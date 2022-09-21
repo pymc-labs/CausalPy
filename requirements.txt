@@ -1,0 +1,10 @@
+arviz
+pymc>=4.0.0
+ipykernel
+graphviz
+matplotlib
+numpy
+pandas
+xarray
+scipy
+statsmodels
