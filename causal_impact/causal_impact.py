@@ -68,32 +68,43 @@ class CausalBase:
 
     def plot(self):
         fig, ax = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+        self.plot_data_and_fit(ax[0])
+        self.plot_causal_impact(ax[1])
+        self.plot_causal_impact_cumulative(ax[2])
 
-        # PLOT IN DATA SPACE
+    def plot_data_and_fit(self, ax=None):
+        if ax is None:
+            ax = plt.gca()
         # synthetic control: pre
-        plot_xY(self.pre.index, self.idata_pre.posterior_predictive["obs"], ax[0])
+        plot_xY(self.pre.index, self.idata_pre.posterior_predictive["obs"], ax)
         # synthetic control: post
-        plot_xY(self.post.index, self.idata_post.posterior_predictive["obs"], ax[0])
+        plot_xY(self.post.index, self.idata_post.posterior_predictive["obs"], ax)
         # plot observed data
-        ax[0].plot(self.df.index, self.df[self.target_var], label=self.target_var)
+        ax.plot(self.df.index, self.df[self.target_var], label=self.target_var)
         # formatting
-        ax[0].axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
-        ax[0].legend()
-        format_x_axis(ax[0])
-        ax[0].set(title="Data and Synthetic Control")
+        ax.axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
+        ax.legend()
+        format_x_axis(ax)
+        ax.set(title="Data and Synthetic Control")
 
-        # PLOT CAUSAL IMPACT
-        plot_xY(self.pre.index, self.causal_impact_pre, ax[1])
-        plot_xY(self.post.index, self.causal_impact_post, ax[1])
-        ax[1].axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
-        format_x_axis(ax[1])
-        ax[1].axhline(y=0, color="k")
-        ax[1].set(title="Lift analysis / Causal Impact")
+    def plot_causal_impact(self, ax=None):
+        if ax is None:
+            ax = plt.gca()
+        """Plot the inferred causal impact (aka lift analysis)"""
+        plot_xY(self.pre.index, self.causal_impact_pre, ax)
+        plot_xY(self.post.index, self.causal_impact_post, ax)
+        ax.axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
+        format_x_axis(ax)
+        ax.axhline(y=0, color="k")
+        ax.set(title="Lift analysis / Causal Impact")
 
-        # PLOT CUMULATIVE CAUSAL IMPACT
-        plot_xY(self.post.index, self.post_cumulative_impact, ax[2])
-        ax[2].axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
-        ax[2].set(title="Lift analysis / Causal Impact (Cumulative)")
+    def plot_causal_impact_cumulative(self, ax=None):
+        if ax is None:
+            ax = plt.gca()
+        """Plot the inferred causal impact (aka lift analysis), but cumulative over time,since the intervention."""
+        plot_xY(self.post.index, self.post_cumulative_impact, ax)
+        ax.axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
+        ax.set(title="Lift analysis / Causal Impact (Cumulative)")
 
     def calc_causal_impact(self):
         # POST -----
