@@ -43,10 +43,10 @@ def generate_synthetic_control_data(
 
     # 3. Generate the causal effect
     causal_effect = gamma(10).pdf(np.arange(0, N, 1) - treatment_time)
-    df["causal effect"] = causal_effect * 50
+    df["causal effect"] = causal_effect * -50
 
     # 4. Generate the actually observed data, ie the treated with the causal effect applied
-    df["actual"] = df["counterfactual"] - df["causal effect"]
+    df["actual"] = df["counterfactual"] + df["causal effect"]
 
     # 5. apply observation noise to all relevant variables
     for var in ["actual", "a", "b", "c", "d", "e", "f", "g"]:
