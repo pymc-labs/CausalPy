@@ -131,6 +131,8 @@ class CausalBase:
 
 
 class SyntheticControl(CausalBase):
+    """This model is intended for use in synthetic control contexts. It's main feature is that it has a Dirichlet prior over the coefficients."""
+
     def build_model(self):
         COORDS = {
             "predictors": self.predictor_vars,
@@ -157,6 +159,8 @@ class SyntheticControl(CausalBase):
 
 
 class LinearModel(CausalBase):
+    """Simple linear regression model. Useful for interrupted time series contexts with predictor variables"""
+
     def build_model(self):
         COORDS = {
             "predictors": self.predictor_vars,
