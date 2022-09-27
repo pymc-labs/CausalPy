@@ -6,7 +6,9 @@ from copy import copy
 from causal_impact.plot_utils import plot_xY, format_x_axis
 
 
-class SyntheticControl:
+class CausalBase:
+    """Base class that does core counterfactual inference tasks"""
+
     def __init__(
         self, df, treatment_date, target_var, predictor_vars, RANDOM_SEED=1234
     ) -> None:
@@ -62,31 +64,10 @@ class SyntheticControl:
         self.calc_causal_impact()
 
     def build_model(self):
-        COORDS = {
-            "predictors": self.predictor_vars,
-            "obs": np.arange(self.pre.shape[0]),
-        }
-
-        with pm.Model(coords=COORDS) as model:
-            # observed predictors and outcome
-            X = pm.MutableData("X", self.pre[self.predictor_vars].to_numpy())
-            y = pm.MutableData("y", self.pre[self.target_var].to_numpy())
-            # priors
-            beta = pm.Dirichlet(
-                "beta",
-                a=np.ones(self.n_predictors),
-                dims="predictors",
-            )
-            #  linear model
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
-            sigma = pm.HalfNormal("sigma", 1)
-            # likelihood
-            pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
-
-        return model
+        raise NotImplementedError("Please implement this method")
 
     def plot(self):
-        fig, ax = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+        fig, ax = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
         # PLOT IN DATA SPACE
         # synthetic control: pre
@@ -107,12 +88,12 @@ class SyntheticControl:
         ax[1].axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
         format_x_axis(ax[1])
         ax[1].axhline(y=0, color="k")
-        ax[1].set(title="Causal Impact")
+        ax[1].set(title="Lift analysis / Causal Impact")
 
         # PLOT CUMULATIVE CAUSAL IMPACT
         plot_xY(self.post.index, self.post_cumulative_impact, ax[2])
         ax[2].axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
-        ax[2].set(title="Cumulative Causal Impact")
+        ax[2].set(title="Lift analysis / Causal Impact (Cumulative)")
 
     def calc_causal_impact(self):
         # POST -----
@@ -136,3 +117,51 @@ class SyntheticControl:
 
         # CUMULATIVE IMPACT: post -----
         self.post_cumulative_impact = self.causal_impact_post.cumsum(dim="obs_dim_0")
+
+
+class SyntheticControl(CausalBase):
+    def build_model(self):
+        COORDS = {
+            "predictors": self.predictor_vars,
+            "obs": np.arange(self.pre.shape[0]),
+        }
+
+        with pm.Model(coords=COORDS) as model:
+            # observed predictors and outcome
+            X = pm.MutableData("X", self.pre[self.predictor_vars].to_numpy())
+            y = pm.MutableData("y", self.pre[self.target_var].to_numpy())
+            # priors
+            beta = pm.Dirichlet(
+                "beta",
+                a=np.ones(self.n_predictors),
+                dims="predictors",
+            )
+            #  linear model
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+            sigma = pm.HalfNormal("sigma", 1)
+            # likelihood
+            pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
+
+        return model
+
+
+class LinearModel(CausalBase):
+    def build_model(self):
+        COORDS = {
+            "predictors": self.predictor_vars,
+            "obs": np.arange(self.pre.shape[0]),
+        }
+
+        with pm.Model(coords=COORDS) as model:
+            # observed predictors and outcome
+            X = pm.MutableData("X", self.pre[self.predictor_vars].to_numpy())
+            y = pm.MutableData("y", self.pre[self.target_var].to_numpy())
+            # priors
+            beta = pm.Normal("beta", mu=0, sigma=2, dims="predictors")
+            #  linear model
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+            sigma = pm.HalfNormal("sigma", 1)
+            # likelihood
+            pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
+
+        return model
