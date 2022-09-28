@@ -84,3 +84,26 @@ def generate_interrupted_time_series_data(
     df["intercept"] = np.ones(df.shape[0])
 
     return df
+
+
+def generate_time_series_data(treatment_time):
+    dates = pd.date_range(
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+    )
+    df = pd.DataFrame(data={"date": dates})
+    df = df.assign(
+        year=lambda x: x["date"].dt.year,
+        month=lambda x: x["date"].dt.month,
+        linear_trend=df.index,
+    ).set_index("date", drop=True)
+    month_effect = np.array([11, 13, 12, 15, 19, 23, 21, 28, 20, 17, 15, 12])
+    df["timeseries"] = df["linear_trend"] + month_effect[df.month.values - 1]
+
+    N = df.shape[0]
+    idx = np.arange(N)[df.index > treatment_time]
+    df["causal effect"] = 100 * gamma(10).pdf(np.arange(0, N, 1) - np.min(idx))
+
+    df["timeseries"] += df["causal effect"]
+    # add intercept
+    df["intercept"] = np.ones(df.shape[0])
+    return df
