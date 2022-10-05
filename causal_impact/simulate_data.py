@@ -107,3 +107,23 @@ def generate_time_series_data(treatment_time):
     # add intercept
     df["intercept"] = np.ones(df.shape[0])
     return df
+
+
+def generate_time_series_data_simple(treatment_time, slope=0.0):
+    """Gnerate simple interrupted time series data, with no seasonality or temporal structure"""
+    dates = pd.date_range(
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+    )
+    df = pd.DataFrame(data={"date": dates})
+    df = df.assign(
+        linear_trend=df.index,
+    ).set_index("date", drop=True)
+    df["timeseries"] = slope * df["linear_trend"]
+    N = df.shape[0]
+    df["causal effect"] = (df.index > treatment_time) * 2
+    df["timeseries"] += df["causal effect"]
+    # add intercept
+    df["intercept"] = np.ones(df.shape[0])
+    # add observation noise
+    df["timeseries"] += norm(0, 0.25).rvs(N)
+    return df
