@@ -93,7 +93,7 @@ class CausalBase:
         ax.axvline(x=self.treatment_date, linewidth=3, c="k", ls="--")
         ax.legend()
         format_x_axis(ax)
-        ax.set(title="Data and Synthetic Control")
+        ax.set(title="Data and Counterfactual")
 
     def plot_causal_impact(self, ax=None):
         if ax is None:
