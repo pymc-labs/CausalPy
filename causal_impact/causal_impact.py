@@ -2,6 +2,7 @@ import pymc as pm
 import numpy as np
 import matplotlib.pyplot as plt
 import xarray as xr
+import pandas as pd
 from copy import copy
 from causal_impact.plot_utils import plot_xY, format_x_axis
 
@@ -17,6 +18,13 @@ class CausalBase:
         self.target_var = target_var
         self.predictor_vars = predictor_vars
         self.n_predictors = len(self.predictor_vars)
+
+        # validate inputs
+        if type(self.df.index) is pd.DatetimeIndex:
+            if type(self.treatment_date) is not pd.Timestamp:
+                raise Exception(
+                    "If index of dataframe is a timeseries, then treatment_date needs to be a timeseries type."
+                )
 
         # create indicator column of pre/post
         self.df["pre"] = self.df.index < self.treatment_date
