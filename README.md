@@ -4,7 +4,7 @@ This package focusses on Bayesian causal inference
 
 ## Examples
 
-* [Synthetic control](notebooks/synthetic_control_generative.ipynb)
+* [Synthetic control](notebooks/synthetic_control.ipynb)
 * Interrupted time series
 
 ## Synthetic control

@@ -138,32 +138,32 @@ class CausalBase:
         self.post_cumulative_impact = self.causal_impact_post.cumsum(dim="obs_dim_0")
 
 
-class SyntheticControl(CausalBase):
-    """This model is intended for use in synthetic control contexts. It's main feature is that it has a Dirichlet prior over the coefficients."""
+# class SyntheticControl(CausalBase):
+#     """This model is intended for use in synthetic control contexts. It's main feature is that it has a Dirichlet prior over the coefficients."""
 
-    def build_model(self):
-        COORDS = {
-            "predictors": self.predictor_vars,
-            "obs": np.arange(self.pre.shape[0]),
-        }
+#     def build_model(self):
+#         COORDS = {
+#             "predictors": self.predictor_vars,
+#             "obs": np.arange(self.pre.shape[0]),
+#         }
 
-        with pm.Model(coords=COORDS) as model:
-            # observed predictors and outcome
-            X = pm.MutableData("X", self.pre[self.predictor_vars].to_numpy())
-            y = pm.MutableData("y", self.pre[self.target_var].to_numpy())
-            # priors
-            beta = pm.Dirichlet(
-                "beta",
-                a=np.ones(self.n_predictors),
-                dims="predictors",
-            )
-            #  linear model
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
-            sigma = pm.HalfNormal("sigma", 1)
-            # likelihood
-            pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
+#         with pm.Model(coords=COORDS) as model:
+#             # observed predictors and outcome
+#             X = pm.MutableData("X", self.pre[self.predictor_vars].to_numpy())
+#             y = pm.MutableData("y", self.pre[self.target_var].to_numpy())
+#             # priors
+#             beta = pm.Dirichlet(
+#                 "beta",
+#                 a=np.ones(self.n_predictors),
+#                 dims="predictors",
+#             )
+#             #  linear model
+#             mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+#             sigma = pm.HalfNormal("sigma", 1)
+#             # likelihood
+#             pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
 
-        return model
+#         return model
 
 
 class LinearModel(CausalBase):
