@@ -79,6 +79,16 @@ class CausalModelBuilder(ModelBuilder):
         # do the calculation by taking the difference
         self.causal_impact_pre = (pre_data - pre_prediction).transpose(..., "y_dim_0")
 
+    def _data_setter(self, data: pd.DataFrame):
+        """Set the data for the post-treatment period"""
+        with self.model:
+            pm.set_data(
+                {
+                    "X": data[self.model_config["predictor_vars"]].to_numpy(),
+                    "y": data[self.model_config["target_var"]].to_numpy(),
+                }
+            )
+
     def plot(self):
         fig, ax = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
         self.plot_data_and_fit(ax[0])

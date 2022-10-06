@@ -32,16 +32,6 @@ class SyntheticControl(CausalModelBuilder):
         if data is not None:
             pm.Normal("y_model", mu, sigma, shape=y.shape, observed=y)
 
-    def _data_setter(self, data: pd.DataFrame):
-        """Set the data for the post-treatment period"""
-        with self.model:
-            pm.set_data(
-                {
-                    "X": data[self.model_config["predictor_vars"]].to_numpy(),
-                    "y": data[self.model_config["target_var"]].to_numpy(),
-                }
-            )
-
     # @classmethod
     # def create_sample_input(cls):
     #     x = np.linspace(start=0, stop=70, num=100)
@@ -94,16 +84,6 @@ class LinearModel(CausalModelBuilder):
         # observed data
         if data is not None:
             pm.Normal("y_model", mu, sigma, shape=y.shape, observed=y)
-
-    def _data_setter(self, data: pd.DataFrame):
-        """Set the data for the post-treatment period"""
-        with self.model:
-            pm.set_data(
-                {
-                    "X": data[self.model_config["predictor_vars"]].to_numpy(),
-                    "y": data[self.model_config["target_var"]].to_numpy(),
-                }
-            )
 
     # @classmethod
     # def create_sample_input(cls):
