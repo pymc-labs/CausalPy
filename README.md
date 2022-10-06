@@ -2,11 +2,6 @@
 
 This package focusses on Bayesian causal inference
 
-## Examples
-
-* [Synthetic control](notebooks/synthetic_control.ipynb)
-* Interrupted time series
-
 ## Synthetic control
 This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
 
@@ -16,6 +11,8 @@ This is appropriate when you have multiple units, one of which is treated. You b
 | 1    | $y_1$ | $x_{1,1}$ | $x_{2,1}$ | $x_{3,1}$ |
 |$\ldots$ | $\ldots$  | $\ldots$  | $\ldots$  | $\ldots$  |
 | N    | $y_N$ | $x_{1,N}$ | $x_{2,N}$ | $x_{3,N}$ |
+
+A worked example is given in the [Synthetic control](notebooks/synthetic_control.ipynb) notebook.
 
 ![](img/synthetic_control.png)
 
@@ -29,7 +26,21 @@ This is appropriate when you have a single treated unit, and therefore a single 
 |$\ldots$ | $\ldots$  |
 | N    | $y_N$ |
 
+A worked example is given in the [Interrupted time series](notebooks/interrupted_time_series_no_predictors.ipynb) notebook.
+
 ![](img/interrupted_time_series.png)
+
+## Related packages
+
+* [CausalImpact/CausalImpact.html) from Google
+* [GeoLift](https://github.com/facebookincubator/GeoLift/) by Meta
+
+
+## Learning resources
+Here are some general resources about causal inference:
+
+* [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) There is a section in the official PyMC documentation with examples relating to causal inference.
+
 
 --- 
 
