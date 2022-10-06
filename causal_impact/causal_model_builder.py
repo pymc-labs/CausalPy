@@ -12,50 +12,11 @@ class CausalModelBuilder(ModelBuilder):
     def predict(
         self,
         data_prediction: Dict[str, Union[np.ndarray, pd.DataFrame, pd.Series]] = None,
-        point_estimate: bool = True,
     ):
-        """
-        Uses model to predict on unseen data.
-        Parameters
-        ---------
-        data_prediction : Dictionary of string and either of numpy array, pandas dataframe or pandas Series
-            It is the data we need to make prediction on using the model.
-        point_estimate : bool
-            Adds point like estimate used as mean passed as
-        Returns
-        -------
-        returns dictionary of sample's posterior predict.
-        Examples
-        --------
-        >>> data, model_config, sampler_config = LinearModel.create_sample_input()
-        >>> model = LinearModel(model_config, sampler_config)
-        >>> idata = model.fit(data)
-        >>> x_pred = []
-        >>> prediction_data = pd.DataFrame({'input':x_pred})
-        # only point estimate
-        >>> pred_mean = model.predict(prediction_data)
-        # samples
-        >>> pred_samples = model.predict(prediction_data, point_estimate=False)
-        """
-
-        # STEP 1 - PREDICT
-        if data_prediction is not None:  # set new input data
-            self._data_setter(data_prediction)
-
-        with self.model:  # sample with new input data
-            self.idata_predict = pm.sample_posterior_predictive(self.idata)
-
-        # TODO STEP 2 - CALCULATE CAUSAL IMPACT
+        self.idata_predict = super().predict(
+            data_prediction=data_prediction, point_estimate=False
+        )
         self._calc_causal_impact()
-
-        # TODO: DO WE WANT THIS EXPORTING OF POINT ESTIMATE?
-        # reshape output
-        post_pred = self._extract_samples(self.idata_predict)
-        if point_estimate:  # average, if point-like estimate desired
-            for key in post_pred:
-                post_pred[key] = post_pred[key].mean(axis=0)
-
-        return post_pred
 
     def _calc_causal_impact(self):
         target_var = self.model_config["target_var"]
