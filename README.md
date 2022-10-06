@@ -32,7 +32,7 @@ A worked example is given in the [Interrupted time series](notebooks/interrupted
 
 ## Related packages
 
-* [CausalImpact/CausalImpact.html) from Google
+* [CausalImpact](https://google.github.io/CausalImpact/) from Google
 * [GeoLift](https://github.com/facebookincubator/GeoLift/) by Meta
 
 
