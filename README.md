@@ -33,14 +33,17 @@ A worked example is given in the [Interrupted time series](notebooks/interrupted
 ## Related packages
 
 * [CausalImpact](https://google.github.io/CausalImpact/) from Google
+* [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact)
 * [GeoLift](https://github.com/facebookincubator/GeoLift/) by Meta
 
 
 ## Learning resources
+
 Here are some general resources about causal inference:
 
-* [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) There is a section in the official PyMC documentation with examples relating to causal inference.
-
+* The official [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) has a set of examples specifically relating to causal inference.
+* Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
+* Cunningham, S. (2021). [Causal inference: The Mixtape](https://mixtape.scunning.com). Yale University Press.
 
 --- 
 
