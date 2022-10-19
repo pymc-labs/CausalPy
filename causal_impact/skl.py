@@ -72,12 +72,24 @@ class InterruptedTimeSeries(ExperimentalDesign, PlotterMixin):
 
 
 class SyntheticControl(ExperimentalDesign, PlotterMixin):
+    def __init__(self, datapre, datapost, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.datapre = datapre
         self.datapost = datapost
-        self.target_col = target_col
-        self.controls = controls
+        self.formula = formula
 
+        # set things up with pre-intervention data
+        y, X = dmatrices(formula, self.datapre)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+        # process post-intervention data
+        (new_y, new_x) = build_design_matrices(
+            [self._y_design_info, self._x_design_info], self.datapost
+        )
+        self.post_X = np.asarray(new_x)
+        self.post_y = np.asarray(new_y)
 
         # fit the model to the observed (pre-intervention) data
         self.prediction_model.fit(X=self.pre_X, y=self.pre_y)
