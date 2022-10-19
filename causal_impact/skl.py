@@ -72,20 +72,12 @@ class InterruptedTimeSeries(ExperimentalDesign, PlotterMixin):
 
 
 class SyntheticControl(ExperimentalDesign, PlotterMixin):
-    def __init__(
-        self, datapre, datapost, target_col, controls, prediction_model=None, **kwargs
-    ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.datapre = datapre
         self.datapost = datapost
         self.target_col = target_col
         self.controls = controls
 
-        # extract the data we need
-        self.pre_X = self.datapre[self.controls].values
-        self.pre_y = self.datapre[self.target_col].values.reshape(-1, 1)
-        self.post_X = self.datapost[self.controls].values
-        self.post_y = self.datapost[self.target_col].values.reshape(-1, 1)
 
         # fit the model to the observed (pre-intervention) data
         self.prediction_model.fit(X=self.pre_X, y=self.pre_y)
@@ -112,7 +104,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
         self.formula = formula
-        y, X = dmatrices(formula, data)
+        y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -128,14 +120,14 @@ class DifferenceInDifferences(ExperimentalDesign):
             {"group": [0, 0], "t": [0.0, 1.0], "treated": [0, 0]}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = np.dot(np.asarray(new_x), self.prediction_model.coef_.T)
+        self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = pd.DataFrame(
             {"group": [1, 1], "t": [0.0, 1.0], "treated": [0, 1]}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = np.dot(np.asarray(new_x), self.prediction_model.coef_.T)
+        self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual
         self.x_pred_counterfactual = pd.DataFrame(
@@ -144,9 +136,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
         )
-        self.y_pred_counterfactual = np.dot(
-            np.asarray(new_x), self.prediction_model.coef_.T
-        )
+        self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
         # self.pre_pred = self.prediction_model.predict(X=self.X)
 
