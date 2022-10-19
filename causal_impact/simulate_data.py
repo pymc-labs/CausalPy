@@ -4,6 +4,8 @@ from scipy.stats import norm, gamma, dirichlet
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 default_lowess_kwargs = {"frac": 0.2, "it": 0}
+RANDOM_SEED = 8927
+rng = np.random.default_rng(RANDOM_SEED)
 
 
 def _smoothed_gaussian_random_walk(
@@ -126,4 +128,47 @@ def generate_time_series_data_simple(treatment_time, slope=0.0):
     df["intercept"] = np.ones(df.shape[0])
     # add observation noise
     df["timeseries"] += norm(0, 0.25).rvs(N)
+    return df
+
+
+def generate_did():
+    # true parameters
+    control_intercept = 1
+    treat_intercept_delta = 0.25
+    trend = 1
+    Δ = 0.5
+    intervention_time = 0.5
+
+    # local functions
+    def outcome(t, control_intercept, treat_intercept_delta, trend, Δ, group, treated):
+        return (
+            control_intercept
+            + (treat_intercept_delta * group)
+            + (t * trend)
+            + (Δ * treated * group)
+        )
+
+    def _is_treated(t, intervention_time, group):
+        return (t > intervention_time) * group
+
+    df = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1] * 10,
+            "t": [0.0, 1.0, 0.0, 1.0] * 10,
+            "unit": np.concatenate([[i] * 2 for i in range(20)]),
+        }
+    )
+
+    df["treated"] = _is_treated(df["t"], intervention_time, df["group"])
+
+    df["y"] = outcome(
+        df["t"],
+        control_intercept,
+        treat_intercept_delta,
+        trend,
+        Δ,
+        df["group"],
+        df["treated"],
+    )
+    df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df

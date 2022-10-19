@@ -7,4 +7,5 @@ numpy
 pandas
 xarray
 scipy
+scikit-learn 
 statsmodels
