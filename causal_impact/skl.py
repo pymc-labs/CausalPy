@@ -156,19 +156,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
-        # self.pre_pred = self.prediction_model.predict(X=self.X)
-
-        # # calculate the counterfactual
-        # self.post_pred = self.prediction_model.predict(X=self.post_X)
-
-        # # causal impact pre (ie the residuals of the model fit to observed)
-        # self.pre_impact = self.pre_y - self.pre_pred
-        # # causal impact post (ie the impact of the intervention)
-        # self.post_impact = self.post_y - self.post_pred
-
-        # # cumulative impact post
-        # self.post_impact_cumulative = np.cumsum(self.post_impact)
-
     def plot(self):
         fig, ax = plt.subplots()
 
