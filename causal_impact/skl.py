@@ -16,10 +16,13 @@ class ExperimentalDesign:
 
 
 class TimeSeriesExperiment(ExperimentalDesign):
-    def __init__(self, datapre, datapost, formula, prediction_model=None, **kwargs):
+    def __init__(self, data, treatment_time, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
-        self.datapre = datapre
-        self.datapost = datapost
+
+        # split data in to pre and post intervention
+        self.datapre = data[data.index <= treatment_time]
+        self.datapost = data[data.index > treatment_time]
+
         self.formula = formula
 
         # set things up with pre-intervention data
