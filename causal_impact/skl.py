@@ -133,18 +133,18 @@ class DifferenceInDifferences(ExperimentalDesign):
     def plot(self):
         fig, ax = plt.subplots()
 
-        # plot raw data
+        # Plot raw data
         sns.lineplot(
             self.data, x="t", y="y", hue="group", units="unit", estimator=None, ax=ax
         )
         sns.scatterplot(self.data, x="t", y="y", hue="group", ax=ax)
 
-        # #Plot model fit to control group
+        # Plot model fit to control group
         ax.plot(
             self.x_pred_control["t"],
             self.y_pred_control,
             "ko",
-            markersize=20,
+            markersize=10,
             alpha=0.5,
             label="model fit (control group)",
         )
@@ -154,7 +154,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.x_pred_treatment["t"],
             self.y_pred_treatment,
             "ro",
-            markersize=20,
+            markersize=10,
             alpha=0.5,
             label="model fit (treament group)",
         )
@@ -164,9 +164,9 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.x_pred_counterfactual["t"],
             self.y_pred_counterfactual,
             "go",
-            markersize=20,
+            markersize=10,
             alpha=0.5,
-            label="model fit (treament group)",
+            label="counterfactual",
         )
 
-        # ax.legend()
+        ax.legend()
