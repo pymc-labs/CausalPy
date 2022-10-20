@@ -1,6 +1,6 @@
 # [this repo name is to be decided!]
 
-This package focusses on Bayesian causal inference
+This package focusses on Bayesian causal inference in a number of quasi-experimental settings.
 
 ## Synthetic control
 This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
@@ -59,6 +59,10 @@ Here are some general resources about causal inference:
 * The official [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) has a set of examples specifically relating to causal inference.
 * Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
 * Cunningham, S. (2021). [Causal inference: The Mixtape](https://mixtape.scunning.com). Yale University Press.
+
+## Installation
+
+[coming soon]
 
 --- 
 
