@@ -32,7 +32,7 @@ A worked example is given in the [Interrupted time series](notebooks/interrupted
 
 ## Difference in Differences
 
-Data is expected to be in the following form. Shown are just two units, one in the treated group (`group=1`) and one in the untreated gropu (`group=0`), but there can of course be multiple units per group.
+Data is expected to be in the following form. Shown are just two units, one in the treated group (`group=1`) and one in the untreated group (`group=0`), but there can of course be multiple units per group. This is panel data (also known as repeated measures) where each unit is measured at 2 time points.
 
 | unit | t | group | y         |
 |------|---|-------|-----------|
