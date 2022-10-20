@@ -93,7 +93,7 @@ class SyntheticControl(TimeSeriesExperiment):
 
 
 class DifferenceInDifferences(ExperimentalDesign):
-    """Note: there is no 'predict data' for DiD, we fit all the data available."""
+    """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
 
     def __init__(self, data, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
