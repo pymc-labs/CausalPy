@@ -30,6 +30,21 @@ A worked example is given in the [Interrupted time series](notebooks/interrupted
 
 ![](img/interrupted_time_series.png)
 
+## Difference in Differences
+
+Data is expected to be in the following form. Shown are just two units, one in the treated group (`group=1`) and one in the untreated gropu (`group=0`), but there can of course be multiple units per group.
+
+| unit | t | group | y         |
+|------|---|-------|-----------|
+| 0    | 0 | 0     | $y_{0,0}$ |
+| 0    | 1 | 0     | $y_{0,0}$ |
+| 1    | 0 | 1     | $y_{1,0}$ |
+| 1    | 1 | 1     | $y_{1,1}$ |
+
+This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
+
+![](img/difference_in_differences.png)
+
 ## Related packages
 
 * [CausalImpact](https://google.github.io/CausalImpact/) from Google
