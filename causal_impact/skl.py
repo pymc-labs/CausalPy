@@ -5,31 +5,6 @@ import seaborn as sns
 import pandas as pd
 
 
-class PlotterMixin:
-    def plot(self):
-        fig, ax = plt.subplots(3, 1, sharex=True)
-
-        ax[0].plot(self.datapre.index, self.pre_y, "ko")
-        ax[0].plot(self.datapost.index, self.post_y, "ko")
-
-        ax[0].plot(
-            self.datapre.index, self.pre_pred, label="model fit to observed data"
-        )
-        ax[0].plot(
-            self.datapost.index, self.post_pred, label="estimated counterfactual"
-        )
-
-        ax[0].legend()
-
-        ax[1].plot(self.datapre.index, self.pre_impact)
-        ax[1].plot(self.datapost.index, self.post_impact)
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative)
-        ax[2].set(title="Cumulative Causal Impact")
-
-
 class ExperimentalDesign:
     prediction_model = None
 
@@ -40,44 +15,7 @@ class ExperimentalDesign:
             raise ValueError("fitting_model not set or passed.")
 
 
-class InterruptedTimeSeries(ExperimentalDesign, PlotterMixin):
-    def __init__(self, datapre, datapost, formula, prediction_model=None, **kwargs):
-        super().__init__(prediction_model=prediction_model, **kwargs)
-        self.datapre = datapre
-        self.datapost = datapost
-
-        # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
-
-        # fit the model to the observed (pre-intervention) data
-        self.prediction_model.fit(X=self.pre_X, y=self.pre_y)
-
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.prediction_model.predict(X=self.pre_X)
-
-        # calculate the counterfactual
-        self.post_pred = self.prediction_model.predict(X=self.post_X)
-
-        # causal impact pre (ie the residuals of the model fit to observed)
-        self.pre_impact = self.pre_y - self.pre_pred
-        # causal impact post (ie the impact of the intervention)
-        self.post_impact = self.post_y - self.post_pred
-
-        # cumulative impact post
-        self.post_impact_cumulative = np.cumsum(self.post_impact)
-
-
-class SyntheticControl(ExperimentalDesign, PlotterMixin):
+class TimeSeriesExperiment(ExperimentalDesign):
     def __init__(self, datapre, datapost, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.datapre = datapre
@@ -113,6 +51,42 @@ class SyntheticControl(ExperimentalDesign, PlotterMixin):
 
         # cumulative impact post
         self.post_impact_cumulative = np.cumsum(self.post_impact)
+
+    def plot(self):
+        fig, ax = plt.subplots(3, 1, sharex=True)
+
+        ax[0].plot(self.datapre.index, self.pre_y, "ko")
+        ax[0].plot(self.datapost.index, self.post_y, "ko")
+
+        ax[0].plot(
+            self.datapre.index, self.pre_pred, label="model fit to observed data"
+        )
+        ax[0].plot(
+            self.datapost.index, self.post_pred, label="estimated counterfactual"
+        )
+
+        ax[0].legend()
+
+        ax[1].plot(self.datapre.index, self.pre_impact)
+        ax[1].plot(self.datapost.index, self.post_impact)
+        ax[1].axhline(y=0, c="k")
+        ax[1].set(title="Causal Impact")
+
+        ax[2].plot(self.datapost.index, self.post_impact_cumulative)
+        ax[2].set(title="Cumulative Causal Impact")
+
+
+# InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
+# predictor variables. So we just have a TimeSeriesExperiment class and InterruptedTimeSeries
+# and SyntheticControl are both equal to the TimeSeriesExperiment class
+
+
+class InterruptedTimeSeries(TimeSeriesExperiment):
+    pass
+
+
+class SyntheticControl(TimeSeriesExperiment):
+    pass
 
 
 class DifferenceInDifferences(ExperimentalDesign):
