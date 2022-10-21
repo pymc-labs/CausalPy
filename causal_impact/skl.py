@@ -18,10 +18,10 @@ class ExperimentalDesign:
 class TimeSeriesExperiment(ExperimentalDesign):
     def __init__(self, data, treatment_time, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
-
+        self.treatment_time = treatment_time
         # split data in to pre and post intervention
-        self.datapre = data[data.index <= treatment_time]
-        self.datapost = data[data.index > treatment_time]
+        self.datapre = data[data.index <= self.treatment_time]
+        self.datapost = data[data.index > self.treatment_time]
 
         self.formula = formula
 
@@ -59,27 +59,66 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
     def plot(self):
-        fig, ax = plt.subplots(3, 1, sharex=True)
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "ko")
         ax[0].plot(self.datapost.index, self.post_y, "ko")
 
         ax[0].plot(
-            self.datapre.index, self.pre_pred, label="model fit to observed data"
+            self.datapre.index, self.pre_pred, c="k", label="model fit to observed data"
         )
         ax[0].plot(
-            self.datapost.index, self.post_pred, label="estimated counterfactual"
+            self.datapost.index,
+            self.post_pred,
+            label="counterfactual",
+            ls=":",
+            c="k",
         )
         ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
-        ax[0].legend()
 
-        ax[1].plot(self.datapre.index, self.pre_impact)
-        ax[1].plot(self.datapost.index, self.post_impact)
+        ax[1].plot(self.datapre.index, self.pre_impact, c="k")
+        ax[1].plot(
+            self.datapost.index,
+            self.post_impact,
+            label="counterfactual",
+            ls=":",
+            c="k",
+        )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative)
+        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
         ax[2].set(title="Cumulative Causal Impact")
+
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_pred),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+            label="causal impact",
+        )
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_impact),
+            color="C0",
+            alpha=0.25,
+            label="causal impact",
+        )
+
+        # Intervention line
+        # TODO: make this work when self.treatment_time is a datetime
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=self.treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+                label="treatment time",
+            )
+
+        ax[0].legend()
 
 
 # InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
@@ -157,43 +196,33 @@ class DifferenceInDifferences(ExperimentalDesign):
             hue="group",
             units="unit",
             estimator=None,
+            alpha=0.25,
             ax=ax,
         )
-        sns.scatterplot(
-            self.data,
-            x=self.time_variable_name,
-            y=self.outcome_variable_name,
-            hue="group",
-            ax=ax,
-        )
-
         # Plot model fit to control group
         ax.plot(
             self.x_pred_control[self.time_variable_name],
             self.y_pred_control,
-            "ko",
+            "o",
+            c="C0",
             markersize=10,
-            alpha=0.5,
             label="model fit (control group)",
         )
-
         # Plot model fit to treatment group
         ax.plot(
             self.x_pred_treatment[self.time_variable_name],
             self.y_pred_treatment,
-            "ro",
+            "o",
+            c="C1",
             markersize=10,
-            alpha=0.5,
             label="model fit (treament group)",
         )
-
         # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
         ax.plot(
             self.x_pred_counterfactual[self.time_variable_name],
             self.y_pred_counterfactual,
             "go",
             markersize=10,
-            alpha=0.5,
             label="counterfactual",
         )
 
@@ -250,7 +279,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     def plot(self):
         fig, ax = plt.subplots()
-
         # Plot raw data
         sns.scatterplot(
             self.data,
@@ -259,7 +287,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
             hue="treated",
             ax=ax,
         )
-
         # Plot model fit to data
         ax.plot(
             self.x_pred[self.running_variable_name],
@@ -268,16 +295,25 @@ class RegressionDiscontinuity(ExperimentalDesign):
             markersize=10,
             label="model fit",
         )
-
         # Plot counterfactual
         ax.plot(
             self.x_counterfact[self.running_variable_name],
             self.pred_counterfac,
             markersize=10,
             ls=":",
+            c="k",
             label="counterfactual",
         )
-
+        # Shaded causal effect
+        ax.fill_between(
+            self.x_counterfact[self.running_variable_name],
+            y1=np.squeeze(self.pred_counterfac),
+            y2=np.squeeze(self.pred[-len(np.squeeze(self.pred_counterfac)) :]),
+            color="C0",
+            alpha=0.25,
+            label="inferred causal impact",
+        )
+        # Intervention line
         ax.axvline(
             x=self.treatment_threshold,
             ls="-",
