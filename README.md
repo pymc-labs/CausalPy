@@ -13,9 +13,8 @@ We cover the following quasi-experimental situations and models:
 |                                  | [`scikit-learn` examples](notebooks/skl_demos.ipynb) |               |
 
 ## Comparison to related packages
-|                           | [CausalImpact](https://google.github.io/CausalImpact/) | [GeoLift](https://github.com/facebookincubator/GeoLift/) | QuasPy                                 |
+|                           | [CausalImpact](https://google.github.io/CausalImpact/) from Google | [GeoLift](https://github.com/facebookincubator/GeoLift/) from Meta | QuasPy from PyMC Labs                                |
 |---------------------------|--------------------------------|---------|----------------------------------------|
-| from                      | Google                         | Meta    | PyMC Labs                              |
 | interrupted time series   | ✅                              | ❌       | ✅                                      |
 | synthetic control         | ❌                              | ✅       | ✅                                      |
 | regression discontinuity  | ❌                              | ❌       | ✅                                      |
