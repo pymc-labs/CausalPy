@@ -98,10 +98,20 @@ class SyntheticControl(TimeSeriesExperiment):
 class DifferenceInDifferences(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
 
-    def __init__(self, data, formula, prediction_model=None, **kwargs):
+    def __init__(
+        self,
+        data,
+        formula,
+        time_variable_name="t",
+        outcome_variable_name="y",
+        prediction_model=None,
+        **kwargs,
+    ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
         self.formula = formula
+        self.time_variable_name = time_variable_name
+        self.outcome_variable_name = outcome_variable_name
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -141,13 +151,25 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         # Plot raw data
         sns.lineplot(
-            self.data, x="t", y="y", hue="group", units="unit", estimator=None, ax=ax
+            self.data,
+            x=self.time_variable_name,
+            y=self.outcome_variable_name,
+            hue="group",
+            units="unit",
+            estimator=None,
+            ax=ax,
         )
-        sns.scatterplot(self.data, x="t", y="y", hue="group", ax=ax)
+        sns.scatterplot(
+            self.data,
+            x=self.time_variable_name,
+            y=self.outcome_variable_name,
+            hue="group",
+            ax=ax,
+        )
 
         # Plot model fit to control group
         ax.plot(
-            self.x_pred_control["t"],
+            self.x_pred_control[self.time_variable_name],
             self.y_pred_control,
             "ko",
             markersize=10,
@@ -157,7 +179,7 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         # Plot model fit to treatment group
         ax.plot(
-            self.x_pred_treatment["t"],
+            self.x_pred_treatment[self.time_variable_name],
             self.y_pred_treatment,
             "ro",
             markersize=10,
@@ -167,7 +189,7 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
         ax.plot(
-            self.x_pred_counterfactual["t"],
+            self.x_pred_counterfactual[self.time_variable_name],
             self.y_pred_counterfactual,
             "go",
             markersize=10,
@@ -182,11 +204,20 @@ class RegressionDiscontinuity(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction, we fit all the data available."""
 
     def __init__(
-        self, data, formula, treatment_threshold, prediction_model=None, **kwargs
+        self,
+        data,
+        formula,
+        treatment_threshold,
+        prediction_model=None,
+        running_variable_name="x",
+        outcome_variable_name="y",
+        **kwargs,
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
         self.formula = formula
+        self.running_variable_name = running_variable_name
+        self.outcome_variable_name = outcome_variable_name
         self.treatment_threshold = treatment_threshold
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -221,11 +252,17 @@ class RegressionDiscontinuity(ExperimentalDesign):
         fig, ax = plt.subplots()
 
         # Plot raw data
-        sns.scatterplot(self.data, x="x", y="y", hue="treated", ax=ax)
+        sns.scatterplot(
+            self.data,
+            x=self.running_variable_name,
+            y=self.outcome_variable_name,
+            hue="treated",
+            ax=ax,
+        )
 
         # Plot model fit to data
         ax.plot(
-            self.x_pred["x"],
+            self.x_pred[self.running_variable_name],
             self.pred,
             "k",
             markersize=10,
@@ -234,7 +271,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
         # Plot counterfactual
         ax.plot(
-            self.x_counterfact["x"],
+            self.x_counterfact[self.running_variable_name],
             self.pred_counterfac,
             markersize=10,
             ls=":",
