@@ -4,6 +4,8 @@ from patsy import dmatrices, build_design_matrices
 import seaborn as sns
 import pandas as pd
 
+LEGEND_FONT_SIZE = 12
+
 
 class ExperimentalDesign:
     prediction_model = None
@@ -61,12 +63,10 @@ class TimeSeriesExperiment(ExperimentalDesign):
     def plot(self):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "ko")
-        ax[0].plot(self.datapost.index, self.post_y, "ko")
+        ax[0].plot(self.datapre.index, self.pre_y, "k.-")
+        ax[0].plot(self.datapost.index, self.post_y, "k.-")
 
-        ax[0].plot(
-            self.datapre.index, self.pre_pred, c="k", label="model fit to observed data"
-        )
+        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
         ax[0].plot(
             self.datapost.index,
             self.post_pred,
@@ -76,13 +76,12 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
         ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
 
-        ax[1].plot(self.datapre.index, self.pre_impact, c="k")
+        ax[1].plot(self.datapre.index, self.pre_impact, "k.-")
         ax[1].plot(
             self.datapost.index,
             self.post_impact,
+            "k.-",
             label="counterfactual",
-            ls=":",
-            c="k",
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
@@ -118,7 +117,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 label="treatment time",
             )
 
-        ax[0].legend()
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         return (fig, ax)
 
@@ -228,7 +227,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             label="counterfactual",
         )
 
-        ax.legend()
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
 
@@ -287,7 +286,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
-            hue="treated",
+            c="k",  # hue="treated",
             ax=ax,
         )
         # Plot model fit to data
@@ -325,5 +324,5 @@ class RegressionDiscontinuity(ExperimentalDesign):
             label="treatment threshold",
         )
         ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
-        ax.legend()
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
