@@ -12,6 +12,17 @@ We cover the following quasi-experimental situations and models:
 | Regression discontinuity designs | ✅                     | ❌             |
 |                                  | [`scikit-learn` examples](notebooks/skl_demos.ipynb) |               |
 
+## Comparison to related packages
+|                           | [CausalImpact](https://google.github.io/CausalImpact/) | [GeoLift](https://github.com/facebookincubator/GeoLift/) | QuasPy                                 |
+|---------------------------|--------------------------------|---------|----------------------------------------|
+| from                      | Google                         | Meta    | PyMC Labs                              |
+| interrupted time series   | ✅                              | ❌       | ✅                                      |
+| synthetic control         | ❌                              | ✅       | ✅                                      |
+| regression discontinuity  | ❌                              | ❌       | ✅                                      |
+| difference in differences | ❌                              | ❌       | ✅                                      |
+| Language                  | R (but see [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact))  | R       | Python                                 |
+| Models                    | Bayesian structural timeseries | Augmented synthetic control      | Flexible Bayesian & traditional models |
+
 ## Synthetic control
 This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
 
