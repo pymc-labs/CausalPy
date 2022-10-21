@@ -120,6 +120,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         ax[0].legend()
 
+        return (fig, ax)
+
 
 # InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
 # predictor variables. So we just have a TimeSeriesExperiment class and InterruptedTimeSeries
@@ -227,6 +229,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
 
         ax.legend()
+        return (fig, ax)
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
@@ -323,3 +326,4 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
         ax.legend()
+        return (fig, ax)

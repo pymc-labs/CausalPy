@@ -14,7 +14,7 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 A worked example is given in the [Synthetic control](notebooks/synthetic_control.ipynb) notebook.
 
-![](img/synthetic_control.png)
+![](img/synthetic_control_skl.png)
 
 ## Interrupted time series
 This is appropriate when you have a single treated unit, and therefore a single time series, and do _not_ have a set of untreated units.
@@ -28,7 +28,7 @@ This is appropriate when you have a single treated unit, and therefore a single 
 
 A worked example is given in the [Interrupted time series](notebooks/interrupted_time_series_no_predictors.ipynb) notebook.
 
-![](img/interrupted_time_series.png)
+![](img/interrupted_time_series_skl.png)
 
 ## Difference in Differences
 
@@ -43,7 +43,7 @@ Data is expected to be in the following form. Shown are just two units, one in t
 
 This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
 
-![](img/difference_in_differences.png)
+![](img/difference_in_differences_skl.png)
 
 ## Regression discontinuity designs
 
@@ -57,7 +57,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 | $x_{N-1}$ | $y_{N-1}$ | True     |
 | $x_N$     | $y_N$     | True     |
 
-![](img/regression_discontinuity.png)
+![](img/regression_discontinuity_skl.png)
 
 ## Related packages
 
