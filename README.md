@@ -45,6 +45,20 @@ This is appropriate when you have a single pre and post intervention measurement
 
 ![](img/difference_in_differences.png)
 
+## Regression discontinuity designs
+
+Regression discontinuity designs are used when treatment is applied to units according to a cutoff on the running variable (e.g. $x$). By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
+
+| x         | y         | treated  |
+|-----------|-----------|----------|
+| $x_0$     | $y_0$     | False    |
+| $x_1$     | $y_0$     | False    |
+| $\ldots$  | $\ldots$  | $\ldots$ |
+| $x_{N-1}$ | $y_{N-1}$ | True     |
+| $x_N$     | $y_N$     | True     |
+
+![](img/regression_discontinuity.png)
+
 ## Related packages
 
 * [CausalImpact](https://google.github.io/CausalImpact/) from Google

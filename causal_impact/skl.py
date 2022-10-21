@@ -173,3 +173,74 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
 
         ax.legend()
+
+
+class RegressionDiscontinuity(ExperimentalDesign):
+    """Note: there is no pre/post intervention data distinction, we fit all the data available."""
+
+    def __init__(
+        self, data, formula, treatment_threshold, prediction_model=None, **kwargs
+    ):
+        super().__init__(prediction_model=prediction_model, **kwargs)
+        self.data = data
+        self.formula = formula
+        self.treatment_threshold = treatment_threshold
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+
+        # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
+
+        # fit the model to all the data
+        self.prediction_model.fit(X=self.X, y=self.y)
+
+        # get the model predictions of the observed data
+        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 1000)
+        self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        self.pred = self.prediction_model.predict(X=np.asarray(new_x))
+
+        # calculate the counterfactual
+        xi = xi[xi > self.treatment_threshold]
+        self.x_counterfact = pd.DataFrame({"x": xi, "treated": np.zeros(xi.shape)})
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
+        self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
+
+    def _is_treated(self, x):
+        return np.greater_equal(x, self.treatment_threshold)
+
+    def plot(self):
+        fig, ax = plt.subplots()
+
+        # Plot raw data
+        sns.scatterplot(self.data, x="x", y="y", hue="treated", ax=ax)
+
+        # Plot model fit to data
+        ax.plot(
+            self.x_pred["x"],
+            self.pred,
+            "k",
+            markersize=10,
+            label="model fit",
+        )
+
+        # Plot counterfactual
+        ax.plot(
+            self.x_counterfact["x"],
+            self.pred_counterfac,
+            markersize=10,
+            ls=":",
+            label="counterfactual",
+        )
+
+        ax.axvline(
+            x=self.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+
+        ax.legend()

@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, gamma, dirichlet
+from scipy.stats import norm, gamma, dirichlet, uniform
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 default_lowess_kwargs = {"frac": 0.2, "it": 0}
@@ -172,3 +172,20 @@ def generate_did():
     )
     df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df
+
+
+def generate_regression_discontinuity_data(
+    N=100, true_causal_impact=0.5, true_treatment_threshold=0.0
+):
+    def is_treated(x):
+        return np.greater_equal(x, true_treatment_threshold)
+
+    def impact(x):
+        y = np.zeros(len(x))
+        y[is_treated(x)] = true_causal_impact
+        return y
+
+    x = np.sort((uniform.rvs(size=N) - 0.5) * 2)
+    y = np.sin(x * 3) + impact(x) + norm.rvs(scale=0.1, size=N)
+
+    return pd.DataFrame({"x": x, "y": y, "treated": is_treated(x)})
