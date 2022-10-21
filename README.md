@@ -2,6 +2,16 @@
 
 A Python package focussing on causal inference in a number of quasi-experimental settings. The package allows for both Bayesian and traditional model fitting methods.
 
+We cover the following quasi-experimental situations and models:
+
+| method                           | `scikit-learn` models | `pymc` models |
+|----------------------------------|-----------------------|---------------|
+| Synthetic control                | ✅                     | ⏳             |
+| Interrupted time series          | ✅                     | ⏳             |
+| Difference in differences        | ✅                     | ⏳             |
+| Regression discontinuity designs | ✅                     | ❌             |
+
+
 ## Synthetic control
 This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
 
