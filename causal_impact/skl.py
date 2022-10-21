@@ -41,6 +41,9 @@ class TimeSeriesExperiment(ExperimentalDesign):
         # fit the model to the observed (pre-intervention) data
         self.prediction_model.fit(X=self.pre_X, y=self.pre_y)
 
+        # score the goodness of fit to the pre-intervention data
+        self.score = self.prediction_model.score(X=self.pre_X, y=self.pre_y)
+
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.prediction_model.predict(X=self.pre_X)
 
@@ -67,7 +70,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         ax[0].plot(
             self.datapost.index, self.post_pred, label="estimated counterfactual"
         )
-
+        ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
         ax[0].legend()
 
         ax[1].plot(self.datapre.index, self.pre_impact)
@@ -196,6 +199,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # fit the model to all the data
         self.prediction_model.fit(X=self.X, y=self.y)
 
+        # score the goodness of fit to all data
+        self.score = self.prediction_model.score(X=self.X, y=self.y)
+
         # get the model predictions of the observed data
         xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 1000)
         self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
@@ -242,5 +248,5 @@ class RegressionDiscontinuity(ExperimentalDesign):
             color="r",
             label="treatment threshold",
         )
-
+        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
         ax.legend()
