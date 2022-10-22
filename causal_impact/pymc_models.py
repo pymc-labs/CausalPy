@@ -9,8 +9,8 @@ class WeightedSumFitter(ModelBuilder):
         with self:
             n_predictors = X.shape[1]
             X = pm.MutableData("X", X)
-            y = pm.MutableData("y", y)
+            y = pm.MutableData("y", y[:, 0])
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors))
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta))
-            pm.Normal("y_hat", mu, sigma, shape=y.eval().shape, observed=y)
+            pm.Normal("y_hat", mu, sigma, observed=y)
