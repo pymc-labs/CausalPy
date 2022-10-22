@@ -96,16 +96,18 @@ def generate_time_series_data(treatment_time):
     df = df.assign(
         year=lambda x: x["date"].dt.year,
         month=lambda x: x["date"].dt.month,
-        linear_trend=df.index,
+        t=df.index,
     ).set_index("date", drop=True)
     month_effect = np.array([11, 13, 12, 15, 19, 23, 21, 28, 20, 17, 15, 12])
-    df["timeseries"] = df["linear_trend"] + month_effect[df.month.values - 1]
+    df["y"] = 0.2 * df["t"] + 2 * month_effect[df.month.values - 1]
 
     N = df.shape[0]
     idx = np.arange(N)[df.index > treatment_time]
     df["causal effect"] = 100 * gamma(10).pdf(np.arange(0, N, 1) - np.min(idx))
 
-    df["timeseries"] += df["causal effect"]
+    df["y"] += df["causal effect"]
+    df["y"] += norm(0, 2).rvs(N)
+
     # add intercept
     df["intercept"] = np.ones(df.shape[0])
     return df

@@ -63,8 +63,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
     def plot(self):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.-")
-        ax[0].plot(self.datapost.index, self.post_y, "k.-")
+        ax[0].plot(self.datapre.index, self.pre_y, "k.")
+        ax[0].plot(self.datapost.index, self.post_y, "k.")
 
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
         ax[0].plot(
@@ -76,17 +76,18 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
         ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.-")
+        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
         ax[1].plot(
             self.datapost.index,
             self.post_impact,
-            "k.-",
+            "k.",
             label="counterfactual",
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
         ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
