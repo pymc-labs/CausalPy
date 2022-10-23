@@ -41,7 +41,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_y = np.asarray(new_y)
 
         # fit the model to the observed (pre-intervention) data
-        self.prediction_model.fit(X=self.pre_X, y=self.pre_y)
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
+        self.prediction_model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.prediction_model.score(X=self.pre_X, y=self.pre_y)
@@ -52,13 +53,14 @@ class TimeSeriesExperiment(ExperimentalDesign):
         # calculate the counterfactual
         self.post_pred = self.prediction_model.predict(X=self.post_X)
 
-        # causal impact pre (ie the residuals of the model fit to observed)
-        self.pre_impact = self.pre_y - self.pre_pred
-        # causal impact post (ie the impact of the intervention)
-        self.post_impact = self.post_y - self.post_pred
+        # TODO
+        # # causal impact pre (ie the residuals of the model fit to observed)
+        # self.pre_impact = self.pre_y - self.pre_pred
+        # # causal impact post (ie the impact of the intervention)
+        # self.post_impact = self.post_y - self.post_pred
 
-        # cumulative impact post
-        self.post_impact_cumulative = np.cumsum(self.post_impact)
+        # # cumulative impact post
+        # self.post_impact_cumulative = np.cumsum(self.post_impact)
 
 
 class SyntheticControl(TimeSeriesExperiment):

@@ -13,29 +13,24 @@ class ModelBuilder(pm.Model):
         super().__init__()
         self.idata = None
 
-    def build_model(self, X, y):
+    def build_model(self, X, y, coords):
         raise NotImplementedError
 
     def _data_setter(self, X):
         with self.model:
             pm.set_data({"X": X})
 
-    def fit(self, X, y):
-        self.build_model(X, y)
+    def fit(self, X, y, coords):
+        self.build_model(X, y, coords)
         with self.model:
             self.idata = pm.sample()
-            print("pm.sample DONE")
             self.idata.extend(pm.sample_prior_predictive())
-            print("sample_prior_predictive DONE")
             self.idata.extend(pm.sample_posterior_predictive(self.idata))
-            print("sample_posterior_predictive DONE")
         return self.idata
 
     def predict(self, X):
         self._data_setter(X)
-        print("_data_setter DONE")
         with self.model:  # sample with new input data
-            print("pm.sample_posterior_predictive")
             post_pred = pm.sample_posterior_predictive(self.idata)
         return post_pred
 
