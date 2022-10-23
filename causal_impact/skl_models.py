@@ -1,11 +1,11 @@
 from functools import partial
 from scipy.optimize import fmin_slsqp
-from sklearn.metrics import r2_score
 from sklearn.base import RegressorMixin
+from sklearn.linear_model._base import LinearModel
 import numpy as np
 
 
-class WeightedProportion(RegressorMixin):
+class WeightedProportion(LinearModel, RegressorMixin):
     """
     Model which minimises sum squared error subject to:
     - all weights are bound between 0-1
@@ -27,8 +27,7 @@ class WeightedProportion(RegressorMixin):
             bounds=[(0.0, 1.0)] * len(w_start),
             disp=False,
         )
-        # return as column vector
-        self.coef_ = np.atleast_2d(coef_)
+        self.coef_ = np.atleast_2d(coef_)  # return as column vector
         self.mse = self.loss(W=self.coef_, X=X, y=y)
         return self
 
