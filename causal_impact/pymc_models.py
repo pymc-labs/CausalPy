@@ -1,11 +1,45 @@
-from causal_impact.ModelBuilder import ModelBuilder
 import pymc as pm
 import numpy as np
 
 
-class WeightedSumFitter(ModelBuilder):
+class ModelBuilder(pm.Model):
+    """
+    This is a wrapper around pm.Model to give scikit-learn like API
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.idata = None
+
     def build_model(self, X, y, coords):
-        print("building model")
+        raise NotImplementedError
+
+    def _data_setter(self, X):
+        with self.model:
+            pm.set_data({"X": X})
+
+    def fit(self, X, y, coords):
+        self.build_model(X, y, coords)
+        with self.model:
+            self.idata = pm.sample()
+            self.idata.extend(pm.sample_prior_predictive())
+            self.idata.extend(pm.sample_posterior_predictive(self.idata))
+        return self.idata
+
+    def predict(self, X):
+        self._data_setter(X)
+        with self.model:  # sample with new input data
+            post_pred = pm.sample_posterior_predictive(self.idata)
+        return post_pred
+
+    def score(self, X, y):
+        return 0.0
+
+
+class WeightedSumFitter(ModelBuilder):
+    """Used for synthetic control experiments"""
+
+    def build_model(self, X, y, coords):
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
