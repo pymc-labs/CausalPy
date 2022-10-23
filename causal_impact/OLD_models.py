@@ -1,7 +1,7 @@
 import pymc as pm
 import numpy as np
 import pandas as pd
-from causal_impact.causal_model_builder import CausalModelBuilder
+from causal_impact.OLD_causal_model_builder import CausalModelBuilder
 
 
 class SyntheticControl(CausalModelBuilder):
