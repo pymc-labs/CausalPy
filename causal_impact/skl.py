@@ -122,6 +122,20 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         return (fig, ax)
 
+    def get_coeffs(self):
+        return self.prediction_model.coef_[0, :]
+
+    def plot_coeffs(self):
+        df = pd.DataFrame(
+            {"predictor variable": self.labels, "ols_coef": self.get_coeffs()}
+        )
+        sns.barplot(
+            data=df,
+            x="ols_coef",
+            y="predictor variable",
+            palette=sns.color_palette("husl"),
+        )
+
 
 # InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
 # predictor variables. So we just have a TimeSeriesExperiment class and InterruptedTimeSeries
