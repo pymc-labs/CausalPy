@@ -123,7 +123,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         return (fig, ax)
 
     def get_coeffs(self):
-        return self.prediction_model.coef_[0, :]
+        return np.squeeze(self.prediction_model.coef_)
 
     def plot_coeffs(self):
         df = pd.DataFrame(
