@@ -21,7 +21,7 @@ def plot_xY(x, Y, ax):
         smooth=False,
         ax=ax,
     )
-    ax.plot(x, quantiles.sel(quantile=0.5), color="C1", lw=3)
+    ax.plot(x, quantiles.sel(quantile=0.5), color="C1", lw=2)
 
 
 def format_x_axis(ax):

@@ -3,6 +3,7 @@ import numpy as np
 from patsy import dmatrices, build_design_matrices
 import seaborn as sns
 import pandas as pd
+from causal_impact.plot_utils import plot_xY
 
 LEGEND_FONT_SIZE = 12
 
@@ -61,6 +62,31 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         # # cumulative impact post
         # self.post_impact_cumulative = np.cumsum(self.post_impact)
+
+    def plot(self):
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+
+        # pre-intervention period
+        plot_xY(
+            self.datapre.index, self.pre_pred["posterior_predictive"].y_hat, ax=ax[0]
+        )
+        ax[0].plot(self.datapre.index, self.pre_y, "k.")
+        # post intervention period
+        plot_xY(
+            self.datapost.index, self.post_pred["posterior_predictive"].y_hat, ax=ax[0]
+        )
+        ax[0].plot(self.datapost.index, self.post_y, "k.")
+
+        # Intervention line
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=self.treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+                label="treatment time",
+            )
+        return (fig, ax)
 
 
 class SyntheticControl(TimeSeriesExperiment):
