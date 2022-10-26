@@ -9,3 +9,4 @@ xarray
 scipy
 scikit-learn 
 statsmodels
+seaborn

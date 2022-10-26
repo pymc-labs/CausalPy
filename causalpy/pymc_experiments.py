@@ -3,7 +3,7 @@ import numpy as np
 from patsy import dmatrices, build_design_matrices
 import seaborn as sns
 import pandas as pd
-from causal_impact.plot_utils import plot_xY
+from causalpy.plot_utils import plot_xY
 import xarray as xr
 
 

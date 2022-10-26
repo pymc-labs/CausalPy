@@ -2,7 +2,7 @@ import re
 from os.path import dirname, join, realpath
 from setuptools import find_packages, setup
 
-DESCRIPTION = "Bayesian causal impact in Python"
+DESCRIPTION = "Causal inference for quasi-experiments in Python"
 AUTHOR = "TBD"
 AUTHOR_EMAIL = "TBD"
 URL = "TBD"
