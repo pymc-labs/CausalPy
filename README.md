@@ -50,7 +50,9 @@ This is appropriate when you have a single treated unit, and therefore a single 
 
 A worked example is given in the [Interrupted time series](notebooks/interrupted_time_series_no_predictors.ipynb) notebook.
 
-![](img/interrupted_time_series_skl.png)
+| Frequentist | Bayesian |
+|--|--|
+| ![](img/interrupted_time_series_skl.png) | ![](img/interrupted_time_series_pymc.png) |
 
 ## Difference in Differences
 

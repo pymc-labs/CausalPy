@@ -106,3 +106,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
 class SyntheticControl(TimeSeriesExperiment):
     pass
+
+
+class InterruptedTimeSeries(TimeSeriesExperiment):
+    pass

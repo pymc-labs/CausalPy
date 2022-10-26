@@ -49,3 +49,15 @@ class WeightedSumFitter(ModelBuilder):
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta))
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+
+
+class LinearRegression(ModelBuilder):
+    def build_model(self, X, y, coords):
+        with self:
+            self.add_coords(coords)
+            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            beta = pm.Normal("beta", 0, 50, dims="coeffs")
+            sigma = pm.HalfNormal("sigma", 1)
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
