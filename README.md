@@ -25,7 +25,11 @@ Another distinctive feature of this package is the ability to use different mode
 
 ## Roadmap
 
-Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/causal-inference/issues). In addition to the quasi-experimental methods supported thus far, we might add functionality around propensity scores and non-equivalent group designs.
+Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/causal-inference/issues). 
+
+In addition to the quasi-experimental methods supported thus far, we might add functionality around propensity scores and non-equivalent group designs.
+
+Currently we have a few core examples (see the [`scikit-learn` demo notebook](notebooks/skl_demos.ipynb) and the [`pymc` demo notebook](notebooks/pymc_demos.ipynb)) but we plan to flesh these out with more experiment and model variants over time.
 
 ## Overview of package capabilities
 
