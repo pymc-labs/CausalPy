@@ -43,7 +43,6 @@ This is appropriate when you have multiple units, one of which is treated. You b
 |$\ldots$ | $\ldots$  | $\ldots$  | $\ldots$  | $\ldots$  |
 | T    | $y_T$ | $x_{1,T}$ | $x_{2,T}$ | $x_{3,T}$ |
 
-A worked example is given in the [Synthetic control](notebooks/synthetic_control.ipynb) notebook.
 
 | Frequentist | Bayesian |
 |--|--|
@@ -58,8 +57,6 @@ This is appropriate when you have a single treated unit, and therefore a single 
 | 1    | $y_1$ |
 |$\ldots$ | $\ldots$  |
 | T    | $y_T$ |
-
-A worked example is given in the [Interrupted time series](notebooks/interrupted_time_series_no_predictors.ipynb) notebook.
 
 | Frequentist | Bayesian |
 |--|--|
