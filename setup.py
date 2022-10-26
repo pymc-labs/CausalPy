@@ -13,15 +13,15 @@ REQUIREMENTS_FILE = join(PROJECT_ROOT, "requirements.txt")
 
 with open(REQUIREMENTS_FILE) as f:
     install_reqs = f.read().splitlines()
-    
-    
+
+
 setup(
-    name="causal_inference",
+    name="CausalPy",
     # version=get_version(),
     maintainer=AUTHOR,
     maintainer_email=AUTHOR_EMAIL,
     description=DESCRIPTION,
-    license='LICENSE',
+    license="LICENSE",
     url=URL,
     packages=find_packages(),
     python_requires=">=3.8",

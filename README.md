@@ -2,7 +2,7 @@
 
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for both traditional OLS and Bayesian model fitting methods to be used.
 
-_**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/causal-inference/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._ 
+_**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._ 
 
 ## Comparison to related packages
 
@@ -25,7 +25,7 @@ Another distinctive feature of this package is the ability to use different mode
 
 ## Roadmap
 
-Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/causal-inference/issues). 
+Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues). 
 
 In addition to the quasi-experimental methods supported thus far, we might add functionality around propensity scores and non-equivalent group designs.
 
@@ -123,13 +123,13 @@ This repository is under active development by a small number of contributors at
 1. Create conda environment:
 
 ```bash
-conda create --name causal_impact_env --file requirements.txt
+conda create --name CausalPy --file requirements.txt
 ```
 
 2. Activate environment:
 
 ```bash
-conda activate causal_impact_env
+conda activate CausalPy
 ```
 
 3. Import the package
