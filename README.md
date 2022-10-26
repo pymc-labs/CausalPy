@@ -10,7 +10,7 @@ We cover the following quasi-experimental situations and models:
 | Interrupted time series          | ✅                     | ✅             |
 | Difference in differences        | ✅                     | ❌             |
 | Regression discontinuity designs | ✅                     | ✅             |
-|                                  | [`scikit-learn` examples](notebooks/skl_demos.ipynb) |               |
+|                                  | [`scikit-learn` examples](notebooks/skl_demos.ipynb) | [`pymc` examples](notebooks/pymc_demos.ipynb) |
 
 ## Comparison to related packages
 |                           | [CausalImpact](https://google.github.io/CausalImpact/) from Google | [GeoLift](https://github.com/facebookincubator/GeoLift/) from Meta | QuasPy from PyMC Labs                                |
