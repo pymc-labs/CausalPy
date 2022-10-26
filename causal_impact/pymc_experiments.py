@@ -110,3 +110,88 @@ class SyntheticControl(TimeSeriesExperiment):
 
 class InterruptedTimeSeries(TimeSeriesExperiment):
     pass
+
+
+class DifferenceInDifferences(ExperimentalDesign):
+    """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
+    pass
+
+class RegressionDiscontinuity(ExperimentalDesign):
+    """Note: there is no pre/post intervention data distinction, we fit all the data available."""
+    
+    def __init__(
+        self,
+        data,
+        formula,
+        treatment_threshold,
+        prediction_model=None,
+        running_variable_name="x",
+        outcome_variable_name="y",
+        **kwargs,
+    ):
+        super().__init__(prediction_model=prediction_model, **kwargs)
+        self.data = data
+        self.formula = formula
+        self.running_variable_name = running_variable_name
+        self.outcome_variable_name = outcome_variable_name
+        self.treatment_threshold = treatment_threshold
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+
+        # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
+
+        # DEVIATION FROM SKL EXPERIMENT CODE =============================
+        # fit the model to the observed (pre-intervention) data
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        # ================================================================
+
+        # score the goodness of fit to all data
+        self.score = self.prediction_model.score(X=self.X, y=self.y)
+
+        # get the model predictions of the observed data
+        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 1000)
+        self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        self.pred = self.prediction_model.predict(X=np.asarray(new_x))
+
+        # calculate the counterfactual
+        xi = xi[xi > self.treatment_threshold]
+        self.x_counterfact = pd.DataFrame({"x": xi, "treated": np.zeros(xi.shape)})
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
+        self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
+
+    def _is_treated(self, x):
+        return np.greater_equal(x, self.treatment_threshold)
+
+    def plot(self):
+        fig, ax = plt.subplots()
+        # Plot raw data
+        sns.scatterplot(
+            self.data,
+            x=self.running_variable_name,
+            y=self.outcome_variable_name,
+            c="k",  # hue="treated",
+            ax=ax,
+        )
+        # Plot model fit to data
+        plot_xY(self.x_pred[self.running_variable_name], self.pred["posterior_predictive"].y_hat, ax=ax)
+        # # Plot counterfactual
+        plot_xY(self.x_counterfact[self.running_variable_name], self.pred_counterfac["posterior_predictive"].y_hat, ax=ax)
+        # Shaded causal effect
+        # TODO
+        # Intervention line
+        ax.axvline(
+            x=self.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        return (fig, ax)
+    

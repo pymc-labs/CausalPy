@@ -6,10 +6,10 @@ We cover the following quasi-experimental situations and models:
 
 | method                           | `scikit-learn` models  | `pymc` models |
 |----------------------------------|-----------------------|---------------|
-| Synthetic control                | ✅                     | ⏳             |
-| Interrupted time series          | ✅                     | ⏳             |
-| Difference in differences        | ✅                     | ⏳             |
-| Regression discontinuity designs | ✅                     | ❌             |
+| Synthetic control                | ✅                     | ✅             |
+| Interrupted time series          | ✅                     | ✅             |
+| Difference in differences        | ✅                     | ❌             |
+| Regression discontinuity designs | ✅                     | ✅             |
 |                                  | [`scikit-learn` examples](notebooks/skl_demos.ipynb) |               |
 
 ## Comparison to related packages
@@ -81,7 +81,11 @@ Regression discontinuity designs are used when treatment is applied to units acc
 | $x_{N-1}$ | $y_{N-1}$ | True     |
 | $x_N$     | $y_N$     | True     |
 
-![](img/regression_discontinuity_skl.png)
+
+
+| Frequentist | Bayesian |
+|--|--|
+| ![](img/regression_discontinuity_skl.png) | ![](img/regression_discontinuity_pymc.png) | 
 
 ## Related packages
 
