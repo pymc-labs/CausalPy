@@ -4,6 +4,8 @@ from patsy import dmatrices, build_design_matrices
 import seaborn as sns
 import pandas as pd
 from causal_impact.plot_utils import plot_xY
+import xarray as xr
+
 
 LEGEND_FONT_SIZE = 12
 
@@ -41,9 +43,11 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
 
+        # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
         self.prediction_model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+        # ================================================================
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.prediction_model.score(X=self.pre_X, y=self.pre_y)
@@ -54,14 +58,16 @@ class TimeSeriesExperiment(ExperimentalDesign):
         # calculate the counterfactual
         self.post_pred = self.prediction_model.predict(X=self.post_X)
 
-        # TODO
-        # # causal impact pre (ie the residuals of the model fit to observed)
-        # self.pre_impact = self.pre_y - self.pre_pred
-        # # causal impact post (ie the impact of the intervention)
-        # self.post_impact = self.post_y - self.post_pred
+        # causal impact pre (ie the residuals of the model fit to observed)
+        pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
+        self.pre_impact = pre_data - self.pre_pred["posterior_predictive"].y_hat
 
-        # # cumulative impact post
-        # self.post_impact_cumulative = np.cumsum(self.post_impact)
+        # causal impact post (ie the residuals of the model fit to observed)
+        post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
+        self.post_impact = post_data - self.post_pred["posterior_predictive"].y_hat
+
+        # cumulative impact post
+        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def plot(self):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
@@ -76,6 +82,15 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index, self.post_pred["posterior_predictive"].y_hat, ax=ax[0]
         )
         ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
+
+        plot_xY(self.datapre.index, self.pre_impact, ax=ax[1])
+        plot_xY(self.datapost.index, self.post_impact, ax=ax[1])
+        ax[1].axhline(y=0, c="k")
+        ax[1].set(title="Causal Impact")
+
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(self.datapost.index, self.post_impact_cumulative, ax=ax[2])
 
         # Intervention line
         for i in [0, 1, 2]:

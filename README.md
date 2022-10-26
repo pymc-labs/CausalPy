@@ -34,7 +34,9 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 A worked example is given in the [Synthetic control](notebooks/synthetic_control.ipynb) notebook.
 
-![](img/synthetic_control_skl.png)
+| Frequentist | Bayesian |
+|--|--|
+| ![](img/synthetic_control_skl.png) | ![](img/synthetic_control_pymc.png) | 
 
 ## Interrupted time series
 This is appropriate when you have a single treated unit, and therefore a single time series, and do _not_ have a set of untreated units.
