@@ -1,11 +1,9 @@
-import re
 from os.path import dirname, join, realpath
 from setuptools import find_packages, setup
 
 DESCRIPTION = "Causal inference for quasi-experiments in Python"
-AUTHOR = "TBD"
-AUTHOR_EMAIL = "TBD"
-URL = "TBD"
+AUTHOR = "Benjamin T. Vincent"
+URL = "https://github.com/pymc-labs/CausalPy"
 
 PROJECT_ROOT = dirname(realpath(__file__))
 
@@ -14,12 +12,10 @@ REQUIREMENTS_FILE = join(PROJECT_ROOT, "requirements.txt")
 with open(REQUIREMENTS_FILE) as f:
     install_reqs = f.read().splitlines()
 
-
 setup(
     name="CausalPy",
     # version=get_version(),
     maintainer=AUTHOR,
-    maintainer_email=AUTHOR_EMAIL,
     description=DESCRIPTION,
     license="LICENSE",
     url=URL,
