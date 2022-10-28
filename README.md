@@ -60,7 +60,7 @@ This is appropriate when you have a single treated unit, and therefore a single 
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](img/interrupted_time_series_skl.png) | ![](img/interrupted_time_series_pymc.png) |
+| ![](img/interrupted_time_series_skl.svg) | ![](img/interrupted_time_series_pymc.svg) |
 
 ### Difference in Differences
 
@@ -75,7 +75,7 @@ Data is expected to be in the following form. Shown are just two units - one in 
 | 1    | 0 | 1     | $y_{1,0}$ |
 | 1    | 1 | 1     | $y_{1,1}$ |
 
-![](img/difference_in_differences_skl.png)
+![](img/difference_in_differences_skl.svg)
 
 ### Regression discontinuity designs
 
@@ -92,7 +92,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](img/regression_discontinuity_skl.png) | ![](img/regression_discontinuity_pymc.png) | 
+| ![](img/regression_discontinuity_skl.svg) | ![](img/regression_discontinuity_pymc.svg) | 
 
 ## Learning resources
 
