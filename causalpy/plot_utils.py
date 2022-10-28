@@ -24,15 +24,3 @@ def plot_xY(x, Y, ax, plot_hdi_kwargs=dict()):
         **plot_hdi_kwargs,
     )
     ax.plot(x, quantiles.sel(quantile=0.5), color="k")
-
-
-def format_x_axis(ax):
-    # format
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    # ax.xaxis.set_minor_formatter(mdates.DateFormatter("%Y %b"))
-    # locator
-    ax.xaxis.set_major_locator(mdates.YearLocator())
-    # ax.xaxis.set_minor_locator(mdates.MonthLocator())
-    # grid
-    ax.grid(which="major", linestyle="-", axis="x")
-    # ax.grid(which='minor', color='lightgrey', linestyle='--', axis='x')
