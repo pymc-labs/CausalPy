@@ -119,22 +119,28 @@ This repository is under active development by a small number of contributors at
 
 ## Local development
 
-1. Create conda environment:
+1. Create a new environment using Python >=3.8, for example 3.10
 
-```bash
-conda create --name CausalPy --file requirements.txt
+```
+conda create --name CausalPy python=3.10
 ```
 
 2. Activate environment:
 
-```bash
+```
 conda activate CausalPy
 ```
 
-3. Import the package
+3. Install the package in editable mode
 
-```bash
-pip install -e ./
+```
+pip install -e .
+```
+
+4. Install development dependencies
+
+```
+pip install -r requirements-dev.txt
 ```
 
 ---
