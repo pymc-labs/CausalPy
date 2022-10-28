@@ -136,3 +136,13 @@ conda activate CausalPy
 ```bash
 pip install -e ./
 ```
+
+---
+
+## Support
+This repository is backed by [PyMC Labs](www.pymc-labs.io). 
+
+If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.io](mailto:ben.vincent@pymc-labs.io). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
+
+![](https://github.com/pymc-labs/brand/blob/main/logos/4-pymc-labs-transp-black.png?raw=true)
+
