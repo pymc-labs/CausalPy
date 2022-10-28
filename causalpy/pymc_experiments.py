@@ -5,6 +5,7 @@ import seaborn as sns
 import pandas as pd
 from causalpy.plot_utils import plot_xY
 import xarray as xr
+import arviz as az
 
 
 LEGEND_FONT_SIZE = 12
@@ -114,7 +115,94 @@ class InterruptedTimeSeries(TimeSeriesExperiment):
 
 class DifferenceInDifferences(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
-    pass
+    def __init__(
+        self,
+        data,
+        formula,
+        time_variable_name="t",
+        outcome_variable_name="y",
+        prediction_model=None,
+        **kwargs,
+    ):
+        super().__init__(prediction_model=prediction_model, **kwargs)
+        self.data = data
+        self.formula = formula
+        self.time_variable_name = time_variable_name
+        self.outcome_variable_name = outcome_variable_name
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+
+        # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
+
+        # DEVIATION FROM SKL EXPERIMENT CODE =============================
+        # fit the model to the observed (pre-intervention) data
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        # ================================================================
+
+        # predicted outcome for control group
+        self.x_pred_control = pd.DataFrame(
+            {"group": [0, 0], "t": [0.0, 1.0], "treated": [0, 0]}
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
+        self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
+
+        # predicted outcome for treatment group
+        self.x_pred_treatment = pd.DataFrame(
+            {"group": [1, 1], "t": [0.0, 1.0], "treated": [0, 1]}
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
+        self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
+
+        # predicted outcome for counterfactual
+        self.x_pred_counterfactual = pd.DataFrame(
+            {"group": [1], "t": [1.0], "treated": [0]}
+        )
+        (new_x,) = build_design_matrices(
+            [self._x_design_info], self.x_pred_counterfactual
+        )
+        self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
+        
+    def plot(self):
+        fig, ax = plt.subplots()
+
+        # Plot raw data
+        sns.lineplot(
+            self.data,
+            x=self.time_variable_name,
+            y=self.outcome_variable_name,
+            hue="group",
+            units="unit",
+            estimator=None,
+            alpha=0.25,
+            ax=ax,
+        )
+        # Plot model fit to control group
+        parts = ax.violinplot(az.extract(self.y_pred_control, group='posterior_predictive', var_names='y_hat').values.T, 
+                      positions=self.x_pred_control[self.time_variable_name].values, 
+                      showmeans=False, 
+                      showmedians=False, widths=0.2)
+        for pc in parts['bodies']:
+            pc.set_facecolor('C0')
+            pc.set_edgecolor('None')
+            pc.set_alpha(0.5)
+        
+        # Plot model fit to treatment group
+        parts = ax.violinplot(az.extract(self.y_pred_treatment, group='posterior_predictive', var_names='y_hat').values.T, 
+                      positions=self.x_pred_treatment[self.time_variable_name].values, 
+                      showmeans=False, 
+                      showmedians=False, widths=0.2)
+        # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
+        parts = ax.violinplot(az.extract(self.y_pred_counterfactual, group='posterior_predictive', var_names='y_hat').values.T, 
+                      positions=self.x_pred_counterfactual[self.time_variable_name].values, 
+                      showmeans=False, 
+                      showmedians=False, widths=0.2)
+
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        return (fig, ax)
 
 class RegressionDiscontinuity(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction, we fit all the data available."""

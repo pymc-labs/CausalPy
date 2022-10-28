@@ -75,7 +75,9 @@ Data is expected to be in the following form. Shown are just two units - one in 
 | 1    | 0 | 1     | $y_{1,0}$ |
 | 1    | 1 | 1     | $y_{1,1}$ |
 
-![](img/difference_in_differences_skl.svg)
+| Frequentist | Bayesian |
+|--|--|
+| ![](img/difference_in_differences_skl.svg) | ![](img/difference_in_differences_pymc.svg) | 
 
 ### Regression discontinuity designs
 
