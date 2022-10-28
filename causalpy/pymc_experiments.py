@@ -268,7 +268,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # Plot model fit to data
         plot_xY(self.x_pred[self.running_variable_name], self.pred["posterior_predictive"].y_hat, ax=ax)
         # # Plot counterfactual
-        plot_xY(self.x_counterfact[self.running_variable_name], self.pred_counterfac["posterior_predictive"].y_hat, ax=ax)
+        plot_xY(self.x_counterfact[self.running_variable_name], 
+                self.pred_counterfac["posterior_predictive"].y_hat, 
+                ax=ax, 
+                plot_hdi_kwargs={"color": "C2"},
+                )
         # Shaded causal effect
         # TODO
         # Intervention line

@@ -2,7 +2,7 @@ import arviz as az
 import matplotlib.dates as mdates
 
 
-def plot_xY(x, Y, ax):
+def plot_xY(x, Y, ax, plot_hdi_kwargs=dict()):
     quantiles = Y.quantile(
         (0.025, 0.25, 0.5, 0.75, 0.975), dim=("chain", "draw")
     ).transpose()
@@ -13,6 +13,7 @@ def plot_xY(x, Y, ax):
         fill_kwargs={"alpha": 0.25},
         smooth=False,
         ax=ax,
+        **plot_hdi_kwargs,
     )
     az.plot_hdi(
         x,
@@ -20,6 +21,7 @@ def plot_xY(x, Y, ax):
         fill_kwargs={"alpha": 0.5},
         smooth=False,
         ax=ax,
+        **plot_hdi_kwargs,
     )
     ax.plot(x, quantiles.sel(quantile=0.5), color="k")
 
