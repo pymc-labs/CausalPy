@@ -1,6 +1,6 @@
 # CausalPy
 
-A Python package focussing on causal inference in quasi-experimental settings. The package allows for both traditional OLS and Bayesian model fitting methods to be used.
+A Python package focussing on causal inference in quasi-experimental settings. The package allows for traditional OLS and more sophisticated Bayesian model fitting methods to be used.
 
 _**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._ 
 
@@ -111,7 +111,7 @@ Here are some general resources about causal inference:
 
 This repository is under active development by a small number of contributors at the moment. Once the code and API has settled a bit we will open up and welcome contributions. But not yet.
 
-## Licence
+## License
 
 [Apache License](LICENSE)
 
@@ -144,5 +144,4 @@ This repository is backed by [PyMC Labs](https://www.pymc-labs.io).
 
 If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.io](mailto:ben.vincent@pymc-labs.io). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
 
-![](https://github.com/pymc-labs/brand/blob/main/logos/4-pymc-labs-transp-black.png?raw=true)
-
+![](img/pymc-labs-log.png)
