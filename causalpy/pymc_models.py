@@ -1,5 +1,7 @@
 import pymc as pm
 import numpy as np
+from sklearn.metrics import r2_score
+import arviz as az
 
 
 class ModelBuilder(pm.Model):
@@ -33,7 +35,11 @@ class ModelBuilder(pm.Model):
         return post_pred
 
     def score(self, X, y):
-        return 0.0
+        yhat = self.predict(X)
+        yhat = az.extract(yhat, group="posterior_predictive", var_names="y_hat").mean(
+            dim="sample"
+        )
+        return r2_score(y, yhat)
 
 
 class WeightedSumFitter(ModelBuilder):
