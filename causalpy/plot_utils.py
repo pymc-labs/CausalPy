@@ -1,5 +1,4 @@
 import arviz as az
-import matplotlib.dates as mdates
 
 
 def plot_xY(x, Y, ax, plot_hdi_kwargs=dict()):
