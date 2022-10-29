@@ -143,6 +143,7 @@ pip install -e .
 
 ```
 pip install -r requirements-dev.txt
+pip install -r requirements-docs.txt
 ```
 
 5. You may also need to run this to get pre-commit checks working

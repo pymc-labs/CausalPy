@@ -1,2 +1,1 @@
-ipykernel
 pre-commit
