@@ -106,7 +106,12 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
 
 class SyntheticControl(TimeSeriesExperiment):
-    pass
+    def plot(self):
+        fig, ax = super().plot()
+        # plot control units as well
+        ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+        ax[0].plot(self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+        return (fig, ax)
 
 
 class InterruptedTimeSeries(TimeSeriesExperiment):
