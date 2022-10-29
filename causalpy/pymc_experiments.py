@@ -260,7 +260,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.score = self.prediction_model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 1000)
+        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 200)
         self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
