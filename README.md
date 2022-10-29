@@ -98,7 +98,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 |--|--|
 | ![](img/regression_discontinuity_skl.svg) | ![](img/regression_discontinuity_pymc.svg) |
 
-<p style="text-align: center;">We plot the data, model fits, and counterfactual (top panels). The Bayesian analysis shows model fits and counterfactual estimate with shaded Bayesian credible regions. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect</p>
+We plot the data, model fits, and counterfactual (top panels). The Bayesian analysis shows model fits and counterfactual estimate with shaded Bayesian credible regions. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect (bottom).
 
 ## Learning resources
 
