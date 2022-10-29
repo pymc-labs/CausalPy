@@ -1,7 +1,7 @@
-import pymc as pm
-import numpy as np
-from sklearn.metrics import r2_score
 import arviz as az
+import numpy as np
+import pymc as pm
+from sklearn.metrics import r2_score
 
 
 class ModelBuilder(pm.Model):

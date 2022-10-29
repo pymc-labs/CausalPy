@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, gamma, dirichlet, uniform
+from scipy.stats import dirichlet, gamma, norm, uniform
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 default_lowess_kwargs = {"frac": 0.2, "it": 0}

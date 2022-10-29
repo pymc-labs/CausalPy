@@ -1,8 +1,9 @@
 from functools import partial
+
+import numpy as np
 from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
 from sklearn.linear_model._base import LinearModel
-import numpy as np
 
 
 class WeightedProportion(LinearModel, RegressorMixin):

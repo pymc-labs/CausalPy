@@ -2,7 +2,7 @@
 
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for traditional OLS and more sophisticated Bayesian model fitting methods to be used.
 
-_**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._ 
+_**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._
 
 ## Comparison to related packages
 
@@ -25,7 +25,7 @@ Another distinctive feature of this package is the ability to use different mode
 
 ## Roadmap
 
-Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues). 
+Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues).
 
 In addition to the quasi-experimental methods supported thus far, we might add functionality around propensity scores and non-equivalent group designs.
 
@@ -46,7 +46,7 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](img/synthetic_control_skl.svg) | ![](img/synthetic_control_pymc.svg) | 
+| ![](img/synthetic_control_skl.svg) | ![](img/synthetic_control_pymc.svg) |
 
 ### Interrupted time series
 This is appropriate when you have a single treated unit, and therefore a single time series, and do _not_ have a set of untreated units.
@@ -77,7 +77,7 @@ Data is expected to be in the following form. Shown are just two units - one in 
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](img/difference_in_differences_skl.svg) | ![](img/difference_in_differences_pymc.svg) | 
+| ![](img/difference_in_differences_skl.svg) | ![](img/difference_in_differences_pymc.svg) |
 
 ### Regression discontinuity designs
 
@@ -94,7 +94,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](img/regression_discontinuity_skl.svg) | ![](img/regression_discontinuity_pymc.svg) | 
+| ![](img/regression_discontinuity_skl.svg) | ![](img/regression_discontinuity_pymc.svg) |
 
 ## Learning resources
 
@@ -115,7 +115,7 @@ This repository is under active development by a small number of contributors at
 
 [Apache License](LICENSE)
 
---- 
+---
 
 ## Local development
 
@@ -143,10 +143,16 @@ pip install -e .
 pip install -r requirements-dev.txt
 ```
 
+You may also need to run this to get pre-commit checks working
+
+```
+pre-commit install --install-hooks
+```
+
 ---
 
 ## Support
-This repository is backed by [PyMC Labs](https://www.pymc-labs.io). 
+This repository is backed by [PyMC Labs](https://www.pymc-labs.io).
 
 If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.io](mailto:ben.vincent@pymc-labs.io). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
 

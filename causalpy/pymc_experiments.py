@@ -1,12 +1,12 @@
+import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
-from patsy import dmatrices, build_design_matrices
-import seaborn as sns
 import pandas as pd
-from causalpy.plot_utils import plot_xY
+import seaborn as sns
 import xarray as xr
-import arviz as az
+from patsy import build_design_matrices, dmatrices
 
+from causalpy.plot_utils import plot_xY
 
 LEGEND_FONT_SIZE = 12
 
@@ -115,6 +115,7 @@ class InterruptedTimeSeries(TimeSeriesExperiment):
 
 class DifferenceInDifferences(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
+
     def __init__(
         self,
         data,
@@ -165,7 +166,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             [self._x_design_info], self.x_pred_counterfactual
         )
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
-        
+
     def plot(self):
         fig, ax = plt.subplots()
 
@@ -181,32 +182,50 @@ class DifferenceInDifferences(ExperimentalDesign):
             ax=ax,
         )
         # Plot model fit to control group
-        parts = ax.violinplot(az.extract(self.y_pred_control, group='posterior_predictive', var_names='y_hat').values.T, 
-                      positions=self.x_pred_control[self.time_variable_name].values, 
-                      showmeans=False, 
-                      showmedians=False, widths=0.2)
-        for pc in parts['bodies']:
-            pc.set_facecolor('C0')
-            pc.set_edgecolor('None')
+        parts = ax.violinplot(
+            az.extract(
+                self.y_pred_control, group="posterior_predictive", var_names="y_hat"
+            ).values.T,
+            positions=self.x_pred_control[self.time_variable_name].values,
+            showmeans=False,
+            showmedians=False,
+            widths=0.2,
+        )
+        for pc in parts["bodies"]:
+            pc.set_facecolor("C0")
+            pc.set_edgecolor("None")
             pc.set_alpha(0.5)
-        
+
         # Plot model fit to treatment group
-        parts = ax.violinplot(az.extract(self.y_pred_treatment, group='posterior_predictive', var_names='y_hat').values.T, 
-                      positions=self.x_pred_treatment[self.time_variable_name].values, 
-                      showmeans=False, 
-                      showmedians=False, widths=0.2)
+        parts = ax.violinplot(
+            az.extract(
+                self.y_pred_treatment, group="posterior_predictive", var_names="y_hat"
+            ).values.T,
+            positions=self.x_pred_treatment[self.time_variable_name].values,
+            showmeans=False,
+            showmedians=False,
+            widths=0.2,
+        )
         # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
-        parts = ax.violinplot(az.extract(self.y_pred_counterfactual, group='posterior_predictive', var_names='y_hat').values.T, 
-                      positions=self.x_pred_counterfactual[self.time_variable_name].values, 
-                      showmeans=False, 
-                      showmedians=False, widths=0.2)
+        parts = ax.violinplot(
+            az.extract(
+                self.y_pred_counterfactual,
+                group="posterior_predictive",
+                var_names="y_hat",
+            ).values.T,
+            positions=self.x_pred_counterfactual[self.time_variable_name].values,
+            showmeans=False,
+            showmedians=False,
+            widths=0.2,
+        )
 
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
+
 class RegressionDiscontinuity(ExperimentalDesign):
     """Note: there is no pre/post intervention data distinction, we fit all the data available."""
-    
+
     def __init__(
         self,
         data,
@@ -266,13 +285,18 @@ class RegressionDiscontinuity(ExperimentalDesign):
             ax=ax,
         )
         # Plot model fit to data
-        plot_xY(self.x_pred[self.running_variable_name], self.pred["posterior_predictive"].y_hat, ax=ax)
+        plot_xY(
+            self.x_pred[self.running_variable_name],
+            self.pred["posterior_predictive"].y_hat,
+            ax=ax,
+        )
         # # Plot counterfactual
-        plot_xY(self.x_counterfact[self.running_variable_name], 
-                self.pred_counterfac["posterior_predictive"].y_hat, 
-                ax=ax, 
-                plot_hdi_kwargs={"color": "C2"},
-                )
+        plot_xY(
+            self.x_counterfact[self.running_variable_name],
+            self.pred_counterfac["posterior_predictive"].y_hat,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C2"},
+        )
         # Shaded causal effect
         # TODO
         # Intervention line
@@ -286,4 +310,3 @@ class RegressionDiscontinuity(ExperimentalDesign):
         ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
-    

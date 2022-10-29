@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from patsy import dmatrices, build_design_matrices
-import seaborn as sns
 import pandas as pd
+import seaborn as sns
+from patsy import build_design_matrices, dmatrices
 
 LEGEND_FONT_SIZE = 12
 

@@ -1,4 +1,5 @@
 from os.path import dirname, join, realpath
+
 from setuptools import find_packages, setup
 
 DESCRIPTION = "Causal inference for quasi-experiments in Python"
