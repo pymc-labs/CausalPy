@@ -1,5 +1,7 @@
 # CausalPy
 
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for traditional OLS and more sophisticated Bayesian model fitting methods to be used.
 
 _**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._
@@ -143,10 +145,10 @@ pip install -e .
 pip install -r requirements-dev.txt
 ```
 
-You may also need to run this to get pre-commit checks working
+5. You may also need to run this to get pre-commit checks working
 
 ```
-pre-commit install --install-hooks
+pre-commit install
 ```
 
 ---
