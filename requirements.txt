@@ -1,11 +1,11 @@
 arviz>=v0.13.0
 graphviz
 matplotlib>=3.6.1
-numpy>=1.23.4
-pandas>=1.5.1
+numpy
+pandas
 pymc>=4.0.0
-scikit-learn>=1.1.2
-scipy>=1.9.3
+scikit-learn>=1
+scipy
 seaborn>=0.11.2
 statsmodels
-xarray>=2022.10.0
+xarray
