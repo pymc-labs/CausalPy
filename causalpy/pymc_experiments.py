@@ -275,38 +275,48 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(2, 1, figsize=(7, 8))
         # Plot raw data
         sns.scatterplot(
             self.data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
             c="k",  # hue="treated",
-            ax=ax,
+            ax=ax[0],
         )
         # Plot model fit to data
         plot_xY(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].y_hat,
-            ax=ax,
+            ax=ax[0],
         )
         # # Plot counterfactual
         plot_xY(
             self.x_counterfact[self.running_variable_name],
             self.pred_counterfac["posterior_predictive"].y_hat,
-            ax=ax,
+            ax=ax[0],
             plot_hdi_kwargs={"color": "C2"},
         )
         # Shaded causal effect
         # TODO
         # Intervention line
-        ax.axvline(
+        ax[0].axvline(
             x=self.treatment_threshold,
             ls="-",
             lw=3,
             color="r",
             label="treatment threshold",
         )
-        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        ax[0].set(title=f"$R^2$ on all data = {self.score:.3f}")
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        # Plot causal effect estimate ------------------------
+        coeff_name = (
+            "treated[T.True]"  # NOTE: get rid of this hard coded variable name!
+        )
+        beta = self.prediction_model.idata["posterior"]["beta"].sel(
+            {"coeffs": coeff_name}
+        )
+        az.plot_posterior(beta, ref_val=0, ax=ax[1])
+        ax[1].set(title=f"Causal impact", xlabel=coeff_name)
         return (fig, ax)

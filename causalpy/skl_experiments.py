@@ -296,21 +296,25 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
         self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
 
+        # calculate the causal impact
+        k = len(self.pred_counterfac)
+        self.causal_impact = self.pred[-k:] - self.pred_counterfac
+
     def _is_treated(self, x):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(2, 1, sharex=True, figsize=(7, 8))
         # Plot raw data
         sns.scatterplot(
             self.data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
             c="k",  # hue="treated",
-            ax=ax,
+            ax=ax[0],
         )
         # Plot model fit to data
-        ax.plot(
+        ax[0].plot(
             self.x_pred[self.running_variable_name],
             self.pred,
             "k",
@@ -318,7 +322,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             label="model fit",
         )
         # Plot counterfactual
-        ax.plot(
+        ax[0].plot(
             self.x_counterfact[self.running_variable_name],
             self.pred_counterfac,
             markersize=10,
@@ -327,7 +331,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             label="counterfactual",
         )
         # Shaded causal effect
-        ax.fill_between(
+        ax[0].fill_between(
             self.x_counterfact[self.running_variable_name],
             y1=np.squeeze(self.pred_counterfac),
             y2=np.squeeze(self.pred[-len(np.squeeze(self.pred_counterfac)) :]),
@@ -335,14 +339,30 @@ class RegressionDiscontinuity(ExperimentalDesign):
             alpha=0.25,
             label="inferred causal impact",
         )
-        # Intervention line
-        ax.axvline(
-            x=self.treatment_threshold,
+        ax[0].set(title=f"$R^2$ on all data = {self.score:.3f}")
+
+        # Plot causal effect ------------------------
+        # NOTE: plotting residual data point requires another call to self.prediction_model.predict() for the treated unit x-values.
+        ax[1].plot(
+            self.x_counterfact[self.running_variable_name],
+            self.causal_impact,
+            markersize=10,
             ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
+            c="k",
+            label="causal impact",
         )
-        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        ax[1].axhline(y=0, c="k")
+        ax[1].set(title=f"Causal impact", xlabel=self.running_variable_name)
+
+        # Intervention line
+        for i in [0, 1]:
+            ax[i].axvline(
+                x=self.treatment_threshold,
+                ls="-",
+                lw=3,
+                color="r",
+                label="treatment threshold",
+            )
+            ax[i].legend(fontsize=LEGEND_FONT_SIZE)
+
         return (fig, ax)
