@@ -160,6 +160,12 @@ pip install -r requirements-docs.txt
 pre-commit install
 ```
 
+6. Note: You may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
+
+```
+python -m ipykernel install --user --name CausalPy
+```
+
 ---
 
 ## Support
