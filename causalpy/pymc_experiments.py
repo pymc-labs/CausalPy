@@ -172,6 +172,16 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
+        # calculate causal impact
+        # TODO: This should most likely be posterior estimate, not posterior predictive
+        self.causal_impact = (
+            self.y_pred_treatment["posterior_predictive"]
+            .y_hat.isel({"obs_ind": 1})
+            .mean()
+            .data
+            - self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+        )
+
     def plot(self):
         fig, ax = plt.subplots()
 
@@ -223,7 +233,40 @@ class DifferenceInDifferences(ExperimentalDesign):
             showmedians=False,
             widths=0.2,
         )
-
+        # arrow to label the causal impact
+        y_pred_treatment = (
+            self.y_pred_treatment["posterior_predictive"]
+            .y_hat.isel({"obs_ind": 1})
+            .mean()
+            .data
+        )
+        y_pred_counterfactual = (
+            self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+        )
+        ax.annotate(
+            "",
+            xy=(1.15, y_pred_counterfactual),
+            xycoords="data",
+            xytext=(1.15, y_pred_treatment),
+            textcoords="data",
+            arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
+        )
+        ax.annotate(
+            "causal\nimpact",
+            xy=(1.15, np.mean([y_pred_counterfactual, y_pred_treatment])),
+            xycoords="data",
+            xytext=(5, 0),
+            textcoords="offset points",
+            color="green",
+            va="center",
+        )
+        # formatting
+        ax.set(
+            xlim=[-0.15, 1.25],
+            xticks=[0, 1],
+            xticklabels=["pre", "post"],
+            title=f"Causal impact = {self.causal_impact:.2f}",
+        )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
