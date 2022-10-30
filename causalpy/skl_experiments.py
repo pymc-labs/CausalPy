@@ -206,6 +206,9 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
+        # calculate causal impact
+        self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
+
     def plot(self):
         fig, ax = plt.subplots()
 
@@ -246,7 +249,31 @@ class DifferenceInDifferences(ExperimentalDesign):
             markersize=10,
             label="counterfactual",
         )
-
+        # arrow to label the causal impact
+        ax.annotate(
+            "",
+            xy=(1.05, self.y_pred_counterfactual),
+            xycoords="data",
+            xytext=(1.05, self.y_pred_treatment[1]),
+            textcoords="data",
+            arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
+        )
+        ax.annotate(
+            "causal\nimpact",
+            xy=(1.05, np.mean([self.y_pred_counterfactual, self.y_pred_treatment[1]])),
+            xycoords="data",
+            xytext=(5, 0),
+            textcoords="offset points",
+            color="green",
+            va="center",
+        )
+        # formatting
+        ax.set(
+            xlim=[-0.05, 1.1],
+            xticks=[0, 1],
+            xticklabels=["pre", "post"],
+            title=f"Causal impact = {self.causal_impact[0]:.2f}",
+        )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
