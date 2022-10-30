@@ -25,6 +25,12 @@ def generate_synthetic_control_data(
     grw_sigma=1,
     lowess_kwargs=default_lowess_kwargs,
 ):
+    """
+    Example:
+    >> import pathlib
+    >> df, weightings_true = generate_synthetic_control_data(treatment_time=treatment_time)
+    >> df.to_csv(pathlib.Path.cwd() / 'synthetic_control.csv', index=False)
+    """
 
     # 1. Generate non-treated variables
     df = pd.DataFrame(
@@ -89,6 +95,12 @@ def generate_interrupted_time_series_data(
 
 
 def generate_time_series_data(treatment_time):
+    """
+    Example use:
+    >> import pathlib
+    >> df = generate_time_series_data("2017-01-01").loc[:, ['month', 'year', 't', 'y']]
+    df.to_csv(pathlib.Path.cwd() / 'its.csv')
+    """
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )
@@ -114,7 +126,7 @@ def generate_time_series_data(treatment_time):
 
 
 def generate_time_series_data_simple(treatment_time, slope=0.0):
-    """Gnerate simple interrupted time series data, with no seasonality or temporal structure"""
+    """Generate simple interrupted time series data, with no seasonality or temporal structure"""
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )
@@ -179,6 +191,13 @@ def generate_did():
 def generate_regression_discontinuity_data(
     N=100, true_causal_impact=0.5, true_treatment_threshold=0.0
 ):
+    """
+    Example use:
+    >> import pathlib
+    >> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
+    >> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv', index=False)
+    """
+
     def is_treated(x):
         return np.greater_equal(x, true_treatment_threshold)
 

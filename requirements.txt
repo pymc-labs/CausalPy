@@ -3,9 +3,9 @@ graphviz
 matplotlib>=3.6.1
 numpy
 pandas
+patsy
 pymc>=4.0.0
 scikit-learn>=1
 scipy
 seaborn>=0.11.2
-statsmodels
 xarray
