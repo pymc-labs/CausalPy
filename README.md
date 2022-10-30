@@ -85,6 +85,8 @@ Data is expected to be in the following form. Shown are just two units - one in 
 |--|--|
 | ![](img/difference_in_differences_skl.svg) | ![](img/difference_in_differences_pymc.svg) |
 
+The data, model fit, and counterfactual are plotted. Frequentist model fits result in points estimates, but the Bayesian analysis results in posterior distributions, represented by the violin plots. The causal impact is the difference between the counterfactual prediction (treated group, post treatment) and the observed values for the treated group, post treatment.
+
 ### Regression discontinuity designs
 
 Regression discontinuity designs are used when treatment is applied to units according to a cutoff on the running variable (e.g. $x$) which is typically _not_ time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
