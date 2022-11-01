@@ -15,7 +15,7 @@ with open(REQUIREMENTS_FILE) as f:
 
 setup(
     name="CausalPy",
-    # version=get_version(),
+    version="0.0.2",
     maintainer=AUTHOR,
     description=DESCRIPTION,
     license="LICENSE",
