@@ -312,14 +312,22 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.score = self.prediction_model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 1000)
-        self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
+        xi = np.linspace(
+            np.min(self.data[self.running_variable_name]),
+            np.max(self.data[self.running_variable_name]),
+            1000,
+        )
+        self.x_pred = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
         # calculate the counterfactual
         xi = xi[xi > self.treatment_threshold]
-        self.x_counterfact = pd.DataFrame({"x": xi, "treated": np.zeros(xi.shape)})
+        self.x_counterfact = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": np.zeros(xi.shape)}
+        )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
         self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
 
