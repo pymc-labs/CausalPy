@@ -385,4 +385,16 @@ class RegressionDiscontinuity(ExperimentalDesign):
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )
         print("Model coefficients:")
-        # TODO
+        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
+        for name in self.labels:
+            coeff_samples = coeffs.sel(coeffs=name)
+            print(
+                f"\t{name}\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+            )
+        # add coeff for measurement std
+        coeff_samples = az.extract(
+            self.prediction_model.idata.posterior, var_names="sigma"
+        )
+        print(
+            f"\tsigma\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+        )
