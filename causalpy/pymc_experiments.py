@@ -347,5 +347,13 @@ class RegressionDiscontinuity(ExperimentalDesign):
             ax=ax,
         )
         ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
+        # Intervention line
+        ax.axvline(
+            x=self.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
