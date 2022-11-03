@@ -31,7 +31,9 @@ class ModelBuilder(pm.Model):
     def predict(self, X):
         self._data_setter(X)
         with self.model:  # sample with new input data
-            post_pred = pm.sample_posterior_predictive(self.idata)
+            post_pred = pm.sample_posterior_predictive(
+                self.idata, var_names=["y_hat", "mu"]
+            )
         return post_pred
 
     def score(self, X, y):
@@ -53,7 +55,7 @@ class WeightedSumFitter(ModelBuilder):
             y = pm.MutableData("y", y[:, 0], dims="obs_ind")
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors))
             sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
 
 
@@ -65,5 +67,5 @@ class LinearRegression(ModelBuilder):
             y = pm.MutableData("y", y[:, 0], dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta))
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")

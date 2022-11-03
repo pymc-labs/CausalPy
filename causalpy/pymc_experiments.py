@@ -332,10 +332,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
         self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
         below_thresh = az.extract(
-            self.pred_discon, group="posterior_predictive", var_names="y_hat"
+            self.pred_discon, group="posterior_predictive", var_names="mu"
         ).sel({"obs_ind": 0})
         above_thresh = az.extract(
-            self.pred_discon, group="posterior_predictive", var_names="y_hat"
+            self.pred_discon, group="posterior_predictive", var_names="mu"
         ).sel({"obs_ind": 1})
         self.discontinuity_at_threshold = above_thresh - below_thresh
 
@@ -355,15 +355,15 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # Plot model fit to data
         plot_xY(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].y_hat,
+            self.pred["posterior_predictive"].mu,
             ax=ax,
         )
         # create strings to compose title
         r2 = f"$R^2$ on all data = {self.score:.3f}"
-        discon = (
-            f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
-        )
-        ax.set(title=r2 + "\n" + discon)
+        percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
+        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        discon = f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}, "
+        ax.set(title=r2 + "\n" + discon + ci)
         # Intervention line
         ax.axvline(
             x=self.treatment_threshold,
