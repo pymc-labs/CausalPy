@@ -335,7 +335,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
         self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
-        self.discontinuity_at_threshold = (self.pred_discon[1] - self.pred_discon[0])[0]
+        self.discontinuity_at_threshold = np.squeeze(self.pred_discon[1]) - np.squeeze(
+            self.pred_discon[0]
+        )
 
     def _is_treated(self, x):
         return np.greater_equal(x, self.treatment_threshold)
@@ -358,9 +360,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
             markersize=10,
             label="model fit",
         )
-        ax.set(
-            title=f"$R^2$ on all data = {self.score:.3f} \n Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}"
-        )
+        # create strings to compose title
+        r2 = f"$R^2$ on all data = {self.score:.3f}"
+        discon = f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}"
+        ax.set(title=r2 + "\n" + discon)
         # Intervention line
         ax.axvline(
             x=self.treatment_threshold,

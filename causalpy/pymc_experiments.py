@@ -319,13 +319,25 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
-        # calculate the counterfactual
-        xi = xi[xi > self.treatment_threshold]
-        self.x_counterfact = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": np.zeros(xi.shape)}
+        # calculate discontinuity by evaluating the difference in model expectation on either side of the discontinuity
+        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above (not below) the threshold
+        self.x_discon = pd.DataFrame(
+            {
+                self.running_variable_name: np.array(
+                    [self.treatment_threshold - 0.001, self.treatment_threshold + 0.001]
+                ),
+                "treated": np.array([0, 1]),
+            }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
-        self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+        self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
+        below_thresh = az.extract(
+            self.pred_discon, group="posterior_predictive", var_names="y_hat"
+        ).sel({"obs_ind": 0})
+        above_thresh = az.extract(
+            self.pred_discon, group="posterior_predictive", var_names="y_hat"
+        ).sel({"obs_ind": 1})
+        self.discontinuity_at_threshold = above_thresh - below_thresh
 
     def _is_treated(self, x):
         return np.greater_equal(x, self.treatment_threshold)
@@ -346,7 +358,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.pred["posterior_predictive"].y_hat,
             ax=ax,
         )
-        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
+        # create strings to compose title
+        r2 = f"$R^2$ on all data = {self.score:.3f}"
+        discon = (
+            f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
+        )
+        ax.set(title=r2 + "\n" + discon)
         # Intervention line
         ax.axvline(
             x=self.treatment_threshold,
