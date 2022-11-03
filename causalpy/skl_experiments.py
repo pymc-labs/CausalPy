@@ -374,3 +374,14 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
+
+    def summary(self):
+        print("Difference in Differences experiment")
+        print(f"Formula: {self.formula}")
+        print(f"Running variable: {self.running_variable_name}")
+        print(f"Threshold on running variable: {self.treatment_threshold}")
+        print(f"\nResults:")
+        print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
+        print("Model coefficients:")
+        for name, val in zip(self.labels, self.prediction_model.coef_[0]):
+            print(f"\t{name}\t\t{val}")
