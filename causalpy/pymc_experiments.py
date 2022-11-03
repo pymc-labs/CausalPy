@@ -331,13 +331,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
         self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
-        below_thresh = az.extract(
-            self.pred_discon, group="posterior_predictive", var_names="mu"
-        ).sel({"obs_ind": 0})
-        above_thresh = az.extract(
-            self.pred_discon, group="posterior_predictive", var_names="mu"
-        ).sel({"obs_ind": 1})
-        self.discontinuity_at_threshold = above_thresh - below_thresh
+        self.discontinuity_at_threshold = (
+            self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
+            - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
+        )
 
     def _is_treated(self, x):
         return np.greater_equal(x, self.treatment_threshold)
