@@ -323,17 +323,19 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
-        # calculate the counterfactual
-        xi = xi[xi > self.treatment_threshold]
-        self.x_counterfact = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": np.zeros(xi.shape)}
+        # calculate discontinuity by evaluating the difference in model expectation on either side of the discontinuity
+        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above (not below) the threshold
+        self.x_discon = pd.DataFrame(
+            {
+                self.running_variable_name: np.array(
+                    [self.treatment_threshold - 0.001, self.treatment_threshold + 0.001]
+                ),
+                "treated": np.array([0, 1]),
+            }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
-        self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
-
-        # calculate the causal impact
-        k = len(self.pred_counterfac)
-        self.causal_impact = self.pred[-k:] - self.pred_counterfac
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+        self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
+        self.discontinuity_at_threshold = (self.pred_discon[1] - self.pred_discon[0])[0]
 
     def _is_treated(self, x):
         return np.greater_equal(x, self.treatment_threshold)
@@ -356,7 +358,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
             markersize=10,
             label="model fit",
         )
-        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
+        ax.set(
+            title=f"$R^2$ on all data = {self.score:.3f} \n Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}"
+        )
         # Intervention line
         ax.axvline(
             x=self.treatment_threshold,
