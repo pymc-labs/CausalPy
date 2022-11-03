@@ -308,14 +308,22 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.score = self.prediction_model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        xi = np.linspace(np.min(self.data["x"]), np.max(self.data["x"]), 200)
-        self.x_pred = pd.DataFrame({"x": xi, "treated": self._is_treated(xi)})
+        xi = np.linspace(
+            np.min(self.data[self.running_variable_name]),
+            np.max(self.data[self.running_variable_name]),
+            200,
+        )
+        self.x_pred = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
         # calculate the counterfactual
         xi = xi[xi > self.treatment_threshold]
-        self.x_counterfact = pd.DataFrame({"x": xi, "treated": np.zeros(xi.shape)})
+        self.x_counterfact = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": np.zeros(xi.shape)}
+        )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_counterfact)
         self.pred_counterfac = self.prediction_model.predict(X=np.asarray(new_x))
 
@@ -323,48 +331,21 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
-        fig, ax = plt.subplots(2, 1, figsize=(7, 8))
+        fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
             self.data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
             c="k",  # hue="treated",
-            ax=ax[0],
+            ax=ax,
         )
         # Plot model fit to data
         plot_xY(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].y_hat,
-            ax=ax[0],
+            ax=ax,
         )
-        # # Plot counterfactual
-        plot_xY(
-            self.x_counterfact[self.running_variable_name],
-            self.pred_counterfac["posterior_predictive"].y_hat,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C2"},
-        )
-        # Shaded causal effect
-        # TODO
-        # Intervention line
-        ax[0].axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-        ax[0].set(title=f"$R^2$ on all data = {self.score:.3f}")
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Plot causal effect estimate ------------------------
-        coeff_name = (
-            "treated[T.True]"  # NOTE: get rid of this hard coded variable name!
-        )
-        beta = self.prediction_model.idata["posterior"]["beta"].sel(
-            {"coeffs": coeff_name}
-        )
-        az.plot_posterior(beta, ref_val=0, ax=ax[1])
-        ax[1].set(title=f"Causal impact", xlabel=coeff_name)
+        ax.set(title=f"$R^2$ on all data = {self.score:.3f}")
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
