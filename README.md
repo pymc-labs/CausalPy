@@ -2,7 +2,7 @@
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A Python package focussing on causal inference in quasi-experimental settings. The package allows for traditional OLS and more sophisticated Bayesian model fitting methods to be used.
+A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
 
 _**STATUS:** Feel free to explore and experiment with the repository, and we very much welcome feedback (via [Issues](https://github.com/pymc-labs/CausalPy/issues)). But be aware that this code is very alpha! Expect the codebase and API to change for a while, so it is not appropriate to rely on this package for in-production or research pipelines._
 
@@ -28,10 +28,6 @@ Another distinctive feature of this package is the ability to use different mode
 ## Roadmap
 
 Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues).
-
-In addition to the quasi-experimental methods supported thus far, we might add functionality around propensity scores and non-equivalent group designs.
-
-Currently we have a few core examples (see the [`scikit-learn` demo notebook](notebooks/skl_demos.ipynb) and the [`pymc` demo notebook](notebooks/pymc_demos.ipynb)) but we plan to flesh these out with more experiment and model variants over time.
 
 ## Overview of package capabilities
 
@@ -123,7 +119,7 @@ This repository is under active development by a small number of contributors at
 
 ## License
 
-[Apache License](LICENSE)
+[Apache License 2.0](LICENSE)
 
 ---
 
@@ -172,6 +168,6 @@ python -m ipykernel install --user --name CausalPy
 
 <img src="img/pymc-labs-log.png" align="right" width="50%" />
 
-This repository is backed by [PyMC Labs](https://www.pymc-labs.io).
+This repository is supported by [PyMC Labs](https://www.pymc-labs.io).
 
 If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.io](mailto:ben.vincent@pymc-labs.io). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
