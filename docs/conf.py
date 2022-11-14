@@ -21,7 +21,11 @@ sys.path.insert(0, os.path.abspath("../mypackage"))
 project = "CausalPy"
 copyright = "2022, Benjamin T. Vincent"
 author = "Benjamin T. Vincent"
-release = "0.0.1"
+
+from causalpy.version import __version__
+
+release = __version__
+print(f"{release=}")
 
 
 # -- General configuration ---------------------------------------------------

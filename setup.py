@@ -1,4 +1,5 @@
 import os
+import sys
 
 from setuptools import find_packages, setup
 
@@ -13,19 +14,16 @@ def get_long_description():
         return f.read()
 
 
-def get_version():
-    with open(VERSION_FILE, encoding="utf-8") as f:
-        exec(f.read())
-    return vars()["__version__"]
-
+# get version
+sys.path.insert(0, os.path.abspath("../mypackage"))
+from causalpy.version import __version__
 
 with open(REQUIREMENTS_FILE) as f:
     install_reqs = f.read().splitlines()
 
-
 setup(
     name="CausalPy",
-    version=get_version(),
+    version=__version__,
     description="Causal inference for quasi-experiments in Python",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
