@@ -59,3 +59,11 @@ make clean && make html
 ```
 
 Docs are built in `docs/_build`, but these docs are _not_ committed to the GitHub repository due to `.gitignore`.
+
+## New releases [work in progress]
+
+1. Bump the release version in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
+2. Update on pypi.org. In the root directory:
+  - `python setup.py sdist`
+  - update to pypi.org with `twine upload dist/*`
+3. _??? Do I have to do anything to update the docs on [`readthedocs`](https://readthedocs.org)???_
