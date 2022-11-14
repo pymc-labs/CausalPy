@@ -23,7 +23,16 @@ Another distinctive feature of this package is the ability to use different mode
 
 ## Installation
 
-[coming soon]
+To get the latest release:
+```bash
+pip install CausalPy
+```
+
+Alternatively, if you want the very latest version of the package you can install from GitHub:
+
+```bash
+pip install git+https://github.com/pymc-labs/CausalPy.git
+```
 
 ## Roadmap
 
@@ -113,54 +122,9 @@ Here are some general resources about causal inference:
 * Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
 * Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.
 
-## Contributions
-
-This repository is under active development by a small number of contributors at the moment. Once the code and API has settled a bit we will open up and welcome contributions. But not yet.
-
 ## License
 
 [Apache License 2.0](LICENSE)
-
----
-
-## Local development
-
-1. Create a new environment using Python >=3.8, for example 3.10
-
-```
-conda create --name CausalPy python=3.10
-```
-
-2. Activate environment:
-
-```
-conda activate CausalPy
-```
-
-3. Install the package in editable mode
-
-```
-pip install -e .
-```
-
-4. Install development dependencies
-
-```
-pip install -r requirements-dev.txt
-pip install -r requirements-docs.txt
-```
-
-5. You may also need to run this to get pre-commit checks working
-
-```
-pre-commit install
-```
-
-6. Note: You may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
-
-```
-python -m ipykernel install --user --name CausalPy
-```
 
 ---
 
