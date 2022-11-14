@@ -66,4 +66,6 @@ Docs are built in `docs/_build`, but these docs are _not_ committed to the GitHu
 2. Update on pypi.org. In the root directory:
   - `python setup.py sdist`
   - update to pypi.org with `twine upload dist/*`
-3. _??? Do I have to do anything to update the docs on [`readthedocs`](https://readthedocs.org)???_
+3. Readthedocs:
+  - Docs should be built remotely every time there is a pull request
+  - See here https://docs.readthedocs.io/en/stable/tutorial/#versioning-documentation for versioning the docs
