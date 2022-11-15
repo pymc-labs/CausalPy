@@ -127,9 +127,10 @@ class InterruptedTimeSeries(TimeSeriesExperiment):
 class DifferenceInDifferences(ExperimentalDesign):
     """A class to analyse data from Difference in Difference settings.
 
-    .. Note::
+    .. note::
 
-        There is no pre/post intervention data distinction for DiD, we fit all the data available.
+       There is no pre/post intervention data distinction for DiD, we fit all the data available.
+
     """
 
     def __init__(
@@ -287,9 +288,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
     """
     A class to analyse regression discontinuity experiments.
 
-    .. Note::
+    .. note::
 
-    There is no pre/post intervention data distinction for DiD, we fit all the data available.
+       There is no pre/post intervention data distinction for the regression discontinuity design, we fit all the data available.
     """
 
     def __init__(
@@ -355,8 +356,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
-        """Returns true is `x` is greater than or equal to the treatment threshold.
-        Assumes treatment is given to those ABOVE the treatment threshold.
+        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
+
+        .. warning::
+
+           Assumes treatment is given to those ABOVE the treatment threshold.
         """
         return np.greater_equal(x, self.treatment_threshold)
 

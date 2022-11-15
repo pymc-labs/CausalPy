@@ -9,8 +9,9 @@ from sklearn.linear_model._base import LinearModel
 class WeightedProportion(LinearModel, RegressorMixin):
     """
     Model which minimises sum squared error subject to:
-    - all weights are bound between 0-1
-    - weights sum to 1.
+
+    - All weights are bound between 0-1
+    - Weights sum to 1.
 
     Inspiration taken from this blog post
     https://towardsdatascience.com/understanding-synthetic-control-methods-dd9a291885a1

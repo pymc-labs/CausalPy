@@ -8,6 +8,8 @@ LEGEND_FONT_SIZE = 12
 
 
 class ExperimentalDesign:
+    """Base class for experiment designs"""
+
     prediction_model = None
 
     def __init__(self, prediction_model=None, **kwargs):
@@ -143,11 +145,16 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
 
 class InterruptedTimeSeries(TimeSeriesExperiment):
+    """A wrapper around the TimeSeriesExperiment class"""
+
     pass
 
 
 class SyntheticControl(TimeSeriesExperiment):
+    """A wrapper around the TimeSeriesExperiment class"""
+
     def plot(self):
+        """Plot the results"""
         fig, ax = super().plot()
         # plot control units as well
         ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
@@ -156,7 +163,11 @@ class SyntheticControl(TimeSeriesExperiment):
 
 
 class DifferenceInDifferences(ExperimentalDesign):
-    """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
+    """
+    .. note::
+
+       There is no pre/post intervention data distinction for DiD, we fit all the data available.
+    """
 
     def __init__(
         self,
@@ -210,6 +221,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
 
     def plot(self):
+        """Plot results"""
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -279,7 +291,14 @@ class DifferenceInDifferences(ExperimentalDesign):
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
-    """Note: there is no pre/post intervention data distinction, we fit all the data available."""
+    """
+    Analyse data from regression discontinuity experiments.
+
+    .. note::
+
+       There is no pre/post intervention data distinction for the regression discontinuity design, we fit all the data available.
+
+    """
 
     def __init__(
         self,
@@ -340,6 +359,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
+        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
+
+        .. warning::
+
+           Assumes treatment is given to those ABOVE the treatment threshold.
+        """
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
