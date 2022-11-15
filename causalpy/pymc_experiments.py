@@ -355,11 +355,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
-        """Returns true is `x` is greater than or equal to the treatment threshold
-
-        .. admonition::
-
-           Assumes treatment is given to those ABOVE the treatment threshold.
+        """Returns true is `x` is greater than or equal to the treatment threshold.
+        Assumes treatment is given to those ABOVE the treatment threshold.
         """
         return np.greater_equal(x, self.treatment_threshold)
 
