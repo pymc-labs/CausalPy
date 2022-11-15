@@ -25,8 +25,6 @@ author = "Benjamin T. Vincent"
 from causalpy.version import __version__
 
 release = __version__
-print(f"{release=}")
-
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
