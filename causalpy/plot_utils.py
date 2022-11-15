@@ -1,26 +1,17 @@
 import arviz as az
 
 
-def plot_xY(x, Y, ax, plot_hdi_kwargs=dict()):
+def plot_xY(x, Y, ax, plot_hdi_kwargs=dict(), hdi_prob: float = 0.94) -> None:
     """Utility function to plot HDI intervals."""
-    quantiles = Y.quantile(
-        (0.025, 0.25, 0.5, 0.75, 0.975), dim=("chain", "draw")
-    ).transpose()
 
+    Y = Y.stack(samples=["chain", "draw"]).T
     az.plot_hdi(
         x,
-        hdi_data=quantiles.sel(quantile=[0.025, 0.975]),
-        fill_kwargs={"alpha": 0.25},
+        Y,
+        hdi_prob=hdi_prob,
+        fill_kwargs={"alpha": 0.25, "label": f"{hdi_prob*100}% HDI"},
         smooth=False,
         ax=ax,
         **plot_hdi_kwargs,
     )
-    az.plot_hdi(
-        x,
-        hdi_data=quantiles.sel(quantile=[0.25, 0.75]),
-        fill_kwargs={"alpha": 0.5},
-        smooth=False,
-        ax=ax,
-        **plot_hdi_kwargs,
-    )
-    ax.plot(x, quantiles.sel(quantile=0.5), color="k")
+    ax.plot(x, Y.mean(dim="samples"), color="k", label="Posterior mean")
