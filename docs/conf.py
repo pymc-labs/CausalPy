@@ -14,17 +14,30 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
-# manually import package dependencies in an attempt to make autodoc work
-import arviz
-import matplotlib
-import numpy
-import pandas
-import patsy
-import pymc
-import scipy
-import seaborn
-import sklearn
-import xarray
+
+# Need to mock the package dependencies in order for autodoc to work when docs are remotely built on readthedocs
+from mock import Mock as MagicMock
+
+
+class Mock(MagicMock):
+    @classmethod
+    def __getattr__(cls, name):
+        return MagicMock()
+
+
+MOCK_MODULES = [
+    "arviz",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "patsy",
+    "pymc",
+    "scipy",
+    "seaborn",
+    "sklearn",
+    "xarray",
+]
+sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information

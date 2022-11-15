@@ -1,5 +1,6 @@
 ipykernel
 linkify-it-py
+mock
 myst_parser
 nbsphinx
 pathlib
