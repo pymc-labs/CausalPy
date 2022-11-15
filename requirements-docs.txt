@@ -1,9 +1,12 @@
+arviz
 ipykernel
 linkify-it-py
+matplotlib
 myst_parser
 nbsphinx
 pathlib
 recommonmark
+sklearn
 sphinx
 sphinx-autodoc-typehints
 sphinx-design
