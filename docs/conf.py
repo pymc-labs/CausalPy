@@ -14,6 +14,17 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
+# manually import package dependencies in an attempt to make autodoc work
+import arviz
+import matplotlib
+import numpy
+import pandas
+import patsy
+import pymc
+import scipy
+import seaborn
+import sklearn
+import xarray
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -73,18 +84,18 @@ html_context = {
     "conf_py_path": "/docs/",  # Path in the checkout to the docs root
 }
 
-# autodoc_mock_imports
-# This avoids autodoc breaking when it can't find packages imported in the code.
-# https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
-autodoc_mock_imports = [
-    "arviz",
-    "matplotlib",
-    "numpy",
-    "pandas",
-    "patsy",
-    "pymc",
-    "scipy",
-    "seaborn",
-    "sklearn",
-    "xarray",
-]
+# # autodoc_mock_imports
+# # This avoids autodoc breaking when it can't find packages imported in the code.
+# # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
+# autodoc_mock_imports = [
+#     "arviz",
+#     "matplotlib",
+#     "numpy",
+#     "pandas",
+#     "patsy",
+#     "pymc",
+#     "scipy",
+#     "seaborn",
+#     "sklearn",
+#     "xarray",
+# ]
