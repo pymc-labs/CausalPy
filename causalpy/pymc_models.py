@@ -39,7 +39,7 @@ class ModelBuilder(pm.Model):
         return post_pred
 
     def score(self, X, y):
-        """Score the predictions $R^2$ given inputs X and outputs y."""
+        """Score the predictions :math:`R^2` given inputs ``X`` and outputs ``y``."""
         yhat = self.predict(X)
         yhat = az.extract(yhat, group="posterior_predictive", var_names="y_hat").mean(
             dim="sample"

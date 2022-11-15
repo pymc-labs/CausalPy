@@ -359,7 +359,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
+        """Returns ``True`` if ``x`` is greater than or equal to the treatment threshold.
 
         .. warning::
 
@@ -401,6 +401,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return (fig, ax)
 
     def summary(self):
+        """Print text output summarising the results"""
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")

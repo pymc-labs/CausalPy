@@ -26,7 +26,14 @@ class ExperimentalDesign:
 class TimeSeriesExperiment(ExperimentalDesign):
     """A class to analyse time series quasi-experiments"""
 
-    def __init__(self, data, treatment_time, formula, prediction_model=None, **kwargs):
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        treatment_time: int,
+        formula: str,
+        prediction_model=None,
+        **kwargs,
+    ) -> None:
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
@@ -111,6 +118,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
 
 class SyntheticControl(TimeSeriesExperiment):
+    """A wrapper around the TimeSeriesExperiment class"""
+
     def plot(self):
         """Plot the results"""
         fig, ax = super().plot()
@@ -121,6 +130,8 @@ class SyntheticControl(TimeSeriesExperiment):
 
 
 class InterruptedTimeSeries(TimeSeriesExperiment):
+    """A wrapper around the TimeSeriesExperiment class"""
+
     pass
 
 
