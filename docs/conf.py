@@ -14,31 +14,6 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
-
-# Need to mock the package dependencies in order for autodoc to work when docs are remotely built on readthedocs
-# from mock import Mock as MagicMock
-
-
-# class Mock(MagicMock):
-#     @classmethod
-#     def __getattr__(cls, name):
-#         return MagicMock()
-
-
-# MOCK_MODULES = [
-#     "arviz",
-#     "matplotlib",
-#     "numpy",
-#     "pandas",
-#     "patsy",
-#     "pymc",
-#     "scipy",
-#     "seaborn",
-#     "sklearn",
-#     "xarray",
-# ]
-# sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
-
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
 # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports

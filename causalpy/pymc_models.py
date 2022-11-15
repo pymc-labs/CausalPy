@@ -21,6 +21,7 @@ class ModelBuilder(pm.Model):
             pm.set_data({"X": X})
 
     def fit(self, X, y, coords):
+        """Draw samples from posterior, prior predictive, and posterior predictive distributions."""
         self.build_model(X, y, coords)
         with self.model:
             self.idata = pm.sample()
@@ -29,6 +30,7 @@ class ModelBuilder(pm.Model):
         return self.idata
 
     def predict(self, X):
+        """Predict data given input data `X`"""
         self._data_setter(X)
         with self.model:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
@@ -37,6 +39,7 @@ class ModelBuilder(pm.Model):
         return post_pred
 
     def score(self, X, y):
+        """Score the predictions $R^2$ given inputs X and outputs y."""
         yhat = self.predict(X)
         yhat = az.extract(yhat, group="posterior_predictive", var_names="y_hat").mean(
             dim="sample"
@@ -48,6 +51,7 @@ class WeightedSumFitter(ModelBuilder):
     """Used for synthetic control experiments"""
 
     def build_model(self, X, y, coords):
+        """Defines the PyMC model"""
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
@@ -60,7 +64,10 @@ class WeightedSumFitter(ModelBuilder):
 
 
 class LinearRegression(ModelBuilder):
+    """Custom PyMC model for linear regression"""
+
     def build_model(self, X, y, coords):
+        """Defines the PyMC model"""
         with self:
             self.add_coords(coords)
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])

@@ -2,7 +2,7 @@ import arviz as az
 
 
 def plot_xY(x, Y, ax, plot_hdi_kwargs=dict()):
-    """Utility function to plot HDI intervals"""
+    """Utility function to plot HDI intervals."""
     quantiles = Y.quantile(
         (0.025, 0.25, 0.5, 0.75, 0.975), dim=("chain", "draw")
     ).transpose()

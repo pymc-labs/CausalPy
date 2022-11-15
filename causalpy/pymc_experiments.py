@@ -12,6 +12,8 @@ LEGEND_FONT_SIZE = 12
 
 
 class ExperimentalDesign:
+    """Base class"""
+
     prediction_model = None
 
     def __init__(self, prediction_model=None, **kwargs):
@@ -22,6 +24,8 @@ class ExperimentalDesign:
 
 
 class TimeSeriesExperiment(ExperimentalDesign):
+    """A class to analyse time series quasi-experiments"""
+
     def __init__(self, data, treatment_time, formula, prediction_model=None, **kwargs):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.treatment_time = treatment_time
@@ -71,6 +75,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def plot(self):
+        """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # pre-intervention period
@@ -107,6 +112,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
 class SyntheticControl(TimeSeriesExperiment):
     def plot(self):
+        """Plot the results"""
         fig, ax = super().plot()
         # plot control units as well
         ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
@@ -119,7 +125,12 @@ class InterruptedTimeSeries(TimeSeriesExperiment):
 
 
 class DifferenceInDifferences(ExperimentalDesign):
-    """Note: there is no pre/post intervention data distinction for DiD, we fit all the data available."""
+    """A class to analyse data from Difference in Difference settings.
+
+    .. Note::
+
+        There is no pre/post intervention data distinction for DiD, we fit all the data available.
+    """
 
     def __init__(
         self,
@@ -183,6 +194,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
 
     def plot(self):
+        """Plot the results"""
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -272,7 +284,13 @@ class DifferenceInDifferences(ExperimentalDesign):
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
-    """Note: there is no pre/post intervention data distinction, we fit all the data available."""
+    """
+    A class to analyse regression discontinuity experiments.
+
+    .. Note::
+
+    There is no pre/post intervention data distinction for DiD, we fit all the data available.
+    """
 
     def __init__(
         self,
@@ -337,9 +355,16 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
+        """Returns true is `x` is greater than or equal to the treatment threshold
+
+        .. admonition::
+
+           Assumes treatment is given to those ABOVE the treatment threshold.
+        """
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
+        """Plot the results"""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -373,6 +398,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return (fig, ax)
 
     def summary(self):
+        """Print text output summarising the results"""
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")

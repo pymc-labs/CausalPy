@@ -29,6 +29,8 @@ pip install -r requirements-dev.txt
 pip install -r requirements-docs.txt
 ```
 
+It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, I run `brew install pandoc`.
+
 5. You may also need to run this to get pre-commit checks working
 
 ```
@@ -59,6 +61,14 @@ make clean && make html
 ```
 
 Docs are built in `docs/_build`, but these docs are _not_ committed to the GitHub repository due to `.gitignore`.
+
+## Remote documentation
+
+Documentation is hosted on https://causalpy.readthedocs.io/. New remote builds are triggered automatically whenever there is an update to the `main` branch.
+
+The `.readthedocs.yaml` file contains the configurations for the remote build.
+
+If there are autodoc issues/errors in remote builds of the docs, we need to add all package dependencies (in `requirements.txt`) into the list `autodoc_mock_imports` in `docs/config.py`.
 
 ## New releases [work in progress]
 
