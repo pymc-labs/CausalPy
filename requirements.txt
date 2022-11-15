@@ -8,4 +8,4 @@ pymc>=4.0.0
 scikit-learn>=1
 scipy
 seaborn>=0.11.2
-xarray
+xarray>=v2022.11.0
