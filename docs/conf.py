@@ -76,4 +76,15 @@ html_context = {
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
 # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
-autodoc_mock_imports = ["arviz", "matplotlib", "sklearn", "seaborn", "pymc", "sklearn"]
+autodoc_mock_imports = [
+    "arviz",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "patsy",
+    "pymc",
+    "scipy",
+    "seaborn",
+    "sklearn",
+    "xarray",
+]
