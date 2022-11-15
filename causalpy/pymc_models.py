@@ -1,7 +1,7 @@
 import arviz as az
 import numpy as np
 import pymc as pm
-from sklearn.metrics import r2_score
+from arviz import r2_score
 
 
 class ModelBuilder(pm.Model):
@@ -39,12 +39,21 @@ class ModelBuilder(pm.Model):
         return post_pred
 
     def score(self, X, y):
-        """Score the predictions :math:`R^2` given inputs ``X`` and outputs ``y``."""
+        """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
+
+        .. caution::
+
+           The Bayesian :math:`R^2` is not the same as the traditional coefficient of determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
+
+        """
         yhat = self.predict(X)
-        yhat = az.extract(yhat, group="posterior_predictive", var_names="y_hat").mean(
-            dim="sample"
-        )
-        return r2_score(y, yhat)
+        yhat = az.extract(
+            yhat, group="posterior_predictive", var_names="y_hat"
+        ).T.values
+        # Note: First argument must be a 1D array
+        return r2_score(y.flatten(), yhat)
+
+    # .stack(sample=("chain", "draw")
 
 
 class WeightedSumFitter(ModelBuilder):

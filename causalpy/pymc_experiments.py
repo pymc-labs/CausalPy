@@ -95,7 +95,9 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index, self.post_pred["posterior_predictive"].y_hat, ax=ax[0]
         )
         ax[0].plot(self.datapost.index, self.post_y, "k.")
-        ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
+        ax[0].set(
+            title=f"Pre-intervention Bayesian $R^2$: {self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+        )
 
         plot_xY(self.datapre.index, self.pre_impact, ax=ax[1])
         plot_xY(self.datapost.index, self.post_impact, ax=ax[1])
@@ -393,7 +395,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             ax=ax,
         )
         # create strings to compose title
-        r2 = f"$R^2$ on all data = {self.score:.3f}"
+        r2 = f"Bayesian $R^2$ on all data = {self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
         percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
         ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         discon = f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}, "
