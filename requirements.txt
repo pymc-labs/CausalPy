@@ -1,6 +1,6 @@
 arviz>=0.13.0rc1
 graphviz
-matplotlib>=3.6.1
+matplotlib>=3.5.3
 numpy
 pandas
 patsy
