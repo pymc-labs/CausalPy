@@ -27,19 +27,30 @@ Alternatively, if you want the very latest version of the package you can instal
 Features
 --------
 
-Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability.
+Different quasi-experimental methods
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability. We can analyse data from the following quasi-experimental methods:
 
 Synthetic control
-^^^^^^^^^^^^^^^^^
+"""""""""""""""""
+
+.. image:: ../img/synthetic_control_pymc.svg
 
 Interrupted time series
-^^^^^^^^^^^^^^^^^^^^^^^
+"""""""""""""""""""""""
+
+.. image:: ../img/interrupted_time_series_pymc.svg
 
 Difference in differences
-^^^^^^^^^^^^^^^^^^^^^^^^^
+"""""""""""""""""""""""""
+
+.. image:: ../img/difference_in_differences_pymc.svg
 
 Regression discontinuity
-^^^^^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""""""
+
+.. image:: ../img/regression_discontinuity_pymc.svg
 
 Support
 -------
