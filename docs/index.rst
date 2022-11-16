@@ -8,6 +8,17 @@ CausalPy - Causal inference in quasi-experimental settings
 
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
 
+Support
+-------
+
+This repository is supported by `PyMC Labs <https://www.pymc-labs.io>`_.
+
+.. image:: ../img/pymc-labs-log.png
+   :align: center
+   :target: https://www.pymc-labs.io
+   :scale: 50 %
+
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
@@ -33,9 +44,7 @@ Documentation outline
    api_plot_utils
 
 
-Indices and tables
-==================
+Index
+=====
 
 * :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`

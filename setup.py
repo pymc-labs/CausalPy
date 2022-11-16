@@ -15,7 +15,7 @@ def get_long_description():
 
 
 # get version
-sys.path.insert(0, os.path.abspath("../mypackage"))
+sys.path.insert(0, os.path.abspath("../"))
 from causalpy.version import __version__
 
 with open(REQUIREMENTS_FILE) as f:

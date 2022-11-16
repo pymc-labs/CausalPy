@@ -55,7 +55,7 @@ This is appropriate when you have multiple units, one of which is treated. You b
 |--|--|
 | ![](img/synthetic_control_skl.svg) | ![](img/synthetic_control_pymc.svg) |
 
-> The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The Frequentist analysis shows the causal impact as a blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
+> The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
 ### Interrupted time series
 This is appropriate when you have a single treated unit, and therefore a single time series, and do _not_ have a set of untreated units.
@@ -71,7 +71,7 @@ This is appropriate when you have a single treated unit, and therefore a single 
 |--|--|
 | ![](img/interrupted_time_series_skl.svg) | ![](img/interrupted_time_series_pymc.svg) |
 
-> The data, model fits, and counterfactual are plotted (top panels). The Frequentist analysis shows the causal impact with the blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fits. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
+> The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
 ### Difference in Differences
 

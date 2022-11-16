@@ -89,10 +89,13 @@ class TimeSeriesExperiment(ExperimentalDesign):
         plot_xY(
             self.datapre.index, self.pre_pred["posterior_predictive"].y_hat, ax=ax[0]
         )
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
+        ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
         # post intervention period
         plot_xY(
-            self.datapost.index, self.post_pred["posterior_predictive"].y_hat, ax=ax[0]
+            self.datapost.index,
+            self.post_pred["posterior_predictive"].y_hat,
+            ax=ax[0],
+            include_label=False,
         )
         ax[0].plot(self.datapost.index, self.post_y, "k.")
         ax[0].set(
@@ -100,12 +103,32 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
 
         plot_xY(self.datapre.index, self.pre_impact, ax=ax[1])
-        plot_xY(self.datapost.index, self.post_impact, ax=ax[1])
+        plot_xY(self.datapost.index, self.post_impact, ax=ax[1], include_label=False)
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(self.datapost.index, self.post_impact_cumulative, ax=ax[2])
+        ax[2].axhline(y=0, c="k")
+
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=az.extract(
+                self.post_pred, group="posterior_predictive", var_names="y_hat"
+            ).mean("sample"),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=self.post_impact.mean(["chain", "draw"]),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
 
         # Intervention line
         for i in [0, 1, 2]:
@@ -114,8 +137,11 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 ls="-",
                 lw=3,
                 color="r",
-                label="treatment time",
+                label="Treatment time",
             )
+
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
         return (fig, ax)
 
 
