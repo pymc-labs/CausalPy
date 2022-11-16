@@ -71,6 +71,7 @@ html_static_path = ["_static"]
 # TODO: version seems not to be displayed despite setting this to True
 html_theme_options = {
     "display_version": True,
+    "github_url": "https://github.com/pymc-labs/CausalPy",
 }
 
 # -- Options for autodoc ----------------------------------------------------
