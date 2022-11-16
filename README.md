@@ -10,7 +10,7 @@ _**STATUS:** Feel free to explore and experiment with the repository, and we ver
 
 Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability.
 
-Another distinctive feature of this package is the ability to use different models. Currently, users can fit with `scikit-learn` models (see the [`scikit-learn` demo notebook](notebooks/skl_demos.ipynb)) or Bayesian models with `PyMC` (see the [`pymc` demo notebook](notebooks/pymc_demos.ipynb)).
+Another distinctive feature of this package is the ability to use different models. Currently, users can fit with `scikit-learn` models or Bayesian models with `PyMC`.
 
 |                           | [CausalImpact](https://google.github.io/CausalImpact/) from Google | [GeoLift](https://github.com/facebookincubator/GeoLift/) from Meta | CausalPy from [PyMC Labs](https://www.pymc-labs.io) |
 |---------------------------|--------------------------------|---------|----------------------------------------|

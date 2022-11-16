@@ -19,10 +19,6 @@ This repository is supported by `PyMC Labs <https://www.pymc-labs.io>`_.
    :scale: 50 %
 
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
-
 Documentation outline
 =====================
 
@@ -30,8 +26,7 @@ Documentation outline
    :caption: Examples
    :titlesonly:
 
-   notebooks/skl_demos.ipynb
-   notebooks/pymc_demos.ipynb
+   examples
 
 .. toctree::
    :caption: API Reference
