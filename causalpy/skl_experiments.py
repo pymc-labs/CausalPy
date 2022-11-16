@@ -117,7 +117,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 ls="-",
                 lw=3,
                 color="r",
-                label="treatment time",
+                label="Treatment time",
             )
 
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
