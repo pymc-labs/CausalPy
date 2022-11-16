@@ -106,6 +106,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(self.datapost.index, self.post_impact_cumulative, ax=ax[2])
+        ax[2].axhline(y=0, c="k")
 
         # Intervention line
         for i in [0, 1, 2]:
