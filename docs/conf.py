@@ -56,6 +56,10 @@ source_suffix = [".rst", ".md"]
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
+# -- nbsphinx config ----------------------------------------------------------
+# Opt out of executing the notebooks remotely. This will save time in the remote build process on readthedocs. The notebooks in /docs/notebooks will be parsed/converted, but not re-executed.
+nbsphinx_execute = "never"
+
 # MyST options for working with markdown files. Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives
 myst_enable_extensions = ["dollarmath", "amsmath", "colon_fence", "linkify"]
 
