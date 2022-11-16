@@ -3,7 +3,6 @@ linkify-it-py
 myst_parser
 nbsphinx
 pathlib
-recommonmark
 sphinx
 sphinx-autodoc-typehints
 sphinx-design
