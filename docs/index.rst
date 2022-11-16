@@ -3,10 +3,43 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-CausalPy - Causal inference in quasi-experimental settings
-==========================================================
+CausalPy - causal inference for quasi-experiments
+=================================================
 
-A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
+A Python package focussing on causal inference for quasi-experimentas. The package allows users to use different model types. Sophisticated Bayesian methods can be used, harnessing the power of `PyMC <https://www.pymc.io/>`_ and `ArviZ <https://python.arviz.org>`_. But users can also use more traditional `Ordinary Least Squares <https://en.wikipedia.org/wiki/Ordinary_least_squares>`_ estimation methods via `scikit-learn <https://scikit-learn.org/>`_ models.
+
+Installation
+------------
+
+To get the latest release:
+
+.. code-block:: sh
+
+   pip install CausalPy
+
+Alternatively, if you want the very latest version of the package you can install from GitHub:
+
+.. code-block:: sh
+
+   pip install git+https://github.com/pymc-labs/CausalPy.git
+
+
+Features
+--------
+
+Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability.
+
+Synthetic control
+^^^^^^^^^^^^^^^^^
+
+Interrupted time series
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Difference in differences
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Regression discontinuity
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 Support
 -------
