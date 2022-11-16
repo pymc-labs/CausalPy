@@ -17,18 +17,18 @@ sys.path.insert(0, os.path.abspath("../"))
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
 # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
-# autodoc_mock_imports = [
-#     "arviz",
-#     "matplotlib",
-#     "numpy",
-#     "pandas",
-#     "patsy",
-#     "pymc",
-#     "scipy",
-#     "seaborn",
-#     "sklearn",
-#     "xarray",
-# ]
+autodoc_mock_imports = [
+    "arviz",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "patsy",
+    "pymc",
+    "scipy",
+    "seaborn",
+    "sklearn",
+    "xarray",
+]
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
