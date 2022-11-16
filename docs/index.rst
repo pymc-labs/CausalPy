@@ -6,7 +6,7 @@
 CausalPy - causal inference for quasi-experiments
 =================================================
 
-A Python package focussing on causal inference for quasi-experimentas. The package allows users to use different model types. Sophisticated Bayesian methods can be used, harnessing the power of `PyMC <https://www.pymc.io/>`_ and `ArviZ <https://python.arviz.org>`_. But users can also use more traditional `Ordinary Least Squares <https://en.wikipedia.org/wiki/Ordinary_least_squares>`_ estimation methods via `scikit-learn <https://scikit-learn.org/>`_ models.
+A Python package focussing on causal inference for quasi-experiments. The package allows users to use different model types. Sophisticated Bayesian methods can be used, harnessing the power of `PyMC <https://www.pymc.io/>`_ and `ArviZ <https://python.arviz.org>`_. But users can also use more traditional `Ordinary Least Squares <https://en.wikipedia.org/wiki/Ordinary_least_squares>`_ estimation methods via `scikit-learn <https://scikit-learn.org/>`_ models.
 
 Installation
 ------------
@@ -35,20 +35,28 @@ Rather than focussing on one particular quasi-experimental setting, this package
 Synthetic control
 """""""""""""""""
 
+This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
+
 .. image:: ../img/synthetic_control_pymc.svg
 
 Interrupted time series
 """""""""""""""""""""""
+
+This is appropriate when you have a single treated unit, and therefore a single time series, and do not have a set of untreated units.
 
 .. image:: ../img/interrupted_time_series_pymc.svg
 
 Difference in differences
 """""""""""""""""""""""""
 
+This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
+
 .. image:: ../img/difference_in_differences_pymc.svg
 
 Regression discontinuity
 """"""""""""""""""""""""
+
+Regression discontinuity designs are used when treatment is applied to units according to a cutoff on a running variable, which is typically not time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
 
 .. image:: ../img/regression_discontinuity_pymc.svg
 
