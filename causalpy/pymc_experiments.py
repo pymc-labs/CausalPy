@@ -111,6 +111,25 @@ class TimeSeriesExperiment(ExperimentalDesign):
         plot_xY(self.datapost.index, self.post_impact_cumulative, ax=ax[2])
         ax[2].axhline(y=0, c="k")
 
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=az.extract(
+                self.post_pred, group="posterior_predictive", var_names="y_hat"
+            ).mean("sample"),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=self.post_impact.mean(["chain", "draw"]),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+
         # Intervention line
         for i in [0, 1, 2]:
             ax[i].axvline(

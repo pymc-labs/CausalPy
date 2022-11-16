@@ -99,14 +99,14 @@ class TimeSeriesExperiment(ExperimentalDesign):
             y2=np.squeeze(self.post_y),
             color="C0",
             alpha=0.25,
-            label="causal impact",
+            label="Causal impact",
         )
         ax[1].fill_between(
             self.datapost.index,
             y1=np.squeeze(self.post_impact),
             color="C0",
             alpha=0.25,
-            label="causal impact",
+            label="Causal impact",
         )
 
         # Intervention line
