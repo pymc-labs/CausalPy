@@ -327,6 +327,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
     """
     A class to analyse regression discontinuity experiments.
 
+    :param data: A pandas dataframe
+    :param formula: A statistical model formula
+    :param treatment_threshold: A scalar threshold value at which the treatment is applied
+    :param prediction_model: A PyMC model
+    :param running_variable_name: The name of the predictor variable that the treatment threshold is based upon
+
     .. note::
 
        There is no pre/post intervention data distinction for the regression discontinuity design, we fit all the data available.
@@ -334,11 +340,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     def __init__(
         self,
-        data,
-        formula,
-        treatment_threshold,
+        data: pd.DataFrame,
+        formula: str,
+        treatment_threshold: float,
         prediction_model=None,
-        running_variable_name="x",
+        running_variable_name: str = "x",
         outcome_variable_name="y",
         **kwargs,
     ):
