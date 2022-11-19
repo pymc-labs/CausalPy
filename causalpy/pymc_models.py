@@ -66,7 +66,7 @@ class WeightedSumFitter(ModelBuilder):
             n_predictors = X.shape[1]
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
             y = pm.MutableData("y", y[:, 0], dims="obs_ind")
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors))
+            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")

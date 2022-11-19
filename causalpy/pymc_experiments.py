@@ -24,6 +24,25 @@ class ExperimentalDesign:
         if self.prediction_model is None:
             raise ValueError("fitting_model not set or passed.")
 
+    def print_coefficients(self):
+        """Prints the model coefficients"""
+        print("Model coefficients:")
+        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
+        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of the stats despite variable names of different lengths
+        for name in self.labels:
+            coeff_samples = coeffs.sel(coeffs=name)
+            print(
+                f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+            )
+        # add coeff for measurement std
+        coeff_samples = az.extract(
+            self.prediction_model.idata.posterior, var_names="sigma"
+        )
+        name = "sigma"
+        print(
+            f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+        )
+
 
 class TimeSeriesExperiment(ExperimentalDesign):
     """A class to analyse time series quasi-experiments"""
@@ -147,9 +166,19 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         return (fig, ax)
 
+    def summary(self):
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        # TODO: extra experiment specific outputs here
+        self.print_coefficients()
+
 
 class SyntheticControl(TimeSeriesExperiment):
     """A wrapper around the TimeSeriesExperiment class"""
+
+    expt_type = "Synthetic Control"
 
     def plot(self):
         """Plot the results"""
@@ -163,7 +192,7 @@ class SyntheticControl(TimeSeriesExperiment):
 class InterruptedTimeSeries(TimeSeriesExperiment):
     """A wrapper around the TimeSeriesExperiment class"""
 
-    pass
+    expt_type = "Interrupted Time Series"
 
 
 class DifferenceInDifferences(ExperimentalDesign):
@@ -185,6 +214,7 @@ class DifferenceInDifferences(ExperimentalDesign):
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
+        self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
         y, X = dmatrices(formula, self.data)
@@ -324,6 +354,14 @@ class DifferenceInDifferences(ExperimentalDesign):
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
+    def summary(self):
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        # TODO: extra experiment specific outputs here
+        self.print_coefficients()
+
 
 class RegressionDiscontinuity(ExperimentalDesign):
     """
@@ -456,19 +494,4 @@ class RegressionDiscontinuity(ExperimentalDesign):
         print(
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )
-        print("Model coefficients:")
-        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
-        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of the stats despite variable names of different lengths
-        for name in self.labels:
-            coeff_samples = coeffs.sel(coeffs=name)
-            print(
-                f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
-            )
-        # add coeff for measurement std
-        coeff_samples = az.extract(
-            self.prediction_model.idata.posterior, var_names="sigma"
-        )
-        name = "sigma"
-        print(
-            f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
-        )
+        self.print_coefficients()
