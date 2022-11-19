@@ -9,18 +9,39 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.plot_utils import plot_xY
 
 LEGEND_FONT_SIZE = 12
+az.style.use("arviz-darkgrid")
 
 
 class ExperimentalDesign:
     """Base class"""
 
     prediction_model = None
+    expt_type = None
 
     def __init__(self, prediction_model=None, **kwargs):
         if prediction_model is not None:
             self.prediction_model = prediction_model
         if self.prediction_model is None:
             raise ValueError("fitting_model not set or passed.")
+
+    def print_coefficients(self):
+        """Prints the model coefficients"""
+        print("Model coefficients:")
+        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
+        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of the stats despite variable names of different lengths
+        for name in self.labels:
+            coeff_samples = coeffs.sel(coeffs=name)
+            print(
+                f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+            )
+        # add coeff for measurement std
+        coeff_samples = az.extract(
+            self.prediction_model.idata.posterior, var_names="sigma"
+        )
+        name = "sigma"
+        print(
+            f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+        )
 
 
 class TimeSeriesExperiment(ExperimentalDesign):
@@ -44,6 +65,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         # set things up with pre-intervention data
         y, X = dmatrices(formula, self.datapre)
+        self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -144,9 +166,19 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         return (fig, ax)
 
+    def summary(self):
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        # TODO: extra experiment specific outputs here
+        self.print_coefficients()
+
 
 class SyntheticControl(TimeSeriesExperiment):
     """A wrapper around the TimeSeriesExperiment class"""
+
+    expt_type = "Synthetic Control"
 
     def plot(self):
         """Plot the results"""
@@ -160,7 +192,7 @@ class SyntheticControl(TimeSeriesExperiment):
 class InterruptedTimeSeries(TimeSeriesExperiment):
     """A wrapper around the TimeSeriesExperiment class"""
 
-    pass
+    expt_type = "Interrupted Time Series"
 
 
 class DifferenceInDifferences(ExperimentalDesign):
@@ -177,20 +209,20 @@ class DifferenceInDifferences(ExperimentalDesign):
         data,
         formula,
         time_variable_name="t",
-        outcome_variable_name="y",
         prediction_model=None,
         **kwargs,
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
+        self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
-        self.outcome_variable_name = outcome_variable_name
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
 
@@ -224,14 +256,18 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
         # calculate causal impact
-        # TODO: This should most likely be posterior estimate, not posterior predictive
         self.causal_impact = (
-            self.y_pred_treatment["posterior_predictive"]
-            .y_hat.isel({"obs_ind": 1})
-            .mean()
-            .data
-            - self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+            self.y_pred_treatment["posterior_predictive"].mu.isel({"obs_ind": 1})
+            - self.y_pred_counterfactual["posterior_predictive"].mu.squeeze()
         )
+        # self.causal_impact = (
+        #     self.y_pred_treatment["posterior_predictive"]
+        #     .mu.isel({"obs_ind": 1})
+        #     .stack(samples=["chain", "draw"])
+        #     - self.y_pred_counterfactual["posterior_predictive"]
+        #     .mu.stack(samples=["chain", "draw"])
+        #     .squeeze()
+        # )
 
     def plot(self):
         """Plot the results"""
@@ -251,7 +287,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         # Plot model fit to control group
         parts = ax.violinplot(
             az.extract(
-                self.y_pred_control, group="posterior_predictive", var_names="y_hat"
+                self.y_pred_control, group="posterior_predictive", var_names="mu"
             ).values.T,
             positions=self.x_pred_control[self.time_variable_name].values,
             showmeans=False,
@@ -266,7 +302,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         # Plot model fit to treatment group
         parts = ax.violinplot(
             az.extract(
-                self.y_pred_treatment, group="posterior_predictive", var_names="y_hat"
+                self.y_pred_treatment, group="posterior_predictive", var_names="mu"
             ).values.T,
             positions=self.x_pred_treatment[self.time_variable_name].values,
             showmeans=False,
@@ -278,7 +314,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             az.extract(
                 self.y_pred_counterfactual,
                 group="posterior_predictive",
-                var_names="y_hat",
+                var_names="mu",
             ).values.T,
             positions=self.x_pred_counterfactual[self.time_variable_name].values,
             showmeans=False,
@@ -288,12 +324,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         # arrow to label the causal impact
         y_pred_treatment = (
             self.y_pred_treatment["posterior_predictive"]
-            .y_hat.isel({"obs_ind": 1})
+            .mu.isel({"obs_ind": 1})
             .mean()
             .data
         )
         y_pred_counterfactual = (
-            self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+            self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
         ax.annotate(
             "",
@@ -317,10 +353,26 @@ class DifferenceInDifferences(ExperimentalDesign):
             xlim=[-0.15, 1.25],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {self.causal_impact:.2f}",
+            title=self._causal_impact_summary_stat(),
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
+
+    def _causal_impact_summary_stat(self):
+        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        return f"Causal impact = {causal_impact + ci}"
+
+    def summary(self):
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print("\nResults:")
+        # TODO: extra experiment specific outputs here
+        print(self._causal_impact_summary_stat())
+        self.print_coefficients()
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
@@ -345,20 +397,20 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold: float,
         prediction_model=None,
         running_variable_name: str = "x",
-        outcome_variable_name="y",
         **kwargs,
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
+        self.expt_type = "Regression Discontinuity"
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
-        self.outcome_variable_name = outcome_variable_name
         self.treatment_threshold = treatment_threshold
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
 
@@ -445,7 +497,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     def summary(self):
         """Print text output summarising the results"""
-        print("Difference in Differences experiment")
+
+        print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
@@ -453,17 +506,4 @@ class RegressionDiscontinuity(ExperimentalDesign):
         print(
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )
-        print("Model coefficients:")
-        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
-        for name in self.labels:
-            coeff_samples = coeffs.sel(coeffs=name)
-            print(
-                f"\t{name}\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
-            )
-        # add coeff for measurement std
-        coeff_samples = az.extract(
-            self.prediction_model.idata.posterior, var_names="sigma"
-        )
-        print(
-            f"\tsigma\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
-        )
+        self.print_coefficients()
