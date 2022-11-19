@@ -257,12 +257,17 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         # calculate causal impact
         self.causal_impact = (
-            self.y_pred_treatment["posterior_predictive"]
-            .mu.isel({"obs_ind": 1})
-            .mean()
-            .data
-            - self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+            self.y_pred_treatment["posterior_predictive"].mu.isel({"obs_ind": 1})
+            - self.y_pred_counterfactual["posterior_predictive"].mu.squeeze()
         )
+        # self.causal_impact = (
+        #     self.y_pred_treatment["posterior_predictive"]
+        #     .mu.isel({"obs_ind": 1})
+        #     .stack(samples=["chain", "draw"])
+        #     - self.y_pred_counterfactual["posterior_predictive"]
+        #     .mu.stack(samples=["chain", "draw"])
+        #     .squeeze()
+        # )
 
     def plot(self):
         """Plot the results"""
@@ -348,17 +353,25 @@ class DifferenceInDifferences(ExperimentalDesign):
             xlim=[-0.15, 1.25],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {self.causal_impact:.2f}",
+            title=self._causal_impact_summary_stat(),
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
+
+    def _causal_impact_summary_stat(self):
+        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        return f"Causal impact = {causal_impact + ci}"
 
     def summary(self):
         """Print text output summarising the results"""
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
+        print("\nResults:")
         # TODO: extra experiment specific outputs here
+        print(self._causal_impact_summary_stat())
         self.print_coefficients()
 
 
