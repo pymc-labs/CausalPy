@@ -11,6 +11,7 @@ class ExperimentalDesign:
     """Base class for experiment designs"""
 
     prediction_model = None
+    outcome_variable_name = None
 
     def __init__(self, prediction_model=None, **kwargs):
         if prediction_model is not None:
@@ -34,6 +35,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
+        self.outcome_variable_name = y.design_info.column_names[0]
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
         # process post-intervention data
         (new_y, new_x) = build_design_matrices(
@@ -174,7 +176,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         data,
         formula,
         time_variable_name="t",
-        outcome_variable_name="y",
         prediction_model=None,
         **kwargs,
     ):
@@ -182,12 +183,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.data = data
         self.formula = formula
         self.time_variable_name = time_variable_name
-        self.outcome_variable_name = outcome_variable_name
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
 
@@ -307,20 +308,19 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold,
         prediction_model=None,
         running_variable_name="x",
-        outcome_variable_name="y",
         **kwargs,
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
-        self.outcome_variable_name = outcome_variable_name
         self.treatment_threshold = treatment_threshold
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
 

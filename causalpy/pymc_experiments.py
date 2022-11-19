@@ -46,6 +46,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         # set things up with pre-intervention data
         y, X = dmatrices(formula, self.datapre)
+        self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -179,7 +180,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         data,
         formula,
         time_variable_name="t",
-        outcome_variable_name="y",
         prediction_model=None,
         **kwargs,
     ):
@@ -187,12 +187,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.data = data
         self.formula = formula
         self.time_variable_name = time_variable_name
-        self.outcome_variable_name = outcome_variable_name
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
 
