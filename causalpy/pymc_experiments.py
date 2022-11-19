@@ -209,6 +209,9 @@ class DifferenceInDifferences(ExperimentalDesign):
         data: pd.DataFrame,
         formula: str,
         time_variable_name: str,
+        group_variable_name: str,
+        treated: str,
+        untreated: str,
         prediction_model=None,
         **kwargs,
     ):
@@ -217,12 +220,23 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
+        self.group_variable_name = group_variable_name
+        self.treated = treated  # level of the group_variable_name that was treated
+        self.untreated = (
+            untreated  # level of the group_variable_name that was untreated
+        )
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
+
+        assert (
+            "treated" in formula
+        ), "A predictor column called `treated` should be in the provided dataframe"
+
+        # TODO: check that data in column self.group_variable_name has TWO levels
 
         # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
 
@@ -232,23 +246,37 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
         # ================================================================
 
+        time_levels = self.data[self.time_variable_name].unique()
+
         # predicted outcome for control group
         self.x_pred_control = pd.DataFrame(
-            {"group": [0, 0], "t": [0.0, 1.0], "treated": [0, 0]}
+            {
+                self.group_variable_name: [self.untreated, self.untreated],
+                self.time_variable_name: time_levels,
+                "treated": [0, 0],
+            }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = pd.DataFrame(
-            {"group": [1, 1], "t": [0.0, 1.0], "treated": [0, 1]}
+            {
+                self.group_variable_name: [self.treated, self.treated],
+                self.time_variable_name: time_levels,
+                "treated": [0, 1],
+            }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual
         self.x_pred_counterfactual = pd.DataFrame(
-            {"group": [1], "t": [1.0], "treated": [0]}
+            {
+                self.group_variable_name: [self.treated],
+                self.time_variable_name: time_levels[1],
+                "treated": [0],
+            }
         )
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
@@ -278,7 +306,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.data,
             x=self.time_variable_name,
             y=self.outcome_variable_name,
-            hue="group",
+            hue=self.group_variable_name,
             units="unit",
             estimator=None,
             alpha=0.25,
