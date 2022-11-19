@@ -256,13 +256,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
 
         # calculate causal impact
-        # TODO: This should most likely be posterior estimate, not posterior predictive
         self.causal_impact = (
             self.y_pred_treatment["posterior_predictive"]
-            .y_hat.isel({"obs_ind": 1})
+            .mu.isel({"obs_ind": 1})
             .mean()
             .data
-            - self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+            - self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
 
     def plot(self):
@@ -283,7 +282,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         # Plot model fit to control group
         parts = ax.violinplot(
             az.extract(
-                self.y_pred_control, group="posterior_predictive", var_names="y_hat"
+                self.y_pred_control, group="posterior_predictive", var_names="mu"
             ).values.T,
             positions=self.x_pred_control[self.time_variable_name].values,
             showmeans=False,
@@ -298,7 +297,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         # Plot model fit to treatment group
         parts = ax.violinplot(
             az.extract(
-                self.y_pred_treatment, group="posterior_predictive", var_names="y_hat"
+                self.y_pred_treatment, group="posterior_predictive", var_names="mu"
             ).values.T,
             positions=self.x_pred_treatment[self.time_variable_name].values,
             showmeans=False,
@@ -310,7 +309,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             az.extract(
                 self.y_pred_counterfactual,
                 group="posterior_predictive",
-                var_names="y_hat",
+                var_names="mu",
             ).values.T,
             positions=self.x_pred_counterfactual[self.time_variable_name].values,
             showmeans=False,
@@ -320,12 +319,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         # arrow to label the causal impact
         y_pred_treatment = (
             self.y_pred_treatment["posterior_predictive"]
-            .y_hat.isel({"obs_ind": 1})
+            .mu.isel({"obs_ind": 1})
             .mean()
             .data
         )
         y_pred_counterfactual = (
-            self.y_pred_counterfactual["posterior_predictive"].y_hat.mean().data
+            self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
         ax.annotate(
             "",
