@@ -9,12 +9,14 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.plot_utils import plot_xY
 
 LEGEND_FONT_SIZE = 12
+az.style.use("arviz-darkgrid")
 
 
 class ExperimentalDesign:
     """Base class"""
 
     prediction_model = None
+    expt_type = None
 
     def __init__(self, prediction_model=None, **kwargs):
         if prediction_model is not None:
@@ -345,20 +347,20 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold: float,
         prediction_model=None,
         running_variable_name: str = "x",
-        outcome_variable_name="y",
         **kwargs,
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
+        self.expt_type = "Regression Discontinuity"
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
-        self.outcome_variable_name = outcome_variable_name
         self.treatment_threshold = treatment_threshold
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
 
         # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
 
@@ -445,7 +447,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     def summary(self):
         """Print text output summarising the results"""
-        print("Difference in Differences experiment")
+
+        print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
@@ -455,15 +458,17 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         print("Model coefficients:")
         coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
+        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of the stats despite variable names of different lengths
         for name in self.labels:
             coeff_samples = coeffs.sel(coeffs=name)
             print(
-                f"\t{name}\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+                f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
             )
         # add coeff for measurement std
         coeff_samples = az.extract(
             self.prediction_model.idata.posterior, var_names="sigma"
         )
+        name = "sigma"
         print(
-            f"\tsigma\t\t{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+            f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
         )
