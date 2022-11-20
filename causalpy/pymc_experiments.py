@@ -232,15 +232,25 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
+        # Input validation ----------------------------------------------------
+        # Check that `treated` appears in the module formula
         assert (
             "treated" in formula
         ), "A predictor column called `treated` should be in the provided dataframe"
+        # Check that we have `treated` in the incoming dataframe
+        assert (
+            "treated" in self.data.columns
+        ), "Require a boolean column labelling observations which are `treated`"
+        # Check for `unit` in the incoming dataframe. *This is only used for plotting purposes*
+        assert (
+            "unit" in self.data.columns
+        ), "Require a `unit` column to label unique units. This is used for plotting purposes"
+        # Check that `group_variable_name` has TWO levels, representing the treated/untreated. But it does not matter what the actual names of the levels are.
+        assert (
+            len(pd.Categorical(self.data[self.group_variable_name]).categories) is 2
+        ), f"There must be 2 levels of the grouping variable {self.group_variable_name}. I.e. the treated and untreated."
 
-        # TODO: check that data in column self.group_variable_name has TWO levels
-
-        # TODO: check we have `unit` as a predictor column which is an vector of labels of unique units
-
-        # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of group and time, so this could be a function rather than supplied data
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
