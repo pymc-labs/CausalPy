@@ -28,7 +28,9 @@ def generate_synthetic_control_data(
     """
     Example:
     >> import pathlib
-    >> df, weightings_true = generate_synthetic_control_data(treatment_time=treatment_time)
+    >> df, weightings_true = generate_synthetic_control_data(
+                                treatment_time=treatment_time
+                            )
     >> df.to_csv(pathlib.Path.cwd() / 'synthetic_control.csv', index=False)
     """
 
@@ -45,7 +47,8 @@ def generate_synthetic_control_data(
         }
     )
 
-    # 2. Generate counterfactual, based on weighted sum of non-treated variables. This is the counterfactual with NO treatment.
+    # 2. Generate counterfactual, based on weighted sum of non-treated variables. This
+    # is the counterfactual with NO treatment.
     weightings_true = dirichlet(np.ones(7)).rvs(1)
     df["counterfactual"] = np.dot(df.to_numpy(), weightings_true.T)
 
@@ -53,7 +56,8 @@ def generate_synthetic_control_data(
     causal_effect = gamma(10).pdf(np.arange(0, N, 1) - treatment_time)
     df["causal effect"] = causal_effect * -50
 
-    # 4. Generate the actually observed data, ie the treated with the causal effect applied
+    # 4. Generate the actually observed data, ie the treated with the causal effect
+    # applied
     df["actual"] = df["counterfactual"] + df["causal effect"]
 
     # 5. apply observation noise to all relevant variables
@@ -126,7 +130,9 @@ def generate_time_series_data(treatment_time):
 
 
 def generate_time_series_data_simple(treatment_time, slope=0.0):
-    """Generate simple interrupted time series data, with no seasonality or temporal structure"""
+    """Generate simple interrupted time series data, with no seasonality or temporal
+    structure.
+    """
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )

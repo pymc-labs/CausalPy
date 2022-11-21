@@ -28,11 +28,16 @@ class ExperimentalDesign:
         """Prints the model coefficients"""
         print("Model coefficients:")
         coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
-        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of the stats despite variable names of different lengths
+        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
+        # the stats despite variable names of different lengths
         for name in self.labels:
             coeff_samples = coeffs.sel(coeffs=name)
             print(
-                f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+                f"""
+                {name: <30}{coeff_samples.mean().data:.2f},
+                94% HDI [{coeff_samples.quantile(0.03).data:.2f},
+                {coeff_samples.quantile(1-0.03).data:.2f}]
+                """
             )
         # add coeff for measurement std
         coeff_samples = az.extract(
@@ -40,7 +45,11 @@ class ExperimentalDesign:
         )
         name = "sigma"
         print(
-            f"  {name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"
+            f"""
+            {name: <30}{coeff_samples.mean().data:.2f},
+            94% HDI [{coeff_samples.quantile(0.03).data:.2f},
+            {coeff_samples.quantile(1-0.03).data:.2f}]
+            """
         )
 
 
@@ -120,8 +129,12 @@ class TimeSeriesExperiment(ExperimentalDesign):
             include_label=False,
         )
         ax[0].plot(self.datapost.index, self.post_y, "k.")
+
         ax[0].set(
-            title=f"Pre-intervention Bayesian $R^2$: {self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+            title=f"""
+            Pre-intervention Bayesian $R^2$: {self.score.r2:.3f}
+            (std = {self.score.r2_std:.3f})
+            """
         )
 
         plot_xY(self.datapre.index, self.pre_impact, ax=ax[1])
@@ -200,7 +213,8 @@ class DifferenceInDifferences(ExperimentalDesign):
 
     .. note::
 
-       There is no pre/post intervention data distinction for DiD, we fit all the data available.
+        There is no pre/post intervention data distinction for DiD, we fit all the
+        data available.
 
     """
 
@@ -224,7 +238,8 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of group and time, so this should
+        # be a function rather than supplied data
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
@@ -309,7 +324,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             showmedians=False,
             widths=0.2,
         )
-        # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
+        # Plot counterfactual - post-test for treatment group IF no treatment
+        # had occurred.
         parts = ax.violinplot(
             az.extract(
                 self.y_pred_counterfactual,
@@ -381,13 +397,16 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     :param data: A pandas dataframe
     :param formula: A statistical model formula
-    :param treatment_threshold: A scalar threshold value at which the treatment is applied
+    :param treatment_threshold: A scalar threshold value at which the treatment
+                                is applied
     :param prediction_model: A PyMC model
-    :param running_variable_name: The name of the predictor variable that the treatment threshold is based upon
+    :param running_variable_name: The name of the predictor variable that the treatment
+                                  threshold is based upon
 
     .. note::
 
-       There is no pre/post intervention data distinction for the regression discontinuity design, we fit all the data available.
+        There is no pre/post intervention data distinction for the regression
+        discontinuity design, we fit all the data available.
     """
 
     def __init__(
@@ -412,7 +431,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of x and treatment_threshold, so
+        # this could be a function rather than supplied data
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
@@ -435,8 +455,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
-        # calculate discontinuity by evaluating the difference in model expectation on either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above (not below) the threshold
+        # calculate discontinuity by evaluating the difference in model expectation on
+        # either side of the discontinuity
+        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
+        # (not below) the threshold
         self.x_discon = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
@@ -457,7 +479,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
         .. warning::
 
-           Assumes treatment is given to those ABOVE the treatment threshold.
+            Assumes treatment is given to those ABOVE the treatment threshold.
         """
         return np.greater_equal(x, self.treatment_threshold)
 
@@ -479,10 +501,13 @@ class RegressionDiscontinuity(ExperimentalDesign):
             ax=ax,
         )
         # create strings to compose title
-        r2 = f"Bayesian $R^2$ on all data = {self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+        title_info = f"{self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+        r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
         ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
-        discon = f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}, "
+        discon = f"""
+            Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f},
+            """
         ax.set(title=r2 + "\n" + discon + ci)
         # Intervention line
         ax.axvline(
@@ -502,7 +527,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
-        print(f"\nResults:")
+        print("\nResults:")
         print(
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )

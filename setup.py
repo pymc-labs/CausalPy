@@ -3,6 +3,8 @@ import sys
 
 from setuptools import find_packages, setup
 
+from causalpy.version import __version__
+
 PROJECT_ROOT = os.path.dirname(os.path.realpath(__file__))
 README_FILE = os.path.join(PROJECT_ROOT, "README.md")
 VERSION_FILE = os.path.join(PROJECT_ROOT, "bambi", "version.py")
@@ -16,7 +18,6 @@ def get_long_description():
 
 # get version
 sys.path.insert(0, os.path.abspath("../"))
-from causalpy.version import __version__
 
 with open(REQUIREMENTS_FILE) as f:
     install_reqs = f.read().splitlines()

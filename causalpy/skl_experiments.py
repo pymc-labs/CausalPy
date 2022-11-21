@@ -141,9 +141,10 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
 
 
-# InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
-# predictor variables. So we just have a TimeSeriesExperiment class and InterruptedTimeSeries
-# and SyntheticControl are both equal to the TimeSeriesExperiment class
+# InterruptedTimeSeries and SyntheticControl are basically the same thing but with
+# different predictor variables. So we just have a TimeSeriesExperiment class and
+# InterruptedTimeSeries and SyntheticControl are both equal to the TimeSeriesExperiment
+# class
 
 
 class InterruptedTimeSeries(TimeSeriesExperiment):
@@ -168,7 +169,8 @@ class DifferenceInDifferences(ExperimentalDesign):
     """
     .. note::
 
-       There is no pre/post intervention data distinction for DiD, we fit all the data available.
+        There is no pre/post intervention data distinction for DiD, we fit all the data
+        available.
     """
 
     def __init__(
@@ -190,7 +192,8 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of group and time, so this should be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of group and time, so this should
+        # be a function rather than supplied data
 
         # fit the model to all the data
         self.prediction_model.fit(X=self.X, y=self.y)
@@ -254,7 +257,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             markersize=10,
             label="model fit (treament group)",
         )
-        # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
+        # Plot counterfactual - post-test for treatment group IF no treatment
+        # had occurred.
         ax.plot(
             self.x_pred_counterfactual[self.time_variable_name],
             self.y_pred_counterfactual,
@@ -297,7 +301,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     .. note::
 
-       There is no pre/post intervention data distinction for the regression discontinuity design, we fit all the data available.
+        There is no pre/post intervention data distinction for the regression
+        discontinuity design, we fit all the data available.
 
     """
 
@@ -322,7 +327,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of x and treatment_threshold, so this could be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of x and treatment_threshold, so
+        # this could be a function rather than supplied data
 
         # fit the model to all the data
         self.prediction_model.fit(X=self.X, y=self.y)
@@ -342,8 +348,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.prediction_model.predict(X=np.asarray(new_x))
 
-        # calculate discontinuity by evaluating the difference in model expectation on either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above (not below) the threshold
+        # calculate discontinuity by evaluating the difference in model expectation on
+        # either side of the discontinuity
+        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
+        # (not below) the threshold
         self.x_discon = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
@@ -359,11 +367,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
 
     def _is_treated(self, x):
-        """Returns ``True`` if ``x`` is greater than or equal to the treatment threshold.
+        """Returns ``True`` if ``x`` is greater than or equal to the treatment
+        threshold.
 
         .. warning::
 
-           Assumes treatment is given to those ABOVE the treatment threshold.
+            Assumes treatment is given to those ABOVE the treatment threshold.
         """
         return np.greater_equal(x, self.treatment_threshold)
 
@@ -406,7 +415,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
-        print(f"\nResults:")
+        print("\nResults:")
         print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
         print("Model coefficients:")
         for name, val in zip(self.labels, self.prediction_model.coef_[0]):
