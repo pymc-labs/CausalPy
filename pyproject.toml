@@ -1,0 +1,11 @@
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=causalpy",
+]
+testpaths = "causalpy/tests"
