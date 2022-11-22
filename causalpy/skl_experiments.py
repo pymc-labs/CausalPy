@@ -21,7 +21,14 @@ class ExperimentalDesign:
 
 
 class TimeSeriesExperiment(ExperimentalDesign):
-    def __init__(self, data, treatment_time, formula, prediction_model=None, **kwargs):
+    def __init__(
+        self,
+        data,
+        treatment_time,
+        formula,
+        prediction_model=None,
+        **kwargs,
+    ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
@@ -141,26 +148,18 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
 
 
-# InterruptedTimeSeries and SyntheticControl are basically the same thing but with different
-# predictor variables. So we just have a TimeSeriesExperiment class and InterruptedTimeSeries
-# and SyntheticControl are both equal to the TimeSeriesExperiment class
-
-
-class InterruptedTimeSeries(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
-
-    pass
-
-
 class SyntheticControl(TimeSeriesExperiment):
     """A wrapper around the TimeSeriesExperiment class"""
 
-    def plot(self):
+    def plot(self, plot_predictors=False):
         """Plot the results"""
         fig, ax = super().plot()
-        # plot control units as well
-        ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
-        ax[0].plot(self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+        if plot_predictors:
+            # plot control units as well
+            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+            ax[0].plot(
+                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
+            )
         return (fig, ax)
 
 
