@@ -74,13 +74,6 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 .. image:: ../img/synthetic_control_pymc.svg
 
-Interrupted time series
-"""""""""""""""""""""""
-
-This is appropriate when you have a single treated unit, and therefore a single time series, and do not have a set of untreated units.
-
-.. image:: ../img/interrupted_time_series_pymc.svg
-
 Difference in differences
 """""""""""""""""""""""""
 

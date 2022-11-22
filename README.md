@@ -15,8 +15,7 @@ Another distinctive feature of this package is the ability to use different mode
 
 |                           | [CausalImpact](https://google.github.io/CausalImpact/) from Google | [GeoLift](https://github.com/facebookincubator/GeoLift/) from Meta | CausalPy from [PyMC Labs](https://www.pymc-labs.io) |
 |---------------------------|--------------------------------|---------|----------------------------------------|
-| Interrupted time series   | ✅                              | ❌       | ✅                                      |
-| Synthetic control         | ❌                              | ✅       | ✅                                      |
+| Synthetic control         | ✅                              | ✅       | ✅                                      |
 | Regression discontinuity  | ❌                              | ❌       | ✅                                      |
 | Difference in differences | ❌                              | ❌       | ✅                                      |
 | Language                  | R (but see [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact))  | R       | Python                                 |
@@ -89,22 +88,6 @@ This is appropriate when you have multiple units, one of which is treated. You b
 | Frequentist | Bayesian |
 |--|--|
 | ![](img/synthetic_control_skl.svg) | ![](img/synthetic_control_pymc.svg) |
-
-> The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
-
-### Interrupted time series
-This is appropriate when you have a single treated unit, and therefore a single time series, and do _not_ have a set of untreated units.
-
-| Time | Outcome |
-|------|-----------|
-| 0    | $y_0$ |
-| 1    | $y_1$ |
-|$\ldots$ | $\ldots$  |
-| T    | $y_T$ |
-
-| Frequentist | Bayesian |
-|--|--|
-| ![](img/interrupted_time_series_skl.svg) | ![](img/interrupted_time_series_pymc.svg) |
 
 > The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 

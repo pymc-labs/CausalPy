@@ -6,16 +6,8 @@ Synthetic Control
 
    notebooks/sc_pymc.ipynb
    notebooks/sc_skl.ipynb
-
-
-Interrupted Time Series
-=======================
-
-.. toctree::
-   :titlesonly:
-
-   notebooks/its_pymc.ipynb
-   notebooks/its_skl.ipynb
+   notebooks/sc2_pymc.ipynb
+   notebooks/sc2_skl.ipynb
 
 
 Difference in Differences

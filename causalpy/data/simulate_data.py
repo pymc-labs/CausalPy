@@ -63,7 +63,7 @@ def generate_synthetic_control_data(
     return df, weightings_true
 
 
-def generate_interrupted_time_series_data(
+def generate_time_series_data(
     N=100, treatment_time=70, beta_temp=-1, beta_linear=0.5, beta_intercept=3
 ):
     x = np.arange(0, 100, 1)
