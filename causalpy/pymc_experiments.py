@@ -113,6 +113,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def plot(self):
+
         """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -193,19 +194,16 @@ class SyntheticControl(TimeSeriesExperiment):
 
     expt_type = "Synthetic Control"
 
-    def plot(self):
+    def plot(self, plot_predictors=False):
         """Plot the results"""
         fig, ax = super().plot()
-        # plot control units as well
-        ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
-        ax[0].plot(self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+        if plot_predictors:
+            # plot control units as well
+            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+            ax[0].plot(
+                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
+            )
         return (fig, ax)
-
-
-class InterruptedTimeSeries(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
-
-    expt_type = "Interrupted Time Series"
 
 
 class DifferenceInDifferences(ExperimentalDesign):
