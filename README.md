@@ -37,27 +37,23 @@ pip install git+https://github.com/pymc-labs/CausalPy.git
 ## Quickstart
 
 ```python
-from causalpy.pymc_experiments import RegressionDiscontinuity
-from causalpy.pymc_models import LinearRegression
-import pandas as pd
-import pathlib
+import causalpy as cp
 
 
 # Import and process data
-rd_data_path = pathlib.Path.cwd().parents[1] / "causalpy" / "data" / "drinking.csv"
 df = (
-    pd.read_csv(rd_data_path)[["agecell", "all", "mva", "suicide"]]
+    cp.load_data("drinking")
     .rename(columns={"agecell": "age"})
     .assign(treated=lambda df_: df_.age > 21)
     .dropna(axis=0)
     )
 
 # Run the analysis
-result = RegressionDiscontinuity(
+result = cp.pymc_experiments.RegressionDiscontinuity(
     df,
     formula="all ~ 1 + age + treated",
     running_variable_name="age",
-    prediction_model=LinearRegression(),
+    prediction_model=cp.pymc_models.LinearRegression(),
     treatment_threshold=21,
     )
 
