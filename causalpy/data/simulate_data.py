@@ -98,13 +98,7 @@ def generate_time_series_data(
     return df
 
 
-def generate_time_series_data(treatment_time):
-    """
-    Example use:
-    >> import pathlib
-    >> df = generate_time_series_data("2017-01-01").loc[:, ['month', 'year', 't', 'y']]
-    df.to_csv(pathlib.Path.cwd() / 'its.csv')
-    """
+def generate_time_series_data_seasonal(treatment_time):
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )
