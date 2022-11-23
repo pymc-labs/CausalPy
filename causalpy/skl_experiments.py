@@ -172,9 +172,9 @@ class DifferenceInDifferences(ExperimentalDesign):
 
     def __init__(
         self,
-        data,
-        formula,
-        time_variable_name="t",
+        data: pd.DataFrame,
+        formula: str,
+        time_variable_name: str,
         prediction_model=None,
         **kwargs,
     ):
