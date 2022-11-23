@@ -244,7 +244,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-
         # Input validation ----------------------------------------------------
         # Check that `treated` appears in the module formula
         assert (
@@ -254,17 +253,26 @@ class DifferenceInDifferences(ExperimentalDesign):
         assert (
             "treated" in self.data.columns
         ), "Require a boolean column labelling observations which are `treated`"
-        # Check for `unit` in the incoming dataframe. *This is only used for plotting purposes*
+        # Check for `unit` in the incoming dataframe.
+        # *This is only used for plotting purposes*
         assert (
             "unit" in self.data.columns
-        ), "Require a `unit` column to label unique units. This is used for plotting purposes"
-        # Check that `group_variable_name` has TWO levels, representing the treated/untreated.
-        # But it does not matter what the actual names of the levels are.
+        ), """
+        Require a `unit` column to label unique units.
+        This is used for plotting purposes
+        """
+        # Check that `group_variable_name` has TWO levels, representing the
+        # treated/untreated. But it does not matter what the actual names of
+        # the levels are.
         assert (
-            len(pd.Categorical(self.data[self.group_variable_name]).categories) is 2
-        ), f"There must be 2 levels of the grouping variable {self.group_variable_name}.I.e. the treated and untreated."
+            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
+        ), f"""
+            There must be 2 levels of the grouping variable {self.group_variable_name}
+            .I.e. the treated and untreated.
+        """
 
-        # TODO: `treated` is a deterministic function of group and time, so this could be a function rather than supplied data
+        # TODO: `treated` is a deterministic function of group and time, so this could
+        # be a function rather than supplied data
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
@@ -369,7 +377,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             pc.set_facecolor("C1")
             pc.set_edgecolor("None")
             pc.set_alpha(0.5)
-        # Plot counterfactual - post-test for treatment group IF no treatment had occurred.
+        # Plot counterfactual - post-test for treatment group IF no treatment
+        # had occurred.
         parts = ax.violinplot(
             az.extract(
                 self.y_pred_counterfactual,
@@ -397,7 +406,8 @@ class DifferenceInDifferences(ExperimentalDesign):
 
     def _plot_causal_impact_arrow(self, ax):
         """
-        draw a vertical arrow between `y_pred_counterfactual` and `y_pred_counterfactual`
+        draw a vertical arrow between `y_pred_counterfactual` and
+        `y_pred_counterfactual`
         """
         # Calculate y values to plot the arrow between
         y_pred_treatment = (
