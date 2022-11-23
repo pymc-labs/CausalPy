@@ -75,7 +75,7 @@ If there are autodoc issues/errors in remote builds of the docs, we need to add 
 ### Test release to `test.pypi.org` (manual)
 
 1. Bump the release version in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
-2. Update on test.pypi.org. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
+2. Build locally and upload to test.pypi.org. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
 ```bash
 rm -rf dist
 python setup.py sdist
@@ -93,10 +93,13 @@ python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-u
 
 ### Actual release to `pypi.org` (manual)
 
-1. If not done in the previous step, bump the release version in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
-2. Update on pypi.org. In the root directory:
-  - `python setup.py sdist`
-  - update to pypi.org with `twine upload dist/*` Note that this requires username and password for pypi.org.
+1. Bump the release version (if not done in the previous step) in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
+2. Build locally and upload to pypi.org. In the root directory:
+```bash
+rm -rf dist
+python setup.py sdist
+twine upload dist/*
+```
 3. Readthedocs:
   - Docs should be built remotely every time there is a pull request
   - See here https://docs.readthedocs.io/en/stable/tutorial/#versioning-documentation for versioning the docs
