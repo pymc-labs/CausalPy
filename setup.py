@@ -31,6 +31,7 @@ setup(
     license="Apache License 2.0",
     url="https://github.com/pymc-labs/CausalPy",
     packages=find_packages(exclude=["tests", "test_*"]),
+    package_data={"causalpy": ["data/*.csv"]},
     python_requires=">=3.8",
     maintainer="Benjamin T. Vincent",
     install_requires=install_reqs,

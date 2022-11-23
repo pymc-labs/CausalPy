@@ -1,4 +1,4 @@
-arviz>=0.13.0rc1
+arviz>=0.14.0
 graphviz
 matplotlib>=3.5.3
 numpy

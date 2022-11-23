@@ -18,6 +18,7 @@ Difference in Differences
 
    notebooks/did_pymc.ipynb
    notebooks/did_skl.ipynb
+   notebooks/did_pymc_banks.ipynb
 
 
 Regression Discontinuity
