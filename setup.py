@@ -17,7 +17,10 @@ def get_long_description():
 
 
 # get version
-sys.path.insert(0, os.path.abspath("../"))
+# sys.path.insert(0, os.path.abspath("../"))
+# from causalpy.version import __version__
+exec(open("causalpy/version.py").read())
+
 
 with open(REQUIREMENTS_FILE) as f:
     install_reqs = f.read().splitlines()
