@@ -12,11 +12,13 @@
 import os
 import sys
 
+from causalpy.version import __version__
+
 sys.path.insert(0, os.path.abspath("../"))
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
-# https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
+# https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports # noqa: E501
 autodoc_mock_imports = [
     "arviz",
     "matplotlib",
@@ -37,7 +39,6 @@ project = "CausalPy"
 copyright = "2022, Benjamin T. Vincent"
 author = "Benjamin T. Vincent"
 
-from causalpy.version import __version__
 
 release = __version__
 
@@ -57,10 +58,13 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # -- nbsphinx config ----------------------------------------------------------
-# Opt out of executing the notebooks remotely. This will save time in the remote build process on readthedocs. The notebooks in /docs/notebooks will be parsed/converted, but not re-executed.
+# Opt out of executing the notebooks remotely. This will save time in the remote build
+# process on readthedocs. The notebooks in /docs/notebooks will be parsed/converted,
+# but not re-executed.
 nbsphinx_execute = "never"
 
-# MyST options for working with markdown files. Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives
+# MyST options for working with markdown files.
+# Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives # noqa: E501
 myst_enable_extensions = ["dollarmath", "amsmath", "colon_fence", "linkify"]
 
 # -- Options for HTML output -------------------------------------------------

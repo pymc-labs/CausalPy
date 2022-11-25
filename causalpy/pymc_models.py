@@ -21,7 +21,9 @@ class ModelBuilder(pm.Model):
             pm.set_data({"X": X})
 
     def fit(self, X, y, coords):
-        """Draw samples from posterior, prior predictive, and posterior predictive distributions."""
+        """Draw samples from posterior, prior predictive, and posterior predictive
+        distributions.
+        """
         self.build_model(X, y, coords)
         with self.model:
             self.idata = pm.sample()
@@ -43,7 +45,8 @@ class ModelBuilder(pm.Model):
 
         .. caution::
 
-           The Bayesian :math:`R^2` is not the same as the traditional coefficient of determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
+            The Bayesian :math:`R^2` is not the same as the traditional coefficient of
+            determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
         """
         yhat = self.predict(X)
