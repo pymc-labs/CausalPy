@@ -65,7 +65,13 @@ nbsphinx_execute = "never"
 
 # MyST options for working with markdown files.
 # Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives # noqa: E501
-myst_enable_extensions = ["dollarmath", "amsmath", "colon_fence", "linkify"]
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
+    "colon_fence",
+    "linkify",
+    "html_admonition",
+]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
