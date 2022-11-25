@@ -99,6 +99,11 @@ Documentation outline
 =====================
 
 .. toctree::
+   :titlesonly:
+
+   glossary.md
+
+.. toctree::
    :caption: Examples
    :titlesonly:
 
