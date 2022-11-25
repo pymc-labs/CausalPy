@@ -15,16 +15,20 @@ DATASETS = {
 }
 
 
-def get_data_home():
+def _get_data_home() -> pathlib.PosixPath:
     """Return the path of the data directory"""
     return pathlib.Path(cp.__file__).parents[1] / "causalpy" / "data"
 
 
-def load_data(dataset: str = None):
+def load_data(dataset: str = None) -> pd.DataFrame:
+    """Loads the requested dataset and returns a pandas DataFrame.
+
+    :param dataset: The desired dataset to load
+    """
 
     if dataset in DATASETS:
 
-        data_dir = get_data_home()
+        data_dir = _get_data_home()
         datafile = DATASETS[dataset]
         file_path = data_dir / datafile["filename"]
         return pd.read_csv(file_path)

@@ -113,6 +113,7 @@ Documentation outline
    api_pymc_experiments
    api_pymc_models
    api_plot_utils
+   api_datasets
 
 
 Index
