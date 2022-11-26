@@ -7,7 +7,7 @@ Some of the definitions have been copied from (or inspired by) various resources
 
 **Average treatment effect (ATE):** The average treatement effect across all units.
 
-**Average treatment effect on the treated (ATT):** The average effect of the treatment on the units that recieved it. Also called Treatement on the treated.
+**Average treatment effect on the treated (ATT):** The average effect of the treatment on the units that recieved it. Also called Treatment on the treated.
 
 **Change score analysis:** A statistical procedure where the outcome variable is the difference between the posttest and protest scores.
 
@@ -41,7 +41,7 @@ Some of the definitions have been copied from (or inspired by) various resources
 
 **Synthetic control method:** The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
 
-**Treatement on the treated (TOT) effect:** The average effect of the treatment on the units that recieved it. Also called the average treatment effect on the treated (ATT).
+**Treatment on the treated (TOT) effect:** The average effect of the treatment on the units that recieved it. Also called the average treatment effect on the treated (ATT).
 
 **Treatment effect:** The difference in outcomes between what happened after a treatment is implemented and what would have happened (see Counterfactual) if the treatment had not been implemented, assuming everything else had been the same.
 
