@@ -8,6 +8,7 @@ Synthetic Control
    notebooks/sc_skl.ipynb
    notebooks/sc2_pymc.ipynb
    notebooks/sc2_skl.ipynb
+   notebooks/sc_pymc_brexit.ipynb
 
 
 Difference in Differences
