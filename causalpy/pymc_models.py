@@ -1,3 +1,5 @@
+from typing import Dict
+
 import arviz as az
 import numpy as np
 import pymc as pm
@@ -9,9 +11,10 @@ class ModelBuilder(pm.Model):
     This is a wrapper around pm.Model to give scikit-learn like API
     """
 
-    def __init__(self):
+    def __init__(self, sample_kwargs: Dict = {}):
         super().__init__()
         self.idata = None
+        self.sample_kwargs = sample_kwargs
 
     def build_model(self, X, y, coords):
         raise NotImplementedError
@@ -26,7 +29,7 @@ class ModelBuilder(pm.Model):
         """
         self.build_model(X, y, coords)
         with self.model:
-            self.idata = pm.sample()
+            self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive())
             self.idata.extend(pm.sample_posterior_predictive(self.idata))
         return self.idata
@@ -69,7 +72,12 @@ class WeightedSumFitter(ModelBuilder):
             n_predictors = X.shape[1]
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
             y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            # TODO: There we should allow user-specified priors here
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
+            # beta = pm.Dirichlet(
+            #     name="beta", a=(1 / n_predictors) * np.ones(n_predictors),
+            #     dims="coeffs"
+            # )
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
