@@ -1,6 +1,6 @@
 arviz>=0.14.0
 graphviz
-ipython
+ipython!=8.7.0
 matplotlib>=3.5.3
 numpy
 pandas
