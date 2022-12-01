@@ -94,12 +94,14 @@ python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-u
 ### Actual release to `pypi.org` (manual)
 
 1. Bump the release version (if not done in the previous step) in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
-2. Build locally and upload to pypi.org. In the root directory:
+2. Push this to a branch, open a pull request, and merge into main.
+3. Manually draft a new release [here](https://github.com/pymc-labs/CausalPy/releases), making sure to hit 'generate release notes'.
+4. Build locally and upload to pypi.org. In the root directory:
 ```bash
 rm -rf dist
 python setup.py sdist
 twine upload dist/*
 ```
-3. Readthedocs:
+5. Readthedocs:
   - Docs should be built remotely every time there is a pull request
   - See here https://docs.readthedocs.io/en/stable/tutorial/#versioning-documentation for versioning the docs
