@@ -21,7 +21,7 @@ with open(REQUIREMENTS_FILE) as f:
 
 setup(
     name="CausalPy",
-    version=__version__,
+    version=__version__,  # noqa: F821
     description="Causal inference for quasi-experiments in Python",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
