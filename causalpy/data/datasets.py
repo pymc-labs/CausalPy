@@ -7,6 +7,7 @@ import causalpy as cp
 DATASETS = {
     "banks": {"filename": "banks.csv"},
     "brexit": {"filename": "GDP_in_dollars_billions.csv"},
+    "covid": {"filename": "deaths_and_temps_england_wales.csv"},
     "did": {"filename": "did.csv"},
     "drinking": {"filename": "drinking.csv"},
     "its": {"filename": "its.csv"},
