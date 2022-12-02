@@ -9,6 +9,7 @@ Synthetic Control
    notebooks/sc2_pymc.ipynb
    notebooks/sc2_skl.ipynb
    notebooks/sc_pymc_brexit.ipynb
+   notebooks/its_covid.ipynb
 
 
 Difference in Differences
