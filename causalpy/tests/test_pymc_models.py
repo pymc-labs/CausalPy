@@ -1,9 +1,10 @@
-import numpy as np
-import pytest
-import pymc as pm
-from causalpy.pymc_models import ModelBuilder
 import arviz as az
+import numpy as np
 import pandas as pd
+import pymc as pm
+import pytest
+
+from causalpy.pymc_models import ModelBuilder
 
 
 class MyToyModel(ModelBuilder):

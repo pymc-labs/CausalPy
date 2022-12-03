@@ -1,7 +1,8 @@
 from typing import Any, Dict, Optional
-import pandas as pd
+
 import arviz as az
 import numpy as np
+import pandas as pd
 import pymc as pm
 from arviz import r2_score
 
