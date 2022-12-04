@@ -602,10 +602,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.print_coefficients()
 
 
-# =============================================================================
-# =============================================================================
-
-
 class PrePostNEGD(ExperimentalDesign):
     """A class to analyse data from pretest/posttest designs"""
 
