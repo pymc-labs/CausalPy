@@ -619,7 +619,7 @@ class PrePostNEGD(ExperimentalDesign):
     ):
         super().__init__(prediction_model=prediction_model, **kwargs)
         self.data = data
-        self.expt_type = "Difference in Differences"
+        self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
         self.group_variable_name = group_variable_name
 
@@ -644,6 +644,15 @@ class PrePostNEGD(ExperimentalDesign):
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+
+        # Evaluate causal impact as equal to the trestment effect
+        # TODO: Grabbing the appropriate name for the group parameter (to describe
+        # the treatment effect) is brittle and will likely break.
+        treatment_effect_parameter = f"C({self.group_variable_name})[T.1]"
+        self.causal_impact = self.prediction_model.idata.posterior["beta"].sel(
+            {"coeffs": treatment_effect_parameter}
+        )
+
         # ================================================================
 
     def plot(self):
@@ -658,26 +667,29 @@ class PrePostNEGD(ExperimentalDesign):
             y="post",
             hue="group",
             alpha=0.5,
-            palette="muted",
             data=self.data,
             ax=ax[0],
         )
         ax[0].set(xlabel="Pretest", ylabel="Posttest")
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
-        # Post estimated treatment effect
-        # TODO: Grabbing the appropriate name for the group parameter (to describe
-        # the treatment effect) is brittle and will likely break.
-        treatment_effect_parameter = f"C({self.group_variable_name})[T.1]"
-        az.plot_posterior(
-            self.prediction_model.idata.posterior["beta"].sel(
-                {"coeffs": treatment_effect_parameter}
-            ),
-            ref_val=0,
-            ax=ax[1],
-        )
+        # Plot estimated caual impact / treatment effect
+        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1])
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
+    def _causal_impact_summary_stat(self):
+        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        return f"Causal impact = {causal_impact + ci}"
+
     def summary(self):
-        raise NotImplementedError
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print("\nResults:")
+        # TODO: extra experiment specific outputs here
+        print(self._causal_impact_summary_stat())
+        self.print_coefficients()
