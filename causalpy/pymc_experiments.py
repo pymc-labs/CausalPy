@@ -600,3 +600,148 @@ class RegressionDiscontinuity(ExperimentalDesign):
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )
         self.print_coefficients()
+
+
+class PrePostNEGD(ExperimentalDesign):
+    """A class to analyse data from pretest/posttest designs"""
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        formula: str,
+        group_variable_name: str,
+        pretreatment_variable_name: str,
+        prediction_model=None,
+        **kwargs,
+    ):
+        super().__init__(prediction_model=prediction_model, **kwargs)
+        self.data = data
+        self.expt_type = "Pretest/posttest Nonequivalent Group Design"
+        self.formula = formula
+        self.group_variable_name = group_variable_name
+        self.pretreatment_variable_name = pretreatment_variable_name
+
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
+
+        # Input validation ----------------------------------------------------
+        # Check that `group_variable_name` has TWO levels, representing the
+        # treated/untreated. But it does not matter what the actual names of
+        # the levels are.
+        assert (
+            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
+        ), f"""
+            There must be 2 levels of the grouping variable {self.group_variable_name}
+            .I.e. the treated and untreated.
+        """
+
+        # fit the model to the observed (pre-intervention) data
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+
+        # Calculate the posterior predictive for the treatment and control for an
+        # interpolated set of pretest values
+        # get the model predictions of the observed data
+        self.pred_xi = np.linspace(
+            np.min(self.data[self.pretreatment_variable_name]),
+            np.max(self.data[self.pretreatment_variable_name]),
+            200,
+        )
+        # untreated
+        x_pred_untreated = pd.DataFrame(
+            {
+                self.pretreatment_variable_name: self.pred_xi,
+                self.group_variable_name: np.zeros(self.pred_xi.shape),
+            }
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
+        self.pred_untreated = self.prediction_model.predict(X=np.asarray(new_x))
+        # treated
+        x_pred_untreated = pd.DataFrame(
+            {
+                self.pretreatment_variable_name: self.pred_xi,
+                self.group_variable_name: np.ones(self.pred_xi.shape),
+            }
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
+        self.pred_treated = self.prediction_model.predict(X=np.asarray(new_x))
+
+        # Evaluate causal impact as equal to the trestment effect
+        self.causal_impact = self.prediction_model.idata.posterior["beta"].sel(
+            {"coeffs": self._get_treatment_effect_coeff()}
+        )
+
+        # ================================================================
+
+    def plot(self):
+        """Plot the results"""
+        fig, ax = plt.subplots(
+            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+        )
+
+        # Plot raw data
+        sns.scatterplot(
+            x="pre",
+            y="post",
+            hue="group",
+            alpha=0.5,
+            data=self.data,
+            ax=ax[0],
+        )
+        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+
+        # plot posterior predictive of untreated
+        plot_xY(
+            self.pred_xi,
+            self.pred_untreated["posterior_predictive"].y_hat,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C0"},
+        )
+
+        # plot posterior predictive of treated
+        plot_xY(
+            self.pred_xi,
+            self.pred_treated["posterior_predictive"].y_hat,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        # Plot estimated caual impact / treatment effect
+        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1])
+        ax[1].set(title="Estimated treatment effect")
+        return fig, ax
+
+    def _causal_impact_summary_stat(self):
+        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        return f"Causal impact = {causal_impact + ci}"
+
+    def summary(self):
+        """Print text output summarising the results"""
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print("\nResults:")
+        # TODO: extra experiment specific outputs here
+        print(self._causal_impact_summary_stat())
+        self.print_coefficients()
+
+    def _get_treatment_effect_coeff(self) -> str:
+        """Find the beta regression coefficient corresponding to the
+        group (i.e. treatment) effect.
+        For example if self.group_variable_name is 'group' and
+        the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
+        then we want `C(group)[T.1]`.
+        """
+        for label in self.labels:
+            if ("group" in label) & (":" not in label):
+                return label
+
+        raise NameError("Unable to find coefficient name for the treatment effect")

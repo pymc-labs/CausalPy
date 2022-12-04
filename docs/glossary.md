@@ -5,6 +5,9 @@
 Some of the definitions have been copied from (or inspired by) various resources, including Reichardt (2019).
 </div>
 
+
+**ANCOVA:** Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a catgeorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pretest-postdest designs, either with or without random assignment.
+
 **Average treatment effect (ATE):** The average treatement effect across all units.
 
 **Average treatment effect on the treated (ATT):** The average effect of the treatment on the units that recieved it. Also called Treatment on the treated.
@@ -22,6 +25,20 @@ Some of the definitions have been copied from (or inspired by) various resources
 **Interrupted time series (ITS) design:** A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment.
 
 **Non-equivalent group designs:** A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
+
+The basic posttest-only design can be described as:
+
+| NR: | X | O |
+|-----|---|---|
+| NR: |   | 0 |
+
+The pretest-posttest NEGD can be described as:
+
+| NR: | O1 | X | O2 |
+|-----|----|---|----|
+| NR: | O1 |   | O2 |
+
+Data from pretest-posttest NEGD could be analysed using change score analysis or the difference in differences approach, or with ANCOVA.
 
 **One-group posttest-only design:** A design where a single group is exposed to a treatment and assessed on an outcome measure. There is no pretest measure or comparison group.
 

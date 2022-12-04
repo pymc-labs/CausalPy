@@ -1,3 +1,12 @@
+Nonequivalent group designs
+===========================
+
+.. toctree::
+   :titlesonly:
+
+   notebooks/ancova_pymc.ipynb
+
+
 Synthetic Control
 =================
 
