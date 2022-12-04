@@ -600,3 +600,84 @@ class RegressionDiscontinuity(ExperimentalDesign):
             f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
         )
         self.print_coefficients()
+
+
+# =============================================================================
+# =============================================================================
+
+
+class PrePostNEGD(ExperimentalDesign):
+    """A class to analyse data from pretest/posttest designs"""
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        formula: str,
+        group_variable_name: str,
+        prediction_model=None,
+        **kwargs,
+    ):
+        super().__init__(prediction_model=prediction_model, **kwargs)
+        self.data = data
+        self.expt_type = "Difference in Differences"
+        self.formula = formula
+        self.group_variable_name = group_variable_name
+
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
+
+        # Input validation ----------------------------------------------------
+        # Check that `group_variable_name` has TWO levels, representing the
+        # treated/untreated. But it does not matter what the actual names of
+        # the levels are.
+        assert (
+            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
+        ), f"""
+            There must be 2 levels of the grouping variable {self.group_variable_name}
+            .I.e. the treated and untreated.
+        """
+
+        # fit the model to the observed (pre-intervention) data
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        # ================================================================
+
+    def plot(self):
+        """Plot the results"""
+        fig, ax = plt.subplots(
+            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+        )
+
+        # Plot raw data
+        sns.scatterplot(
+            x="pre",
+            y="post",
+            hue="group",
+            alpha=0.5,
+            palette="muted",
+            data=self.data,
+            ax=ax[0],
+        )
+        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        # Post estimated treatment effect
+        # TODO: Grabbing the appropriate name for the group parameter (to describe
+        # the treatment effect) is brittle and will likely break.
+        treatment_effect_parameter = f"C({self.group_variable_name})[T.1]"
+        az.plot_posterior(
+            self.prediction_model.idata.posterior["beta"].sel(
+                {"coeffs": treatment_effect_parameter}
+            ),
+            ref_val=0,
+            ax=ax[1],
+        )
+        ax[1].set(title="Estimated treatment effect")
+        return fig, ax
+
+    def summary(self):
+        raise NotImplementedError
