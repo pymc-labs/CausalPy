@@ -614,6 +614,7 @@ class PrePostNEGD(ExperimentalDesign):
         data: pd.DataFrame,
         formula: str,
         group_variable_name: str,
+        pretreatment_variable_name: str,
         prediction_model=None,
         **kwargs,
     ):
@@ -622,6 +623,7 @@ class PrePostNEGD(ExperimentalDesign):
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
         self.group_variable_name = group_variable_name
+        self.pretreatment_variable_name = pretreatment_variable_name
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -644,6 +646,33 @@ class PrePostNEGD(ExperimentalDesign):
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+
+        # Calculate the posterior predictive for the treatment and control for an
+        # interpolated set of pretest values
+        # get the model predictions of the observed data
+        self.pred_xi = np.linspace(
+            np.min(self.data[self.pretreatment_variable_name]),
+            np.max(self.data[self.pretreatment_variable_name]),
+            200,
+        )
+        # untreated
+        x_pred_untreated = pd.DataFrame(
+            {
+                self.pretreatment_variable_name: self.pred_xi,
+                self.group_variable_name: np.zeros(self.pred_xi.shape),
+            }
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
+        self.pred_untreated = self.prediction_model.predict(X=np.asarray(new_x))
+        # treated
+        x_pred_untreated = pd.DataFrame(
+            {
+                self.pretreatment_variable_name: self.pred_xi,
+                self.group_variable_name: np.ones(self.pred_xi.shape),
+            }
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
+        self.pred_treated = self.prediction_model.predict(X=np.asarray(new_x))
 
         # Evaluate causal impact as equal to the trestment effect
         self.causal_impact = self.prediction_model.idata.posterior["beta"].sel(
@@ -668,6 +697,23 @@ class PrePostNEGD(ExperimentalDesign):
             ax=ax[0],
         )
         ax[0].set(xlabel="Pretest", ylabel="Posttest")
+
+        # plot posterior predictive of untreated
+        plot_xY(
+            self.pred_xi,
+            self.pred_untreated["posterior_predictive"].y_hat,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C0"},
+        )
+
+        # plot posterior predictive of treated
+        plot_xY(
+            self.pred_xi,
+            self.pred_treated["posterior_predictive"].y_hat,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         # Plot estimated caual impact / treatment effect
@@ -698,5 +744,7 @@ class PrePostNEGD(ExperimentalDesign):
         the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
         then we want `C(group)[T.1]`.
         """
-        mask = [self.group_variable_name in label for label in self.labels]
-        return self.labels[np.argmax(mask)]
+        for label in self.labels:
+            if ("group" in label) & (":" not in label):
+                return label
+        # TODO: raise an exception if we fail to find the coefficient we want
