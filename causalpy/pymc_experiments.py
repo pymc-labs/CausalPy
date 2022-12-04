@@ -747,4 +747,5 @@ class PrePostNEGD(ExperimentalDesign):
         for label in self.labels:
             if ("group" in label) & (":" not in label):
                 return label
-        # TODO: raise an exception if we fail to find the coefficient we want
+
+        raise NameError("Unable to find coefficient name for the treatment effect")
