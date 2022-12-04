@@ -1,7 +1,8 @@
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import arviz as az
 import numpy as np
+import pandas as pd
 import pymc as pm
 from arviz import r2_score
 
@@ -11,19 +12,33 @@ class ModelBuilder(pm.Model):
     This is a wrapper around pm.Model to give scikit-learn like API
     """
 
-    def __init__(self, sample_kwargs: Dict = {}):
+    def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.idata = None
-        self.sample_kwargs = sample_kwargs
+        self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
 
-    def build_model(self, X, y, coords):
-        raise NotImplementedError
+    def build_model(self, X, y, coords) -> None:
+        """Build the model.
 
-    def _data_setter(self, X):
+        Example
+        -------
+        >>> class CausalPyModel(ModelBuilder):
+        >>>    def build_model(self, X, y):
+        >>>        with self:
+        >>>            X_ = pm.MutableData(name="X", value=X)
+        >>>            y_ = pm.MutableData(name="y", value=y)
+        >>>            beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        >>>            sigma = pm.HalfNormal("sigma", sigma=1)
+        >>>            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        >>>            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+        """
+        raise NotImplementedError("This method must be implemented by a subclass")
+
+    def _data_setter(self, X) -> None:
         with self.model:
             pm.set_data({"X": X})
 
-    def fit(self, X, y, coords):
+    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions.
         """
@@ -43,7 +58,7 @@ class ModelBuilder(pm.Model):
             )
         return post_pred
 
-    def score(self, X, y):
+    def score(self, X, y) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         .. caution::
