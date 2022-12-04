@@ -646,11 +646,8 @@ class PrePostNEGD(ExperimentalDesign):
         self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
 
         # Evaluate causal impact as equal to the trestment effect
-        # TODO: Grabbing the appropriate name for the group parameter (to describe
-        # the treatment effect) is brittle and will likely break.
-        treatment_effect_parameter = f"C({self.group_variable_name})[T.1]"
         self.causal_impact = self.prediction_model.idata.posterior["beta"].sel(
-            {"coeffs": treatment_effect_parameter}
+            {"coeffs": self._get_treatment_effect_coeff()}
         )
 
         # ================================================================
@@ -693,3 +690,13 @@ class PrePostNEGD(ExperimentalDesign):
         # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat())
         self.print_coefficients()
+
+    def _get_treatment_effect_coeff(self) -> str:
+        """Find the beta regression coefficient corresponding to the
+        group (i.e. treatment) effect.
+        For example if self.group_variable_name is 'group' and
+        the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
+        then we want `C(group)[T.1]`.
+        """
+        mask = [self.group_variable_name in label for label in self.labels]
+        return self.labels[np.argmax(mask)]
