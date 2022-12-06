@@ -103,11 +103,15 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         # causal impact pre (ie the residuals of the model fit to observed)
         pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
-        self.pre_impact = pre_data - self.pre_pred["posterior_predictive"].y_hat
+        self.pre_impact = (
+            pre_data - self.pre_pred["posterior_predictive"].y_hat
+        ).transpose(..., "obs_ind")
 
         # causal impact post (ie the residuals of the model fit to observed)
         post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
-        self.post_impact = post_data - self.post_pred["posterior_predictive"].y_hat
+        self.post_impact = (
+            post_data - self.post_pred["posterior_predictive"].y_hat
+        ).transpose(..., "obs_ind")
 
         # cumulative impact post
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
@@ -117,9 +121,12 @@ class TimeSeriesExperiment(ExperimentalDesign):
         """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
+        # TOP PLOT --------------------------------------------------
         # pre-intervention period
         plot_xY(
-            self.datapre.index, self.pre_pred["posterior_predictive"].y_hat, ax=ax[0]
+            self.datapre.index,
+            self.pre_pred["posterior_predictive"].y_hat,
+            ax=ax[0],
         )
         ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
         # post intervention period
@@ -130,23 +137,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             include_label=False,
         )
         ax[0].plot(self.datapost.index, self.post_y, "k.")
-
-        ax[0].set(
-            title=f"""
-            Pre-intervention Bayesian $R^2$: {self.score.r2:.3f}
-            (std = {self.score.r2_std:.3f})
-            """
-        )
-
-        plot_xY(self.datapre.index, self.pre_impact, ax=ax[1])
-        plot_xY(self.datapost.index, self.post_impact, ax=ax[1], include_label=False)
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(self.datapost.index, self.post_impact_cumulative, ax=ax[2])
-        ax[2].axhline(y=0, c="k")
-
         # Shaded causal effect
         ax[0].fill_between(
             self.datapost.index,
@@ -158,6 +148,26 @@ class TimeSeriesExperiment(ExperimentalDesign):
             alpha=0.25,
             label="Causal impact",
         )
+        ax[0].set(
+            title=f"""
+            Pre-intervention Bayesian $R^2$: {self.score.r2:.3f}
+            (std = {self.score.r2_std:.3f})
+            """
+        )
+
+        # MIDDLE PLOT -----------------------------------------------
+        plot_xY(
+            self.datapre.index,
+            self.pre_impact,
+            ax=ax[1],
+        )
+        plot_xY(
+            self.datapost.index,
+            self.post_impact,
+            ax=ax[1],
+            include_label=False,
+        )
+        ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
             y1=self.post_impact.mean(["chain", "draw"]),
@@ -165,6 +175,17 @@ class TimeSeriesExperiment(ExperimentalDesign):
             alpha=0.25,
             label="Causal impact",
         )
+        ax[1].set(title="Causal Impact")
+
+        # BOTTOM PLOT -----------------------------------------------
+
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            self.datapost.index,
+            self.post_impact_cumulative,
+            ax=ax[2],
+        )
+        ax[2].axhline(y=0, c="k")
 
         # Intervention line
         for i in [0, 1, 2]:
