@@ -11,11 +11,14 @@ def plot_xY(
     x: Union[pd.DatetimeIndex, np.array],
     Y: xr.DataArray,
     ax: plt.Axes,
-    plot_hdi_kwargs: Optional[Dict[str, Any]] = {},
-    hdi_prob: Optional[float] = 0.94,
-    include_label: Optional[bool] = True,
+    plot_hdi_kwargs: Optional[Dict[str, Any]] = None,
+    hdi_prob: float = 0.94,
+    include_label: bool = True,
 ) -> None:
     """Utility function to plot HDI intervals."""
+
+    if plot_hdi_kwargs is None:
+        plot_hdi_kwargs = {}
 
     az.plot_hdi(
         x,
