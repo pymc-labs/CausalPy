@@ -7,5 +7,6 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=causalpy",
+    "--cov-report=term-missing -vv",
 ]
 testpaths = "causalpy/tests"
