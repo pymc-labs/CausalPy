@@ -3,10 +3,10 @@ profile = "black"
 
 [tool.pytest.ini_options]
 addopts = [
-    "-v",
+    "-vv",
     "--strict-markers",
     "--strict-config",
     "--cov=causalpy",
-    "--cov-report=term-missing -vv",
+    "--cov-report=term-missing",
 ]
 testpaths = "causalpy/tests"
