@@ -10,3 +10,7 @@ addopts = [
     "--cov-report=term-missing",
 ]
 testpaths = "causalpy/tests"
+markers = [
+    "integration: mark as an integration test.",
+    "slow: mark test as slow.",
+    ]
