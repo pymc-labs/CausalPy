@@ -72,7 +72,6 @@ def test_rd_drinking():
         cp.load_data("drinking")
         .rename(columns={"agecell": "age"})
         .assign(treated=lambda df_: df_.age > 21)
-        .dropna(axis=0)
     )
     result = cp.pymc_experiments.RegressionDiscontinuity(
         df,
