@@ -49,7 +49,6 @@ df = (
     cp.load_data("drinking")
     .rename(columns={"agecell": "age"})
     .assign(treated=lambda df_: df_.age > 21)
-    .dropna(axis=0)
     )
 
 # Run the analysis
