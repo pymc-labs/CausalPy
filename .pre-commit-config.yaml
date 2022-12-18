@@ -20,8 +20,17 @@ repos:
       rev: 22.10.0
       hooks:
           - id: black
-          - id: black-jupyter
     - repo: https://github.com/pycqa/flake8
       rev: 3.9.2
       hooks:
           - id: flake8
+    - repo: https://github.com/nbQA-dev/nbQA
+      rev: 1.5.3
+      hooks:
+        - id: nbqa-black
+          # additional_dependencies: [jupytext]  # optional, only if you're using Jupytext
+        - id: nbqa-pyupgrade
+          args: ["--py37-plus"]
+        - id: nbqa-isort
+          # args: ["--float-to-top"]
+          args: [--profile, black]
