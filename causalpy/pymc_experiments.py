@@ -24,6 +24,11 @@ class ExperimentalDesign:
         if self.prediction_model is None:
             raise ValueError("fitting_model not set or passed.")
 
+    @property
+    def idata(self):
+        """Access to the InferenceData object"""
+        return self.prediction_model.idata
+
     def print_coefficients(self):
         """Prints the model coefficients"""
         print("Model coefficients:")
