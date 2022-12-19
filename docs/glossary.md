@@ -6,7 +6,7 @@ Some of the definitions have been copied from (or inspired by) various resources
 </div>
 
 
-**ANCOVA:** Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a catgeorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pretest-postdest designs, either with or without random assignment.
+**ANCOVA:** Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a catgeorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
 
 **Average treatment effect (ATE):** The average treatement effect across all units.
 
