@@ -213,10 +213,10 @@ def generate_regression_discontinuity_data(
 
 
 def generate_ancova_data(
-    N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2
+    N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
 ):
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
-    post = pre + treatment_effect * group + np.random.normal(size=N) * 0.4
+    post = pre + treatment_effect * group + np.random.normal(size=N) * sigma
     df = pd.DataFrame({"group": group, "pre": pre, "post": post})
     return df
