@@ -69,10 +69,17 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 .. image:: ../img/synthetic_control_pymc.svg
 
+ANCOVA
+""""""
+
+This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
+
+.. image:: ../img/anova_pymc.svg
+
 Difference in differences
 """""""""""""""""""""""""
 
-This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
+This is appropriate when you have pre and post intervention measurement(s) and have a treament and a control group.
 
 .. image:: ../img/difference_in_differences_pymc.svg
 
