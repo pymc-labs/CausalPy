@@ -14,6 +14,7 @@ DATASETS = {
     "its simple": {"filename": "its_simple.csv"},
     "rd": {"filename": "regression_discontinuity.csv"},
     "sc": {"filename": "synthetic_control.csv"},
+    "anova1": {"filename": "ancova_generated.csv"},
 }
 
 
