@@ -1,3 +1,4 @@
 pathlib
 pre-commit
 twine
+interrogate

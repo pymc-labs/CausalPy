@@ -19,6 +19,7 @@ jobs:
         run: |
           make init
           make check_lint
+
   test:
     runs-on: ubuntu-latest
     strategy:

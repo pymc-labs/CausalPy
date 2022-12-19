@@ -15,6 +15,7 @@ check_lint:
 	black --diff --check --fast .
 	nbqa black --check .
 	nbqa isort --check-only .
+	interrogate .
 
 test:
 	pip install -r requirements-test.txt

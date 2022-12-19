@@ -6,6 +6,7 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
 ![Read the Docs](https://img.shields.io/readthedocs/causalpy)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
+![Interrogate](img/interrogate_badge.svg)
 
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
 
