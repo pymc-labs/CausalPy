@@ -228,9 +228,9 @@ def test_ancova():
         formula="post ~ 1 + C(group) + pre",
         group_variable_name="group",
         pretreatment_variable_name="pre",
-        prediction_model=cp.pymc_models.LinearRegression(),
+        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.LinearRegression)
+    assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
