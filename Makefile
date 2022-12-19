@@ -13,6 +13,8 @@ check_lint:
 	flake8 .
 	isort --check-only .
 	black --diff --check --fast .
+	nbqa black --check .
+	nbqa isort --check-only .
 
 test:
 	pip install -r requirements-test.txt
