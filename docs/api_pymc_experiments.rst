@@ -7,3 +7,4 @@
 .. automodule:: causalpy.pymc_experiments
    :members:
    :undoc-members:
+   :inherited-members:

@@ -20,14 +20,8 @@ def test_did():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -61,14 +55,8 @@ def test_did_banks():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -82,14 +70,8 @@ def test_rd():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -108,14 +90,8 @@ def test_rd_drinking():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -132,14 +108,8 @@ def test_its():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -156,14 +126,8 @@ def test_its_covid():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -178,14 +142,8 @@ def test_sc():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration
@@ -210,14 +168,8 @@ def test_sc_brexit():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
-    assert (
-        len(result.prediction_model.idata.posterior.coords["chain"])
-        == sample_kwargs["chains"]
-    )
-    assert (
-        len(result.prediction_model.idata.posterior.coords["draw"])
-        == sample_kwargs["draws"]
-    )
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
 @pytest.mark.integration

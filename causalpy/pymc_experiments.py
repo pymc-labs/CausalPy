@@ -32,7 +32,7 @@ class ExperimentalDesign:
     def print_coefficients(self):
         """Prints the model coefficients"""
         print("Model coefficients:")
-        coeffs = az.extract(self.prediction_model.idata.posterior, var_names="beta")
+        coeffs = az.extract(self.idata.posterior, var_names="beta")
         # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
         # the stats despite variable names of different lengths
         for name in self.labels:
@@ -697,7 +697,7 @@ class PrePostNEGD(ExperimentalDesign):
         self.pred_treated = self.prediction_model.predict(X=np.asarray(new_x))
 
         # Evaluate causal impact as equal to the trestment effect
-        self.causal_impact = self.prediction_model.idata.posterior["beta"].sel(
+        self.causal_impact = self.idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )
 
