@@ -4,7 +4,10 @@ import pandas as pd
 import pymc as pm
 import pytest
 
+import causalpy as cp
 from causalpy.pymc_models import ModelBuilder
+
+sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 class MyToyModel(ModelBuilder):
@@ -67,3 +70,19 @@ class TestModelBuilder:
         assert isinstance(score, pd.Series)
         assert score.shape == (2,)
         assert isinstance(predictions, az.InferenceData)
+
+
+def test_idata_property():
+    """Test that we can access the idata property of the model"""
+    df = cp.load_data("did")
+    result = cp.pymc_experiments.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group + t + treated:group",
+        time_variable_name="t",
+        group_variable_name="group",
+        treated=1,
+        untreated=0,
+        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert hasattr(result, "idata")
+    assert isinstance(result.idata, az.InferenceData)

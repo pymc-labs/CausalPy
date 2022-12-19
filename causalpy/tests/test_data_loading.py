@@ -3,7 +3,18 @@ import pytest
 
 import causalpy as cp
 
-tests = ["banks", "brexit", "covid", "did", "drinking", "its", "its simple", "rd", "sc"]
+tests = [
+    "banks",
+    "brexit",
+    "covid",
+    "did",
+    "drinking",
+    "its",
+    "its simple",
+    "rd",
+    "sc",
+    "anova1",
+]
 
 
 @pytest.mark.parametrize("dataset_name", tests)
