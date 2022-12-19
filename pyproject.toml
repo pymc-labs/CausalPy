@@ -17,7 +17,7 @@ markers = [
 
 [tool.interrogate]
 ignore-init-method = true
-ignore-init-module = false
+ignore-init-module = true
 ignore-magic = false
 ignore-semiprivate = false
 ignore-private = false
@@ -27,7 +27,7 @@ ignore-nested-functions = false
 ignore-nested-classes = true
 ignore-setters = false
 fail-under = 80
-exclude = ["setup.py", "docs", "build"]
+exclude = ["setup.py", "docs", "build", "conf.py"]
 ignore-regex = ["^get$", "^mock_.*", ".*BaseClass.*"]
 # possible values: 0 (minimal output), 1 (-v), 2 (-vv)
 verbose = 1
