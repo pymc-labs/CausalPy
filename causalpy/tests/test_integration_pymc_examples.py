@@ -218,3 +218,19 @@ def test_sc_brexit():
         len(result.prediction_model.idata.posterior.coords["draw"])
         == sample_kwargs["draws"]
     )
+
+
+@pytest.mark.integration
+def test_ancova():
+    df = cp.load_data("anova1")
+    result = cp.pymc_experiments.PrePostNEGD(
+        df,
+        formula="post ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        prediction_model=cp.pymc_models.LinearRegression(),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.pymc_experiments.LinearRegression)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
