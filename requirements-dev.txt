@@ -1,4 +1,3 @@
-nbqa
 pathlib
 pre-commit
 twine
