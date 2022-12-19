@@ -91,9 +91,26 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 > The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
+### ANCOVA
+
+This is appropriate for non-equivalent group designs when you have a single pre and post intervention measurement and have a treament and a control group.
+
+| Group | pre | post |
+|------|---|-------|
+| 0    | $x_1$ | $y_1$ |
+| 0    | $x_2$ | $y_2$ |
+| 1    | $x_3$ | $y_3$ |
+| 1    | $x_4$ | $y_4$ |
+
+| Frequentist | Bayesian |
+|--|--|
+| coming soon | ![](img/anova_pymc.svg) |
+
+> The data from the control and treatment group are plotted, along with posterior predictive 94% credible intervals. The lower panel shows the estimated treatment effect.
+
 ### Difference in Differences
 
-This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
+This is appropriate for non-equivalent group designs when you have pre and post intervention measurement and have a treament and a control group. Unlike the ANCOVA approach, difference in differences is appropriate when there are multiple pre and/or post treatment measurements.
 
 Data is expected to be in the following form. Shown are just two units - one in the treated group (`group=1`) and one in the untreated group (`group=0`), but there can of course be multiple units per group. This is panel data (also known as repeated measures) where each unit is measured at 2 time points.
 
@@ -108,7 +125,7 @@ Data is expected to be in the following form. Shown are just two units - one in 
 |--|--|
 | ![](img/difference_in_differences_skl.svg) | ![](img/difference_in_differences_pymc.svg) |
 
-The data, model fit, and counterfactual are plotted. Frequentist model fits result in points estimates, but the Bayesian analysis results in posterior distributions, represented by the violin plots. The causal impact is the difference between the counterfactual prediction (treated group, post treatment) and the observed values for the treated group, post treatment.
+>The data, model fit, and counterfactual are plotted. Frequentist model fits result in points estimates, but the Bayesian analysis results in posterior distributions, represented by the violin plots. The causal impact is the difference between the counterfactual prediction (treated group, post treatment) and the observed values for the treated group, post treatment.
 
 ### Regression discontinuity designs
 
