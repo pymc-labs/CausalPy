@@ -19,6 +19,10 @@ jobs:
         run: |
           make init
           make check_lint
+      - name: check docstring coverage
+        uses: JackMcKew/python-interrogate-check@main
+        with:
+          path: 'causalpy'
   test:
     runs-on: ubuntu-latest
     strategy:
