@@ -186,3 +186,22 @@ def test_ancova():
     assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+
+@pytest.mark.integration
+def test_geolift1():
+    df = cp.load_data("geolift1")
+    df["time"] = pd.to_datetime(df["time"])
+    df.set_index("time", inplace=True)
+    treatment_time = pd.to_datetime("2022-01-01")
+    result = cp.pymc_experiments.SyntheticControl(
+        df,
+        treatment_time,
+        formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
+        + Czech_Republic""",
+        prediction_model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
