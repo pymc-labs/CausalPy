@@ -15,6 +15,7 @@ DATASETS = {
     "rd": {"filename": "regression_discontinuity.csv"},
     "sc": {"filename": "synthetic_control.csv"},
     "anova1": {"filename": "ancova_generated.csv"},
+    "geolift1": {"filename": "geolift1.csv"},
 }
 
 

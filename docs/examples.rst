@@ -19,6 +19,7 @@ Synthetic Control
    notebooks/sc2_skl.ipynb
    notebooks/sc_pymc_brexit.ipynb
    notebooks/its_covid.ipynb
+   notebooks/geolift1.ipynb
 
 
 Difference in Differences

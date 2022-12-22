@@ -46,7 +46,9 @@ class ModelBuilder(pm.Model):
         with self.model:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive())
-            self.idata.extend(pm.sample_posterior_predictive(self.idata))
+            self.idata.extend(
+                pm.sample_posterior_predictive(self.idata, progressbar=False)
+            )
         return self.idata
 
     def predict(self, X):
@@ -54,7 +56,7 @@ class ModelBuilder(pm.Model):
         self._data_setter(X)
         with self.model:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
-                self.idata, var_names=["y_hat", "mu"]
+                self.idata, var_names=["y_hat", "mu"], progressbar=False
             )
         return post_pred
 

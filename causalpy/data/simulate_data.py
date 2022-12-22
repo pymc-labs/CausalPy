@@ -220,3 +220,75 @@ def generate_ancova_data(
     post = pre + treatment_effect * group + np.random.normal(size=N) * sigma
     df = pd.DataFrame({"group": group, "pre": pre, "post": post})
     return df
+
+
+def generate_geolift_data():
+    """Generate synthetic data for a geolift example. This will consists of 6 untreated
+    countries. The treated unit `Denmark` is a weighted combination of the untreated
+    units. We additionally specify a treatment effect which takes effect after the
+    `treatment_time`. The timeseries data is observed at weekly resolution and has
+    annual seasonality, with this seasonality being a drawn from a Gaussian Process with
+    a periodic kernel."""
+    n_years = 4
+    treatment_time = pd.to_datetime("2022-01-01")
+    causal_impact = 0.2
+
+    def create_series(n=52, amplitude=1, length_scale=2):
+        return np.tile(
+            generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + 3, n_years
+        )
+
+    time = pd.date_range(start="2019-01-01", periods=52 * n_years, freq="W")
+
+    untreated = [
+        "Austria",
+        "Belgium",
+        "Bulgaria",
+        "Croatia",
+        "Cyprus",
+        "Czech_Republic",
+    ]
+
+    df = (
+        pd.DataFrame({country: create_series() for country in untreated})
+        .assign(time=time)
+        .set_index("time")
+    )
+
+    # create treated unit as a weighted sum of the untreated units
+    weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
+    df = df.assign(Denmark=np.dot(df[untreated].values, weights))
+
+    # add observation noise
+    for col in untreated + ["Denmark"]:
+        df[col] += np.random.normal(size=len(df), scale=0.1)
+
+    # add treatment effect
+    df["Denmark"] += np.where(df.index < treatment_time, 0, causal_impact)
+    return df
+
+
+# -----------------
+# UTILITY FUNCTIONS
+# -----------------
+
+
+def generate_seasonality(n=12, amplitude=1, length_scale=0.5):
+    """Generate monthly seasonality by sampling from a Gaussian process with a
+    Gaussian kernel, using numpy code"""
+    # Generate the covariance matrix
+    x = np.linspace(0, 1, n)
+    x1, x2 = np.meshgrid(x, x)
+    cov = periodic_kernel(
+        x1, x2, period=1, length_scale=length_scale, amplitude=amplitude
+    )
+    # Generate the seasonality
+    seasonality = np.random.multivariate_normal(np.zeros(n), cov)
+    return seasonality
+
+
+def periodic_kernel(x1, x2, period=1, length_scale=1, amplitude=1):
+    """Generate a periodic kernal for gaussian process"""
+    return amplitude**2 * np.exp(
+        -2 * np.sin(np.pi * np.abs(x1 - x2) / period) ** 2 / length_scale**2
+    )
