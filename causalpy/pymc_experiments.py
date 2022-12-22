@@ -38,11 +38,7 @@ class ExperimentalDesign:
         for name in self.labels:
             coeff_samples = coeffs.sel(coeffs=name)
             print(
-                f"""
-                {name: <30}{coeff_samples.mean().data:.2f},
-                94% HDI [{coeff_samples.quantile(0.03).data:.2f},
-                {coeff_samples.quantile(1-0.03).data:.2f}]
-                """
+                f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
             )
         # add coeff for measurement std
         coeff_samples = az.extract(
@@ -50,11 +46,7 @@ class ExperimentalDesign:
         )
         name = "sigma"
         print(
-            f"""
-            {name: <30}{coeff_samples.mean().data:.2f},
-            94% HDI [{coeff_samples.quantile(0.03).data:.2f},
-            {coeff_samples.quantile(1-0.03).data:.2f}]
-            """
+            f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
         )
 
 
