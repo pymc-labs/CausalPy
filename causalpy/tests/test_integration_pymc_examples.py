@@ -24,8 +24,11 @@ def test_did():
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
+# TODO: set up fixture for the banks dataset
+
+
 @pytest.mark.integration
-def test_did_banks():
+def test_did_banks_simple():
     treatment_time = 1930.5
     df = (
         cp.load_data("banks")
@@ -47,6 +50,42 @@ def test_did_banks():
     df_long["post_treatment"] = df_long.year >= treatment_time
     result = cp.pymc_experiments.DifferenceInDifferences(
         df_long[df_long.year.isin([1930, 1931])],
+        formula="bib ~ 1 + district + year + district:post_treatment",
+        time_variable_name="year",
+        group_variable_name="district",
+        treated="Sixth District",
+        untreated="Eighth District",
+        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+
+@pytest.mark.integration
+def test_did_banks_multi():
+    treatment_time = 1930.5
+    df = (
+        cp.load_data("banks")
+        .filter(items=["bib6", "bib8", "year"])
+        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
+        .groupby("year")
+        .median()
+    )
+    df.reset_index(level=0, inplace=True)
+    df_long = pd.melt(
+        df,
+        id_vars=["year"],
+        value_vars=["Sixth District", "Eighth District"],
+        var_name="district",
+        value_name="bib",
+    ).sort_values("year")
+    df_long["district"] = df_long["district"].astype("category")
+    df_long["unit"] = df_long["district"]
+    df_long["post_treatment"] = df_long.year >= treatment_time
+    result = cp.pymc_experiments.DifferenceInDifferences(
+        df_long,
         formula="bib ~ 1 + district + year + district:post_treatment",
         time_variable_name="year",
         group_variable_name="district",
