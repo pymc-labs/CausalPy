@@ -265,11 +265,11 @@ class DifferenceInDifferences(ExperimentalDesign):
         # Input validation ----------------------------------------------------
         # Check that `treated` appears in the module formula
         assert (
-            "treated" in formula
-        ), "A predictor column called `treated` should be in the provided dataframe"
+            "post_treatment" in formula
+        ), "A predictor called `post_treatment` should be in the dataframe"
         # Check that we have `treated` in the incoming dataframe
         assert (
-            "treated" in self.data.columns
+            "post_treatment" in self.data.columns
         ), "Require a boolean column labelling observations which are `treated`"
         # Check for `unit` in the incoming dataframe.
         # *This is only used for plotting purposes*
@@ -289,46 +289,45 @@ class DifferenceInDifferences(ExperimentalDesign):
             .I.e. the treated and untreated.
         """
 
-        # TODO: `treated` is a deterministic function of group and time, so this could
-        # be a function rather than supplied data
-
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
-        # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
         # ================================================================
 
-        time_levels = self.data[self.time_variable_name].unique()
-
         # predicted outcome for control group
-        self.x_pred_control = pd.DataFrame(
-            {
-                self.group_variable_name: [self.untreated, self.untreated],
-                self.time_variable_name: time_levels,
-                "treated": [0, 0],
-            }
+        self.x_pred_control = (
+            self.data
+            # just the untreated group
+            .query(f"district == '{self.untreated}'")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
-        self.x_pred_treatment = pd.DataFrame(
-            {
-                self.group_variable_name: [self.treated, self.treated],
-                self.time_variable_name: time_levels,
-                "treated": [0, 1],
-            }
+        self.x_pred_treatment = (
+            self.data
+            # just the treated group
+            .query(f"district == '{self.treated}'")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual
-        self.x_pred_counterfactual = pd.DataFrame(
-            {
-                self.group_variable_name: [self.treated],
-                self.time_variable_name: time_levels[1],
-                "treated": [0],
-            }
+        self.x_pred_counterfactual = (
+            self.data
+            # just the treated group
+            .query(f"district == '{self.treated}'")
+            # just the treatment period(s)
+            # TODO: the line below might need some work to be more robust
+            .query("post_treatment == True")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
+            # DO AN INTERVENTION. Set the post_treatment variable to False
+            .assign(post_treatment=False)
         )
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
@@ -340,14 +339,6 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.y_pred_treatment["posterior_predictive"].mu.isel({"obs_ind": 1})
             - self.y_pred_counterfactual["posterior_predictive"].mu.squeeze()
         )
-        # self.causal_impact = (
-        #     self.y_pred_treatment["posterior_predictive"]
-        #     .mu.isel({"obs_ind": 1})
-        #     .stack(samples=["chain", "draw"])
-        #     - self.y_pred_counterfactual["posterior_predictive"]
-        #     .mu.stack(samples=["chain", "draw"])
-        #     .squeeze()
-        # )
 
     def plot(self):
         """Plot the results"""
