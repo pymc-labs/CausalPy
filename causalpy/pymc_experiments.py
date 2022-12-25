@@ -298,10 +298,11 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_control = (
             self.data
             # just the untreated group
-            .query(f"district == '{self.untreated}'")
+            .query(f"{self.group_variable_name} == @self.untreated")  # 🔥
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
         )
+        assert not self.x_pred_control.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
 
@@ -309,10 +310,11 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_treatment = (
             self.data
             # just the treated group
-            .query(f"district == '{self.treated}'")
+            .query(f"{self.group_variable_name} == @self.treated")  # 🔥
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
         )
+        assert not self.x_pred_treatment.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
 
@@ -320,7 +322,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_counterfactual = (
             self.data
             # just the treated group
-            .query(f"district == '{self.treated}'")
+            .query(f"{self.group_variable_name} == @self.treated")  # 🔥
             # just the treatment period(s)
             # TODO: the line below might need some work to be more robust
             .query("post_treatment == True")
@@ -329,6 +331,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             # DO AN INTERVENTION. Set the post_treatment variable to False
             .assign(post_treatment=False)
         )
+        assert not self.x_pred_counterfactual.empty
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
         )

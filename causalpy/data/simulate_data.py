@@ -154,16 +154,15 @@ def generate_did():
     intervention_time = 0.5
 
     # local functions
-    def outcome(t, control_intercept, treat_intercept_delta, trend, Δ, group, treated):
+    def outcome(
+        t, control_intercept, treat_intercept_delta, trend, Δ, group, post_treatment
+    ):
         return (
             control_intercept
             + (treat_intercept_delta * group)
             + (t * trend)
-            + (Δ * treated * group)
+            + (Δ * post_treatment * group)
         )
-
-    def _is_treated(t, intervention_time, group):
-        return (t > intervention_time) * group
 
     df = pd.DataFrame(
         {
@@ -173,7 +172,7 @@ def generate_did():
         }
     )
 
-    df["treated"] = _is_treated(df["t"], intervention_time, df["group"])
+    df["post_treatment"] = df["t"] > intervention_time
 
     df["y"] = outcome(
         df["t"],
@@ -182,7 +181,7 @@ def generate_did():
         trend,
         Δ,
         df["group"],
-        df["treated"],
+        df["post_treatment"],
     )
     df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df
