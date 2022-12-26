@@ -12,7 +12,7 @@ def test_did():
     data = cp.load_data("did")
     result = cp.skl_experiments.DifferenceInDifferences(
         data,
-        formula="y ~ 1 + group + t + treated:group",
+        formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         prediction_model=LinearRegression(),
     )
