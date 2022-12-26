@@ -370,53 +370,52 @@ class DifferenceInDifferences(ExperimentalDesign):
             alpha=0.5,
             ax=ax,
         )
+
         # Plot model fit to control group
-        parts = ax.violinplot(
-            az.extract(
-                self.y_pred_control, group="posterior_predictive", var_names="mu"
-            ).values.T,
-            positions=self.x_pred_control[self.time_variable_name].values,
-            showmeans=False,
-            showmedians=False,
-            widths=0.2,
+        time_points = self.x_pred_control[self.time_variable_name].values
+        plot_xY(
+            time_points,
+            self.y_pred_control.posterior_predictive.y_hat,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C0"},
         )
-        for pc in parts["bodies"]:
-            pc.set_facecolor("C0")
-            pc.set_edgecolor("None")
-            pc.set_alpha(0.5)
 
         # Plot model fit to treatment group
-        parts = ax.violinplot(
-            az.extract(
-                self.y_pred_treatment, group="posterior_predictive", var_names="mu"
-            ).values.T,
-            positions=self.x_pred_treatment[self.time_variable_name].values,
-            showmeans=False,
-            showmedians=False,
-            widths=0.2,
+        time_points = self.x_pred_control[self.time_variable_name].values
+        plot_xY(
+            time_points,
+            self.y_pred_treatment.posterior_predictive.y_hat,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C1"},
         )
 
-        for pc in parts["bodies"]:
-            pc.set_facecolor("C1")
-            pc.set_edgecolor("None")
-            pc.set_alpha(0.5)
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
-        parts = ax.violinplot(
-            az.extract(
-                self.y_pred_counterfactual,
-                group="posterior_predictive",
-                var_names="mu",
-            ).values.T,
-            positions=self.x_pred_counterfactual[self.time_variable_name].values,
-            showmeans=False,
-            showmedians=False,
-            widths=0.2,
-        )
-        for pc in parts["bodies"]:
-            pc.set_facecolor("C2")
-            pc.set_edgecolor("None")
-            pc.set_alpha(0.5)
+        time_points = self.x_pred_counterfactual[self.time_variable_name].values
+        if len(time_points) == 1:
+            parts = ax.violinplot(
+                az.extract(
+                    self.y_pred_counterfactual,
+                    group="posterior_predictive",
+                    var_names="mu",
+                ).values.T,
+                positions=self.x_pred_counterfactual[self.time_variable_name].values,
+                showmeans=False,
+                showmedians=False,
+                widths=0.2,
+            )
+            for pc in parts["bodies"]:
+                pc.set_facecolor("C2")
+                pc.set_edgecolor("None")
+                pc.set_alpha(0.5)
+        else:
+            plot_xY(
+                time_points,
+                self.y_pred_counterfactual.posterior_predictive.y_hat,
+                ax=ax,
+                plot_hdi_kwargs={"color": "C2"},
+            )
+
         # arrow to label the causal impact
         self._plot_causal_impact_arrow(ax)
         # formatting
