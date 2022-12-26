@@ -82,7 +82,7 @@ def test_idata_property():
         group_variable_name="group",
         treated=1,
         untreated=0,
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert hasattr(result, "idata")
     assert isinstance(result.idata, az.InferenceData)

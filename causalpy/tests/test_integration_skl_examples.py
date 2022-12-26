@@ -14,7 +14,7 @@ def test_did():
         data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
-        prediction_model=LinearRegression(),
+        model=LinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.DifferenceInDifferences)
@@ -31,7 +31,7 @@ def test_rd_drinking():
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
-        prediction_model=LinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=21,
     )
     assert isinstance(df, pd.DataFrame)
@@ -48,7 +48,7 @@ def test_its():
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        prediction_model=LinearRegression(),
+        model=LinearRegression(),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.SyntheticControl)
@@ -62,7 +62,7 @@ def test_sc():
         df,
         treatment_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
-        prediction_model=cp.skl_models.WeightedProportion(),
+        model=cp.skl_models.WeightedProportion(),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.SyntheticControl)
@@ -74,7 +74,7 @@ def test_rd_linear_main_effects():
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        prediction_model=LinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=0.5,
     )
     assert isinstance(data, pd.DataFrame)
@@ -87,7 +87,7 @@ def test_rd_linear_with_interaction():
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
-        prediction_model=LinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=0.5,
     )
     assert isinstance(data, pd.DataFrame)
@@ -101,7 +101,7 @@ def test_rd_linear_with_gaussian_process():
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        prediction_model=GaussianProcessRegressor(kernel=kernel),
+        model=GaussianProcessRegressor(kernel=kernel),
         treatment_threshold=0.5,
     )
     assert isinstance(data, pd.DataFrame)

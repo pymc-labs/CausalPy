@@ -57,7 +57,7 @@ result = cp.pymc_experiments.RegressionDiscontinuity(
     df,
     formula="all ~ 1 + age + treated",
     running_variable_name="age",
-    prediction_model=cp.pymc_models.LinearRegression(),
+    model=cp.pymc_models.LinearRegression(),
     treatment_threshold=21,
     )
 

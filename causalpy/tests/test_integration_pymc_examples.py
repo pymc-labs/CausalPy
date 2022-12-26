@@ -16,7 +16,7 @@ def test_did():
         group_variable_name="group",
         treated=1,
         untreated=0,
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
@@ -55,7 +55,7 @@ def test_did_banks_simple():
         group_variable_name="district",
         treated="Sixth District",
         untreated="Eighth District",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
@@ -91,7 +91,7 @@ def test_did_banks_multi():
         group_variable_name="district",
         treated="Sixth District",
         untreated="Eighth District",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
@@ -105,7 +105,7 @@ def test_rd():
     result = cp.pymc_experiments.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.5,
     )
     assert isinstance(df, pd.DataFrame)
@@ -125,7 +125,7 @@ def test_rd_drinking():
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=21,
     )
     assert isinstance(df, pd.DataFrame)
@@ -144,7 +144,7 @@ def test_its():
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
@@ -162,7 +162,7 @@ def test_its_covid():
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
@@ -178,7 +178,7 @@ def test_sc():
         df,
         treatment_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
-        prediction_model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
@@ -204,7 +204,7 @@ def test_sc_brexit():
         df,
         treatment_time,
         formula=formula,
-        prediction_model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
@@ -220,7 +220,7 @@ def test_ancova():
         formula="post ~ 1 + C(group) + pre",
         group_variable_name="group",
         pretreatment_variable_name="pre",
-        prediction_model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
@@ -239,7 +239,7 @@ def test_geolift1():
         treatment_time,
         formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
         + Czech_Republic""",
-        prediction_model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
