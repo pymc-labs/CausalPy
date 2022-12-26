@@ -77,7 +77,7 @@ def test_idata_property():
     df = cp.load_data("did")
     result = cp.pymc_experiments.DifferenceInDifferences(
         df,
-        formula="y ~ 1 + group + t + treated:group",
+        formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         treated=1,

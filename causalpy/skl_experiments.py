@@ -190,30 +190,30 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of group and time, so this should
-        # be a function rather than supplied data
-
         # fit the model to all the data
         self.prediction_model.fit(X=self.X, y=self.y)
 
         # predicted outcome for control group
         self.x_pred_control = pd.DataFrame(
-            {"group": [0, 0], "t": [0.0, 1.0], "treated": [0, 0]}
+            {"group": [0, 0], "t": [0.0, 1.0], "post_treatment": [0, 0]}
         )
+        assert not self.x_pred_control.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = pd.DataFrame(
-            {"group": [1, 1], "t": [0.0, 1.0], "treated": [0, 1]}
+            {"group": [1, 1], "t": [0.0, 1.0], "post_treatment": [0, 1]}
         )
+        assert not self.x_pred_treatment.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual
         self.x_pred_counterfactual = pd.DataFrame(
-            {"group": [1], "t": [1.0], "treated": [0]}
+            {"group": [1], "t": [1.0], "post_treatment": [0]}
         )
+        assert not self.x_pred_counterfactual.empty
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
         )
