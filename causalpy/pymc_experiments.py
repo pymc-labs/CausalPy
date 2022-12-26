@@ -298,9 +298,13 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_control = (
             self.data
             # just the untreated group
-            .query(f"{self.group_variable_name} == @self.untreated")  # 🔥
+            .query(f"{self.group_variable_name} == @self.untreated")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_control.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
@@ -310,9 +314,13 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_treatment = (
             self.data
             # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")  # 🔥
+            .query(f"{self.group_variable_name} == @self.treated")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_treatment.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
@@ -322,14 +330,17 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_counterfactual = (
             self.data
             # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")  # 🔥
+            .query(f"{self.group_variable_name} == @self.treated")
             # just the treatment period(s)
-            # TODO: the line below might need some work to be more robust
             .query("post_treatment == True")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # DO AN INTERVENTION. Set the post_treatment variable to False
             .assign(post_treatment=False)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_counterfactual.empty
         (new_x,) = build_design_matrices(
