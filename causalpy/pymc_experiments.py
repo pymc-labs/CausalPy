@@ -15,19 +15,19 @@ az.style.use("arviz-darkgrid")
 class ExperimentalDesign:
     """Base class"""
 
-    prediction_model = None
+    model = None
     expt_type = None
 
-    def __init__(self, prediction_model=None, **kwargs):
-        if prediction_model is not None:
-            self.prediction_model = prediction_model
-        if self.prediction_model is None:
+    def __init__(self, model=None, **kwargs):
+        if model is not None:
+            self.model = model
+        if self.model is None:
             raise ValueError("fitting_model not set or passed.")
 
     @property
     def idata(self):
         """Access to the InferenceData object"""
-        return self.prediction_model.idata
+        return self.model.idata
 
     def print_coefficients(self):
         """Prints the model coefficients"""
@@ -41,9 +41,7 @@ class ExperimentalDesign:
                 f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
             )
         # add coeff for measurement std
-        coeff_samples = az.extract(
-            self.prediction_model.idata.posterior, var_names="sigma"
-        )
+        coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
         name = "sigma"
         print(
             f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
@@ -58,10 +56,10 @@ class TimeSeriesExperiment(ExperimentalDesign):
         data: pd.DataFrame,
         treatment_time: int,
         formula: str,
-        prediction_model=None,
+        model=None,
         **kwargs,
     ) -> None:
-        super().__init__(prediction_model=prediction_model, **kwargs)
+        super().__init__(model=model, **kwargs)
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
         self.datapre = data[data.index <= self.treatment_time]
@@ -86,17 +84,17 @@ class TimeSeriesExperiment(ExperimentalDesign):
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
-        self.prediction_model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+        self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         # ================================================================
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self.prediction_model.score(X=self.pre_X, y=self.pre_y)
+        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.prediction_model.predict(X=self.pre_X)
+        self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual
-        self.post_pred = self.prediction_model.predict(X=self.post_X)
+        self.post_pred = self.model.predict(X=self.post_X)
 
         # causal impact pre (ie the residuals of the model fit to observed)
         pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
@@ -242,10 +240,10 @@ class DifferenceInDifferences(ExperimentalDesign):
         group_variable_name: str,
         treated: str,
         untreated: str,
-        prediction_model=None,
+        model=None,
         **kwargs,
     ):
-        super().__init__(prediction_model=prediction_model, **kwargs)
+        super().__init__(model=model, **kwargs)
         self.data = data
         self.expt_type = "Difference in Differences"
         self.formula = formula
@@ -291,7 +289,7 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        self.model.fit(X=self.X, y=self.y, coords=COORDS)
         # ================================================================
 
         # predicted outcome for control group
@@ -308,7 +306,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         assert not self.x_pred_control.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self.prediction_model.predict(np.asarray(new_x))
+        self.y_pred_control = self.model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = (
@@ -324,7 +322,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         assert not self.x_pred_treatment.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self.prediction_model.predict(np.asarray(new_x))
+        self.y_pred_treatment = self.model.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual
         self.x_pred_counterfactual = (
@@ -346,7 +344,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual
         )
-        self.y_pred_counterfactual = self.prediction_model.predict(np.asarray(new_x))
+        self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
         # calculate causal impact
         self.causal_impact = (
@@ -489,7 +487,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
     :param formula: A statistical model formula
     :param treatment_threshold: A scalar threshold value at which the treatment
                                 is applied
-    :param prediction_model: A PyMC model
+    :param model: A PyMC model
     :param running_variable_name: The name of the predictor variable that the treatment
                                   threshold is based upon
 
@@ -504,11 +502,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
         data: pd.DataFrame,
         formula: str,
         treatment_threshold: float,
-        prediction_model=None,
+        model=None,
         running_variable_name: str = "x",
         **kwargs,
     ):
-        super().__init__(prediction_model=prediction_model, **kwargs)
+        super().__init__(model=model, **kwargs)
         self.expt_type = "Regression Discontinuity"
         self.data = data
         self.formula = formula
@@ -527,11 +525,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        self.model.fit(X=self.X, y=self.y, coords=COORDS)
         # ================================================================
 
         # score the goodness of fit to all data
-        self.score = self.prediction_model.score(X=self.X, y=self.y)
+        self.score = self.model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
         xi = np.linspace(
@@ -543,7 +541,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.prediction_model.predict(X=np.asarray(new_x))
+        self.pred = self.model.predict(X=np.asarray(new_x))
 
         # calculate discontinuity by evaluating the difference in model expectation on
         # either side of the discontinuity
@@ -558,7 +556,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.prediction_model.predict(X=np.asarray(new_x))
+        self.pred_discon = self.model.predict(X=np.asarray(new_x))
         self.discontinuity_at_threshold = (
             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
@@ -633,10 +631,10 @@ class PrePostNEGD(ExperimentalDesign):
         formula: str,
         group_variable_name: str,
         pretreatment_variable_name: str,
-        prediction_model=None,
+        model=None,
         **kwargs,
     ):
-        super().__init__(prediction_model=prediction_model, **kwargs)
+        super().__init__(model=model, **kwargs)
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
@@ -663,7 +661,7 @@ class PrePostNEGD(ExperimentalDesign):
 
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.prediction_model.fit(X=self.X, y=self.y, coords=COORDS)
+        self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
@@ -681,7 +679,7 @@ class PrePostNEGD(ExperimentalDesign):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
-        self.pred_untreated = self.prediction_model.predict(X=np.asarray(new_x))
+        self.pred_untreated = self.model.predict(X=np.asarray(new_x))
         # treated
         x_pred_untreated = pd.DataFrame(
             {
@@ -690,7 +688,7 @@ class PrePostNEGD(ExperimentalDesign):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_pred_untreated)
-        self.pred_treated = self.prediction_model.predict(X=np.asarray(new_x))
+        self.pred_treated = self.model.predict(X=np.asarray(new_x))
 
         # Evaluate causal impact as equal to the trestment effect
         self.causal_impact = self.idata.posterior["beta"].sel(
