@@ -176,6 +176,9 @@ class DifferenceInDifferences(ExperimentalDesign):
         data: pd.DataFrame,
         formula: str,
         time_variable_name: str,
+        group_variable_name: str,
+        treated: str,
+        untreated: str,
         model=None,
         **kwargs,
     ):
@@ -183,6 +186,11 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.data = data
         self.formula = formula
         self.time_variable_name = time_variable_name
+        self.group_variable_name = group_variable_name
+        self.treated = treated  # level of the group_variable_name that was treated
+        self.untreated = (
+            untreated  # level of the group_variable_name that was untreated
+        )
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -194,32 +202,66 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.model.fit(X=self.X, y=self.y)
 
         # predicted outcome for control group
-        self.x_pred_control = pd.DataFrame(
-            {"group": [0, 0], "t": [0.0, 1.0], "post_treatment": [0, 0]}
+        self.x_pred_control = (
+            self.data
+            # just the untreated group
+            .query(f"{self.group_variable_name} == @self.untreated")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_control.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.model.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
-        self.x_pred_treatment = pd.DataFrame(
-            {"group": [1, 1], "t": [0.0, 1.0], "post_treatment": [0, 1]}
+        self.x_pred_treatment = (
+            self.data
+            # just the treated group
+            .query(f"{self.group_variable_name} == @self.treated")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_treatment.empty
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.model.predict(np.asarray(new_x))
 
-        # predicted outcome for counterfactual
-        self.x_pred_counterfactual = pd.DataFrame(
-            {"group": [1], "t": [1.0], "post_treatment": [0]}
+        # predicted outcome for counterfactual. This is given by removing the influence
+        # of the interaction term between the group and the post_treatment variable
+        self.x_pred_counterfactual = (
+            self.data
+            # just the treated group
+            .query(f"{self.group_variable_name} == @self.treated")
+            # just the treatment period(s)
+            .query("post_treatment == True")
+            # drop the outcome variable
+            .drop(self.outcome_variable_name, axis=1)
+            # We may have multiple units per time point, we only want one time point
+            .groupby(self.time_variable_name)
+            .first()
+            .reset_index()
         )
         assert not self.x_pred_counterfactual.empty
         (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual
+            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
         )
+        # INTERVENTION: set the interaction term between the group and the
+        # post_treatment variable to zero. This is the counterfactual.
+        for i, label in enumerate(self.labels):
+            if "post_treatment" in label and self.group_variable_name in label:
+                new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
         # calculate causal impact
+        # This is the coefficient on the interaction term
+        # TODO: THIS IS NOT YET CORRECT
         self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
 
     def plot(self):

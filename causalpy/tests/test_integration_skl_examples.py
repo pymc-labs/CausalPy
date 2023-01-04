@@ -12,8 +12,11 @@ def test_did():
     data = cp.load_data("did")
     result = cp.skl_experiments.DifferenceInDifferences(
         data,
-        formula="y ~ 1 + group + t + group:post_treatment",
+        formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
+        group_variable_name="group",
+        treated=1,
+        untreated=0,
         model=LinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)

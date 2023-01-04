@@ -11,7 +11,7 @@ def test_did():
     df = cp.load_data("did")
     result = cp.pymc_experiments.DifferenceInDifferences(
         df,
-        formula="y ~ 1 + group + t + group:post_treatment",
+        formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         treated=1,
@@ -37,6 +37,10 @@ def test_did_banks_simple():
         .groupby("year")
         .median()
     )
+    # SET TREATMENT TIME TO ZERO =========
+    df.index = df.index - treatment_time
+    treatment_time = 0
+    # ====================================
     df.reset_index(level=0, inplace=True)
     df_long = pd.melt(
         df,
@@ -45,16 +49,18 @@ def test_did_banks_simple():
         var_name="district",
         value_name="bib",
     ).sort_values("year")
-    df_long["district"] = df_long["district"].astype("category")
     df_long["unit"] = df_long["district"]
     df_long["post_treatment"] = df_long.year >= treatment_time
+    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+
     result = cp.pymc_experiments.DifferenceInDifferences(
-        df_long[df_long.year.isin([1930, 1931])],
-        formula="bib ~ 1 + district + year + district:post_treatment",
+        # df_long[df_long.year.isin([1930, 1931])],
+        df_long[df_long.year.isin([-0.5, 0.5])],
+        formula="bib ~ 1 + district * post_treatment",
         time_variable_name="year",
         group_variable_name="district",
-        treated="Sixth District",
-        untreated="Eighth District",
+        treated=1,
+        untreated=0,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -73,6 +79,10 @@ def test_did_banks_multi():
         .groupby("year")
         .median()
     )
+    # SET TREATMENT TIME TO ZERO =========
+    df.index = df.index - treatment_time
+    treatment_time = 0
+    # ====================================
     df.reset_index(level=0, inplace=True)
     df_long = pd.melt(
         df,
@@ -81,16 +91,17 @@ def test_did_banks_multi():
         var_name="district",
         value_name="bib",
     ).sort_values("year")
-    df_long["district"] = df_long["district"].astype("category")
     df_long["unit"] = df_long["district"]
     df_long["post_treatment"] = df_long.year >= treatment_time
+    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+
     result = cp.pymc_experiments.DifferenceInDifferences(
         df_long,
-        formula="bib ~ 1 + district + year + district:post_treatment",
+        formula="bib ~ 1 + year + district + post_treatment + district:post_treatment",
         time_variable_name="year",
         group_variable_name="district",
-        treated="Sixth District",
-        untreated="Eighth District",
+        treated=1,
+        untreated=0,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
