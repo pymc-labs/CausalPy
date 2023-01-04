@@ -122,7 +122,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapre.index,
             self.pre_pred["posterior_predictive"].mu,
             ax=ax[0],
-            include_label=False,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -137,7 +136,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index,
             self.post_pred["posterior_predictive"].mu,
             ax=ax[0],
-            include_label=False,
             # label="Synthetic control",
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -152,9 +150,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 self.post_pred, group="posterior_predictive", var_names="mu"
             ).mean("sample"),
             y2=np.squeeze(self.post_y),
-            color="C2",
+            color="C0",
             alpha=0.25,
-            # label="Causal impact",
         )
         handles.append(h)
         labels.append("Causal impact")
@@ -171,21 +168,19 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapre.index,
             self.pre_impact,
             ax=ax[1],
-            include_label=False,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact,
             ax=ax[1],
-            include_label=False,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
             y1=self.post_impact.mean(["chain", "draw"]),
-            color="C2",
+            color="C0",
             alpha=0.25,
             label="Causal impact",
         )
@@ -197,7 +192,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index,
             self.post_impact_cumulative,
             ax=ax[2],
-            include_label=False,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")
@@ -209,7 +203,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 ls="-",
                 lw=3,
                 color="r",
-                # label="Treatment time",
             )
 
         ax[0].legend(
@@ -434,7 +427,7 @@ class DifferenceInDifferences(ExperimentalDesign):
                 widths=0.2,
             )
             for pc in parts["bodies"]:
-                pc.set_facecolor("C2")
+                pc.set_facecolor("C0")
                 pc.set_edgecolor("None")
                 pc.set_alpha(0.5)
         else:
