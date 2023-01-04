@@ -136,7 +136,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index,
             self.post_pred["posterior_predictive"].mu,
             ax=ax[0],
-            # label="Synthetic control",
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
