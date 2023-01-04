@@ -340,7 +340,8 @@ class DifferenceInDifferences(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.model.predict(np.asarray(new_x))
 
-        # predicted outcome for counterfactual
+        # predicted outcome for counterfactual. This is given by removing the influence
+        # of the interaction term between the group and the post_treatment variable
         self.x_pred_counterfactual = (
             self.data
             # just the treated group
@@ -349,8 +350,6 @@ class DifferenceInDifferences(ExperimentalDesign):
             .query("post_treatment == True")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
-            # DO AN INTERVENTION. Set the post_treatment variable to False
-            .assign(post_treatment=False)
             # We may have multiple units per time point, we only want one time point
             .groupby(self.time_variable_name)
             .first()
@@ -358,15 +357,21 @@ class DifferenceInDifferences(ExperimentalDesign):
         )
         assert not self.x_pred_counterfactual.empty
         (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual
+            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
         )
+        # INTERVENTION: set the interaction term between the group and the
+        # post_treatment variable to zero. This is the counterfactual.
+        for i, label in enumerate(self.labels):
+            if "post_treatment" in label and self.group_variable_name in label:
+                new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
-        # calculate causal impact
-        self.causal_impact = (
-            self.y_pred_treatment["posterior_predictive"].mu.isel({"obs_ind": 1})
-            - self.y_pred_counterfactual["posterior_predictive"].mu.squeeze()
-        )
+        # calculate causal impact.
+        # This is the coefficient on the interaction term
+        coeff_names = self.idata.posterior.coords["coeffs"].data
+        for i, label in enumerate(coeff_names):
+            if "post_treatment" in label and self.group_variable_name in label:
+                self.causal_impact = self.idata.posterior["beta"].isel({"coeffs": i})
 
     def plot(self):
         """Plot the results.
