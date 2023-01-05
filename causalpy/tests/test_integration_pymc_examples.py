@@ -14,8 +14,6 @@ def test_did():
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
-        treated=1,
-        untreated=0,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -59,8 +57,6 @@ def test_did_banks_simple():
         formula="bib ~ 1 + district * post_treatment",
         time_variable_name="year",
         group_variable_name="district",
-        treated=1,
-        untreated=0,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -100,8 +96,6 @@ def test_did_banks_multi():
         formula="bib ~ 1 + year + district + post_treatment + district:post_treatment",
         time_variable_name="year",
         group_variable_name="district",
-        treated=1,
-        untreated=0,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
