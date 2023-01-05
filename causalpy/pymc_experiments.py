@@ -254,8 +254,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         formula: str,
         time_variable_name: str,
         group_variable_name: str,
-        treated: str,
-        untreated: str,
         model=None,
         **kwargs,
     ):
@@ -265,10 +263,6 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
-        self.treated = treated  # level of the group_variable_name that was treated
-        self.untreated = (
-            untreated  # level of the group_variable_name that was untreated
-        )
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -277,11 +271,9 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.outcome_variable_name = y.design_info.column_names[0]
 
         # Input validation ----------------------------------------------------
-        # Check that `treated` appears in the module formula
         assert (
             "post_treatment" in formula
         ), "A predictor called `post_treatment` should be in the dataframe"
-        # Check that we have `treated` in the incoming dataframe
         assert (
             "post_treatment" in self.data.columns
         ), "Require a boolean column labelling observations which are `treated`"
@@ -293,26 +285,22 @@ class DifferenceInDifferences(ExperimentalDesign):
         Require a `unit` column to label unique units.
         This is used for plotting purposes
         """
-        # Check that `group_variable_name` has TWO levels, representing the
-        # treated/untreated. But it does not matter what the actual names of
-        # the levels are.
-        assert (
-            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
+        # Check that `group_variable_name` is dummy coded. It should be 0 or 1
+        assert not set(self.data[self.group_variable_name]).difference(
+            set([0, 1])
         ), f"""
-            There must be 2 levels of the grouping variable {self.group_variable_name}
-            .I.e. the treated and untreated.
+            The grouping variable {self.group_variable_name} should be dummy coded.
+            Consisting of 0's and 1's only.
         """
 
-        # DEVIATION FROM SKL EXPERIMENT CODE =============================
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        # ================================================================
 
         # predicted outcome for control group
         self.x_pred_control = (
             self.data
             # just the untreated group
-            .query(f"{self.group_variable_name} == @self.untreated")
+            .query(f"{self.group_variable_name} == 0")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
@@ -328,7 +316,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_treatment = (
             self.data
             # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")
+            .query(f"{self.group_variable_name} == 1")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
@@ -345,7 +333,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.x_pred_counterfactual = (
             self.data
             # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")
+            .query(f"{self.group_variable_name} == 1")
             # just the treatment period(s)
             .query("post_treatment == True")
             # drop the outcome variable
