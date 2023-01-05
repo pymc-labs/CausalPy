@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
+from causalpy.custom_exceptions import BadIndexException
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -193,9 +194,9 @@ def test_sc():
 
 @pytest.mark.integration
 def test_sc_input_error():
-    """Test that an error is raised if the data index is not datetime and the
-    treatment time is pd.Timestamp."""
-    with pytest.raises(AssertionError):
+    """Confirm that a BadIndexException is raised treatment_time is pd.Timestamp
+    and df.index is not pd.DatetimeIndex."""
+    with pytest.raises(BadIndexException):
         df = cp.load_data("sc")
         treatment_time = pd.to_datetime("2016 June 24")
         _ = cp.pymc_experiments.SyntheticControl(
@@ -234,9 +235,9 @@ def test_sc_brexit():
 
 @pytest.mark.integration
 def test_sc_brexit_input_error():
-    """Test that an error is raised if the data index is datetime and the treatment time
-    is not pd.Timestamp."""
-    with pytest.raises(AssertionError):
+    """Confirm a BadIndexException is raised if the data index is datetime and the
+    treatment time is not pd.Timestamp."""
+    with pytest.raises(BadIndexException):
         df = cp.load_data("brexit")
         df["Time"] = pd.to_datetime(df["Time"])
         df.set_index("Time", inplace=True)

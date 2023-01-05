@@ -8,6 +8,7 @@ import seaborn as sns
 import xarray as xr
 from patsy import build_design_matrices, dmatrices
 
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import plot_xY
 
 LEGEND_FONT_SIZE = 12
@@ -117,14 +118,18 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
     def _input_validation(self, data, treatment_time):
         """Validate the input data for correctness"""
-        if isinstance(data.index, pd.DatetimeIndex):
-            assert isinstance(
-                treatment_time, pd.Timestamp
-            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
-        else:
-            assert (
-                isinstance(treatment_time, pd.Timestamp) is False
-            ), "If treatment_time is pd.Timestamp, this only makese sense if data.index is DatetimeIndex."  # noqa: E501
+        if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
+            treatment_time, pd.Timestamp
+        ):
+            raise BadIndexException(
+                "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
+            )
+        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
+            treatment_time, pd.Timestamp
+        ):
+            raise BadIndexException(
+                "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
+            )
 
     def plot(self):
 
