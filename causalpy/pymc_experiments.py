@@ -1,3 +1,5 @@
+from typing import Union
+
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -54,7 +56,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: int | float | pd.Timestamp,
+        treatment_time: Union[int, float, pd.Timestamp],
         formula: str,
         model=None,
         **kwargs,
