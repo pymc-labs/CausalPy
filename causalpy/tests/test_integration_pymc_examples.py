@@ -192,6 +192,21 @@ def test_sc():
 
 
 @pytest.mark.integration
+def test_sc_input_error():
+    """Test that an error is raised if the data index is not datetime and the
+    treatment time is pd.Timestamp."""
+    with pytest.raises(AssertionError):
+        df = cp.load_data("sc")
+        treatment_time = pd.to_datetime("2016 June 24")
+        _ = cp.pymc_experiments.SyntheticControl(
+            df,
+            treatment_time,
+            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        )
+
+
+@pytest.mark.integration
 def test_sc_brexit():
     df = cp.load_data("brexit")
     df["Time"] = pd.to_datetime(df["Time"])

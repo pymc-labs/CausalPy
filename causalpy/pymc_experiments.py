@@ -60,6 +60,17 @@ class TimeSeriesExperiment(ExperimentalDesign):
         **kwargs,
     ) -> None:
         super().__init__(model=model, **kwargs)
+
+        # Input validation
+        if isinstance(data.index, pd.DatetimeIndex):
+            assert isinstance(
+                treatment_time, pd.Timestamp
+            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
+        else:
+            assert (
+                isinstance(treatment_time, pd.Timestamp) is False
+            ), "If treatment_time is pd.Timestamp, this only makese sense if data.index is DatetimeIndex."  # noqa: E501
+
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
         self.datapre = data[data.index <= self.treatment_time]
@@ -80,12 +91,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
-
-        # Input validation
-        if isinstance(data.index, pd.DatetimeIndex):
-            assert isinstance(
-                treatment_time, pd.Timestamp
-            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
