@@ -62,16 +62,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         **kwargs,
     ) -> None:
         super().__init__(model=model, **kwargs)
-
-        # Input validation
-        if isinstance(data.index, pd.DatetimeIndex):
-            assert isinstance(
-                treatment_time, pd.Timestamp
-            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
-        else:
-            assert (
-                isinstance(treatment_time, pd.Timestamp) is False
-            ), "If treatment_time is pd.Timestamp, this only makese sense if data.index is DatetimeIndex."  # noqa: E501
+        self._input_validation(data, treatment_time)
 
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
@@ -123,6 +114,17 @@ class TimeSeriesExperiment(ExperimentalDesign):
 
         # cumulative impact post
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
+
+    def _input_validation(self, data, treatment_time):
+        """Validate the input data for correctness"""
+        if isinstance(data.index, pd.DatetimeIndex):
+            assert isinstance(
+                treatment_time, pd.Timestamp
+            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
+        else:
+            assert (
+                isinstance(treatment_time, pd.Timestamp) is False
+            ), "If treatment_time is pd.Timestamp, this only makese sense if data.index is DatetimeIndex."  # noqa: E501
 
     def plot(self):
 
@@ -276,35 +278,14 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
+        self._input_validation()
+
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
-
-        # Input validation ----------------------------------------------------
-        assert (
-            "post_treatment" in formula
-        ), "A predictor called `post_treatment` should be in the dataframe"
-        assert (
-            "post_treatment" in self.data.columns
-        ), "Require a boolean column labelling observations which are `treated`"
-        # Check for `unit` in the incoming dataframe.
-        # *This is only used for plotting purposes*
-        assert (
-            "unit" in self.data.columns
-        ), """
-        Require a `unit` column to label unique units.
-        This is used for plotting purposes
-        """
-        # Check that `group_variable_name` is dummy coded. It should be 0 or 1
-        assert not set(self.data[self.group_variable_name]).difference(
-            set([0, 1])
-        ), f"""
-            The grouping variable {self.group_variable_name} should be dummy coded.
-            Consisting of 0's and 1's only.
-        """
 
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.model.fit(X=self.X, y=self.y, coords=COORDS)
@@ -373,6 +354,30 @@ class DifferenceInDifferences(ExperimentalDesign):
         for i, label in enumerate(coeff_names):
             if "post_treatment" in label and self.group_variable_name in label:
                 self.causal_impact = self.idata.posterior["beta"].isel({"coeffs": i})
+
+    def _input_validation(self):
+        """Validate the input data for correctness"""
+        assert (
+            "post_treatment" in self.formula
+        ), "A predictor called `post_treatment` should be in the dataframe"
+        assert (
+            "post_treatment" in self.data.columns
+        ), "Require a boolean column labelling observations which are `treated`"
+        # Check for `unit` in the incoming dataframe.
+        # *This is only used for plotting purposes*
+        assert (
+            "unit" in self.data.columns
+        ), """
+        Require a `unit` column to label unique units.
+        This is used for plotting purposes
+        """
+        # Check that `group_variable_name` is dummy coded. It should be 0 or 1
+        assert not set(self.data[self.group_variable_name]).difference(
+            set([0, 1])
+        ), f"""
+            The grouping variable {self.group_variable_name} should be dummy coded.
+            Consisting of 0's and 1's only.
+        """
 
     def plot(self):
         """Plot the results.
@@ -686,6 +691,7 @@ class PrePostNEGD(ExperimentalDesign):
         self.formula = formula
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
+        self._input_validation()
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -693,17 +699,6 @@ class PrePostNEGD(ExperimentalDesign):
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
-
-        # Input validation ----------------------------------------------------
-        # Check that `group_variable_name` has TWO levels, representing the
-        # treated/untreated. But it does not matter what the actual names of
-        # the levels are.
-        assert (
-            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
-        ), f"""
-            There must be 2 levels of the grouping variable {self.group_variable_name}
-            .I.e. the treated and untreated.
-        """
 
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
@@ -742,6 +737,18 @@ class PrePostNEGD(ExperimentalDesign):
         )
 
         # ================================================================
+
+    def _input_validation(self):
+        """Validate the input data for correctness"""
+        # Check that `group_variable_name` has TWO levels, representing the
+        # treated/untreated. But it does not matter what the actual names of
+        # the levels are.
+        assert (
+            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
+        ), f"""
+            There must be 2 levels of the grouping variable {self.group_variable_name}
+            .I.e. the treated and untreated.
+        """
 
     def plot(self):
         """Plot the results"""
