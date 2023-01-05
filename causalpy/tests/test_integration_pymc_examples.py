@@ -218,6 +218,31 @@ def test_sc_brexit():
 
 
 @pytest.mark.integration
+def test_sc_brexit_input_error():
+    """Test that an error is raised if the data index is datetime and the treatment time
+    is not pd.Timestamp."""
+    with pytest.raises(AssertionError):
+        df = cp.load_data("brexit")
+        df["Time"] = pd.to_datetime(df["Time"])
+        df.set_index("Time", inplace=True)
+        df = df.iloc[df.index > "2009", :]
+        treatment_time = "2016 June 24"  # NOTE This is not of type pd.Timestamp
+        df = df.drop(["Japan", "Italy", "US", "Spain"], axis=1)
+        target_country = "UK"
+        all_countries = df.columns
+        other_countries = all_countries.difference({target_country})
+        all_countries = list(all_countries)
+        other_countries = list(other_countries)
+        formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
+        _ = cp.pymc_experiments.SyntheticControl(
+            df,
+            treatment_time,
+            formula=formula,
+            model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        )
+
+
+@pytest.mark.integration
 def test_ancova():
     df = cp.load_data("anova1")
     result = cp.pymc_experiments.PrePostNEGD(

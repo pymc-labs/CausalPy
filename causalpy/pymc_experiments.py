@@ -54,7 +54,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: int,
+        treatment_time: int | float | pd.Timestamp,
         formula: str,
         model=None,
         **kwargs,
@@ -80,6 +80,12 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
+
+        # Input validation
+        if isinstance(data.index, pd.DatetimeIndex):
+            assert isinstance(
+                treatment_time, pd.Timestamp
+            ), "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
