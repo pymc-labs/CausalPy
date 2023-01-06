@@ -166,7 +166,6 @@ def test_its_covid():
         .assign(date=lambda x: pd.to_datetime(x["date"]))
         .set_index("date")
     )
-    df = df.set_index("date")
     treatment_time = pd.to_datetime("2020-01-01")
     result = cp.pymc_experiments.SyntheticControl(
         df,
