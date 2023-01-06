@@ -1,3 +1,0 @@
-include *.md *.rst
-include LICENSE
-include requirements.txt
