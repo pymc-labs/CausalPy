@@ -1,7 +1,95 @@
+[build-system]
+# Minimum requirements for the build system to execute.
+build-backend = "setuptools.build_meta"
+requires = ["setuptools", "wheel"]  # PEP 508 specifications.
+
+# This is configuration specific to the `setuptools` build backend.
+# If you are using a different build backend, you will need to change this.
+[tool.setuptools]
+# define all packages here
+py-modules = ['causalpy', 'causalpy.data']
+
+[project]
+name = "CausalPy"
+version = "0.0.9"
+description = "Causal inference for quasi-experiments in Python"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.io" }]
+requires-python = ">=3.8"
+
+# This field lists other packages that your project depends on to run.
+# Any package you put here will be installed by pip when your project is
+# installed, so they must be valid existing projects.
+#
+# For an analysis of this field vs pip's requirements files see:
+# https://packaging.python.org/discussions/install-requires-vs-requirements/
+dependencies = [
+    "arviz>=0.14.0",
+    "graphviz",
+    "ipython!=8.7.0",
+    "matplotlib>=3.5.3",
+    "numpy",
+    "pandas",
+    "patsy",
+    "pymc>=4.0.0",
+    "scikit-learn>=1",
+    "scipy",
+    "seaborn>=0.11.2",
+    "xarray>=v2022.11.0",
+]
+
+# List additional groups of dependencies here (e.g. development dependencies). Users
+# will be able to install these using the "extras" syntax, for example:
+#
+#   $ pip install sampleproject[dev]
+#
+# Similar to `dependencies` above, these must be valid existing projects.
+[project.optional-dependencies]
+dev = [
+    "pathlib",
+    "pre-commit",
+    "twine",
+    "interrogate",
+    ]
+docs = ["ipykernel",
+    "linkify-it-py",
+    "myst_parser",
+    "nbsphinx",
+    "pathlib",
+    "sphinx",
+    "sphinx-autodoc-typehints",
+    "sphinx-design",
+    "sphinx-rtd-theme",
+    "statsmodels",
+    ]
+lint = ["black>=22.3.0",
+    "flake8>=4.0.1",
+    "interrogate>=1.5.0",
+    "isort>=5.10.1",
+    "nbqa>=1.5.3",
+    "pre-commit>=2.19."
+    ]
+test = [
+    "pytest",
+    "pytest-cov",
+    ]
+
+[metadata]
+description-file = 'README.md'
+license_files = 'LICENSE'
+
+[project.urls]
+Homepage = "https://github.com/pymc-labs/CausalPy"
+"Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
+"Source" = "https://github.com/pymc-labs/CausalPy"
+
+[tool.black]
+line_length = 88
+
 [tool.isort]
 profile = "black"
 skip_gitignore = true
-# known_third_party = arviz,matplotlib,numpy,pandas,patsy,pymc,pytest,scipy,seaborn,setuptools,sklearn,statsmodels,xarray
 
 [tool.pytest.ini_options]
 addopts = [
