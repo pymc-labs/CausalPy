@@ -11,7 +11,7 @@ packages = ['causalpy', 'causalpy.data']
 
 [project]
 name = "CausalPy"
-version = "0.0.10"
+version = "0.0.10b"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = {file = "LICENSE"}
