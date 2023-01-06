@@ -25,8 +25,15 @@ pip install -e .
 4. Install development dependencies
 
 ```
-pip install -r requirements-dev.txt
-pip install -r requirements-docs.txt
+pip install causalpy[dev]
+pip install causalpy[docs]
+```
+
+If that fails, try:
+
+```
+pip install 'causalpy[dev]'
+pip install 'causalpy[docs]'
 ```
 
 It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, I run `brew install pandoc`.
@@ -54,7 +61,7 @@ cd docs
 make html
 ```
 
-Sometimes not all changes are recognised. In that case run:
+Sometimes not all changes are recognised. In that case run this (again from within the `docs` folder):
 
 ```bash
 make clean && make html
@@ -70,16 +77,16 @@ The `.readthedocs.yaml` file contains the configurations for the remote build.
 
 If there are autodoc issues/errors in remote builds of the docs, we need to add all package dependencies (in `requirements.txt`) into the list `autodoc_mock_imports` in `docs/config.py`.
 
-## New releases [work in progress]
+## New releases
 
 ### Test release to `test.pypi.org` (manual)
 
-1. Bump the release version in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
-2. Build locally and upload to test.pypi.org. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
+1. Bump the release version in `causalpy/version.py` and `pyproject.toml`.
+2. Build locally and upload to test.pypi.org. Full instructions here https://packaging.python.org/en/latest/tutorials/packaging-projects/. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
 ```bash
 rm -rf dist
-python setup.py sdist
-twine upload --repository testpypi dist/*
+python3 -m build
+python3 -m twine upload --repository testpypi dist/*
 ```
 3. At this point the updated build is available on test.pypi.org. We can test that this is working as expected by installing (into a test environment) from test.pypi.org with
 
@@ -93,14 +100,14 @@ python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-u
 
 ### Actual release to `pypi.org` (manual)
 
-1. Bump the release version (if not done in the previous step) in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
+1. Bump the release version in `causalpy/version.py` and `pyproject.toml` (if not done in the previous step). This is automatically read by `setup.py` and `docs/config.py`.
 2. Push this to a branch, open a pull request, and merge into main.
 3. Manually draft a new release [here](https://github.com/pymc-labs/CausalPy/releases), making sure to hit 'generate release notes'.
 4. Build locally and upload to pypi.org. In the root directory:
 ```bash
 rm -rf dist
-python setup.py sdist
-twine upload dist/*
+python3 -m build
+python3 -m twine upload dist/*
 ```
 5. Readthedocs:
   - Docs should be built remotely every time there is a pull request
