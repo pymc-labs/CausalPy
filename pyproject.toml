@@ -11,7 +11,7 @@ py-modules = ['causalpy', 'causalpy.data']
 
 [project]
 name = "CausalPy"
-dynamic = ["version"]
+version = "0.0.9"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -38,10 +38,6 @@ dependencies = [
     "seaborn>=0.11.2",
     "xarray>=v2022.11.0",
 ]
-
-# get the version from causalpy.__version__
-[tool.setuptools.dynamic]
-version = {attr = "causalpy.__version__"}
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
 # will be able to install these using the "extras" syntax, for example:
