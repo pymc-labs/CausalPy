@@ -25,8 +25,15 @@ pip install -e .
 4. Install development dependencies
 
 ```
-pip install -r requirements-dev.txt
-pip install -r requirements-docs.txt
+pip install causalpy[dev]
+pip install causalpy[docs]
+```
+
+If that fails, try:
+
+```
+pip install 'causalpy[dev]'
+pip install 'causalpy[docs]'
 ```
 
 It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, I run `brew install pandoc`.
