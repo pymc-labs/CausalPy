@@ -1,17 +1,17 @@
 [build-system]
 # Minimum requirements for the build system to execute.
 build-backend = "setuptools.build_meta"
-requires = ["setuptools", "wheel"]  # PEP 508 specifications.
+requires = ["setuptools>=61.0"]
 
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
 [tool.setuptools]
 # define all packages here
-py-modules = ['causalpy', 'causalpy.data']
+packages = ['causalpy', 'causalpy.data']
 
 [project]
 name = "CausalPy"
-version = "0.0.9"
+version = "0.0.10"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = {file = "LICENSE"}

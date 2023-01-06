@@ -81,12 +81,12 @@ If there are autodoc issues/errors in remote builds of the docs, we need to add 
 
 ### Test release to `test.pypi.org` (manual)
 
-1. Bump the release version in `causalpy/version.py`.
-2. Build locally and upload to test.pypi.org. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
+1. Bump the release version in `causalpy/version.py` and `pyproject.toml`.
+2. Build locally and upload to test.pypi.org. Full instructions here https://packaging.python.org/en/latest/tutorials/packaging-projects/. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
 ```bash
 rm -rf dist
-python setup.py sdist
-twine upload --repository testpypi dist/*
+python3 -m build
+python3 -m twine upload --repository testpypi dist/*
 ```
 3. At this point the updated build is available on test.pypi.org. We can test that this is working as expected by installing (into a test environment) from test.pypi.org with
 
@@ -100,14 +100,14 @@ python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-u
 
 ### Actual release to `pypi.org` (manual)
 
-1. Bump the release version (if not done in the previous step) in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
+1. Bump the release version in `causalpy/version.py` and `pyproject.toml` (if not done in the previous step). This is automatically read by `setup.py` and `docs/config.py`.
 2. Push this to a branch, open a pull request, and merge into main.
 3. Manually draft a new release [here](https://github.com/pymc-labs/CausalPy/releases), making sure to hit 'generate release notes'.
 4. Build locally and upload to pypi.org. In the root directory:
 ```bash
 rm -rf dist
-python setup.py sdist
-twine upload dist/*
+python3 -m build
+python3 -m twine upload dist/*
 ```
 5. Readthedocs:
   - Docs should be built remotely every time there is a pull request
