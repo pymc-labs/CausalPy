@@ -4,12 +4,12 @@ init:
 	python -m pip install -e .
 
 lint:
-	pip install -r requirements-lint.txt
+	pip install causalpy[lint]
 	isort .
 	black .
 
 check_lint:
-	pip install -r requirements-lint.txt
+	pip install causalpy[lint]
 	flake8 .
 	isort --check-only .
 	black --diff --check --fast .
@@ -18,5 +18,5 @@ check_lint:
 	interrogate .
 
 test:
-	pip install -r requirements-test.txt
+	pip install causalpy[test]
 	pytest
