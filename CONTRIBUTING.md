@@ -61,7 +61,7 @@ cd docs
 make html
 ```
 
-Sometimes not all changes are recognised. In that case run:
+Sometimes not all changes are recognised. In that case run this (again from within the `docs` folder):
 
 ```bash
 make clean && make html
