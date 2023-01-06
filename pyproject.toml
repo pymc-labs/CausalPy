@@ -41,7 +41,7 @@ dependencies = [
 
 # get the version from causalpy.__version__
 [tool.setuptools.dynamic]
-version = {attr = "package.__version__"}
+version = {attr = "causalpy.__version__"}
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
 # will be able to install these using the "extras" syntax, for example:

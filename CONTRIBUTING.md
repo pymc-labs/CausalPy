@@ -77,11 +77,11 @@ The `.readthedocs.yaml` file contains the configurations for the remote build.
 
 If there are autodoc issues/errors in remote builds of the docs, we need to add all package dependencies (in `requirements.txt`) into the list `autodoc_mock_imports` in `docs/config.py`.
 
-## New releases [work in progress]
+## New releases
 
 ### Test release to `test.pypi.org` (manual)
 
-1. Bump the release version in `causalpy/version.py`. This is automatically read by `setup.py` and `docs/config.py`.
+1. Bump the release version in `causalpy/version.py`.
 2. Build locally and upload to test.pypi.org. _Note that this requires username and password for test.pypi.org_. In the root directory type the following:
 ```bash
 rm -rf dist
