@@ -1,5 +1,7 @@
 [tool.isort]
 profile = "black"
+skip_gitignore = true
+# known_third_party = arviz,matplotlib,numpy,pandas,patsy,pymc,pytest,scipy,seaborn,setuptools,sklearn,statsmodels,xarray
 
 [tool.pytest.ini_options]
 addopts = [
