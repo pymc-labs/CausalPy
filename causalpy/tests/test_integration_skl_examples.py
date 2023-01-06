@@ -43,9 +43,11 @@ def test_rd_drinking():
 
 @pytest.mark.integration
 def test_its():
-    df = cp.load_data("its")
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
+    df = (
+        cp.load_data("its")
+        .assign(date=lambda x: pd.to_datetime(x["date"]))
+        .set_index("date")
+    )
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.skl_experiments.SyntheticControl(
         df,

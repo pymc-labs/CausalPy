@@ -142,9 +142,11 @@ def test_rd_drinking():
 
 @pytest.mark.integration
 def test_its():
-    df = cp.load_data("its")
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
+    df = (
+        cp.load_data("its")
+        .assign(date=lambda x: pd.to_datetime(x["date"]))
+        .set_index("date")
+    )
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.pymc_experiments.SyntheticControl(
         df,
@@ -160,9 +162,11 @@ def test_its():
 
 @pytest.mark.integration
 def test_its_covid():
-    df = cp.load_data("covid")
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.set_index("date")
+    df = (
+        cp.load_data("covid")
+        .assign(date=lambda x: pd.to_datetime(x["date"]))
+        .set_index("date")
+    )
     treatment_time = pd.to_datetime("2020-01-01")
     result = cp.pymc_experiments.SyntheticControl(
         df,
@@ -209,12 +213,14 @@ def test_sc_input_error():
 
 @pytest.mark.integration
 def test_sc_brexit():
-    df = cp.load_data("brexit")
-    df["Time"] = pd.to_datetime(df["Time"])
-    df.set_index("Time", inplace=True)
-    df = df.iloc[df.index > "2009", :]
+    df = (
+        cp.load_data("brexit")
+        .assign(Time=lambda x: pd.to_datetime(x["Time"]))
+        .set_index("Time")
+        .loc[lambda x: x.index >= "2009-01-01"]
+        .drop(["Japan", "Italy", "US", "Spain"], axis=1)
+    )
     treatment_time = pd.to_datetime("2016 June 24")
-    df = df.drop(["Japan", "Italy", "US", "Spain"], axis=1)
     target_country = "UK"
     all_countries = df.columns
     other_countries = all_countries.difference({target_country})
@@ -276,9 +282,11 @@ def test_ancova():
 
 @pytest.mark.integration
 def test_geolift1():
-    df = cp.load_data("geolift1")
-    df["time"] = pd.to_datetime(df["time"])
-    df.set_index("time", inplace=True)
+    df = (
+        cp.load_data("geolift1")
+        .assign(time=lambda x: pd.to_datetime(x["time"]))
+        .set_index("time")
+    )
     treatment_time = pd.to_datetime("2022-01-01")
     result = cp.pymc_experiments.SyntheticControl(
         df,
