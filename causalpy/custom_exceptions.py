@@ -4,3 +4,18 @@ class BadIndexException(Exception):
 
     def __init__(self, message):
         self.message = message
+
+
+class FormulaException(Exception):
+    """Exception raised given when there is some error in a user-provided model
+    formula"""
+
+    def __init__(self, message):
+        self.message = message
+
+
+class DataException(Exception):
+    """Exception raised given when there is some error in user-provided dataframe"""
+
+    def __init__(self, message):
+        self.message = message

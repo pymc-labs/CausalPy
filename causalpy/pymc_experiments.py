@@ -8,8 +8,13 @@ import seaborn as sns
 import xarray as xr
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.custom_exceptions import BadIndexException
+from causalpy.custom_exceptions import (
+    BadIndexException,
+    DataException,
+    FormulaException,
+)
 from causalpy.plot_utils import plot_xY
+from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
@@ -117,7 +122,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def _input_validation(self, data, treatment_time):
-        """Validate the input data for correctness"""
+        """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -361,28 +366,27 @@ class DifferenceInDifferences(ExperimentalDesign):
                 self.causal_impact = self.idata.posterior["beta"].isel({"coeffs": i})
 
     def _input_validation(self):
-        """Validate the input data for correctness"""
-        assert (
-            "post_treatment" in self.formula
-        ), "A predictor called `post_treatment` should be in the dataframe"
-        assert (
-            "post_treatment" in self.data.columns
-        ), "Require a boolean column labelling observations which are `treated`"
-        # Check for `unit` in the incoming dataframe.
-        # *This is only used for plotting purposes*
-        assert (
-            "unit" in self.data.columns
-        ), """
-        Require a `unit` column to label unique units.
-        This is used for plotting purposes
-        """
-        # Check that `group_variable_name` is dummy coded. It should be 0 or 1
-        assert not set(self.data[self.group_variable_name]).difference(
-            set([0, 1])
-        ), f"""
-            The grouping variable {self.group_variable_name} should be dummy coded.
-            Consisting of 0's and 1's only.
-        """
+        """Validate the input data and model formula for correctness"""
+        if "post_treatment" not in self.formula:
+            raise FormulaException(
+                "A predictor called `post_treatment` should be in the formula"
+            )
+
+        if "post_treatment" not in self.data.columns:
+            raise DataException(
+                "Require a boolean column labelling observations which are `treated`"
+            )
+
+        if "unit" not in self.data.columns:
+            raise DataException(
+                "Require a `unit` column to label unique units. This is used for plotting purposes"  # noqa: E501
+            )
+
+        if _is_variable_dummy_coded(self.data[self.group_variable_name]) is False:
+            raise DataException(
+                f"""The grouping variable {self.group_variable_name} should be dummy
+                coded. Consisting of 0's and 1's only."""
+            )
 
     def plot(self):
         """Plot the results.
@@ -744,16 +748,17 @@ class PrePostNEGD(ExperimentalDesign):
         # ================================================================
 
     def _input_validation(self):
-        """Validate the input data for correctness"""
+        """Validate the input data and model formula for correctness"""
         # Check that `group_variable_name` has TWO levels, representing the
         # treated/untreated. But it does not matter what the actual names of
         # the levels are.
-        assert (
-            len(pd.Categorical(self.data[self.group_variable_name]).categories) == 2
-        ), f"""
-            There must be 2 levels of the grouping variable {self.group_variable_name}
-            .I.e. the treated and untreated.
-        """
+        if not _series_has_2_levels(self.data[self.group_variable_name]):
+            raise ValueError(
+                f"""
+                There must be 2 levels of the grouping variable
+                {self.group_variable_name}. I.e. the treated and untreated.
+                """
+            )
 
     def plot(self):
         """Plot the results"""
