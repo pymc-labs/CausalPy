@@ -2,7 +2,7 @@
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
     - repo: https://github.com/pre-commit/pre-commit-hooks
-      rev: v4.3.0
+      rev: v4.4.0
       hooks:
           - id: trailing-whitespace
             exclude_types: [svg]
@@ -11,21 +11,21 @@ repos:
           - id: check-yaml
           - id: check-added-large-files
     - repo: https://github.com/pycqa/isort
-      rev: 5.11.2
+      rev: 5.11.4
       hooks:
           - id: isort
             args: [--profile, black]
             types: [python]
     - repo: https://github.com/ambv/black
-      rev: 22.10.0
+      rev: 22.12.0
       hooks:
           - id: black
     - repo: https://github.com/pycqa/flake8
-      rev: 3.9.2
+      rev: 6.0.0
       hooks:
           - id: flake8
     - repo: https://github.com/nbQA-dev/nbQA
-      rev: 1.5.3
+      rev: 1.6.1
       hooks:
         - id: nbqa-black
           # additional_dependencies: [jupytext]  # optional, only if you're using Jupytext
