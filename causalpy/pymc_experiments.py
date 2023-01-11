@@ -747,7 +747,7 @@ class PrePostNEGD(ExperimentalDesign):
     def _input_validation(self):
         """Validate the input data and model formula for correctness"""
         if not _series_has_2_levels(self.data[self.group_variable_name]):
-            raise ValueError(
+            raise DataException(
                 f"""
                 There must be 2 levels of the grouping variable
                 {self.group_variable_name}. I.e. the treated and untreated.

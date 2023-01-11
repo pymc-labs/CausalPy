@@ -141,3 +141,26 @@ def test_sc_brexit_input_error():
             formula=formula,
             model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
         )
+
+
+# Pre-post NEGD
+
+
+def test_ancova_validation_2_levels():
+    """Test that we get a DataException group variable is not dummy coded"""
+    df = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 2],
+            "pre": [1, 1, 3, 4],
+            "post": [1, 2, 3, 4],
+        }
+    )
+
+    with pytest.raises(DataException):
+        _ = cp.pymc_experiments.PrePostNEGD(
+            df,
+            formula="post ~ 1 + C(group) + pre",
+            group_variable_name="group",
+            pretreatment_variable_name="pre",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
