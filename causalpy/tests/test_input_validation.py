@@ -161,3 +161,44 @@ def test_ancova_validation_2_levels():
             pretreatment_variable_name="pre",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
+
+
+# Regression discontinuity
+
+
+def test_rd_validation_treated_in_formula():
+    """Test that we get a FormulaException if treated is not in the model formula"""
+    df = pd.DataFrame(
+        {
+            "x": [0, 1, 2, 3],
+            "treated": [0, 0, 1, 1],
+            "y": [1, 1, 2, 2],
+        }
+    )
+
+    with pytest.raises(FormulaException):
+        _ = cp.pymc_experiments.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=0.5,
+        )
+
+
+def test_rd_validation_treated_is_dummy():
+    """Test that we get a DataException if treated is not dummy coded"""
+    df = pd.DataFrame(
+        {
+            "x": [0, 1, 2, 3],
+            "treated": ["control", "control", "treated", "treated"],
+            "y": [1, 1, 2, 2],
+        }
+    )
+
+    with pytest.raises(DataException):
+        _ = cp.pymc_experiments.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=0.5,
+        )

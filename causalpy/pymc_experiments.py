@@ -560,15 +560,14 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold
+        self._input_validation()
+
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
-
-        # TODO: `treated` is a deterministic function of x and treatment_threshold, so
-        # this could be a function rather than supplied data
 
         # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
@@ -609,6 +608,18 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
         )
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        if "treated" not in self.formula:
+            raise FormulaException(
+                "A predictor called `treated` should be in the formula"
+            )
+
+        if _is_variable_dummy_coded(self.data["treated"]) is False:
+            raise DataException(
+                """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
+            )
 
     def _is_treated(self, x):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
