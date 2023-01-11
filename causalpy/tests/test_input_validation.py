@@ -2,11 +2,8 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.custom_exceptions import (
-    BadIndexException,
-    DataException,
-    FormulaException,
-)
+from causalpy.custom_exceptions import BadIndexException  # NOQA
+from causalpy.custom_exceptions import DataException, FormulaException
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
