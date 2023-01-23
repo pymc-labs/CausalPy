@@ -27,6 +27,7 @@ pip install -e .
 ```
 pip install causalpy[dev]
 pip install causalpy[docs]
+pip install causalpy[test]
 ```
 
 If that fails, try:
@@ -34,6 +35,7 @@ If that fails, try:
 ```
 pip install 'causalpy[dev]'
 pip install 'causalpy[docs]'
+pip install 'causalpy[test]'
 ```
 
 It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, I run `brew install pandoc`.
