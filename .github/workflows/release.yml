@@ -1,5 +1,9 @@
 name: PyPI release
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   release:
     types: [published]
 
@@ -24,16 +28,18 @@ jobs:
           cd test-sdist
           python -m venv venv-sdist
           venv-sdist/bin/python -m pip install ../dist/CausalPy*.tar.gz
-          # check import
-          venv-sdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}'"
+          echo "Checking import and version number (on release)"
+          venv-sdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
+          cd ..
       - name: Check the bdist installs and imports
         run: |
           mkdir -p test-bdist
           cd test-bdist
           python -m venv venv-bdist
           venv-bdist/bin/python -m pip install ../dist/CausalPy*.whl
-          # check import
-          venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}'"
+          echo "Checking import and version number (on release)"
+          venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
+          cd ..
       - uses: actions/upload-artifact@v3
         with:
           name: artifact
@@ -59,9 +65,12 @@ jobs:
           python-version: 3.8
       - name: Test pip install from test.pypi
         run: |
+          # Give time to test.pypi to update its index. If we don't wait,
+          # we might request to install before test.pypi is aware that it actually has the package
+          sleep 5s
           python -m venv venv-test-pypi
-          venv-test-pypi/bin/python -m pip install --index-url https://test.pypi.org/simple/ causalpy
-          # check import
+          venv-test-pypi/bin/python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple causalpy
+          echo "Checking import and version number"
           venv-test-pypi/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}'"
 
   publish:
