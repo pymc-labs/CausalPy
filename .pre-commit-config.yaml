@@ -11,7 +11,7 @@ repos:
           - id: check-yaml
           - id: check-added-large-files
     - repo: https://github.com/pycqa/isort
-      rev: 5.11.4
+      rev: 5.12.0
       hooks:
           - id: isort
             args: [--profile, black]
