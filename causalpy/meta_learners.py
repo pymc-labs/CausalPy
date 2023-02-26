@@ -308,11 +308,7 @@ class XLearner(MetaLearner):
 class DRLearner(MetaLearner):
     """
     Implements of DR-learner also known as doubly robust learner. DR-learner estimates
-    conditional average treatment effect with the use of five separate models. 
-    
-    [1] Künzel, Sören R., Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu. 
-        Metalearners for estimating heterogeneous treatment effects using machine learning.
-        Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
+    conditional average treatment effect with the use of three separate models.
 
     """
     def __init__(self, 
