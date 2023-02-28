@@ -21,6 +21,7 @@ class MetaLearner:
         self.treated = treated
         self.X = X
         self.y = y
+        self.models = {}
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         "Predict conditional average treatment effect for given input X."
@@ -44,16 +45,19 @@ class MetaLearner:
         Runs bootstrap n_iter times on a sample of size n_samples.
         Fits on (X_ins, y, treated), then predicts on X.
         """
+        # Bootstraping overwrites these attributes
+        models, cate = self.models, self.cate
         results = []
         for _ in range(n_iter):
             X_bs = X_ins.sample(frac=frac_samples, n=n_samples, replace=True)
             y_bs = y.loc[X_bs.index].reset_index(drop=True)
             t_bs = treated.loc[X_bs.index].reset_index(drop=True)
 
-            # This overwrites self.models!
             self.fit(X_bs.reset_index(drop=True), y_bs, t_bs)
             results.append(self.predict_cate(X))
 
+        self.models = models
+        self.cate = cate
         return np.array(results)
 
     def ate_confidence_interval(
@@ -124,21 +128,20 @@ class SLearner(MetaLearner):
         self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, model
     ) -> None:
         super().__init__(X=X, y=y, treated=treated)
-        self.model = model
+        self.models['model'] = model
         self.fit(X, y, treated)
         self.cate = self.predict_cate(X)
 
-    def fit(self, X: pd.DataFrame,
-            y: pd.Series,
-            treated: pd.Series):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
         X_t = X.assign(treatment=treated)
-        self.model = self.model.fit(X_t, y)
+        self.models['model'].fit(X_t, y)
         return self
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         X_control = X.assign(treatment=0)
         X_treated = X.assign(treatment=1)
-        return self.model.predict(X_treated) - self.model.predict(X_control)
+        m = self.models['model']
+        return m.predict(X_treated) - m.predict(X_control)
 
 
 class TLearner(MetaLearner):
