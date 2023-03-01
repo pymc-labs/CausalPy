@@ -298,7 +298,11 @@ class XLearner(MetaLearner):
 
 class DRLearner(MetaLearner):
     """
-    Implements of DR-learner also known as doubly robust learner as described in .
+    Implements of DR-learner also known as doubly robust learner as described in [1].
+
+    [1] Curth, Alicia, Mihaela van der Schaar.
+        Nonparametric estimation of heterogeneous treatment effects: From theory to learning algorithms.
+        International Conference on Artificial Intelligence and Statistics, pp. 1810-1818 (2021).
 
     """
 
