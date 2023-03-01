@@ -5,7 +5,7 @@ from sklearn.base import clone
 from sklearn.linear_model import LogisticRegression
 from sklearn.utils import check_consistent_length
 
-from causalpy.utils import _is_variable_dummy_coded
+from causalpy.utils import _is_variable_dummy_coded, _fit
 
 
 class MetaLearner:
@@ -96,7 +96,7 @@ class MetaLearner:
         )
         return conf_ints
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         "Fits model."
         raise NotImplementedError()
 
@@ -129,12 +129,15 @@ class SLearner(MetaLearner):
     ) -> None:
         super().__init__(X=X, y=y, treated=treated)
         self.models['model'] = model
-        self.fit(X, y, treated)
+
+        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+
+        self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         X_t = X.assign(treatment=treated)
-        self.models['model'].fit(X_t, y)
+        _fit(model=self.models['model'], X=X_t, y=y, coords=coords)
         return self
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
@@ -186,9 +189,11 @@ class TLearner(MetaLearner):
         self.fit(X, y, treated)
         self.cate = self.predict_cate(X)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
-        self.models["treated"].fit(X[treated == 1], y[treated == 1])
-        self.models["untreated"].fit(X[treated == 0], y[treated == 0])
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+        X_t, y_t = X[treated == 1], y[treated == 1]
+        X_u, y_u = X[treated == 0], y[treated == 0]
+        _fit(model=self.models["treated"], X=X_t, y=y_t, coords=coords)
+        _fit(model=self.models["untreated"], X=X_u, y=y_u, coords=coords)
         return self
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
@@ -259,7 +264,7 @@ class XLearner(MetaLearner):
 
         self.cate = g * cate_u + (1 - g) * cate_t
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         (
             treated_model,
             untreated_model,
@@ -353,7 +358,7 @@ class DRLearner(MetaLearner):
         self.cate = (treated * (y - m1) / g + m1
                      - ((1 - treated) * (y - m0) / (1 - g) + m0))
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         # Split data to treated and untreated subsets
         X_t, y_t = X[treated == 1], y[treated == 1]
         X_u, y_u = X[treated == 0], y[treated == 0]
