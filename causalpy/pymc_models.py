@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pymc as pm
 from arviz import r2_score
+import pymc_bart as pmb
+
 
 
 class ModelBuilder(pm.Model):
@@ -113,3 +115,19 @@ class LinearRegression(ModelBuilder):
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+
+
+class BARTModel(ModelBuilder):
+    "Class for building BART based models for meta-learners."
+
+    def __init__(self, sample_kwargs=None, m=20, sigma=1):
+        self.m = m
+        self.sigma = sigma
+        super().__init__(sample_kwargs)
+
+    def build_model(self, X, y, coords=None):
+        with self:
+            self.add_coords(coords)
+            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            mu = pmb.BART("mu", X, y, m=self.m, dims="obs_ind")
+            pm.Normal("y_hat", mu=mu, sigma=self.sigma, observed=y, dims="obs_ind")
