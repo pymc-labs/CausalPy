@@ -279,7 +279,7 @@ class XLearner(SkMetaLearner):
         "Predicts with models and then computes cate."
         cate_t = self.models["treated_cate"].predict(X)
         cate_u = self.models["treated_cate"].predict(X)
-        g = self.models["propensity"].predict_proba(X)
+        g = self.models["propensity"].predict_proba(X)[:, 1]
         return g * cate_u + (1 - g) * cate_t
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
