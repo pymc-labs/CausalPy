@@ -131,3 +131,14 @@ class BARTModel(ModelBuilder):
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
             mu = pmb.BART("mu", X, y, m=self.m, dims="obs_ind")
             pm.Normal("y_hat", mu=mu, sigma=self.sigma, observed=y, dims="obs_ind")
+
+class LogisticRegression(ModelBuilder):
+    "Custom PyMC model for logistic regression."
+
+    def build_model(self, X, y, coords) -> None:
+        with self:
+            self.add_coords(coords)
+            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            beta = pm.Normal("beta", 0, 50, dims="coeffs")
+            mu = pm.math.sigmoid(pm.math.dot(X, beta))
+            pm.Bernoulli("yhat", mu, observed=y)
