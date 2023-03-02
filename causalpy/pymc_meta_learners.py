@@ -3,19 +3,15 @@ import numpy as np
 import pymc as pm
 
 
-from causalpy.skl_meta_learners import SLearner, TLearner, XLearner, DRLearner
+from causalpy.skl_meta_learners import MetaLearner, SLearner, TLearner, XLearner, DRLearner
 
 
-class BayesianMetaLearner:
+class BayesianMetaLearner(MetaLearner):
     "Base class for PyMC based meta-learners."
 
-    def plot(self):
-        # TODO
-        pass
-
-    def summary(self):
-        # TODO
-        pass
+    def __init__(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series) -> None:
+        super().__init__(X, y, treated)
+        self.expected_cate = self.cate.mean(dim=["chain", "draw"])
 
 
 class BayesianSLearner(BayesianMetaLearner, SLearner):
@@ -24,14 +20,14 @@ class BayesianSLearner(BayesianMetaLearner, SLearner):
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         X_untreated = X.assign(treatment=0)
         X_treated = X.assign(treatment=1)
-        m = self.models['model']
+        m = self.models["model"]
 
         pred_treated = m.predict(X_treated)["posterior_predictive"].mu
         pred_untreated = m.predict(X_untreated)["posterior_predictive"].mu
 
-        self.cate_posterior = pred_treated - pred_untreated
+        cate = pred_treated - pred_untreated
 
-        return self.cate_posterior.mean(dim=["chain", "draw"])
+        return cate
 
 
 class BayesianTLearner(BayesianMetaLearner, TLearner):
@@ -44,13 +40,19 @@ class BayesianTLearner(BayesianMetaLearner, TLearner):
         pred_treated = treated_model.predict(X)["posterior_predictive"].mu
         pred_untreated = untreated_model.predict(X)["posterior_predictive"].mu
 
-        self.cate_posterior = pred_treated - pred_untreated
+        cate = pred_treated - pred_untreated
 
-        return self.cate_posterior.mean(dim=["chain", "draw"])
+        return cate
 
 
 class BayesianXLearner(BayesianMetaLearner, XLearner):
     "PyMC version of X-Learner."
+
+    def _compute_cate(self, X):
+        cate_t = self.models["treated_cate"].predict(X)["posterior_predictive"].mu
+        cate_u = self.models["treated_cate"].predict(X)["posterior_predictive"].mu
+        g = self.models["propensity"].predict(X)["posterior_predictive"].mu
+        return g * cate_u + (1 - g) * cate_t
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         # TODO

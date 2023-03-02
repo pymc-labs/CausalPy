@@ -15,7 +15,7 @@ class MetaLearner:
         # Check whether input is appropriate
         check_consistent_length(X, y, treated)
         if not _is_variable_dummy_coded(treated):
-            raise ValueError('Treatment variable is not dummy coded.')
+            raise ValueError("Treatment variable is not dummy coded.")
 
         self.cate = None
         self.treated = treated
@@ -31,6 +31,23 @@ class MetaLearner:
         "Predict average treatment effect for given input X."
         return self.predict_cate(X).mean()
 
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+        "Fits model."
+        raise NotImplementedError()
+
+    def summary(self):
+        "Prints summary."
+        print(f"Number of observations:            {self.X.shape[0]}")
+        print(f"Number of treated observations:    {self.treated.sum()}")
+        print(f"Average treatement effect (ATE):   {self.predict_ate(self.X.shape[0])}")
+
+    def plot(self):
+        "Plots results. Content is undecided yet."
+        plt.hist(self.cate, bins=40, density=True)
+
+
+class SkMetaLearner(MetaLearner):
+    "Base class for sklearn based meta-learners."
     def bootstrap(
         self,
         X_ins: pd.DataFrame,
@@ -95,25 +112,16 @@ class MetaLearner:
             axis=1,
         )
         return conf_ints
-
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
-        "Fits model."
-        raise NotImplementedError()
-
+    
     def summary(self):
-        "Prints summary."
         conf_ints = self.ate_confidence_interval(self.X, self.y, self.treated, self.X)
         print(f"Number of observations:            {self.X.shape[0]}")
         print(f"Number of treated observations:    {self.treated.sum()}")
         print(f"Average treatement effect (ATE):   {self.predict_ate(self.X.shape[0])}")
         print(f"Confidence interval for ATE:       {conf_ints}")
 
-    def plot(self):
-        "Plots results. Content is undecided yet."
-        plt.hist(self.cate, bins=40, density=True)
 
-
-class SLearner(MetaLearner):
+class SLearner(SkMetaLearner):
     """
     Implements of S-learner described in [1]. S-learner estimates conditional average
     treatment effect with the use of a single model.
@@ -128,7 +136,7 @@ class SLearner(MetaLearner):
         self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, model
     ) -> None:
         super().__init__(X=X, y=y, treated=treated)
-        self.models['model'] = model
+        self.models["model"] = model
 
         COORDS = {
             "coeffs": list(X.columns) + ["treated"],
@@ -140,17 +148,17 @@ class SLearner(MetaLearner):
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         X_t = X.assign(treatment=treated)
-        _fit(model=self.models['model'], X=X_t, y=y, coords=coords)
+        _fit(model=self.models["model"], X=X_t, y=y, coords=coords)
         return self
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         X_control = X.assign(treatment=0)
         X_treated = X.assign(treatment=1)
-        m = self.models['model']
+        m = self.models["model"]
         return m.predict(X_treated) - m.predict(X_control)
 
 
-class TLearner(MetaLearner):
+class TLearner(SkMetaLearner):
     """
     Implements of T-learner described in [1]. T-learner fits two separate models to estimate
     conditional average treatment effect.
@@ -207,7 +215,7 @@ class TLearner(MetaLearner):
         return treated_model.predict(X) - untreated_model.predict(X)
 
 
-class XLearner(MetaLearner):
+class XLearner(SkMetaLearner):
     """
     Implements of X-learner introduced in [1]. X-learner estimates conditional average treatment
     effect with the use of five separate models.
@@ -265,11 +273,14 @@ class XLearner(MetaLearner):
         self.fit(X, y, treated, coords=COORDS)
 
         # Compute cate
-        cate_t = treated_cate_estimator.predict(X)
-        cate_u = treated_cate_estimator.predict(X)
-        g = self.models["propensity"].predict(X)
+        self.cate = self._compute_cate(X)
 
-        self.cate = g * cate_u + (1 - g) * cate_t
+    def _compute_cate(self, X):
+        "Predicts with models and then computes cate."
+        cate_t = self.models["treated_cate"].predict(X)
+        cate_u = self.models["treated_cate"].predict(X)
+        g = self.models["propensity"].predict_proba(X)
+        return g * cate_u + (1 - g) * cate_t
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         (
@@ -292,8 +303,8 @@ class XLearner(MetaLearner):
         tau_u = treated_model.predict(X_u) - y_u
 
         # Estimate CATE separately on treated and untreated subsets
-        treated_cate_estimator.fit(X_t, tau_t)
-        untreated_cate_estimator.fit(X_u, tau_u)
+        _fit(treated_cate_estimator, X_t, tau_t, coords)
+        _fit(untreated_cate_estimator, X_u, tau_u, coords)
 
         # Fit propensity score model
         _fit(propensity_score_model, X, treated, coords)
@@ -308,7 +319,7 @@ class XLearner(MetaLearner):
         return g * cate_estimate_untreated + (1 - g) * cate_estimate_treated
 
 
-class DRLearner(MetaLearner):
+class DRLearner(SkMetaLearner):
     """
     Implements of DR-learner also known as doubly robust learner as described in [1].
 
