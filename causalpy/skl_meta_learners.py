@@ -130,7 +130,10 @@ class SLearner(MetaLearner):
         super().__init__(X=X, y=y, treated=treated)
         self.models['model'] = model
 
-        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+        COORDS = {
+            "coeffs": list(X.columns) + ["treated"],
+            "obs_indx": np.arange(X.shape[0])
+            }
 
         self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)

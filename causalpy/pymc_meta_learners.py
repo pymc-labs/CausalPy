@@ -8,6 +8,7 @@ from causalpy.skl_meta_learners import SLearner, TLearner, XLearner, DRLearner
 
 class BayesianMetaLearner:
     "Base class for PyMC based meta-learners."
+
     def plot(self):
         # TODO
         pass
@@ -28,7 +29,9 @@ class BayesianSLearner(BayesianMetaLearner, SLearner):
         pred_treated = m.predict(X_treated)["posterior_predictive"].mu
         pred_untreated = m.predict(X_untreated)["posterior_predictive"].mu
 
-        return pred_treated - pred_untreated
+        self.cate_posterior = pred_treated - pred_untreated
+
+        return self.cate_posterior.mean(dim=["chain", "draw"])
 
 
 class BayesianTLearner(BayesianMetaLearner, TLearner):
@@ -41,7 +44,9 @@ class BayesianTLearner(BayesianMetaLearner, TLearner):
         pred_treated = treated_model.predict(X)["posterior_predictive"].mu
         pred_untreated = untreated_model.predict(X)["posterior_predictive"].mu
 
-        return pred_treated - pred_untreated
+        self.cate_posterior = pred_treated - pred_untreated
+
+        return self.cate_posterior.mean(dim=["chain", "draw"])
 
 
 class BayesianXLearner(BayesianMetaLearner, XLearner):
@@ -54,7 +59,7 @@ class BayesianXLearner(BayesianMetaLearner, XLearner):
 
 class BayesianDRLearner(BayesianMetaLearner, DRLearner):
     "PyMC version of DR-Learner."
-    
+
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         # TODO
         pass
