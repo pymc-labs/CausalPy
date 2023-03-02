@@ -11,10 +11,9 @@ class BayesianMetaLearner(MetaLearner):
 
     def __init__(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series) -> None:
         super().__init__(X, y, treated)
-        self.expected_cate = self.cate.mean(dim=["chain", "draw"])
 
 
-class BayesianSLearner(BayesianMetaLearner, SLearner):
+class BayesianSLearner(SLearner, BayesianMetaLearner):
     "PyMC version of S-Learner."
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
@@ -30,7 +29,7 @@ class BayesianSLearner(BayesianMetaLearner, SLearner):
         return cate
 
 
-class BayesianTLearner(BayesianMetaLearner, TLearner):
+class BayesianTLearner(TLearner, BayesianMetaLearner):
     "PyMC version of T-Learner."
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
@@ -45,7 +44,7 @@ class BayesianTLearner(BayesianMetaLearner, TLearner):
         return cate
 
 
-class BayesianXLearner(BayesianMetaLearner, XLearner):
+class BayesianXLearner(XLearner, BayesianMetaLearner):
     "PyMC version of X-Learner."
 
     def _compute_cate(self, X):
@@ -59,7 +58,7 @@ class BayesianXLearner(BayesianMetaLearner, XLearner):
         pass
 
 
-class BayesianDRLearner(BayesianMetaLearner, DRLearner):
+class BayesianDRLearner(DRLearner, BayesianMetaLearner):
     "PyMC version of DR-Learner."
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
