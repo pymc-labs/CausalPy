@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.base import clone
+from copy import deepcopy
 from sklearn.linear_model import LogisticRegression
 from sklearn.utils import check_consistent_length
 
@@ -181,12 +181,14 @@ class TLearner(MetaLearner):
                 )
 
         if model is not None:
-            untreated_model = clone(model)
-            treated_model = clone(model)
+            untreated_model = deepcopy(model)
+            treated_model = deepcopy(model)
 
         self.models = {"treated": treated_model, "untreated": untreated_model}
 
-        self.fit(X, y, treated)
+        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+
+        self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
@@ -242,10 +244,10 @@ class XLearner(MetaLearner):
             propensity_score_model = LogisticRegression(penalty=None)
 
         if model is not None:
-            treated_model = clone(model)
-            untreated_model = clone(model)
-            treated_cate_estimator = clone(model)
-            untreated_cate_estimator = clone(model)
+            treated_model = deepcopy(model)
+            untreated_model = deepcopy(model)
+            treated_cate_estimator = deepcopy(model)
+            untreated_cate_estimator = deepcopy(model)
 
         self.models = {
             "treated": treated_model,
@@ -255,7 +257,9 @@ class XLearner(MetaLearner):
             "propensity": propensity_score_model    
         }
 
-        self.fit(X, y, treated)
+        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+
+        self.fit(X, y, treated, coords=COORDS)
 
         # Compute cate
         cate_t = treated_cate_estimator.predict(X)
@@ -278,8 +282,8 @@ class XLearner(MetaLearner):
         X_u, y_u = X[treated == 0], y[treated == 0]
 
         # Estimate response function
-        treated_model.fit(X_t, y_t)
-        untreated_model.fit(X_u, y_u)
+        _fit(treated_model, X_t, y_t, coords)
+        _fit(untreated_model, X_u, y_u, coords)
 
         tau_t = y_t - untreated_model.predict(X_t)
         tau_u = treated_model.predict(X_u) - y_u
@@ -289,7 +293,7 @@ class XLearner(MetaLearner):
         untreated_cate_estimator.fit(X_u, tau_u)
 
         # Fit propensity score model
-        propensity_score_model.fit(X, treated)
+        _fit(propensity_score_model, X, treated, coords)
         return self
 
     def predict_cate(self, X):
@@ -338,8 +342,8 @@ class DRLearner(MetaLearner):
             propensity_score_model = LogisticRegression(penalty=None)
 
         if model is not None:
-            treated_model = clone(model)
-            untreated_model = clone(model)
+            treated_model = deepcopy(model)
+            untreated_model = deepcopy(model)
 
         # Estimate response function
         self.models = {
@@ -347,8 +351,9 @@ class DRLearner(MetaLearner):
             "untreated": untreated_model,
             "propensity": propensity_score_model
             }
-
-        self.fit(X, y, treated)
+        
+        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+        self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
         g = self.models["propensity"].predict_proba(X)[:, 1]
@@ -366,11 +371,11 @@ class DRLearner(MetaLearner):
         treated_model, untreated_model, propensity_score_model = self.models.values()
 
         # Estimate response functions
-        treated_model.fit(X_t, y_t)
-        untreated_model.fit(X_u, y_u)
+        _fit(treated_model, X_t, y_t, coords)
+        _fit(untreated_model, X_u, y_u, coords)
 
         # Fit propensity score model
-        propensity_score_model.fit(X, treated)
+        _fit(propensity_score_model, X, treated, coords)
 
         return self
 
