@@ -24,12 +24,23 @@ class MetaLearner:
         self.models = {}
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
-        "Predict conditional average treatment effect for given input X."
+        """
+        Predict out-of-sample conditional average treatment effect on given input X.
+        For in-sample treatement effect self.cate should be used.
+        """
         raise NotImplementedError()
 
     def predict_ate(self, X: pd.DataFrame) -> np.float64:
-        "Predict average treatment effect for given input X."
+        """
+        Predict out-of-sample average treatment effect on given input X. For in-sample treatement
+        effect self.ate() should be used.
+        """
         return self.predict_cate(X).mean()
+    
+    
+    def ate(self):
+        "Returns in-sample average treatement effect."
+        return self.cate.mean()
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         "Fits model."
@@ -236,7 +247,7 @@ class XLearner(SkMetaLearner):
         untreated_model=None,
         treated_cate_estimator=None,
         untreated_cate_estimator=None,
-        propensity_score_model=None
+        propensity_score_model=LogisticRegression(penalty=None)
     ):
         super().__init__(X=X, y=y, treated=treated)
 
@@ -250,9 +261,6 @@ class XLearner(SkMetaLearner):
                 "Either model or each of treated_model, untreated_model, \
                 treated_cate_estimator, untreated_cate_estimator has to be specified."
             )
-
-        if propensity_score_model is None:
-            propensity_score_model = LogisticRegression(penalty=None)
 
         if model is not None:
             treated_model = deepcopy(model)
