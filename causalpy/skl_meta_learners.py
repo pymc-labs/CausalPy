@@ -284,7 +284,7 @@ class XLearner(SkMetaLearner):
         self.cate = self._compute_cate(X)
 
     def _compute_cate(self, X):
-        "Predicts with models and then computes cate."
+        "Computes cate for given input."
         cate_t = self.models["treated_cate"].predict(X)
         cate_u = self.models["treated_cate"].predict(X)
         g = self.models["propensity"].predict_proba(X)[:, 1]
@@ -345,7 +345,7 @@ class DRLearner(SkMetaLearner):
         model=None,
         treated_model=None,
         untreated_model=None,
-        propensity_score_model=None
+        propensity_score_model=LogisticRegression(penalty=None)
     ):
         super().__init__(X=X, y=y, treated=treated)
 
@@ -360,8 +360,6 @@ class DRLearner(SkMetaLearner):
                 treated_cate_estimator, untreated_cate_estimator has to be specified."
                 )
 
-        if propensity_score_model is None:
-            propensity_score_model = LogisticRegression(penalty=None)
 
         if model is not None:
             treated_model = deepcopy(model)
@@ -378,12 +376,18 @@ class DRLearner(SkMetaLearner):
         self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
-        g = self.models["propensity"].predict_proba(X)[:, 1]
-        m0 = untreated_model.predict(X)
-        m1 = treated_model.predict(X)
+        self.cate = self._compute_cate(X, y, treated)
 
-        self.cate = (treated * (y - m1) / g + m1
-                     - ((1 - treated) * (y - m0) / (1 - g) + m0))
+
+    def _compute_cate(self, X, y, treated):
+        g = self.models["propensity"].predict_proba(X)[:, 1]
+        m0 = self.models["untreated"].predict(X)
+        m1 = self.models["treated"].predict(X)
+
+        cate = (treated * (y - m1) / g + m1
+                - ((1 - treated) * (y - m0) / (1 - g) + m0))
+
+        return cate
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
         # Split data to treated and untreated subsets

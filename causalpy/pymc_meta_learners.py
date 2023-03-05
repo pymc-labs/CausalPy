@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import pymc as pm
+import xarray as xa
 
-
+from causalpy.utils import _fit
 from causalpy.skl_meta_learners import MetaLearner, SLearner, TLearner, XLearner, DRLearner
 from causalpy.pymc_models import LogisticRegression
 
@@ -74,6 +75,50 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
             untreated_cate_estimator,
             propensity_score_model
             )
+        
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+        (
+            treated_model,
+            untreated_model,
+            treated_cate_estimator,
+            untreated_cate_estimator,
+            propensity_score_model
+        ) = self.models.values()
+
+        # Split data to treated and untreated subsets
+        X_t, y_t = X[treated == 1], y[treated == 1]
+        X_u, y_u = X[treated == 0], y[treated == 0]
+
+        # Estimate response function
+        _fit(treated_model, X_t, y_t, coords)
+        _fit(untreated_model, X_u, y_u, coords)
+
+        pred_u_t = (
+            untreated_model
+            .predict(X_t)["posterior_predictive"]
+            .mu
+            .mean(dim=["chain", "draw"])
+            .to_numpy()
+            )
+        pred_t_u = (
+            treated_model
+            .predict(X_u)["posterior_predictive"]
+            .mu
+            .mean(dim=["chain", "draw"])
+            .to_numpy()
+            )
+
+        tau_t = y_t - pred_u_t
+        tau_u = y_u - pred_t_u
+
+        # Estimate CATE separately on treated and untreated subsets
+        _fit(treated_cate_estimator, X_t, tau_t, coords)
+        _fit(untreated_cate_estimator, X_u, tau_u, coords)
+
+        # Fit propensity score model
+        _fit(propensity_score_model, X, treated, coords)
+        return self
+
 
     def _compute_cate(self, X):
         cate_t = self.models["treated_cate"].predict(X)["posterior_predictive"].mu
@@ -110,4 +155,21 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         m1 = self.models["treated"].predict(X)
         m0 = self.models["untreated"].predict(X)
-        return m1 - m0 
+        return m1 - m0
+    
+    def _compute_cate(self, X, y, treated):
+        g = self.models["propensity"].predict(X)["posterior_predictive"].mu
+        m0 = self.models["untreated"].predict(X)["posterior_predictive"].mu
+        m1 = self.models["treated"].predict(X)["posterior_predictive"].mu
+
+
+        # Broadcast target and treated variables to the size of the predictions
+        y0 = xa.DataArray(y, dims="obs_ind")
+        y0 = xa.broadcast(y0, m0)[0]
+
+        t0 = xa.DataArray(treated, dims="obs_ind")
+        t0 = xa.broadcast(t0, m0)[0]
+
+        cate = (t0 * (y0 - m1) / g + m1 - ((1 - t0) * (y0 - m0) / (1 - g) + m0))
+
+        return cate
