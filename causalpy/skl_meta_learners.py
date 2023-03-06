@@ -36,8 +36,7 @@ class MetaLearner:
         effect self.ate() should be used.
         """
         return self.predict_cate(X).mean()
-    
-    
+
     def ate(self):
         "Returns in-sample average treatement effect."
         return self.cate.mean()
@@ -59,27 +58,47 @@ class MetaLearner:
 
 class SkMetaLearner(MetaLearner):
     "Base class for sklearn based meta-learners."
+
     def bootstrap(
         self,
         X_ins: pd.DataFrame,
         y: pd.Series,
         treated: pd.Series,
-        X: None,
-        frac_samples: float = None,
-        n_samples: int = 1000,
+        X: pd.DataFrame = None,
         n_iter: int = 1000
     ) -> np.array:
         """
         Runs bootstrap n_iter times on a sample of size n_samples.
         Fits on (X_ins, y, treated), then predicts on X.
         """
+        if X is None:
+            X = X_ins
+
         # Bootstraping overwrites these attributes
         models, cate = self.models, self.cate
+
+        # Calculate number of treated and untreated data points
+        n1 = self.treated.sum()
+        n0 = self.treated.count() - n1
+
+        # Prescribed treatement variable of samples
+        t_bs = pd.Series(n0 * [0] + n1 * [1], name="treatement")
+
         results = []
+
+        # TODO: paralellize this loop
         for _ in range(n_iter):
-            X_bs = X_ins.sample(frac=frac_samples, n=n_samples, replace=True)
-            y_bs = y.loc[X_bs.index].reset_index(drop=True)
-            t_bs = treated.loc[X_bs.index].reset_index(drop=True)
+            # Take sample with replacement from our data in a way that we have
+            # the same number of treated and untreated data points as in the whole
+            # data set.
+            X0_bs = X_ins[treated == 0].sample(n=n0, replace=True)
+            y0_bs = y.loc[X0_bs.index]
+
+            X1_bs = X_ins[treated == 1].sample(n=n1, replace=True)
+            y1_bs = y.loc[X1_bs.index]
+
+            X_bs = pd.concat([X0_bs, X1_bs], axis=0).reset_index(drop=True)
+            y_bs = pd.concat([y0_bs, y1_bs], axis=0).reset_index(drop=True)
 
             self.fit(X_bs.reset_index(drop=True), y_bs, t_bs)
             results.append(self.predict_cate(X))
@@ -93,42 +112,50 @@ class SkMetaLearner(MetaLearner):
         X_ins: pd.DataFrame,
         y: pd.Series,
         treated: pd.Series,
-        X: None,
-        q: float = .95,
-        frac_samples: float = None,
-        n_samples: int = 1000,
+        X: pd.DataFrame = None,
+        q: float = .05,
         n_iter: int = 1000
-    ):
+    ) -> tuple:
         "Estimates confidence intervals for ATE on X using bootstraping."
-        cates = self.bootstrap(X_ins, y, treated, X, frac_samples, n_samples, n_iter)
-        return np.quantile(cates, q=q), np.quantile(cates, q=1 - q)
-
+        cates = self.bootstrap(X_ins, y, treated, X, n_iter)
+        ates = cates.mean(axis=0)
+        return np.quantile(ates, q=q / 2), np.quantile(cates, q=1 - q / 2)
 
     def cate_confidence_interval(
         self,
         X_ins: pd.DataFrame,
         y: pd.Series,
         treated: pd.Series,
-        X: None,
-        q: float = .95,
-        frac_samples: float = None,
-        n_samples: int = 1000,
+        X: pd.DataFrame = None,
+        q: float = .05,
         n_iter: int = 1000
-    ):
+    ) -> np.array:
         "Estimates confidence intervals for CATE on X using bootstraping."
-        cates = self.bootstrap(X_ins, y, treated, X, frac_samples, n_samples, n_iter)
+        cates = self.bootstrap(X_ins, y, treated, X, n_iter)
         conf_ints = np.append(
-            np.quantile(cates, q, axis=0).reshape(-1, 1),
-            np.quantile(cates, 1 - q, axis=0).reshape(-1, 1),
+            np.quantile(cates, q / 2, axis=0).reshape(-1, 1),
+            np.quantile(cates, 1 - q / 2, axis=0).reshape(-1, 1),
             axis=1,
         )
         return conf_ints
-    
-    def summary(self):
-        conf_ints = self.ate_confidence_interval(self.X, self.y, self.treated, self.X)
+
+    def bias(
+        self,
+        X_ins: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+        X: pd.DataFrame = None,
+        q: float = .05,
+        n_iter: int = 1000
+    ):
+        cates = self.bootstrap(X_ins, y, treated, X, n_iter)
+
+    def summary(self, n_iter=1000):
+        conf_ints = self.ate_confidence_interval(
+            self.X, self.y, self.treated, self.X, n_iter=n_iter)
         print(f"Number of observations:            {self.X.shape[0]}")
         print(f"Number of treated observations:    {self.treated.sum()}")
-        print(f"Average treatement effect (ATE):   {self.predict_ate(self.X.shape[0])}")
+        print(f"Average treatement effect (ATE):   {self.predict_ate(self.X)}")
         print(f"Confidence interval for ATE:       {conf_ints}")
 
 
@@ -152,7 +179,7 @@ class SLearner(SkMetaLearner):
         COORDS = {
             "coeffs": list(X.columns) + ["treated"],
             "obs_indx": np.arange(X.shape[0])
-            }
+        }
 
         self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)
@@ -195,12 +222,12 @@ class TLearner(SkMetaLearner):
             raise ValueError(
                 "Either model or both of treated_model and untreated_model \
                 have to be specified."
-                )
+            )
         elif not (model is None or untreated_model is None or treated_model is None):
             raise ValueError(
                 "Either model or both of treated_model and untreated_model \
                 have to be specified."
-                )
+            )
 
         if model is not None:
             untreated_model = deepcopy(model)
@@ -273,7 +300,7 @@ class XLearner(SkMetaLearner):
             "untreated": untreated_model,
             "treated_cate": treated_cate_estimator,
             "untreated_cate": untreated_cate_estimator,
-            "propensity": propensity_score_model    
+            "propensity": propensity_score_model
         }
 
         COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
@@ -353,13 +380,12 @@ class DRLearner(SkMetaLearner):
             raise ValueError(
                 "Either model or each of treated_model, untreated_model, \
                 treated_cate_estimator, untreated_cate_estimator has to be specified."
-                )
+            )
         elif not (model is None or untreated_model is None or treated_model is None):
             raise ValueError(
                 "Either model or each of treated_model, untreated_model, \
                 treated_cate_estimator, untreated_cate_estimator has to be specified."
-                )
-
+            )
 
         if model is not None:
             treated_model = deepcopy(model)
@@ -370,14 +396,13 @@ class DRLearner(SkMetaLearner):
             "treated": treated_model,
             "untreated": untreated_model,
             "propensity": propensity_score_model
-            }
-        
+        }
+
         COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
         self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
         self.cate = self._compute_cate(X, y, treated)
-
 
     def _compute_cate(self, X, y, treated):
         g = self.models["propensity"].predict_proba(X)[:, 1]
@@ -408,4 +433,4 @@ class DRLearner(SkMetaLearner):
     def predict_cate(self, X):
         m1 = self.models["treated"].predict(X)
         m0 = self.models["untreated"].predict(X)
-        return m1 - m0 
+        return m1 - m0
