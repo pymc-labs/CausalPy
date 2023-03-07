@@ -1,9 +1,10 @@
+from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from copy import deepcopy
 from sklearn.linear_model import LogisticRegression
 from sklearn.utils import check_consistent_length
+from sklearn.model_selection import train_test_split
 
 from causalpy.utils import _is_variable_dummy_coded, _fit
 
@@ -86,7 +87,6 @@ class SkMetaLearner(MetaLearner):
 
         results = []
 
-        # TODO: paralellize this loop
         for _ in range(n_iter):
             # Take sample with replacement from our data in a way that we have
             # the same number of treated and untreated data points as in the whole
@@ -148,15 +148,28 @@ class SkMetaLearner(MetaLearner):
         q: float = .05,
         n_iter: int = 1000
     ):
-        cates = self.bootstrap(X_ins, y, treated, X, n_iter)
+        "Calculates bootstrap estimate of bias of CATE estimator."
+        if X is None:
+            X = X_ins
+
+        pred = self.predict_cate(X=X)
+        bs_pred = self.bootstrap(X_ins, y, treated, X, n_iter).mean(axis=0)
+
+        return (bs_pred - pred).mean()
+
+        
 
     def summary(self, n_iter=1000):
+        # TODO: we run self.bootstrap twice independently.
+        bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
         conf_ints = self.ate_confidence_interval(
-            self.X, self.y, self.treated, self.X, n_iter=n_iter)
-        print(f"Number of observations:            {self.X.shape[0]}")
-        print(f"Number of treated observations:    {self.treated.sum()}")
-        print(f"Average treatement effect (ATE):   {self.predict_ate(self.X)}")
-        print(f"Confidence interval for ATE:       {conf_ints}")
+            self.X, self.y, self.treated, self.X, n_iter=n_iter
+            )
+        print(f"Number of observations:             {self.X.shape[0]}")
+        print(f"Number of treated observations:     {self.treated.sum()}")
+        print(f"Average treatement effect (ATE):    {self.predict_ate(self.X)}")
+        print(f"95% Confidence interval for ATE:    {conf_ints}")
+        print(f"Estimated bias:                     {bias}")
 
 
 class SLearner(SkMetaLearner):
@@ -372,9 +385,13 @@ class DRLearner(SkMetaLearner):
         model=None,
         treated_model=None,
         untreated_model=None,
-        propensity_score_model=LogisticRegression(penalty=None)
+        pseudo_outcome_model=None,
+        propensity_score_model=LogisticRegression(penalty=None),
+        cross_fitting=False
     ):
         super().__init__(X=X, y=y, treated=treated)
+        
+        self.cross_fitting = cross_fitting
 
         if model is None and (untreated_model is None or treated_model is None):
             raise ValueError(
@@ -390,36 +407,36 @@ class DRLearner(SkMetaLearner):
         if model is not None:
             treated_model = deepcopy(model)
             untreated_model = deepcopy(model)
+            pseudo_outcome_model = deepcopy(model)
 
         # Estimate response function
         self.models = {
             "treated": treated_model,
             "untreated": untreated_model,
-            "propensity": propensity_score_model
+            "propensity": propensity_score_model,
+            "pseudo_outcome": pseudo_outcome_model
         }
 
         COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
         self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
-        self.cate = self._compute_cate(X, y, treated)
+        self.cate = pseudo_outcome_model.predict(X)
 
-    def _compute_cate(self, X, y, treated):
-        g = self.models["propensity"].predict_proba(X)[:, 1]
-        m0 = self.models["untreated"].predict(X)
-        m1 = self.models["treated"].predict(X)
-
-        cate = (treated * (y - m1) / g + m1
-                - ((1 - treated) * (y - m0) / (1 - g) + m0))
-
-        return cate
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
-        # Split data to treated and untreated subsets
-        X_t, y_t = X[treated == 1], y[treated == 1]
-        X_u, y_u = X[treated == 0], y[treated == 0]
+        # Split data to two independent samples of equal size
+        (
+            X0, X1,
+            y0, y1,
+            treated0, treated1
+         ) = train_test_split(X, y, treated, stratify=treated, test_size=.5)
 
-        treated_model, untreated_model, propensity_score_model = self.models.values()
+        # Split data to treated and untreated subsets
+        X_t, y_t = X0[treated0 == 1], y0[treated0 == 1]
+        X_u, y_u = X0[treated0 == 0], y0[treated0 == 0]
+
+        treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.models.values()
 
         # Estimate response functions
         _fit(treated_model, X_t, y_t, coords)
@@ -428,9 +445,19 @@ class DRLearner(SkMetaLearner):
         # Fit propensity score model
         _fit(propensity_score_model, X, treated, coords)
 
+        g = propensity_score_model.predict_proba(X1)[:, 1]
+        mu_0 = untreated_model.predict(X1)
+        mu_1 = treated_model.predict(X1)
+        mu_w = np.where(treated1==0, mu_0, mu_1)
+
+        pseudo_outcome = (
+            (treated1 - g) / (g * (1 - g)) * (y1 - mu_w) + mu_1 - mu_0
+            )
+        
+        # Fit pseudo-outcome model
+        _fit(pseudo_outcome_model, X1, pseudo_outcome, coords)
+
         return self
 
     def predict_cate(self, X):
-        m1 = self.models["treated"].predict(X)
-        m0 = self.models["untreated"].predict(X)
-        return m1 - m0
+        return self.models["pseudo_outcome"].predict(X)
