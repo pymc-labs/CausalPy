@@ -416,12 +416,18 @@ class DRLearner(SkMetaLearner):
             "propensity": propensity_score_model,
             "pseudo_outcome": pseudo_outcome_model
         }
-
+        
+        cross_fitted_models = {} 
+        if self.cross_fitting:
+            cross_fitted_models = {key: deepcopy(value) for key, value in self.models.items()}
+        
+        self.cross_fitted_models = cross_fitted_models
+        
         COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
         self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
-        self.cate = pseudo_outcome_model.predict(X)
+        self.cate = self.predict_cate(X)
 
 
     def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
@@ -431,33 +437,53 @@ class DRLearner(SkMetaLearner):
             y0, y1,
             treated0, treated1
          ) = train_test_split(X, y, treated, stratify=treated, test_size=.5)
-
-        # Split data to treated and untreated subsets
-        X_t, y_t = X0[treated0 == 1], y0[treated0 == 1]
-        X_u, y_u = X0[treated0 == 0], y0[treated0 == 0]
-
-        treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.models.values()
-
-        # Estimate response functions
-        _fit(treated_model, X_t, y_t, coords)
-        _fit(untreated_model, X_u, y_u, coords)
-
-        # Fit propensity score model
-        _fit(propensity_score_model, X, treated, coords)
-
-        g = propensity_score_model.predict_proba(X1)[:, 1]
-        mu_0 = untreated_model.predict(X1)
-        mu_1 = treated_model.predict(X1)
-        mu_w = np.where(treated1==0, mu_0, mu_1)
-
-        pseudo_outcome = (
-            (treated1 - g) / (g * (1 - g)) * (y1 - mu_w) + mu_1 - mu_0
-            )
         
-        # Fit pseudo-outcome model
-        _fit(pseudo_outcome_model, X1, pseudo_outcome, coords)
+        treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.models.values()
+        
+        # Second iteration is the cross-fitting step. 
+        second_iteration = False
+        for i in range(2):
+            # Split data to treated and untreated subsets
+            X_t, y_t = X0[treated0 == 1], y0[treated0 == 1]
+            X_u, y_u = X0[treated0 == 0], y0[treated0 == 0]
+
+            # Estimate response functions
+            _fit(treated_model, X_t, y_t, coords)
+            _fit(untreated_model, X_u, y_u, coords)
+
+            # Fit propensity score model
+            _fit(propensity_score_model, X, treated, coords)
+
+            g = propensity_score_model.predict_proba(X1)[:, 1]
+            mu_0 = untreated_model.predict(X1)
+            mu_1 = treated_model.predict(X1)
+            mu_w = np.where(treated1==0, mu_0, mu_1)
+
+            pseudo_outcome = (
+                (treated1 - g) / (g * (1 - g)) * (y1 - mu_w) + mu_1 - mu_0
+                )
+
+            # Fit pseudo-outcome model
+            _fit(pseudo_outcome_model, X1, pseudo_outcome, coords)
+             
+            if self.cross_fitting and not second_iteration:
+                # Swap data and estimators
+                (X0, X1) = (X1, X0)
+                (y0, y1) = (y1, y0)
+                (treated0, treated1) = (treated1, treated0)
+                
+                treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.cross_fitted_models.values()
+                second_iteration = True
+            else:
+                return self
 
         return self
 
     def predict_cate(self, X):
-        return self.models["pseudo_outcome"].predict(X)
+        pred1 = self.models["pseudo_outcome"].predict(X)
+        
+        if self.cross_fitting:
+            pred2 = self.cross_fitted_models["pseudo_outcome"].predict(X)
+            return (pred1 + pred2) / 2
+        
+        return pred1
