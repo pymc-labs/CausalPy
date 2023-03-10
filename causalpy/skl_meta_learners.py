@@ -2,9 +2,11 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.linear_model import LogisticRegression
-from sklearn.utils import check_consistent_length
 from sklearn.model_selection import train_test_split
+from sklearn.utils import check_consistent_length
+from typing import Any, Dict
 
 from causalpy.utils import _is_variable_dummy_coded, _fit
 
@@ -18,16 +20,26 @@ class MetaLearner:
         if not _is_variable_dummy_coded(treated):
             raise ValueError("Treatment variable is not dummy coded.")
 
+        # Check whether input data share the same index
+        if not ((X.index == y.index) & (y.index == treated.index)).all():
+            raise ValueError("Indices of input data do not coincide.")
+
         self.cate = None
         self.treated = treated
         self.X = X
         self.y = y
         self.models = {}
+        self.labels = X.columns
+        self.index = X.index
 
     def predict_cate(self, X: pd.DataFrame) -> np.array:
         """
         Predict out-of-sample conditional average treatment effect on given input X.
         For in-sample treatement effect self.cate should be used.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame of shape (n_samples, n_featues).
         """
         raise NotImplementedError()
 
@@ -35,18 +47,34 @@ class MetaLearner:
         """
         Predict out-of-sample average treatment effect on given input X. For in-sample treatement
         effect self.ate() should be used.
+        
+        Parameters
+        ----------
+        X : pandas.DataFrame of shape (n_samples, n_featues).
         """
         return self.predict_cate(X).mean()
 
-    def ate(self):
+    def ate(self) -> np.float64:
         "Returns in-sample average treatement effect."
         return self.cate.mean()
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
-        "Fits model."
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords: Dict[str, Any] = None):
+        """Fits model.
+        
+        Parameters
+        ----------
+        X : pandas.DataFrame of shape (n_samples, n_featues).
+            Training data.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        coords : Dict[str, Any].
+            Dictionary containing the keys coeffs and obs_indx.
+        """
         raise NotImplementedError()
 
-    def summary(self):
+    def summary(self) -> None:
         "Prints summary."
         print(f"Number of observations:            {self.X.shape[0]}")
         print(f"Number of treated observations:    {self.treated.sum()}")
@@ -66,11 +94,24 @@ class SkMetaLearner(MetaLearner):
         y: pd.Series,
         treated: pd.Series,
         X: pd.DataFrame = None,
-        n_iter: int = 1000
+        n_iter: int = 1000,
     ) -> np.array:
         """
         Runs bootstrap n_iter times on a sample of size n_samples.
         Fits on (X_ins, y, treated), then predicts on X.
+
+        Parameters
+        ----------
+        X_ins : pandas.DataFrame of shape (n_samples, n_featues).
+                Training data.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        n_iter : int, default = 1000.
+            Number of bootstrap iterations to perform.
         """
         if X is None:
             X = X_ins
@@ -114,9 +155,25 @@ class SkMetaLearner(MetaLearner):
         treated: pd.Series,
         X: pd.DataFrame = None,
         q: float = .05,
-        n_iter: int = 1000
+        n_iter: int = 1000,
     ) -> tuple:
-        "Estimates confidence intervals for ATE on X using bootstraping."
+        """Estimates confidence intervals for ATE on X using bootstraping.
+        
+        Parameters
+        ----------
+        X_ins : pandas.DataFrame of shape (n_samples, n_featues).
+                Training data.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        q : float, default=.05.
+            Quantile to compute. Should be between in the interval [0, 1]. 
+        n_iter : int, default = 1000.
+            Number of bootstrap iterations to perform.
+        """
         cates = self.bootstrap(X_ins, y, treated, X, n_iter)
         ates = cates.mean(axis=0)
         return np.quantile(ates, q=q / 2), np.quantile(cates, q=1 - q / 2)
@@ -128,9 +185,24 @@ class SkMetaLearner(MetaLearner):
         treated: pd.Series,
         X: pd.DataFrame = None,
         q: float = .05,
-        n_iter: int = 1000
+        n_iter: int = 1000,
     ) -> np.array:
-        "Estimates confidence intervals for CATE on X using bootstraping."
+        """Estimates confidence intervals for CATE on X using bootstraping.
+        
+        Parameters
+        ----------
+        X_ins : pandas.DataFrame of shape (n_samples, n_featues).
+                Training data.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        q : float, default=.05.
+            Quantile to compute. Should be between in the interval [0, 1]. 
+        n_iter : int, default = 1000.
+            Number of bootstrap iterations to perform."""
         cates = self.bootstrap(X_ins, y, treated, X, n_iter)
         conf_ints = np.append(
             np.quantile(cates, q / 2, axis=0).reshape(-1, 1),
@@ -146,9 +218,24 @@ class SkMetaLearner(MetaLearner):
         treated: pd.Series,
         X: pd.DataFrame = None,
         q: float = .05,
-        n_iter: int = 1000
-    ):
-        "Calculates bootstrap estimate of bias of CATE estimator."
+        n_iter: int = 1000,
+    ) -> np.float64:
+        """Calculates bootstrap estimate of bias of CATE estimator.
+        
+        Parameters
+        ----------
+        X_ins : pandas.DataFrame of shape (n_samples, n_featues).
+                Training data.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        q : float, default=.05.
+            Quantile to compute. Should be between in the interval [0, 1]. 
+        n_iter : int, default = 1000.
+            Number of bootstrap iterations to perform."""
         if X is None:
             X = X_ins
 
@@ -157,14 +244,20 @@ class SkMetaLearner(MetaLearner):
 
         return (bs_pred - pred).mean()
 
-        
+    def summary(self, n_iter: int = 1000) -> None:
+        """
+        Prints summary.
 
-    def summary(self, n_iter=1000):
+        Parameters
+        ----------
+        n_iter :    int, default=1000.
+                    Number of bootstrap iterations to perform.
+        """
         # TODO: we run self.bootstrap twice independently.
         bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
         conf_ints = self.ate_confidence_interval(
             self.X, self.y, self.treated, self.X, n_iter=n_iter
-            )
+        )
         print(f"Number of observations:             {self.X.shape[0]}")
         print(f"Number of treated observations:     {self.treated.sum()}")
         print(f"Average treatement effect (ATE):    {self.predict_ate(self.X)}")
@@ -181,23 +274,33 @@ class SLearner(SkMetaLearner):
         Metalearners for estimating heterogeneous treatment effects using machine learning.
         Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
 
+    Parameters
+    ----------
+    X :     pandas.DataFrame of shape (n_samples, n_featues).
+            Training data.
+    y :     pandas.Series of shape (n_samples, ).
+            Target vector.
+    treated : pandas.Series of shape (n_samples, ).
+            Treatement assignment indicator consisting of zeros and ones.
+    model : sklearn.base.RegressorMixin.
+            Base learner.
     """
 
     def __init__(
-        self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, model
+        self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, model: RegressorMixin
     ) -> None:
         super().__init__(X=X, y=y, treated=treated)
         self.models["model"] = model
 
         COORDS = {
-            "coeffs": list(X.columns) + ["treated"],
-            "obs_indx": np.arange(X.shape[0])
+            "coeffs": list(self.labels) + ["treated"],
+            "obs_indx": self.index
         }
 
         self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords: Dict[str, Any] = None):
         X_t = X.assign(treatment=treated)
         _fit(model=self.models["model"], X=X_t, y=y, coords=coords)
         return self
@@ -217,7 +320,22 @@ class TLearner(SkMetaLearner):
     [1] Künzel, Sören R., Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu.
         Metalearners for estimating heterogeneous treatment effects using machine learning.
         Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
-
+    
+    Parameters
+    ----------
+    X :     pandas.DataFrame of shape (n_samples, n_featues).
+            Training data.
+    y :     pandas.Series of shape (n_samples, ).
+            Target vector.
+    treated : pandas.Series of shape (n_samples, ).
+            Treatement assignment indicator consisting of zeros and ones.
+    model : sklearn.base.RegressorMixin.
+            If specified, it will be used both as treated and untreated model. Either model or
+            both of treated_model and untreated_model have to be specified.
+    treated_model: sklearn.base.RegressorMixin.
+            Model used for predicting target vector for treated values. 
+    untreated_model: sklearn.base.RegressorMixin.
+            Model used for predicting target vector for untreated values. 
     """
 
     def __init__(
@@ -225,9 +343,9 @@ class TLearner(SkMetaLearner):
         X: pd.DataFrame,
         y: pd.Series,
         treated: pd.Series,
-        model=None,
-        treated_model=None,
-        untreated_model=None
+        model: RegressorMixin = None,
+        treated_model: RegressorMixin = None,
+        untreated_model: RegressorMixin = None,
     ) -> None:
         super().__init__(X=X, y=y, treated=treated)
 
@@ -248,12 +366,12 @@ class TLearner(SkMetaLearner):
 
         self.models = {"treated": treated_model, "untreated": untreated_model}
 
-        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+        COORDS = {"coeffs": self.labels, "obs_indx": self.index}
 
         self.fit(X, y, treated, coords=COORDS)
         self.cate = self.predict_cate(X)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords: Dict[str, Any] = None):
         X_t, y_t = X[treated == 1], y[treated == 1]
         X_u, y_u = X[treated == 0], y[treated == 0]
         _fit(model=self.models["treated"], X=X_t, y=y_t, coords=coords)
@@ -275,19 +393,42 @@ class XLearner(SkMetaLearner):
         Metalearners for estimating heterogeneous treatment effects using machine learning.
         Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
 
+    Parameters
+    ----------
+    X :     pandas.DataFrame of shape (n_samples, n_featues).
+            Training data.
+    y :     pandas.Series of shape (n_samples, ).
+            Target vector.
+    treated : pandas.Series of shape (n_samples, ).
+            Treatement assignment indicator consisting of zeros and ones.
+    model : sklearn.base.RegressorMixin.
+            If specified, it will be used in all of the subregressions, except for the
+            propensity_score_model. Either model or all of treated_model, untreated_model,
+            treated_cate_estimator and untreated_cate_estimator have to be specified.
+    treated_model : sklearn.base.RegressorMixin.
+            Model used for predicting target vector for treated values. 
+    untreated_model :   sklearn.base.RegressorMixin.
+            Model used for predicting target vector for untreated values.
+    untreated_cate_estimator :  sklearn.base.RegressorMixin
+            Model used for CATE estimation on untreated data.
+    treated_cate_estimator :    sklearn.base.RegressorMixin
+            Model used for CATE estimation on treated data.
+    propensity_score_model :    sklearn.base.ClassifierMixin,
+                                default = sklearn.linear_model.LogisticRegression().
+            Model used for propensity score estimation.
     """
 
     def __init__(
         self,
-        X,
-        y,
-        treated,
-        model=None,
-        treated_model=None,
-        untreated_model=None,
-        treated_cate_estimator=None,
-        untreated_cate_estimator=None,
-        propensity_score_model=LogisticRegression(penalty=None)
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+        model: RegressorMixin = None,
+        treated_model: RegressorMixin = None,
+        untreated_model: RegressorMixin = None,
+        treated_cate_estimator: RegressorMixin = None,
+        untreated_cate_estimator: RegressorMixin = None,
+        propensity_score_model: ClassifierMixin = LogisticRegression(penalty=None),
     ):
         super().__init__(X=X, y=y, treated=treated)
 
@@ -316,28 +457,26 @@ class XLearner(SkMetaLearner):
             "propensity": propensity_score_model
         }
 
-        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+        COORDS = {"coeffs": self.labels, "obs_indx": self.index}
 
         self.fit(X, y, treated, coords=COORDS)
 
         # Compute cate
         self.cate = self._compute_cate(X)
 
-    def _compute_cate(self, X):
+    def _compute_cate(self, X: pd.Series):
         "Computes cate for given input."
         cate_t = self.models["treated_cate"].predict(X)
         cate_u = self.models["treated_cate"].predict(X)
         g = self.models["propensity"].predict_proba(X)[:, 1]
         return g * cate_u + (1 - g) * cate_t
 
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
-        (
-            treated_model,
-            untreated_model,
-            treated_cate_estimator,
-            untreated_cate_estimator,
-            propensity_score_model
-        ) = self.models.values()
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords: Dict[str, Any] = None):
+        treated_model = self.models["treated"]
+        untreated_model = self.models["untreated"]
+        treated_cate_estimator = self.models["treated_cate"]
+        untreated_cate_estimator = self.models["untreated_cate"]
+        propensity_score_model = self.models["propensity"]
 
         # Split data to treated and untreated subsets
         X_t, y_t = X[treated == 1], y[treated == 1]
@@ -358,7 +497,7 @@ class XLearner(SkMetaLearner):
         _fit(propensity_score_model, X, treated, coords)
         return self
 
-    def predict_cate(self, X):
+    def predict_cate(self, X: pd.DataFrame) -> np.array:
         cate_estimate_treated = self.models["treated_cate"].predict(X)
         cate_estimate_untreated = self.models["untreated_cate"].predict(X)
 
@@ -374,23 +513,46 @@ class DRLearner(SkMetaLearner):
     [1] Curth, Alicia, Mihaela van der Schaar.
         Nonparametric estimation of heterogeneous treatment effects: From theory to learning algorithms.
         International Conference on Artificial Intelligence and Statistics, pp. 1810-1818 (2021).
-
+    
+    Parameters
+        ----------
+        X :     pandas.DataFrame of shape (n_samples, n_featues).
+                Training data.
+        y :     pandas.Series of shape (n_samples, ).
+                Target vector.
+        treated : pandas.Series of shape (n_samples, ).
+                Treatement assignment indicator consisting of zeros and ones.
+        model : sklearn.base.RegressorMixin.
+                If specified, it will be used in all of the subregressions, except for the
+                propensity_score_model. Either model or all of treated_model, untreated_model,
+                treated_cate_estimator and untreated_cate_estimator have to be specified.
+        treated_model : sklearn.base.RegressorMixin.
+                Model used for predicting target vector for treated values. 
+        untreated_model :   sklearn.base.RegressorMixin.
+                Model used for predicting target vector for untreated values.
+        pseudo_outcome_model :  sklearn.base.RegressorMixin
+                Model used for pseudo-outcome estimation.
+        propensity_score_model :    sklearn.base.ClassifierMixin,
+                                    default = sklearn.linear_model.LogisticRegression().
+                Model used for propensity score estimation.
+        cross_fitting : bool, default=False.
+                If True, performs a cross fitting step.
     """
 
     def __init__(
         self,
-        X,
-        y,
-        treated,
-        model=None,
-        treated_model=None,
-        untreated_model=None,
-        pseudo_outcome_model=None,
-        propensity_score_model=LogisticRegression(penalty=None),
-        cross_fitting=False
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+        model: RegressorMixin = None,
+        treated_model: RegressorMixin = None,
+        untreated_model: RegressorMixin = None,
+        pseudo_outcome_model: RegressorMixin = None,
+        propensity_score_model: ClassifierMixin = LogisticRegression(penalty=None),
+        cross_fitting: bool = False,
     ):
         super().__init__(X=X, y=y, treated=treated)
-        
+
         self.cross_fitting = cross_fitting
 
         if model is None and (untreated_model is None or treated_model is None):
@@ -416,31 +578,34 @@ class DRLearner(SkMetaLearner):
             "propensity": propensity_score_model,
             "pseudo_outcome": pseudo_outcome_model
         }
-        
-        cross_fitted_models = {} 
+
+        cross_fitted_models = {}
         if self.cross_fitting:
-            cross_fitted_models = {key: deepcopy(value) for key, value in self.models.items()}
-        
+            cross_fitted_models = {key: deepcopy(value)
+                                   for key, value in self.models.items()}
+
         self.cross_fitted_models = cross_fitted_models
-        
-        COORDS = {"coeffs": X.columns, "obs_indx": np.arange(X.shape[0])}
+
+        COORDS = {"coeffs": self.labels, "obs_indx": self.index}
         self.fit(X, y, treated, coords=COORDS)
 
         # Estimate CATE
         self.cate = self.predict_cate(X)
 
-
-    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords=None):
+    def fit(self, X: pd.DataFrame, y: pd.Series, treated: pd.Series, coords: Dict[str, Any] = None):
         # Split data to two independent samples of equal size
         (
             X0, X1,
             y0, y1,
             treated0, treated1
-         ) = train_test_split(X, y, treated, stratify=treated, test_size=.5)
-        
-        treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.models.values()
-        
-        # Second iteration is the cross-fitting step. 
+        ) = train_test_split(X, y, treated, stratify=treated, test_size=.5)
+
+        treated_model = self.models["treated"]
+        untreated_model = self.models["untreated"]
+        propensity_score_model = self.models["propensity"]
+        pseudo_outcome_model = self.models["pseudo_outcome"]
+
+        # Second iteration is the cross-fitting step.
         second_iteration = False
         for i in range(2):
             # Split data to treated and untreated subsets
@@ -457,33 +622,36 @@ class DRLearner(SkMetaLearner):
             g = propensity_score_model.predict_proba(X1)[:, 1]
             mu_0 = untreated_model.predict(X1)
             mu_1 = treated_model.predict(X1)
-            mu_w = np.where(treated1==0, mu_0, mu_1)
+            mu_w = np.where(treated1 == 0, mu_0, mu_1)
 
             pseudo_outcome = (
                 (treated1 - g) / (g * (1 - g)) * (y1 - mu_w) + mu_1 - mu_0
-                )
+            )
 
             # Fit pseudo-outcome model
             _fit(pseudo_outcome_model, X1, pseudo_outcome, coords)
-             
+
             if self.cross_fitting and not second_iteration:
                 # Swap data and estimators
                 (X0, X1) = (X1, X0)
                 (y0, y1) = (y1, y0)
                 (treated0, treated1) = (treated1, treated0)
-                
-                treated_model, untreated_model, propensity_score_model, pseudo_outcome_model = self.cross_fitted_models.values()
+
+                treated_model = self.cross_fitted_models["treated"]
+                untreated_model = self.cross_fitted_models["untreated"]
+                propensity_score_model = self.cross_fitted_models["propensity"]
+                pseudo_outcome_model = self.cross_fitted_models["pseudo_outcome"]
                 second_iteration = True
             else:
                 return self
 
         return self
 
-    def predict_cate(self, X):
+    def predict_cate(self, X: pd.DataFrame) -> np.array:
         pred1 = self.models["pseudo_outcome"].predict(X)
-        
+
         if self.cross_fitting:
             pred2 = self.cross_fitted_models["pseudo_outcome"].predict(X)
             return (pred1 + pred2) / 2
-        
+
         return pred1
