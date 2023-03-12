@@ -4,9 +4,9 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
-from arviz import r2_score
 import pymc_bart as pmb
-
+from arviz import r2_score
+from pymc.distributions.distribution import DistributionMeta
 
 
 class ModelBuilder(pm.Model):
@@ -128,17 +128,62 @@ class BARTModel(ModelBuilder):
     def build_model(self, X, y, coords=None):
         with self:
             self.add_coords(coords)
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            mu = pmb.BART("mu", X, y, m=self.m, dims="obs_ind")
+            X_ = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            mu = pmb.BART("mu", X_, y, m=self.m, dims="obs_ind")
             pm.Normal("y_hat", mu=mu, sigma=self.sigma, observed=y, dims="obs_ind")
 
+
 class LogisticRegression(ModelBuilder):
-    "Custom PyMC model for logistic regression."
+    """
+    Custom PyMC model for logistic regression.
+
+    Parameters
+    ----------
+    coeff_distribution :    PyMC distribution.
+                Prior distribution of coefficient vector.
+    distribution_kwargs
+                Keyword arguments for prior distribution.
+    sample_kwargs
+                Keyword arguments for sampler.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import pymc as pm
+    >>> from causalpy.pymc_models import LogisticRegression
+    >>>
+    >>> X = np.random.rand(10, 10)
+    >>> y = np.random.rand(10)
+    >>> m = LogisticRegression(
+    >>>         coeff_distribution=pm.Cauchy,
+    >>>         coeff_distribution_kwargs={"alpha": 0, "beta": 1}
+    >>> )
+    >>>
+    >>> m.fit(X, y)
+    """
+
+    def __init__(
+        self,
+        sample_kwargs=None,
+        coeff_distribution: DistributionMeta = pm.Normal,
+        coeff_distribution_kwargs: Optional[dict[str, Any]] = None,
+    ):
+        self.coeff_distribution = coeff_distribution
+        if coeff_distribution_kwargs is None:
+            self.coeff_distribution_kwargs = {"mu": 0, "sigma": 50}
+        else:
+            self.coeff_distribution_kwargs = coeff_distribution_kwargs
+
+        super().__init__(sample_kwargs)
 
     def build_model(self, X, y, coords) -> None:
         with self:
             self.add_coords(coords)
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            beta = pm.Normal("beta", 0, 50, dims="coeffs")
-            mu = pm.math.sigmoid(pm.math.dot(X, beta))
-            pm.Bernoulli("yhat", mu, observed=y)
+            X_ = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            beta = self.coeff_distribution(
+                "beta", dims="coeffs", **self.coeff_distribution_kwargs
+            )
+            mu = pm.Deterministic(
+                "mu", pm.math.sigmoid(pm.math.dot(X_, beta)), dims="obs_ind"
+            )
+            pm.Bernoulli("y_hat", mu, observed=y)
