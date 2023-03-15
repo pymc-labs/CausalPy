@@ -430,8 +430,8 @@ class XLearner(SkMetaLearner):
     model : sklearn.base.RegressorMixin.
             If specified, it will be used in all of the subregressions, except for the
             propensity_score_model. Either model or all of treated_model,
-            untreated_model, treated_cate_estimator and untreated_cate_estimator have to
-              be specified.
+            untreated_model, treated_cate_estimator and untreated_cate_estimator have
+            to be specified.
     treated_model : sklearn.base.RegressorMixin.
             Model used for predicting target vector for treated values.
     untreated_model :   sklearn.base.RegressorMixin.
@@ -489,14 +489,7 @@ class XLearner(SkMetaLearner):
         self.fit(X, y, treated, coords=COORDS)
 
         # Compute cate
-        self.cate = self._compute_cate(X)
-
-    def _compute_cate(self, X: pd.Series):
-        "Computes cate for given input."
-        cate_t = self.models["treated_cate"].predict(X)
-        cate_u = self.models["treated_cate"].predict(X)
-        g = self.models["propensity"].predict_proba(X)[:, 1]
-        return g * cate_u + (1 - g) * cate_t
+        self.cate = self.predict_cate(X)
 
     def fit(
         self,
@@ -568,7 +561,7 @@ class DRLearner(SkMetaLearner):
         pseudo_outcome_model :  sklearn.base.RegressorMixin
                 Model used for pseudo-outcome estimation.
         propensity_score_model :    sklearn.base.ClassifierMixin,
-                                    default = sklearn.linear_model.LogisticRegression().
+                                   default = sklearn.linear_model.LogisticRegression().
                 Model used for propensity score estimation.
         cross_fitting : bool, default=False.
                 If True, performs a cross fitting step.
