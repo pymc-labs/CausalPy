@@ -4,6 +4,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from xarray.core.dataarray import DataArray
+
 
 from causalpy.pymc_models import LogisticRegression, ModelBuilder
 from causalpy.skl_meta_learners import (
@@ -27,6 +29,8 @@ class BayesianMetaLearner(MetaLearner):
         coords: Dict[str, Any] = None,
     ):
         """
+        Fits base-learners.
+
         Parameters
         ----------
         X :     pandas.DataFrame of shape (n_samples, n_featues).
@@ -36,6 +40,17 @@ class BayesianMetaLearner(MetaLearner):
         treated :   pandas.Series of shape (n_samples, ).
         coords : Dict[str, Any].
             Dictionary containing the keys coeffs and obs_indx.
+        """
+        raise NotImplementedError()
+    
+    def predict_cate(self, X: pd.DataFrame) -> DataArray:
+        """
+        Predicts distribution of treatement effect.
+
+        Parameters
+        ----------
+        X :     pandas.DataFrame of shape (n_samples, n_featues).
+                Feature matrix.
         """
         raise NotImplementedError()
 
@@ -61,7 +76,7 @@ class BayesianSLearner(SLearner, BayesianMetaLearner):
             Base learner.
     """
 
-    def predict_cate(self, X: pd.DataFrame) -> np.array:
+    def predict_cate(self, X: pd.DataFrame) -> DataArray:
         X_untreated = X.assign(treatment=0)
         X_treated = X.assign(treatment=1)
         m = self.models["model"]
@@ -77,7 +92,7 @@ class BayesianTLearner(TLearner, BayesianMetaLearner):
     Implements of T-learner described in [1]. T-learner fits two separate models to
     estimate conditional average treatment effect.
 
-[1] Künzel, Sören R., Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu. Metalearners
+    [1] Künzel, Sören R., Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu. Metalearners
         for estimating heterogeneous treatment effects using machine learning.
         Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
     Parameters
@@ -97,7 +112,7 @@ class BayesianTLearner(TLearner, BayesianMetaLearner):
             Model used for predicting target vector for untreated values.
     """
 
-    def predict_cate(self, X: pd.DataFrame) -> np.array:
+    def predict_cate(self, X: pd.DataFrame) -> DataArray:
         treated_model = self.models["treated"]
         untreated_model = self.models["untreated"]
 
@@ -191,12 +206,12 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
             untreated_model.predict(X_t),
             group="posterior_predictive",
             var_names="mu"
-        )
+        ).mean(axis=1)
         pred_t_u = az.extract(
             treated_model.predict(X_u),
             group="posterior_predictive",
             var_names="mu"
-        )
+        ).mean(axis=1)
 
         tau_t = y_t - pred_u_t
         tau_u = y_u - pred_t_u
@@ -209,7 +224,7 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
         _fit(propensity_score_model, X, treated, coords)
         return self
 
-    def predict_cate(self, X: pd.DataFrame) -> np.array:
+    def predict_cate(self, X: pd.DataFrame) -> DataArray:
         treated_model = self.models["treated_cate"]
         untreated_model = self.models["untreated_cate"]
 
@@ -352,7 +367,7 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
 
         return self
 
-    def predict_cate(self, X: pd.DataFrame) -> pd.Series:
+    def predict_cate(self, X: pd.DataFrame) -> DataArray:
         pred = self.models["pseudo_outcome"].predict(X)["posterior_predictive"].mu
 
         if self.cross_fitting:
