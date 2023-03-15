@@ -186,4 +186,4 @@ class LogisticRegression(ModelBuilder):
             mu = pm.Deterministic(
                 "mu", pm.math.sigmoid(pm.math.dot(X_, beta)), dims="obs_ind"
             )
-            pm.Bernoulli("y_hat", mu, observed=y)
+            pm.Bernoulli("y_hat", mu, observed=y, dims="obs_ind")

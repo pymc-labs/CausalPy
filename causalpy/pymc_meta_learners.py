@@ -1,5 +1,6 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+import arviz as az
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -78,7 +79,7 @@ class BayesianTLearner(TLearner, BayesianMetaLearner):
 
 [1] Künzel, Sören R., Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu. Metalearners
         for estimating heterogeneous treatment effects using machine learning.
-        Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.    
+        Proceedings of the national academy of sciences 116, no. 10 (2019): 4156-4165.
     Parameters
     ----------
     X :     pandas.DataFrame of shape (n_samples, n_featues).
@@ -91,7 +92,7 @@ class BayesianTLearner(TLearner, BayesianMetaLearner):
             If specified, it will be used both as treated and untreated model. Either
             model or both of treated_model and untreated_model have to be specified.
     treated_model: causalpy.pymc_models.ModelBuilder.
-            Model used for predicting target vector for treated values. 
+            Model used for predicting target vector for treated values.
     untreated_model: causalpy.pymc_models.ModelBuilder.
             Model used for predicting target vector for untreated values.
     """
@@ -126,8 +127,8 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
     model : causalpy.pymc_models.ModelBuilder.
             If specified, it will be used in all of the subregressions, except for the
             propensity_score_model. Either model or all of treated_model,
-            untreated_model, treated_cate_estimator and untreated_cate_estimator have to
-            be specified.
+            untreated_model, treated_cate_estimator and untreated_cate_estimator have
+            to be specified.
     treated_model : causalpy.pymc_models.ModelBuilder.
             Model used for predicting target vector for treated values. 
     untreated_model :   causalpy.pymc_models.ModelBuilder.
@@ -143,29 +144,27 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
     """
 
     def __init__(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        treated: pd.Series,
-        model: ModelBuilder = None,
-        treated_model: ModelBuilder = None,
-        untreated_model: ModelBuilder = None,
-        treated_cate_estimator: ModelBuilder = None,
-        untreated_cate_estimator: ModelBuilder = None,
-        propensity_score_model: ModelBuilder = LogisticRegression(),
-    ) -> None:
-
+            self,
+            X: pd.DataFrame,
+            y: pd.Series,
+            treated: pd.Series,
+            model: Optional[ModelBuilder] = None,
+            treated_model: Optional[ModelBuilder] = None,
+            untreated_model: Optional[ModelBuilder] = None,
+            treated_cate_estimator: Optional[ModelBuilder] = None,
+            untreated_cate_estimator: Optional[ModelBuilder] = None,
+            propensity_score_model: Optional[ModelBuilder] = None,
+            ):
         super().__init__(
             X,
             y,
-            treated,
-            model,
+            treated, model,
             treated_model,
             untreated_model,
             treated_cate_estimator,
             untreated_cate_estimator,
             propensity_score_model,
-        )
+            )
 
     def fit(
         self,
@@ -188,15 +187,15 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
         _fit(treated_model, X_t, y_t, coords)
         _fit(untreated_model, X_u, y_u, coords)
 
-        pred_u_t = (
-            untreated_model.predict(X_t)["posterior_predictive"]
-            .mu.mean(dim=["chain", "draw"])
-            .to_numpy()
+        pred_u_t = az.extract(
+            untreated_model.predict(X_t),
+            group="posterior_predictive",
+            var_names="mu"
         )
-        pred_t_u = (
-            treated_model.predict(X_u)["posterior_predictive"]
-            .mu.mean(dim=["chain", "draw"])
-            .to_numpy()
+        pred_t_u = az.extract(
+            treated_model.predict(X_u),
+            group="posterior_predictive",
+            var_names="mu"
         )
 
         tau_t = y_t - pred_u_t
@@ -250,7 +249,7 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
         pseudo_outcome_model :  causalpy.pymc_models.ModelBuilder.
                 Model used for pseudo-outcome estimation.
         propensity_score_model :    causalpy.pymc_models.ModelBuilder,
-                                    default = causalpy.pymc_models.LogisticRegression().
+                                default = causalpy.pymc_models.LogisticRegression().
                 Model used for propensity score estimation.
         cross_fitting : bool, default=False.
                 If True, performs a cross fitting step.
@@ -261,15 +260,24 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
         X: pd.DataFrame,
         y: pd.Series,
         treated: pd.Series,
-        model: ModelBuilder = None,
-        treated_model: ModelBuilder = None,
-        untreated_model: ModelBuilder = None,
-        propensity_score_model: ModelBuilder = LogisticRegression(),
-    ) -> None:
+        model: Optional[ModelBuilder] = None,
+        treated_model: Optional[ModelBuilder] = None,
+        untreated_model: Optional[ModelBuilder] = None,
+        pseudo_outcome_model: Optional[ModelBuilder] = None,
+        propensity_score_model: Optional[ModelBuilder] = LogisticRegression(),
+        cross_fitting: bool = False,
+        ):
         super().__init__(
-            X, y, treated, model, treated_model, untreated_model, propensity_score_model
+        X,
+        y,
+        treated,
+        model,
+        treated_model,
+        untreated_model,
+        pseudo_outcome_model,
+        propensity_score_model,
+        cross_fitting,
         )
-        self.cate = self.cate.mean(dim=["chain", "draw"])
 
     def fit(
             self,
@@ -302,16 +310,27 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
             _fit(untreated_model, X_u, y_u, coords)
 
             # Fit propensity score model
-            _fit(propensity_score_model, X, treated, coords)
-
-            g = propensity_score_model.predict(X1)["posterior_predictive"].mu
-            mu_0 = untreated_model.predict(X1)["posterior_predictive"].mu
-            mu_1 = treated_model.predict(X1)["posterior_predictive"].mu
+            _fit(propensity_score_model, X0, treated0, coords)
+            
+            g = az.extract(
+                propensity_score_model.predict(X1),
+                group="posterior_predictive",
+                var_names="mu").mean(axis=1)
+            mu_0 = az.extract(
+                untreated_model.predict(X1),
+                group="posterior_predictive",
+                var_names="mu").mean(axis=1)
+            mu_1 = az.extract(
+                treated_model.predict(X1),
+                group="posterior_predictive",
+                var_names="mu").mean(axis=1)
+            
             mu_w = np.where(treated1 == 0, mu_0, mu_1)
 
             pseudo_outcome = (
                 (treated1 - g) / (g * (1 - g)) * (y1 - mu_w) + mu_1 - mu_0
             )
+
 
             # Fit pseudo-outcome model
             _fit(pseudo_outcome_model, X1, pseudo_outcome, coords)
@@ -326,6 +345,7 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
                 untreated_model = self.cross_fitted_models["untreated"]
                 propensity_score_model = self.cross_fitted_models["propensity"]
                 pseudo_outcome_model = self.cross_fitted_models["pseudo_outcome"]
+                
                 second_iteration = True
             else:
                 return self
@@ -343,4 +363,4 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
                 .mu)
             pred = (pred + pred2) / 2
 
-        return pd.Series(pred, index=self.index)
+        return pred
