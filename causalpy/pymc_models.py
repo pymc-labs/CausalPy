@@ -1,3 +1,4 @@
+"PyMC based meta-learners."
 from typing import Any, Dict, Optional
 
 import arviz as az
