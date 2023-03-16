@@ -1,3 +1,4 @@
+"Scikit-learn based meta-learners."
 from copy import deepcopy
 from typing import Any, Dict
 
@@ -259,6 +260,27 @@ class SkMetaLearner(MetaLearner):
 
         return (bs_pred - pred).mean()
 
+    def score(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+    ) -> Dict[str, np.float64]:
+        """
+        Returns a dictionary of R^2 scores of base-learners, mean accuracy in case of
+        propensity score estimator.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        y : pandas.Series of shape (n_samples, ).
+            Target vector.
+        treated :   pandas.Series of shape (n_samples, ).
+                    Treatement assignment indicator consisting of zeros and ones.
+        """
+        raise NotImplementedError()
+
     def summary(self, n_iter: int = 1000) -> None:
         """
         Prints summary.
@@ -278,6 +300,8 @@ class SkMetaLearner(MetaLearner):
         print(f"Average treatement effect (ATE):    {self.predict_ate(self.X)}")
         print(f"95% Confidence interval for ATE:    {conf_ints}")
         print(f"Estimated bias:                     {bias}")
+        print("---- Score  ----")
+        print(self.score(self.X, self.y, self.treated))
 
 
 class SLearner(SkMetaLearner):
@@ -328,6 +352,14 @@ class SLearner(SkMetaLearner):
         X_treated = X.assign(treatment=1)
         m = self.models["model"]
         return pd.Series(m.predict(X_treated) - m.predict(X_control), index=self.index)
+
+    def score(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+    ) -> Dict[str, np.float64]:
+        return {"model": self.models["model"].score(X.assign(treatment=treated), y)}
 
 
 class TLearner(SkMetaLearner):
@@ -408,6 +440,19 @@ class TLearner(SkMetaLearner):
         return pd.Series(
             treated_model.predict(X) - untreated_model.predict(X), index=self.index
         )
+
+    def score(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+    ) -> Dict[str, np.float64]:
+        X_t, y_t = X[treated == 1], y[treated == 1]
+        X_u, y_u = X[treated == 0], y[treated == 0]
+        return {
+            "treated": self.models["treated"].score(X_t, y_t),
+            "untreated": self.models["untreated"].score(X_u, y_u),
+        }
 
 
 class XLearner(SkMetaLearner):
@@ -530,6 +575,26 @@ class XLearner(SkMetaLearner):
 
         cate = g * cate_estimate_untreated + (1 - g) * cate_estimate_treated
         return pd.Series(cate, index=self.index)
+
+    def score(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+    ) -> Dict[str, np.float64]:
+        X_t, y_t = X[treated == 1], y[treated == 1]
+        X_u, y_u = X[treated == 0], y[treated == 0]
+
+        tau_t = y_t - self.models["untreated"].predict(X_t)
+        tau_u = self.models["treated"].predict(X_u) - y_u
+
+        return {
+            "treated": self.models["treated"].score(X_t, y_t),
+            "untreated": self.models["untreated"].score(X_u, y_u),
+            "propensity": self.models["propensity"].score(X, treated),
+            "treated_cate": self.models["treated_cate"].score(X_t, tau_t),
+            "untreated_cate": self.models["untreated_cate"].score(X_u, tau_u),
+        }
 
 
 class DRLearner(SkMetaLearner):
@@ -686,3 +751,26 @@ class DRLearner(SkMetaLearner):
             pred = (pred + pred2) / 2
 
         return pd.Series(pred, index=self.index)
+
+    def score(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        treated: pd.Series,
+    ) -> Dict[str, np.float64]:
+        X_t, y_t = X[treated == 1], y[treated == 1]
+        X_u, y_u = X[treated == 0], y[treated == 0]
+
+        g = self.models["propensity"].predict_proba(X)[:, 1]
+        mu_0 = self.models["untreated"].predict(X)
+        mu_1 = self.models["treated"].predict(X)
+        mu_w = np.where(treated == 0, mu_0, mu_1)
+
+        pseudo_outcome = (treated - g) / (g * (1 - g)) * (y - mu_w) + mu_1 - mu_0
+
+        return {
+            "treated": self.models["treated"].score(X_t, y_t),
+            "untreated": self.models["untreated"].score(X_u, y_u),
+            "propensity": self.models["propensity"].score(X, treated),
+            "pseudo-outcome": self.models["pseudo_outcome"].score(X, pseudo_outcome),
+        }
