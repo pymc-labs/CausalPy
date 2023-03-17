@@ -4,8 +4,10 @@ from causalpy.pymc_models import ModelBuilder
 
 
 def _fit(model, X, y, coords):
-    """Fits model to X, y, where model is either a sklearn model or a ModelBuilder
-    instance. In the later case it passes coords, in the first case coords is ignored."""
+    """
+    Fits model to X, y, where model is either a sklearn model or a ModelBuilder
+    instance. In the later case it passes coords, in the first case coords is ignored.
+    """
     if isinstance(model, ModelBuilder):
         model.fit(X, y, coords)
     else:
