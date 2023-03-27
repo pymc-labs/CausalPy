@@ -117,10 +117,26 @@ class LinearRegression(ModelBuilder):
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
 
 
-class BARTModel(ModelBuilder):
-    "Class for building BART based models for meta-learners."
+class BARTRegressor(ModelBuilder):
+    """
+    Class for building BART based models for meta-learners.
 
-    def __init__(self, sample_kwargs=None, m=20, sigma=1):
+    Parameters
+    ----------
+    m : int.
+        Number of trees to fit.
+    sigma : float.
+        Prior standard deviation.
+    sample_kwargs : dict.
+        Keyword arguments for sampler.
+    """
+
+    def __init__(
+        self,
+        m: int = 20,
+        sigma: float = 1.0,
+        sample_kwargs: Optional[dict[str, Any]] = None,
+    ):
         self.m = m
         self.sigma = sigma
         super().__init__(sample_kwargs)
@@ -141,9 +157,9 @@ class LogisticRegression(ModelBuilder):
     ----------
     coeff_distribution :    PyMC distribution.
                 Prior distribution of coefficient vector.
-    distribution_kwargs
+    distribution_kwargs :   dict.
                 Keyword arguments for prior distribution.
-    sample_kwargs
+    sample_kwargs :   dict.
                 Keyword arguments for sampler.
 
     Examples
@@ -164,7 +180,7 @@ class LogisticRegression(ModelBuilder):
 
     def __init__(
         self,
-        sample_kwargs=None,
+        sample_kwargs: Optional[dict[str, Any]] = None,
         coeff_distribution: DistributionMeta = pm.Normal,
         coeff_distribution_kwargs: Optional[dict[str, Any]] = None,
     ):
