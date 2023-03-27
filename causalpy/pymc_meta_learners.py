@@ -211,7 +211,7 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
         ).mean(axis=1)
 
         tau_t = y_t - pred_u_t
-        tau_u = y_u - pred_t_u
+        tau_u = - y_u + pred_t_u
 
         # Estimate CATE separately on treated and untreated subsets
         _fit(treated_cate_estimator, X_t, tau_t, coords)
@@ -229,7 +229,7 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
         cate_estimate_untreated = untreated_model.predict(X)["posterior_predictive"].mu
         g = self.models["propensity"].predict(X)["posterior_predictive"].mu
 
-        return g * cate_estimate_untreated + (1 - g) * cate_estimate_treated
+        return (1 - g) * cate_estimate_untreated + g * cate_estimate_treated
 
 
 class BayesianDRLearner(DRLearner, BayesianMetaLearner):

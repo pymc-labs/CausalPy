@@ -119,7 +119,7 @@ class LinearRegression(ModelBuilder):
 
 class BARTRegressor(ModelBuilder):
     """
-    Class for building BART based models for meta-learners.
+    Class for building BART based regressors for meta-learners.
 
     Parameters
     ----------
@@ -147,6 +147,35 @@ class BARTRegressor(ModelBuilder):
             X_ = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
             mu = pmb.BART("mu", X_, y, m=self.m, dims="obs_ind")
             pm.Normal("y_hat", mu=mu, sigma=self.sigma, observed=y, dims="obs_ind")
+
+
+class BARTClassifier(ModelBuilder):
+    """
+    Class for building BART based models for meta-learners.
+
+    Parameters
+    ----------
+    m : int.
+        Number of trees to fit.
+    sample_kwargs : dict.
+        Keyword arguments for sampler.
+    """
+
+    def __init__(
+        self,
+        m: int = 20,
+        sample_kwargs: Optional[dict[str, Any]] = None,
+    ):
+        self.m = m
+        super().__init__(sample_kwargs)
+
+    def build_model(self, X, y, coords=None):
+        with self:
+            self.add_coords(coords)
+            X_ = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            mu_ = pmb.BART("mu_", X_, y, m=self.m, dims="obs_ind")
+            mu = pm.Deterministic("mu", pm.math.sigmoid(mu_), dims="obs_ind")
+            pm.Bernoulli("y_hat", mu, observed=y, dims="obs_ind")
 
 
 class LogisticRegression(ModelBuilder):
