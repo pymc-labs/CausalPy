@@ -10,6 +10,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_consistent_length
 
+from causalpy.summary import Summary
 from causalpy.utils import _fit, _is_variable_dummy_coded
 
 
@@ -67,7 +68,8 @@ class MetaLearner:
         treated: pd.Series,
         coords: Dict[str, Any] = None,
     ):
-        """Fits model.
+        """
+        Fits model.
 
         Parameters
         ----------
@@ -81,12 +83,6 @@ class MetaLearner:
             Dictionary containing the keys coeffs and obs_indx.
         """
         raise NotImplementedError()
-
-    def summary(self) -> None:
-        "Prints summary."
-        print(f"Number of observations:          {self.X.shape[0]}")
-        print(f"Number of treated observations:  {self.treated.sum()}")
-        print(f"Average treatement effect (ATE): {self.predict_ate(self.X.shape[0])}")
 
     def plot(self):
         "Plots results. Content is undecided yet."
@@ -280,10 +276,38 @@ class SkMetaLearner(MetaLearner):
                     Treatement assignment indicator consisting of zeros and ones.
         """
         raise NotImplementedError()
-
-    def summary(self, n_iter: int = 1000) -> None:
+    
+    def average_uplift_by_percentile(
+            self,
+            X: pd.DataFrame,
+            nbins: int=20,
+            ) -> pd.DataFrame:
         """
-        Prints summary.
+        Returns average uplift in quantile groups. 
+
+        Parameters
+        ----------
+        X : pandas.DataFrame of shape (_, n_features).
+            Data to predict on.
+        nbins : int.
+            Number of bins.
+        """
+        preds = self.predict_cate(X)
+        nunique = preds.unique().shape[0]
+
+        df = pd.DataFrame(
+            {
+            "Mean uplift by quantile": preds,
+            "quantile": pd.qcut(preds, q=min(nunique, nbins))
+            }
+            ).groupby("quantile").mean()
+        
+        return df
+
+        
+    def summary(self, n_iter: int = 100) -> Summary:
+        """
+        Returns.
 
         Parameters
         ----------
@@ -291,18 +315,30 @@ class SkMetaLearner(MetaLearner):
                     Number of bootstrap iterations to perform.
         """
         # TODO: we run self.bootstrap twice independently.
-        bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
         conf_ints = self.ate_confidence_interval(
-            self.X, self.y, self.treated, self.X, n_iter=n_iter
+            self.X, self.y, self.treated, self.X, n_iter=n_iter,
         )
-        print(f"Number of observations:             {self.X.shape[0]}")
-        print(f"Number of treated observations:     {self.treated.sum()}")
-        print(f"Average treatement effect (ATE):    {self.predict_ate(self.X)}")
-        print(f"95% Confidence interval for ATE:    {conf_ints}")
-        print(f"Estimated bias:                     {bias}")
-        print("---- Score  ----")
-        print(self.score(self.X, self.y, self.treated))
+        conf_ints = map(lambda x: round(x, 2), conf_ints)
+        bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
+        bias = round(bias, 2)
+        ate = round(self.ate(), 2)
+        score = self.score(self.X, self.y, self.treated)
+        models = {k: [type(v).__name__, round(score[k], 2)] for k, v in self.models.items()}
 
+        s = Summary()
+        s.add_title(["Conditional Average Treatment Effect Estimator Summary"])
+        s.add_row("Number of observations", [self.index.shape[0]], 2)
+        s.add_row("Number of treated observations", [self.treated.sum()], 2)
+        s.add_row("Average treatement effect (ATE)", [ate], 2)
+        s.add_row("95% Confidence interval for ATE", [tuple(conf_ints)], 1)
+        s.add_row("Estimated bias", [bias], 2)
+        s.add_title(["Base learners"])
+        s.add_header(["", "Model", "R^2"], 1)
+
+        for name, x in models.items():
+            s.add_row(name, x, 1)
+        
+        return s
 
 class SLearner(SkMetaLearner):
     """
