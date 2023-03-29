@@ -808,5 +808,5 @@ class DRLearner(SkMetaLearner):
             "treated": self.models["treated"].score(X_t, y_t),
             "untreated": self.models["untreated"].score(X_u, y_u),
             "propensity": self.models["propensity"].score(X, treated),
-            "pseudo-outcome": self.models["pseudo_outcome"].score(X, pseudo_outcome),
+            "pseudo_outcome": self.models["pseudo_outcome"].score(X, pseudo_outcome),
         }
