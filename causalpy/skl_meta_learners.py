@@ -1,6 +1,6 @@
 "Scikit-learn based meta-learners."
 from copy import deepcopy
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -83,10 +83,6 @@ class MetaLearner:
             Dictionary containing the keys coeffs and obs_indx.
         """
         raise NotImplementedError()
-
-    def plot(self):
-        "Plots results. Content is undecided yet."
-        plt.hist(self.cate, bins=40, density=True)
 
 
 class SkMetaLearner(MetaLearner):
@@ -276,14 +272,14 @@ class SkMetaLearner(MetaLearner):
                     Treatement assignment indicator consisting of zeros and ones.
         """
         raise NotImplementedError()
-    
-    def average_uplift_by_percentile(
-            self,
-            X: pd.DataFrame,
-            nbins: int=20,
-            ) -> pd.DataFrame:
+
+    def average_uplift_by_quantile(
+        self,
+        X: pd.DataFrame,
+        nbins: int = 20,
+    ) -> pd.DataFrame:
         """
-        Returns average uplift in quantile groups. 
+        Returns average uplift in quantile groups.
 
         Parameters
         ----------
@@ -295,16 +291,20 @@ class SkMetaLearner(MetaLearner):
         preds = self.predict_cate(X)
         nunique = preds.unique().shape[0]
 
-        df = pd.DataFrame(
-            {
-            "Mean uplift by quantile": preds,
-            "quantile": pd.qcut(preds, q=min(nunique, nbins))
-            }
-            ).groupby("quantile").mean()
-        
-        return df
+        uplift = (
+            pd.DataFrame(
+                {
+                    "Mean uplift by quantile": preds,
+                    "quantile": pd.qcut(preds, q=min(nunique, nbins)),
+                }
+            )
+            .groupby("quantile")
+            .mean()
+            .sort_values("quantile", ascending=False)
+        )
 
-        
+        return uplift
+
     def summary(self, n_iter: int = 100) -> Summary:
         """
         Returns.
@@ -316,14 +316,20 @@ class SkMetaLearner(MetaLearner):
         """
         # TODO: we run self.bootstrap twice independently.
         conf_ints = self.ate_confidence_interval(
-            self.X, self.y, self.treated, self.X, n_iter=n_iter,
+            self.X,
+            self.y,
+            self.treated,
+            self.X,
+            n_iter=n_iter,
         )
         conf_ints = map(lambda x: round(x, 2), conf_ints)
         bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
         bias = round(bias, 2)
         ate = round(self.ate(), 2)
         score = self.score(self.X, self.y, self.treated)
-        models = {k: [type(v).__name__, round(score[k], 2)] for k, v in self.models.items()}
+        models = {
+            k: [type(v).__name__, round(score[k], 2)] for k, v in self.models.items()
+        }
 
         s = Summary()
         s.add_title(["Conditional Average Treatment Effect Estimator Summary"])
@@ -337,8 +343,49 @@ class SkMetaLearner(MetaLearner):
 
         for name, x in models.items():
             s.add_row(name, x, 1)
-        
+
         return s
+
+    def plot(
+        self,
+        nbins: int = 20,
+        figsize: tuple[int] = (20, 20),
+        fontsize: int = 40,
+    ) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plots average uplift per decile and cummulative uplift curve.
+
+        Parameters
+        ----------
+        nbins : int, default=20.
+            Number of bins.
+        figsize: tuple[int], default=(20, 20).
+            Size of figure.
+        fontsize: int, default=40.
+            Size of font to use.
+        """
+        fig, ax = plt.subplots(2, 1, figsize=figsize)
+
+        uplift = self.average_uplift_by_quantile(self.X, nbins=nbins).sort_values(
+            by="Mean uplift by quantile", ascending=False
+        )
+
+        # nbins might change here if nbins is too big
+        nbins = uplift.shape[0]
+
+        uplift.plot.bar(ax=ax[0])
+        ax[0].set_title("Uplift by quantile", fontsize=fontsize)
+
+        (
+            uplift.cumsum()
+            .reset_index(drop=True)
+            .set_index(np.linspace(0, 100, nbins))
+            .plot(ax=ax[1], xlabel="Percentage of population", ylabel="Uplift")
+        )
+        ax[1].set_title("Cumulative uplift", fontsize=fontsize)
+
+        return fig, ax
+
 
 class SLearner(SkMetaLearner):
     """
