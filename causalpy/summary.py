@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-def html_header(columns: list[str], colspan: int = 1):
+def html_header(columns: list[str], colspan: int = 1) -> str:
     """
     Returns HTML code for table header.
 
@@ -23,7 +23,7 @@ def html_header(columns: list[str], colspan: int = 1):
     return '<tr style="text-align: center">' + string + "</tr>"
 
 
-def html_rows(index: str, values: list, colspan: int = 1):
+def html_rows(index: str, values: list, colspan: int = 1) -> str:
     """
     Returns HTML code for table rows.
 
@@ -53,14 +53,24 @@ def html_rows(index: str, values: list, colspan: int = 1):
     return string
 
 
-def str_header(col_names, length):
+def str_header(columns: list[str], length: int) -> str:
+    """
+    Returns table header string.
+
+    Parameters
+    ----------
+    columns :   list[str].
+        List containing column names.
+    length :   int.
+        Length of box containing header.
+    """
     # If first column is empty, it's box should not be displayed
-    first_col_empty = col_names[0] == ""
+    first_col_empty = columns[0] == ""
 
     if first_col_empty:
-        col_names = col_names[1:]
+        columns = columns[1:]
 
-    n_cols = len(col_names)
+    n_cols = len(columns)
 
     top = f"{length * '═'}╦"
     bot = f"{length * '═'}╩"
@@ -69,12 +79,26 @@ def str_header(col_names, length):
 
     return f"""\
     {spaces}╔{(n_cols - 1) * top}{length * "═"}╗
-    {spaces}║{"║".join(map(lambda x: x.center(length), col_names))}║
+    {spaces}║{"║".join(map(lambda x: x.center(length), columns))}║
     ┏{length * '━'}╚{(n_cols - 1) * bot}{length * "═"}╝\
     """
 
 
-def str_row(index, values, length, row_type="inner"):
+def str_row(index: str, values: str, length: int, row_type: str = "inner") -> str:
+    """
+    Returns string table row.
+
+    Parameters
+    ----------
+    index : str.
+        Index of the row.
+    values :    int.
+        Values of the row.
+    length :    int.
+        Length of boxes.
+    row_type :  str.
+        One of "inner", "first", "last".
+    """
     n_cols = len(values)
     values = map(str, values)
 
@@ -98,7 +122,14 @@ def str_row(index, values, length, row_type="inner"):
 
 
 def str_title(title: str):
-    "Returns title in a box."
+    """
+    Returns title in a box.
+
+    Parameters
+    ----------
+    title : str.
+        String to return in a box.
+    """
     length = len(title)
     return f"""\
     ╔{(length + 2) * '═'}╗
@@ -144,15 +175,21 @@ class Summary:
         self.records = []
 
     def add_header(self, col_names, colspan) -> None:
+        "Adds a header."
         self.records.append(Record("header", col_names, colspan))
 
     def add_row(self, index: str, values: list, colspan: int) -> None:
+        "Adds a row."
         self.records.append(Record("row", values, colspan, index=index))
 
     def add_title(self, title) -> None:
+        "Adds title."
         self.records.append(Record("title", title, 1))
 
     def get_longest_length(self) -> int:
+        """
+        Returns the lenght of the longest item currently in the table.
+        """
         non_titles = [r for r in self.records if not r.record_type == "title"]
 
         def length_of_items(L):
