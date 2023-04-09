@@ -314,18 +314,24 @@ class SkMetaLearner(MetaLearner):
         n_iter :    int, default=1000.
                     Number of bootstrap iterations to perform.
         """
-        # TODO: we run self.bootstrap twice independently.
-        conf_ints = self.ate_confidence_interval(
-            self.X,
-            self.y,
-            self.treated,
-            self.X,
-            n_iter=n_iter,
+        # Bootstrapping confidence intervals for ATE
+        bootstrapped_cates = self.bootstrap(
+            self.X, self.y, self.treated, self.X, n_iter
+        )
+        bootstrapped_ates = bootstrapped_cates.mean(axis=1)
+        conf_ints = (
+            np.quantile(bootstrapped_ates, q=0.025),
+            np.quantile(bootstrapped_ates, q=0.975),
         )
         conf_ints = map(lambda x: round(x, 2), conf_ints)
-        bias = self.bias(self.X, self.y, self.treated, self.X, n_iter=n_iter)
+
+        # Calculate bias
+        cates = self.predict_cate(self.X)
+        ate = round(cates.mean(), 2)
+
+        bias = (bootstrapped_cates.mean(axis=0) - cates).mean()
         bias = round(bias, 2)
-        ate = round(self.ate(), 2)
+
         score = self.score(self.X, self.y, self.treated)
         models = {
             k: [type(v).__name__, round(score[k], 2)] for k, v in self.models.items()
