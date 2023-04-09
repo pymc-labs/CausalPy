@@ -15,6 +15,7 @@ from causalpy.skl_meta_learners import (
     TLearner,
     XLearner,
 )
+from causalpy.summary import Summary
 from causalpy.utils import _fit
 
 
@@ -42,6 +43,54 @@ class BayesianMetaLearner(MetaLearner):
             Dictionary containing the keys coeffs and obs_indx.
         """
         raise NotImplementedError()
+
+    def ate_hdi(self, X) -> np.array:
+        """
+        Estimates high density interval of average treatement effect on X.
+
+        Parameters
+        ----------
+        X :     pandas.DataFrame of shape (n_samples, n_featues).
+                Feature matrix.
+        """
+        cate = self.predict_cate(X)
+        hdi = az.hdi(cate.mean(dim="obs_ind")).mu.values
+        return hdi
+
+    def cate_hdi(self, X) -> np.array:
+        """
+        Estimates high density interval of conditional average treatement effect on X.
+
+        Parameters
+        ----------
+        X :     pandas.DataFrame of shape (n_samples, n_featues).
+                Feature matrix.
+        """
+        cate = self.predict_cate(X)
+        hdi = az.hdi(cate).mu.values
+        return hdi
+
+    def summary(self) -> Summary:
+        "Returns summary."
+        hdi = self.ate_hdi(self.X)
+        ate = self.ate()
+
+        s = Summary()
+
+        s.add_title(["Conditional Average Treatment Effect Estimator Summary"])
+        s.add_row("Number of observations", [self.index.shape[0]], 2)
+        s.add_row("Number of treated observations", [self.treated.sum()], 2)
+        s.add_row("Average treatement effect (ATE)", [ate], 2)
+        s.add_row("HDI for ATE", [tuple(hdi)], 1)
+        # Can bias be estimated in this setting?
+        # s.add_row("Estimated bias", [bias], 2)
+        s.add_title(["Base learners"])
+        s.add_header(["", "Model", "R^2"], 1)
+
+        for name, model in self.models.items():
+            s.add_row(name, model, 1)
+
+        return s
 
     def predict_cate(self, X: pd.DataFrame) -> DataArray:
         """
@@ -211,7 +260,7 @@ class BayesianXLearner(XLearner, BayesianMetaLearner):
         ).mean(axis=1)
 
         tau_t = y_t - pred_u_t
-        tau_u = - y_u + pred_t_u
+        tau_u = -y_u + pred_t_u
 
         # Estimate CATE separately on treated and untreated subsets
         _fit(treated_cate_estimator, X_t, tau_t, coords)
@@ -360,14 +409,19 @@ class BayesianDRLearner(DRLearner, BayesianMetaLearner):
         return self
 
     def predict_cate(self, X: pd.DataFrame) -> DataArray:
-        pred = self.models["pseudo_outcome"].predict(X)["posterior_predictive"].mu
+        pred = az.extract(
+            self.models["pseudo_outcome"].predict(X),
+            group="posterior_predictive",
+            var_names="mu",
+        )
 
         if self.cross_fitting:
-            pred2 = (
-                self.cross_fitted_models["pseudo_outcome"]
-                .predict(X)["posterior_predictive"]
-                .mu
+            pred2 = az.extract(
+                self.cross_fitted_models["pseudo_outcome"].predict(X),
+                group="posterior_predictive",
+                var_names="mu",
             )
+
             pred = (pred + pred2) / 2
 
         return pred
