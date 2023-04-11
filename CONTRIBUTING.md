@@ -28,6 +28,7 @@ pip install -e .
 pip install causalpy[dev]
 pip install causalpy[docs]
 pip install causalpy[test]
+pip install causalpy[lint]
 ```
 
 If that fails, try:
@@ -36,6 +37,7 @@ If that fails, try:
 pip install 'causalpy[dev]'
 pip install 'causalpy[docs]'
 pip install 'causalpy[test]'
+pip install 'causalpy[lint]'
 ```
 
 It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, I run `brew install pandoc`.
@@ -114,3 +116,17 @@ python3 -m twine upload dist/*
 5. Readthedocs:
   - Docs should be built remotely every time there is a pull request
   - See here https://docs.readthedocs.io/en/stable/tutorial/#versioning-documentation for versioning the docs
+
+## Overview of code structure
+
+UML diagrams can be created with the command below. If you have not already done so, you may need to `pip install 'causalpy[lint]'` in order to install `pyreverse`.
+
+```bash
+pyreverse -o png causalpy --output-directory img
+```
+
+Classes
+![](img/classes.png)
+
+Packages
+![](img/packages.png)
