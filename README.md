@@ -73,6 +73,10 @@ result.summary()
 
 Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues).
 
+## Videos
+Click on the thumbnail below to watch a video about CausalPy on YouTube.
+[![Youtube video thumbnail image](https://img.youtube.com/vi/gV6wzTk3o1U/maxresdefault.jpg)](https://www.youtube.com/watch?v=gV6wzTk3o1U)
+
 ## Overview of package capabilities
 
 ### Synthetic control

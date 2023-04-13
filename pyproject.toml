@@ -69,7 +69,8 @@ lint = ["black",
     "interrogate",
     "isort",
     "nbqa",
-    "pre-commit"
+    "pre-commit",
+    "pylint"
     ]
 test = [
     "pytest",
