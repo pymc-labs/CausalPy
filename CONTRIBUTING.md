@@ -125,7 +125,7 @@ We recommend that your contribution complies with the following guidelines befor
 
 - All other tests pass when everything is rebuilt from scratch.
 
-- When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook) in the `CausalPy/docs/source/mmm` or `CausalPy/docs/source/clv` folders. Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
+- When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.
 
