@@ -123,7 +123,11 @@ We recommend that your contribution complies with the following guidelines befor
 
 - To indicate a work in progress please mark the PR as `draft`. Drafts may be useful to (1) indicate you are working on something to avoid duplicated work, (2) request broad review of functionality or API, or (3) seek collaborators.
 
-- All other tests pass when everything is rebuilt from scratch.
+- All other tests pass when everything is rebuilt from scratch. Tests can be run with:
+
+    ```bash
+    make test
+    ```
 
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
@@ -145,18 +149,6 @@ We recommend that your contribution complies with the following guidelines befor
   ```bash
   make lint
   ```
-
-1. To run tests:
-
-    ```bash
-    make test
-    ```
-
-6. To check code style:
-
-    ```bash
-    make check_lint
-    ```
 
 ## Building the documentation locally
 
