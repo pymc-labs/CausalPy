@@ -109,7 +109,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
    git push -u origin my-feature
    ```
 
-1. Before you submit a Pull request, follow the [Pull request checklist](#pull-request-checklist).
+1. Before you submit a Pull Request, follow the [Pull request checklist](#pull-request-checklist).
 
 1. Finally, to submit a pull request, go to the GitHub web page of your fork of the CausalPy repo. Click the 'Pull request' button to send your changes to the project's maintainers for review. This will send an email to the committers.
 
