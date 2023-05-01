@@ -56,6 +56,7 @@ extensions = [
 source_suffix = [".rst", ".md"]
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+master_doc = "index"
 
 # -- nbsphinx config ----------------------------------------------------------
 # Opt out of executing the notebooks remotely. This will save time in the remote build
