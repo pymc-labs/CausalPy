@@ -78,9 +78,10 @@ myst_enable_extensions = [
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
-# TODO: version seems not to be displayed despite setting this to True
+html_logo = "logo.png"
 html_theme_options = {
-    "display_version": True,
+    "logo_only": True,
+    "display_version": False,
 }
 
 # -- Options for autodoc ----------------------------------------------------
