@@ -126,5 +126,5 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
-generate-badge = "img"
+generate-badge = "docs/source/_static/"
 badge-format = "svg"
