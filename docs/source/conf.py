@@ -56,6 +56,7 @@ extensions = [
 source_suffix = [".rst", ".md"]
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+master_doc = "index"
 
 # -- nbsphinx config ----------------------------------------------------------
 # Opt out of executing the notebooks remotely. This will save time in the remote build
@@ -78,9 +79,10 @@ myst_enable_extensions = [
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
-# TODO: version seems not to be displayed despite setting this to True
+html_logo = "logo.png"
 html_theme_options = {
-    "display_version": True,
+    "logo_only": True,
+    "display_version": False,
 }
 
 # -- Options for autodoc ----------------------------------------------------
@@ -99,5 +101,5 @@ html_context = {
     "github_user": "pymc-labs",  # Username
     "github_repo": "CausalPy",  # Repo name
     "github_version": "master",  # Version
-    "conf_py_path": "/docs/",  # Path in the checkout to the docs root
+    "conf_py_path": "/docs/source/",  # Path in the checkout to the docs root
 }

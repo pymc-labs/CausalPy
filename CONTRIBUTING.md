@@ -176,10 +176,10 @@ pyreverse -o png causalpy --output-directory img
 ```
 
 Classes
-![](img/classes.png)
+![](docs/source/_static/classes.png)
 
 Packages
-![](img/packages.png)
+![](docs/source/_static/packages.png)
 
 ---
 
