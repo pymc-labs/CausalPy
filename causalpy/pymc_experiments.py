@@ -134,7 +134,6 @@ class TimeSeriesExperiment(ExperimentalDesign):
             )
 
     def plot(self):
-
         """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -488,7 +487,13 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
         # Calculate the x position to plot at
-        diff = np.ptp(self.x_pred_treatment[self.time_variable_name].values)
+        # Note that we force to be float to avoid a type error using np.ptp with boolean
+        # values
+        diff = np.ptp(
+            np.array(self.x_pred_treatment[self.time_variable_name].values).astype(
+                float
+            )
+        )
         x = np.max(self.x_pred_treatment[self.time_variable_name].values) + 0.1 * diff
         # Plot the arrow
         ax.annotate(
