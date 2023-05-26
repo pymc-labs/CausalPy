@@ -53,8 +53,9 @@ class ExperimentalDesign:
         )
 
 
-class TimeSeriesExperiment(ExperimentalDesign):
-    """A class to analyse time series quasi-experiments"""
+class PrePostFit(ExperimentalDesign):
+    """A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data."""
 
     def __init__(
         self,
@@ -242,8 +243,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.print_coefficients()
 
 
-class SyntheticControl(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
+class SyntheticControl(PrePostFit):
+    """A wrapper around the PrePostFit class"""
 
     expt_type = "Synthetic Control"
 

@@ -20,7 +20,10 @@ class ExperimentalDesign:
             raise ValueError("fitting_model not set or passed.")
 
 
-class TimeSeriesExperiment(ExperimentalDesign):
+class PrePostFit(ExperimentalDesign):
+    """A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data."""
+
     def __init__(
         self,
         data,
@@ -148,8 +151,8 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
 
 
-class SyntheticControl(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
+class SyntheticControl(PrePostFit):
+    """A wrapper around the PrePostFit class"""
 
     def plot(self, plot_predictors=False):
         """Plot the results"""
