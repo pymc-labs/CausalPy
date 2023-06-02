@@ -23,4 +23,4 @@ test:
 
 uml:
 	pip install pylint
-	pyreverse -o png causalpy --output-directory docs/source/_static
+	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
