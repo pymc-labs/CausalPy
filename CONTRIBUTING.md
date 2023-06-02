@@ -169,17 +169,17 @@ Docs are built in `docs/_build`, but these docs are _not_ committed to the GitHu
 
 ## Overview of code structure
 
-UML diagrams can be created with the command below. If you have not already done so, you may need to `pip install 'causalpy[lint]'` in order to install `pyreverse`.
-
-```bash
-pyreverse -o png causalpy --output-directory docs/source/_static
-```
-
 Classes
 ![](docs/source/_static/classes.png)
 
 Packages
 ![](docs/source/_static/packages.png)
+
+UML diagrams can be created with the command below.
+
+```bash
+make uml
+```
 
 ---
 
