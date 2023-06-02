@@ -74,7 +74,7 @@ class PrePostFit(ExperimentalDesign):
         # cumulative impact post
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
-    def plot(self):
+    def plot(self, counterfactual_label="Counterfactual", **kwargs):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -84,7 +84,7 @@ class PrePostFit(ExperimentalDesign):
         ax[0].plot(
             self.datapost.index,
             self.post_pred,
-            label="counterfactual",
+            label=counterfactual_label,
             ls=":",
             c="k",
         )
@@ -95,7 +95,7 @@ class PrePostFit(ExperimentalDesign):
             self.datapost.index,
             self.post_impact,
             "k.",
-            label="counterfactual",
+            label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
@@ -151,12 +151,18 @@ class PrePostFit(ExperimentalDesign):
         )
 
 
+class InterruptedTimeSeries(PrePostFit):
+    """Interrupted time series analysis"""
+
+    expt_type = "Interrupted Time Series"
+
+
 class SyntheticControl(PrePostFit):
     """A wrapper around the PrePostFit class"""
 
-    def plot(self, plot_predictors=False):
+    def plot(self, plot_predictors=False, **kwargs):
         """Plot the results"""
-        fig, ax = super().plot()
+        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)

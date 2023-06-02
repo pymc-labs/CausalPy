@@ -134,7 +134,7 @@ class PrePostFit(ExperimentalDesign):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def plot(self):
+    def plot(self, counterfactual_label="Counterfactual", **kwargs):
         """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -161,7 +161,7 @@ class PrePostFit(ExperimentalDesign):
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
-        labels.append("Synthetic control")
+        labels.append(counterfactual_label)
 
         ax[0].plot(self.datapost.index, self.post_y, "k.")
         # Shaded causal effect
@@ -243,14 +243,20 @@ class PrePostFit(ExperimentalDesign):
         self.print_coefficients()
 
 
+class InterruptedTimeSeries(PrePostFit):
+    """Interrupted time series analysis"""
+
+    expt_type = "Interrupted Time Series"
+
+
 class SyntheticControl(PrePostFit):
     """A wrapper around the PrePostFit class"""
 
     expt_type = "Synthetic Control"
 
-    def plot(self, plot_predictors=False):
+    def plot(self, plot_predictors=False, **kwargs):
         """Plot the results"""
-        fig, ax = super().plot()
+        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
