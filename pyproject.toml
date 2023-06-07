@@ -8,6 +8,8 @@ requires = ["setuptools>=61.0"]
 [tool.setuptools]
 # define all packages here
 packages = ['causalpy', 'causalpy.data']
+# include package data, such as .csv files
+include-package-data = true
 
 [project]
 name = "CausalPy"
