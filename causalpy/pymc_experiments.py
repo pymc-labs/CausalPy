@@ -53,8 +53,9 @@ class ExperimentalDesign:
         )
 
 
-class TimeSeriesExperiment(ExperimentalDesign):
-    """A class to analyse time series quasi-experiments"""
+class PrePostFit(ExperimentalDesign):
+    """A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data."""
 
     def __init__(
         self,
@@ -133,8 +134,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def plot(self):
-
+    def plot(self, counterfactual_label="Counterfactual", **kwargs):
         """Plot the results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -161,7 +161,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
-        labels.append("Synthetic control")
+        labels.append(counterfactual_label)
 
         ax[0].plot(self.datapost.index, self.post_y, "k.")
         # Shaded causal effect
@@ -243,14 +243,20 @@ class TimeSeriesExperiment(ExperimentalDesign):
         self.print_coefficients()
 
 
-class SyntheticControl(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
+class InterruptedTimeSeries(PrePostFit):
+    """Interrupted time series analysis"""
+
+    expt_type = "Interrupted Time Series"
+
+
+class SyntheticControl(PrePostFit):
+    """A wrapper around the PrePostFit class"""
 
     expt_type = "Synthetic Control"
 
-    def plot(self, plot_predictors=False):
+    def plot(self, plot_predictors=False, **kwargs):
         """Plot the results"""
-        fig, ax = super().plot()
+        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
@@ -488,7 +494,13 @@ class DifferenceInDifferences(ExperimentalDesign):
             self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
         # Calculate the x position to plot at
-        diff = np.ptp(self.x_pred_treatment[self.time_variable_name].values)
+        # Note that we force to be float to avoid a type error using np.ptp with boolean
+        # values
+        diff = np.ptp(
+            np.array(self.x_pred_treatment[self.time_variable_name].values).astype(
+                float
+            )
+        )
         x = np.max(self.x_pred_treatment[self.time_variable_name].values) + 0.1 * diff
         # Plot the arrow
         ax.annotate(

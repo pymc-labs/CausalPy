@@ -20,7 +20,10 @@ class ExperimentalDesign:
             raise ValueError("fitting_model not set or passed.")
 
 
-class TimeSeriesExperiment(ExperimentalDesign):
+class PrePostFit(ExperimentalDesign):
+    """A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data."""
+
     def __init__(
         self,
         data,
@@ -71,7 +74,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         # cumulative impact post
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
-    def plot(self):
+    def plot(self, counterfactual_label="Counterfactual", **kwargs):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -81,7 +84,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
         ax[0].plot(
             self.datapost.index,
             self.post_pred,
-            label="counterfactual",
+            label=counterfactual_label,
             ls=":",
             c="k",
         )
@@ -92,7 +95,7 @@ class TimeSeriesExperiment(ExperimentalDesign):
             self.datapost.index,
             self.post_impact,
             "k.",
-            label="counterfactual",
+            label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
@@ -148,12 +151,18 @@ class TimeSeriesExperiment(ExperimentalDesign):
         )
 
 
-class SyntheticControl(TimeSeriesExperiment):
-    """A wrapper around the TimeSeriesExperiment class"""
+class InterruptedTimeSeries(PrePostFit):
+    """Interrupted time series analysis"""
 
-    def plot(self, plot_predictors=False):
+    expt_type = "Interrupted Time Series"
+
+
+class SyntheticControl(PrePostFit):
+    """A wrapper around the PrePostFit class"""
+
+    def plot(self, plot_predictors=False, **kwargs):
         """Plot the results"""
-        fig, ax = super().plot()
+        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)

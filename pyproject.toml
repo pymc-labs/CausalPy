@@ -5,13 +5,15 @@ requires = ["setuptools>=61.0"]
 
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
-[tool.setuptools]
-# define all packages here
-packages = ['causalpy', 'causalpy.data']
+[tool.setuptools.packages.find]
+exclude = ["causalpy.test*", "docs*"]
+
+[tool.setuptools.package-data]
+"causalpy.data" = ["*.csv"]
 
 [project]
 name = "CausalPy"
-version = "0.0.10b"
+version = "0.0.13"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = {file = "LICENSE"}
