@@ -36,8 +36,8 @@ Interrupted Time Series
 .. toctree::
    :titlesonly:
 
-   notebooks/sc2_pymc.ipynb
-   notebooks/sc2_skl.ipynb
+   notebooks/its_pymc.ipynb
+   notebooks/its_skl.ipynb
    notebooks/its_covid.ipynb
 
 
