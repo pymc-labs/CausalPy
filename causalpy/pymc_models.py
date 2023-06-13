@@ -10,12 +10,13 @@ from arviz import r2_score
 class ModelBuilder(pm.Model):
     """
     This is a wrapper around pm.Model to give scikit-learn like API.
-
-    :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
-        :func:`pymc.sample` function. Defaults to an empty dictionary.
     """
 
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
+        """
+        :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
+            :func:`pymc.sample` function. Defaults to an empty dictionary.
+        """
         super().__init__()
         self.idata = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
