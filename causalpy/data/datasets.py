@@ -31,7 +31,6 @@ def load_data(dataset: str = None) -> pd.DataFrame:
     """
 
     if dataset in DATASETS:
-
         data_dir = _get_data_home()
         datafile = DATASETS[dataset]
         file_path = data_dir / datafile["filename"]

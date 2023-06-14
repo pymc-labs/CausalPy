@@ -46,17 +46,24 @@ release = __version__
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "sphinx.ext.mathjax",
-    "sphinx.ext.autodoc",
-    "sphinx_autodoc_typehints",
-    "nbsphinx",
     "myst_parser",
+    "nbsphinx",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.mathjax",
+    "sphinx_autodoc_typehints",
 ]
 
 source_suffix = [".rst", ".md"]
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 master_doc = "index"
+
+# -- intersphinx config -------------------------------------------------------
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "pymc": ("https://www.pymc.io/projects/docs/en/stable/", None),
+}
 
 # -- nbsphinx config ----------------------------------------------------------
 # Opt out of executing the notebooks remotely. This will save time in the remote build
