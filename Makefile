@@ -20,3 +20,7 @@ check_lint:
 test:
 	pip install causalpy[test]
 	pytest
+
+uml:
+	pip install pylint
+	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
