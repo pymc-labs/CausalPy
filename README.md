@@ -160,6 +160,25 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 > The data, model fit, and counterfactual are plotted (top). Frequentist analysis shows the causal impact with the blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fits. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect (bottom).
 
+### Interrupted time series
+
+Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time. Multiple predictors can be included.
+
+| Time | Outcome | Treated  | Predictor |
+|-----------|-----------|----------|----------|
+| $t_0$     | $y_0$     | False    | $x_0$     |
+| $t_1$     | $y_0$     | False    | $x_1$     |
+| $\ldots$  | $\ldots$  | $\ldots$ | $\ldots$  |
+| $t_{N-1}$ | $y_{N-1}$ | True     | $x_{N-1}$ |
+| $t_N$     | $y_N$     | True     | $x_N$     |
+
+
+| Frequentist | Bayesian |
+|--|--|
+| coming soon | ![](docs/source/_static/interrupted_time_series_pymc.svg) |
+
+> The data, pre-treatment model fit, and counterfactual are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
+
 ## Learning resources
 
 Here are some general resources about causal inference:

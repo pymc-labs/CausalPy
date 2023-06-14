@@ -103,6 +103,12 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 .. image:: _static/regression_discontinuity_pymc.svg
 
+Interrupted time series
+"""""""""""""""""""""""
+Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time.
+
+.. image:: _static/interrupted_time_series_pymc.svg
+
 Support
 -------
 

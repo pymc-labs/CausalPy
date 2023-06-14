@@ -22,7 +22,7 @@ Some of the definitions have been copied from (or inspired by) various resources
 
 **Difference in Differences (DID) analysis:** Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
 
-**Interrupted time series (ITS) design:** A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment.
+**Interrupted time series (ITS) design:** A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
 
 **Non-equivalent group designs:** A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
 
