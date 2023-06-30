@@ -4,6 +4,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pytensor.tensor as pt
 from arviz import r2_score
 
 
@@ -117,3 +118,73 @@ class LinearRegression(ModelBuilder):
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+
+
+class InstrumentalVariableRegression(ModelBuilder):
+    """Custom PyMC model for instrumental linear regression"""
+
+    def build_model(self, X, Z, y, t, coords, priors):
+        """Specify model with treatment regression and focal regression data and priors
+
+        :param X: A pandas dataframe used to predict our outcome y
+        :param Z: A pandas dataframe used to predict our treatment variable t
+        :param y: An array of values representing our focal outcome y
+        :param t: An array of values representing the treatment t of
+                  which we're interested in estimating the causal impact
+        :param coords: A dictionary with the coordinate names for our
+                       instruments and covariates
+        :param priors: An optional dictionary of priors for the mus and
+                      sigmas of both regressions
+
+        e.g priors = {'mus': [[10, 0], [2, 0]], 'sigmas': [[1, 1], [1, 1]]}
+
+        """
+
+        # --- Priors ---
+        with self:
+            self.add_coords(coords)
+            beta_t = pm.Normal(
+                name="beta_t",
+                mu=priors["mus"][0],
+                sigma=priors["sigmas"][0],
+                dims="instruments",
+            )
+            beta_z = pm.Normal(
+                name="beta_z",
+                mu=priors["mus"][1],
+                sigma=priors["sigmas"][1],
+                dims="covariates",
+            )
+            sd_dist = pm.HalfCauchy.dist(beta=2, shape=2)
+            chol, corr, sigmas = pm.LKJCholeskyCov(
+                name="chol_cov", eta=2, n=2, sd_dist=sd_dist
+            )
+            # compute and store the covariance matrix
+            pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
+
+            # --- Parameterization ---
+            mu_y = pm.Deterministic(name="mu_y", var=pm.math.dot(X, beta_z))
+            mu_t = pm.Deterministic(name="mu_t", var=pm.math.dot(Z, beta_t))
+            mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
+
+            # --- Likelihood ---
+            pm.MvNormal(
+                name="likelihood",
+                mu=mu,
+                chol=chol,
+                observed=np.stack(arrays=(y.flatten(), t.flatten()), axis=1),
+                shape=(X.shape[0], 2),
+            )
+
+    def fit(self, X, Z, y, t, coords, priors):
+        """Draw samples from posterior, prior predictive, and posterior predictive
+        distributions.
+        """
+        self.build_model(X, Z, y, t, coords, priors)
+        with self.model:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive())
+            self.idata.extend(
+                pm.sample_posterior_predictive(self.idata, progressbar=False)
+            )
+        return self.idata

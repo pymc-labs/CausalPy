@@ -856,3 +856,67 @@ class PrePostNEGD(ExperimentalDesign):
                 return label
 
         raise NameError("Unable to find coefficient name for the treatment effect")
+
+
+class InstrumentalVariable(ExperimentalDesign):
+    """
+    A class to analyse instrumental variable style experiments.
+
+    :param instruments_data: A pandas dataframe of instruments
+    for our treatment variable
+    :param data: A pandas dataframe of covariates for fitting
+                the focal regression of interest
+    :param instruments_formula: A statistical model formula for
+                                the instrumental stage regression
+    :param formula: A statistical model formula for the focal regression
+    :param model: A PyMC model
+    :param priors: An optional dictionary of priors for the
+                   mus and sigmas of both regressions
+
+    .. note::
+
+        There is no pre/post intervention data distinction for the instrumental variable
+        design, we fit all the data available.
+    """
+
+    def __init__(
+        self,
+        instruments_data: pd.DataFrame,
+        data: pd.DataFrame,
+        instruments_formula: str,
+        formula: str,
+        model=None,
+        priors=None,
+        **kwargs,
+    ):
+        super().__init__(model=model, **kwargs)
+        self.expt_type = "Instrumental Variable Regression"
+        self.data = data
+        self.instruments_data = instruments_data
+        self.formula = formula
+        self.instruments_formula = instruments_formula
+        self.model = model
+
+        y, X = dmatrices(formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+        self.outcome_variable_name = y.design_info.column_names[0]
+
+        t, Z = dmatrices(instruments_formula, self.instruments_data)
+        self._t_design_info = t.design_info
+        self._z_design_info = Z.design_info
+        self.labels_instruments = Z.design_info.column_names
+        self.t, self.Z = np.asarray(t), np.asarray(Z)
+        self.instrument_variable_name = t.design_info.column_names[0]
+
+        # fit the model to the observed (pre-intervention) data
+        COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
+        self.coords = COORDS
+        if priors is None:
+            priors = {"mus": [0, 0], "sigmas": [1, 1]}
+        self.priors = priors
+        self.model.fit(
+            X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
+        )
