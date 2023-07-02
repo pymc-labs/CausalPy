@@ -24,6 +24,9 @@ Some of the definitions have been copied from (or inspired by) various resources
 
 **Interrupted time series (ITS) design:** A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
 
+**Instrumental Variable Regression (IVR) design** A quasi experimental design to estimate the treatment effect when there is
+a concern that the treatment variable is endogenous in the system of interest.
+
 **Non-equivalent group designs:** A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
 
 The basic posttest-only design can be described as:

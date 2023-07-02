@@ -51,3 +51,12 @@ Regression Discontinuity
    notebooks/rd_skl.ipynb
    notebooks/rd_pymc_drinking.ipynb
    notebooks/rd_skl_drinking.ipynb
+
+
+Instrumental Variables Regression
+========================
+
+.. toctree::
+   :titlesonly:
+
+   notebooks/iv_pymc.ipynb
