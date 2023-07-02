@@ -7,6 +7,7 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from patsy import build_design_matrices, dmatrices
+from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import BadIndexException  # NOQA
 from causalpy.custom_exceptions import DataException, FormulaException
@@ -871,7 +872,9 @@ class InstrumentalVariable(ExperimentalDesign):
     :param formula: A statistical model formula for the focal regression
     :param model: A PyMC model
     :param priors: An optional dictionary of priors for the
-                   mus and sigmas of both regressions
+                   mus and sigmas of both regressions. If priors are not
+                   specified we will substitue MLE estimates for the beta
+                   coefficients
 
     .. note::
 
@@ -911,12 +914,41 @@ class InstrumentalVariable(ExperimentalDesign):
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
 
+        self.get_naive_OLS_fit()
+        self.get_2SLS_fit()
+
         # fit the model to the observed (pre-intervention) data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
         if priors is None:
-            priors = {"mus": [0, 0], "sigmas": [1, 1]}
+            priors = {
+                "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                "sigmas": [1, 1],
+            }
         self.priors = priors
         self.model.fit(
             X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
         )
+
+    def get_2SLS_fit(self):
+        first_stage_reg = sk_lin_reg().fit(self.Z, self.t)
+        fitted_Z_values = first_stage_reg.predict(self.Z)
+        X2 = self.data.copy(deep=True)
+        X2[self.instrument_variable_name] = fitted_Z_values
+        _, X2 = dmatrices(self.formula, X2)
+        second_stage_reg = sk_lin_reg().fit(X=X2, y=self.y)
+        betas_first = list(first_stage_reg.coef_[0][1:])
+        betas_first.insert(0, first_stage_reg.intercept_[0])
+        betas_second = list(second_stage_reg.coef_[0][1:])
+        betas_second.insert(0, second_stage_reg.intercept_[0])
+        self.ols_beta_first_params = betas_first
+        self.ols_beta_second_params = betas_second
+        self.first_stage_reg = first_stage_reg
+        self.second_stage_reg = second_stage_reg
+
+    def get_naive_OLS_fit(self):
+        ols_reg = sk_lin_reg().fit(self.X, self.y)
+        beta_params = list(ols_reg.coef_[0][1:])
+        beta_params.insert(0, ols_reg.intercept_[0])
+        self.ols_beta_params = beta_params
+        self.ols_reg = ols_reg
