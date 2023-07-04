@@ -46,30 +46,35 @@ release = __version__
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "myst_parser",
-    "nbsphinx",
+    "myst_nb",
+    "sphinxcontrib.bibtex",
     "sphinx.ext.autodoc",
     "sphinx.ext.intersphinx",
     "sphinx.ext.mathjax",
     "sphinx_autodoc_typehints",
 ]
 
-source_suffix = [".rst", ".md"]
+nb_execution_mode = "off"
+
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".ipynb": "myst-nb",
+    ".myst": "myst-nb",
+}
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 master_doc = "index"
+
+# bibtex config
+bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
+bibtex_reference_style = "author_year"
 
 # -- intersphinx config -------------------------------------------------------
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "pymc": ("https://www.pymc.io/projects/docs/en/stable/", None),
 }
-
-# -- nbsphinx config ----------------------------------------------------------
-# Opt out of executing the notebooks remotely. This will save time in the remote build
-# process on readthedocs. The notebooks in /docs/notebooks will be parsed/converted,
-# but not re-executed.
-nbsphinx_execute = "never"
 
 # MyST options for working with markdown files.
 # Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives # noqa: E501
