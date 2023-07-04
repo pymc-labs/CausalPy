@@ -1,10 +1,8 @@
 # Glossary
 
-<div class="admonition note" name="html-admonition">
-<p class="title">Note:</p>
-Some of the definitions have been copied from (or inspired by) various resources, including Reichardt (2019).
-</div>
-
+:::{note}
+Some of the definitions have been copied from (or inspired by) various resources, including {cite:t}`reichardt2019quasi`.
+:::
 
 **ANCOVA:** Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a catgeorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
 
@@ -63,4 +61,6 @@ Data from pretest-posttest NEGD could be analysed using change score analysis or
 **Treatment effect:** The difference in outcomes between what happened after a treatment is implemented and what would have happened (see Counterfactual) if the treatment had not been implemented, assuming everything else had been the same.
 
 ## References
-* Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.
+:::{bibliography}
+:filter: docname in docnames
+:::
