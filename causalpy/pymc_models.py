@@ -136,7 +136,8 @@ class InstrumentalVariableRegression(ModelBuilder):
         :param priors: An optional dictionary of priors for the mus and
                       sigmas of both regressions
 
-        e.g priors = {'mus': [[10, 0], [2, 0]], 'sigmas': [[1, 1], [1, 1]]}
+        e.g priors = {'mus': [[10, 0], [2, 0]], 'sigmas': [[1, 1], [1, 1]]
+                      'eta': 2, 'lkj_sd': 2}
 
         """
 
@@ -155,16 +156,18 @@ class InstrumentalVariableRegression(ModelBuilder):
                 sigma=priors["sigmas"][1],
                 dims="covariates",
             )
-            sd_dist = pm.HalfCauchy.dist(beta=2, shape=2)
+            sd_dist = pm.HalfCauchy.dist(beta=priors["lkj_sd"], shape=2)
             chol, corr, sigmas = pm.LKJCholeskyCov(
-                name="chol_cov", eta=2, n=2, sd_dist=sd_dist
+                name="chol_cov", eta=priors["eta"], n=2, sd_dist=sd_dist
             )
             # compute and store the covariance matrix
             pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
 
             # --- Parameterization ---
             mu_y = pm.Deterministic(name="mu_y", var=pm.math.dot(X, beta_z))
+            # focal regression
             mu_t = pm.Deterministic(name="mu_t", var=pm.math.dot(Z, beta_t))
+            # instrumental regression
             mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
 
             # --- Likelihood ---

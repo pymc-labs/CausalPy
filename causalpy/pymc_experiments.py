@@ -917,13 +917,15 @@ class InstrumentalVariable(ExperimentalDesign):
         self.get_naive_OLS_fit()
         self.get_2SLS_fit()
 
-        # fit the model to the observed (pre-intervention) data
+        # fit the model to the data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
         if priors is None:
             priors = {
                 "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                 "sigmas": [1, 1],
+                "eta": 2,
+                "lkj_sd": 2,
             }
         self.priors = priors
         self.model.fit(
@@ -950,5 +952,5 @@ class InstrumentalVariable(ExperimentalDesign):
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = beta_params
+        self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
         self.ols_reg = ols_reg
