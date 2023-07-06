@@ -158,7 +158,10 @@ class InstrumentalVariableRegression(ModelBuilder):
             )
             sd_dist = pm.HalfCauchy.dist(beta=priors["lkj_sd"], shape=2)
             chol, corr, sigmas = pm.LKJCholeskyCov(
-                name="chol_cov", eta=priors["eta"], n=2, sd_dist=sd_dist
+                name="chol_cov",
+                eta=priors["eta"],
+                n=2,
+                sd_dist=sd_dist,
             )
             # compute and store the covariance matrix
             pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
