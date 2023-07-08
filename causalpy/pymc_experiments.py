@@ -1,3 +1,4 @@
+import re
 from typing import Union
 
 import arviz as az
@@ -537,6 +538,64 @@ class DifferenceInDifferences(ExperimentalDesign):
         # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat())
         self.print_coefficients()
+
+
+class DynamicDifferenceInDifferences(DifferenceInDifferences):
+    """
+    A class to analyse regression discontinuity experiments with dynamic causal effects.
+
+    .. note::
+
+        This class is not suitable when there are multiple groups with staggered
+        treatment times.
+    """
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        formula: str,
+        time_variable_name: str,
+        group_variable_name: str,
+        model=None,
+        **kwargs,
+    ):
+        super().__init__(
+            data,
+            formula,
+            time_variable_name,
+            group_variable_name,
+            model,
+            **kwargs,
+        )
+
+    def plot_dynamic_effect(self):
+        # get a list of the beta coefficients
+        my_list = list(self.idata.posterior.beta.coeffs.values)
+
+        # Construct the regular expression pattern dynamically
+        pattern = rf"{self.group_variable_name}:C\({self.time_variable_name}"
+
+        # Use list comprehension and regular expression matching to filter elements
+        filtered_list = [elem for elem in my_list if re.search(pattern, elem)]
+        contents = [re.search(r"\[(.*?)\]", elem).group(1) for elem in filtered_list]
+        # Use string manipulation to remove the "[T." part
+        numeric_components = [float(elem.replace("T.", "")) for elem in contents]
+
+        fig, ax = plt.subplots()
+
+        for i, (label, t) in enumerate(zip(filtered_list, numeric_components)):
+            samples = self.idata.posterior.beta.sel(coeffs=label)
+            # az.hdi(samples).beta.data
+            plt.plot(t, samples.mean(), "ko")
+            # l, h = az.hdi(samples)["beta"].values
+            plt.plot([t, t], az.hdi(samples)["beta"].values, "k")
+
+        plt.axhline(y=0, linewidth=1, c="k")
+        ax.set(
+            title="Estimated dynamic causal impact",
+            xlabel=self.time_variable_name,
+            ylabel=self.outcome_variable_name,
+        )
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
