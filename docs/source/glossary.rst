@@ -18,7 +18,7 @@ Glossary
    Change score analysis
       A statistical procedure where the outcome variable is the difference between the posttest and protest scores.
 
-   Comparative interrupted time-series design
+   Comparative interrupted time-series
    CITS
       An interrupted time series design with added comparison time series observations.
 
@@ -64,7 +64,7 @@ Glossary
    Sharp regression discontinuity design
       A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function.
 
-   Synthetic control method
+   Synthetic control
       The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
 
    Treatment on the treated effect
@@ -79,5 +79,5 @@ Glossary
 
 
 References
-==========
+----------
 .. footbibliography::
