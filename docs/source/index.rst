@@ -126,7 +126,7 @@ Documentation outline
 .. toctree::
    :titlesonly:
 
-   glossary.md
+   glossary
 
 .. toctree::
    :caption: Examples
