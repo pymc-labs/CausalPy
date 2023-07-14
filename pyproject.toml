@@ -13,7 +13,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.0.13"
+version = "0.0.14"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = {file = "LICENSE"}
