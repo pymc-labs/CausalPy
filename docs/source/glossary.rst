@@ -36,6 +36,13 @@ Glossary
    ITS
       A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
 
+   Instrumental Variable regression
+   IV
+      A quasi-experimental design  to estimate a treatment effect where the is a risk of confounding between the treatment and the outcome due to endogeniety.
+
+   Endogenous Variable
+      An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeniety violates the assumptions of the Gauss Markov theorem.
+
    Non-equivalent group designs
    NEGD
       A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
@@ -76,6 +83,10 @@ Glossary
 
    Wilkinson notation
       A notation for describing statistical models :footcite:p:`wilkinson1973symbolic`.
+
+   Two Stage Least Squares
+   2SLS
+      An estimation technique for estimating the parameters of an IV regression. It takes its name from the fact that it uses two OLS regressions - a first and second stage.
 
 
 References
