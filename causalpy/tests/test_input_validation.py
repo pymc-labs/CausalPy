@@ -202,3 +202,21 @@ def test_rd_validation_treated_is_dummy():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
             treatment_threshold=0.5,
         )
+
+
+def test_iv_treatment_var_is_present():
+    data = pd.DataFrame({"x": [1, 2, 3], "y": [2, 4, 5]})
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = pd.DataFrame({"z": [1, 3, 4], "w": [2, 3, 4]})
+
+    with pytest.raises(DataException):
+        _ = cp.pymc_experiments.InstrumentalVariable(
+            instruments_data=instruments_data,
+            data=data,
+            instruments_formula=instruments_formula,
+            formula=formula,
+            model=cp.pymc_models.InstrumentalVariableRegression(
+                sample_kwargs=sample_kwargs
+            ),
+        )

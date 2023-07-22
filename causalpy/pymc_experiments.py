@@ -899,6 +899,7 @@ class InstrumentalVariable(ExperimentalDesign):
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.model = model
+        self._input_validation()
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -954,3 +955,17 @@ class InstrumentalVariable(ExperimentalDesign):
         beta_params.insert(0, ols_reg.intercept_[0])
         self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
         self.ols_reg = ols_reg
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        treatment = self.instruments_formula.split("~")[0]
+        test = treatment.strip() in self.instruments_data.columns
+        test = test & (treatment.strip() in self.data.columns)
+        if not test:
+            raise DataException(
+                f"""
+                The treatment variable:
+                {treatment} must appear in the instrument_data to be used
+                as an outcome variable and in the data object to be used as a covariate.
+                """
+            )
