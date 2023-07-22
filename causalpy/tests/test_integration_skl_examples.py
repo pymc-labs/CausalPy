@@ -36,6 +36,7 @@ def test_rd_drinking():
         running_variable_name="age",
         model=LinearRegression(),
         treatment_threshold=21,
+        epsilon=0.001,
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
@@ -81,6 +82,7 @@ def test_rd_linear_main_effects():
         formula="y ~ 1 + x + treated",
         model=LinearRegression(),
         treatment_threshold=0.5,
+        epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
@@ -94,6 +96,7 @@ def test_rd_linear_with_interaction():
         formula="y ~ 1 + x + treated + x:treated",
         model=LinearRegression(),
         treatment_threshold=0.5,
+        epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
@@ -108,6 +111,7 @@ def test_rd_linear_with_gaussian_process():
         formula="y ~ 1 + x + treated",
         model=GaussianProcessRegressor(kernel=kernel),
         treatment_threshold=0.5,
+        epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)

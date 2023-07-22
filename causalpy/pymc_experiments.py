@@ -543,18 +543,19 @@ class RegressionDiscontinuity(ExperimentalDesign):
     """
     A class to analyse regression discontinuity experiments.
 
-    :param data: A pandas dataframe
-    :param formula: A statistical model formula
-    :param treatment_threshold: A scalar threshold value at which the treatment
-                                is applied
-    :param model: A PyMC model
-    :param running_variable_name: The name of the predictor variable that the treatment
-                                  threshold is based upon
-
-    .. note::
-
-        There is no pre/post intervention data distinction for the regression
-        discontinuity design, we fit all the data available.
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param treatment_threshold:
+        A scalar threshold value at which the treatment is applied
+    :param model:
+        A PyMC model
+    :param running_variable_name:
+        The name of the predictor variable that the treatment threshold is based upon
+    :param epsilon:
+        A small scalar value which determines how far above and below the treatment
+        threshold to evaluate the causal impact.
     """
 
     def __init__(
@@ -564,6 +565,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold: float,
         model=None,
         running_variable_name: str = "x",
+        epsilon: float = 0.001,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
@@ -572,6 +574,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold
+        self.epsilon = epsilon
         self._input_validation()
 
         y, X = dmatrices(formula, self.data)
@@ -609,7 +612,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.x_discon = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
-                    [self.treatment_threshold - 0.001, self.treatment_threshold + 0.001]
+                    [
+                        self.treatment_threshold - self.epsilon,
+                        self.treatment_threshold + self.epsilon,
+                    ]
                 ),
                 "treated": np.array([0, 1]),
             }
