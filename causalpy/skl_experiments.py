@@ -348,7 +348,7 @@ class DifferenceInDifferences(ExperimentalDesign):
 
 class RegressionDiscontinuity(ExperimentalDesign):
     """
-    A class to analyse regression discontinuity experiments.
+    A class to analyse sharp regression discontinuity experiments.
 
     :param data:
         A pandas dataframe
