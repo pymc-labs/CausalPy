@@ -1,3 +1,5 @@
+from typing import Optional
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -370,7 +372,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold,
         model=None,
         running_variable_name="x",
-        epsilon: float = 0.001,
+        epsilon: Optional[float] = 0.001,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
