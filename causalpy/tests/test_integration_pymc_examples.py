@@ -121,6 +121,23 @@ def test_rd():
 
 
 @pytest.mark.integration
+def test_rd_bandwidth():
+    df = cp.load_data("rd")
+    result = cp.pymc_experiments.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=0.5,
+        epsilon=0.001,
+        bandwidth=0.3,
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+
+@pytest.mark.integration
 def test_rd_drinking():
     df = (
         cp.load_data("drinking")

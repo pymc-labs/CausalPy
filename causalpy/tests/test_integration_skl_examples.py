@@ -89,6 +89,21 @@ def test_rd_linear_main_effects():
 
 
 @pytest.mark.integration
+def test_rd_linear_main_effects_bandwidth():
+    data = cp.load_data("rd")
+    result = cp.skl_experiments.RegressionDiscontinuity(
+        data,
+        formula="y ~ 1 + x + treated",
+        model=LinearRegression(),
+        treatment_threshold=0.5,
+        epsilon=0.001,
+        bandwidth=0.3,
+    )
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+
+
+@pytest.mark.integration
 def test_rd_linear_with_interaction():
     data = cp.load_data("rd")
     result = cp.skl_experiments.RegressionDiscontinuity(
