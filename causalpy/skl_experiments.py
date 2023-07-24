@@ -370,7 +370,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold,
         model=None,
         running_variable_name="x",
-        epsilon: float | None = 0.001,
+        epsilon: float = 0.001,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
