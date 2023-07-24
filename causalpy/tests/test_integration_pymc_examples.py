@@ -112,6 +112,7 @@ def test_rd():
         formula="y ~ 1 + bs(x, df=6) + treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.5,
+        epsilon=0.001,
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
