@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -565,7 +565,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold: float,
         model=None,
         running_variable_name: str = "x",
-        epsilon: Optional[float] = 0.001,
+        epsilon: float | None = 0.001,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
