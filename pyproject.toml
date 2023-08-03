@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools>=61.0", "setuptools-scm[toml]>=6.2"]
 
 [tool.setuptools_scm]
-write_to = "causalpy/version.py"
+write_to = "causalpy/_version.py"
 
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
