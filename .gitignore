@@ -10,3 +10,4 @@ docs/_build/
 *.vscode
 .coverage
 *.jupyterlab-workspace
+causalpy/_version.py
