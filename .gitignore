@@ -11,3 +11,4 @@ docs/_build/
 .coverage
 *.jupyterlab-workspace
 causalpy/_version.py
+.python-version
