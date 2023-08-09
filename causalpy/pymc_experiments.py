@@ -1,3 +1,4 @@
+import warnings
 from typing import Union
 
 import arviz as az
@@ -864,22 +865,28 @@ class InstrumentalVariable(ExperimentalDesign):
     A class to analyse instrumental variable style experiments.
 
     :param instruments_data: A pandas dataframe of instruments
-    for our treatment variable
+                             for our treatment variable. Should contain
+                             instruments Z, and treatment t
     :param data: A pandas dataframe of covariates for fitting
-                the focal regression of interest
+                 the focal regression of interest. Should contain covariates X
+                 including treatment t and outcome y
     :param instruments_formula: A statistical model formula for
                                 the instrumental stage regression
-    :param formula: A statistical model formula for the focal regression
+                                e.g. t ~ 1 + z1 + z2 + z3
+    :param formula: A statistical model formula for the \n
+                    focal regression e.g. y ~ 1 + t + x1 + x2 + x3
     :param model: A PyMC model
     :param priors: An optional dictionary of priors for the
                    mus and sigmas of both regressions. If priors are not
                    specified we will substitue MLE estimates for the beta
-                   coefficients
+                   coefficients. Greater control can be achieved
+                   by specifying the priors directly e.g. priors = {
+                                    "mus": [0, 0],
+                                    "sigmas": [1, 1],
+                                    "eta": 2,
+                                    "lkj_sd": 2,
+                                    }
 
-    .. note::
-
-        There is no pre/post intervention data distinction for the instrumental variable
-        design, we fit all the data available.
     """
 
     def __init__(
@@ -968,4 +975,11 @@ class InstrumentalVariable(ExperimentalDesign):
                 {treatment} must appear in the instrument_data to be used
                 as an outcome variable and in the data object to be used as a covariate.
                 """
+            )
+        check_binary = len(self.data[treatment.strip()].unique()) > 2
+        if check_binary:
+            warnings.warn(
+                """Warning. The treatment variable is not Binary. \n
+                          This is not necessarily a problem but it complicates \n
+                          the interpretation of the model coefficients."""
             )
