@@ -1,5 +1,5 @@
 import warnings
-from typing import Union
+from typing import Optional, Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -543,20 +543,24 @@ class DifferenceInDifferences(ExperimentalDesign):
 
 class RegressionDiscontinuity(ExperimentalDesign):
     """
-    A class to analyse regression discontinuity experiments.
+    A class to analyse sharp regression discontinuity experiments.
 
-    :param data: A pandas dataframe
-    :param formula: A statistical model formula
-    :param treatment_threshold: A scalar threshold value at which the treatment
-                                is applied
-    :param model: A PyMC model
-    :param running_variable_name: The name of the predictor variable that the treatment
-                                  threshold is based upon
-
-    .. note::
-
-        There is no pre/post intervention data distinction for the regression
-        discontinuity design, we fit all the data available.
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param treatment_threshold:
+        A scalar threshold value at which the treatment is applied
+    :param model:
+        A PyMC model
+    :param running_variable_name:
+        The name of the predictor variable that the treatment threshold is based upon
+    :param epsilon:
+        A small scalar value which determines how far above and below the treatment
+        threshold to evaluate the causal impact.
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+        the model.
     """
 
     def __init__(
@@ -566,6 +570,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         treatment_threshold: float,
         model=None,
         running_variable_name: str = "x",
+        epsilon: float = 0.001,
+        bandwidth: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
@@ -574,9 +580,23 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold
+        self.epsilon = epsilon
+        self.bandwidth = bandwidth
         self._input_validation()
 
-        y, X = dmatrices(formula, self.data)
+        if self.bandwidth is not None:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
+            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+            if len(filtered_data) <= 10:
+                warnings.warn(
+                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+                    UserWarning,
+                )
+            y, X = dmatrices(formula, filtered_data)
+        else:
+            y, X = dmatrices(formula, self.data)
+
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -593,11 +613,14 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.score = self.model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        xi = np.linspace(
-            np.min(self.data[self.running_variable_name]),
-            np.max(self.data[self.running_variable_name]),
-            200,
-        )
+        if self.bandwidth is not None:
+            xi = np.linspace(fmin, fmax, 200)
+        else:
+            xi = np.linspace(
+                np.min(self.data[self.running_variable_name]),
+                np.max(self.data[self.running_variable_name]),
+                200,
+            )
         self.x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
@@ -611,7 +634,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.x_discon = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
-                    [self.treatment_threshold - 0.001, self.treatment_threshold + 0.001]
+                    [
+                        self.treatment_threshold - self.epsilon,
+                        self.treatment_threshold + self.epsilon,
+                    ]
                 ),
                 "treated": np.array([0, 1]),
             }
