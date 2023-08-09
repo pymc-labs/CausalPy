@@ -1005,7 +1005,8 @@ class InstrumentalVariable(ExperimentalDesign):
         check_binary = len(self.data[treatment.strip()].unique()) > 2
         if check_binary:
             warnings.warn(
-                """Warning. The treatment variable is not Binary. \n
-                          This is not necessarily a problem but it complicates \n
-                          the interpretation of the model coefficients."""
+                """Warning. The treatment variable is not Binary.
+                This is not necessarily aproblem but it violates
+                the assumption of a simple IV experiment.
+                Change your interpretation of model coefficients accordingly."""
             )
