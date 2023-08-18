@@ -1,3 +1,13 @@
+"""
+Experiment routines for PyMC models.
+
+Includes:
+1. ExperimentalDesign base class
+2. Pre-Post Fit
+3. Synthetic Control
+4. Difference in differences
+5. Regression Discontinuity
+"""
 import warnings
 from typing import Optional, Union
 
@@ -36,7 +46,7 @@ class ExperimentalDesign:
         """Access to the InferenceData object"""
         return self.model.idata
 
-    def print_coefficients(self):
+    def print_coefficients(self) -> None:
         """Prints the model coefficients"""
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
@@ -236,7 +246,7 @@ class PrePostFit(ExperimentalDesign):
 
         return (fig, ax)
 
-    def summary(self):
+    def summary(self) -> None:
         """Print text output summarising the results"""
 
         print(f"{self.expt_type:=^80}")
@@ -524,13 +534,14 @@ class DifferenceInDifferences(ExperimentalDesign):
             va="center",
         )
 
-    def _causal_impact_summary_stat(self):
+    def _causal_impact_summary_stat(self) -> str:
+        """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
         ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self):
+    def summary(self) -> None:
         """Print text output summarising the results"""
 
         print(f"{self.expt_type:=^80}")
@@ -716,7 +727,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         return (fig, ax)
 
-    def summary(self):
+    def summary(self) -> None:
         """Print text output summarising the results"""
 
         print(f"{self.expt_type:=^80}")
@@ -795,7 +806,7 @@ class PrePostNEGD(ExperimentalDesign):
 
         # ================================================================
 
-    def _input_validation(self):
+    def _input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if not _series_has_2_levels(self.data[self.group_variable_name]):
             raise DataException(
@@ -856,13 +867,14 @@ class PrePostNEGD(ExperimentalDesign):
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
-    def _causal_impact_summary_stat(self):
+    def _causal_impact_summary_stat(self) -> str:
+        """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
         ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self):
+    def summary(self) -> None:
         """Print text output summarising the results"""
 
         print(f"{self.expt_type:=^80}")

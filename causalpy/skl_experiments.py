@@ -1,3 +1,6 @@
+"""
+Experiments for Scikit-Learn models
+"""
 import warnings
 from typing import Optional
 
@@ -78,6 +81,7 @@ class PrePostFit(ExperimentalDesign):
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
     def plot(self, counterfactual_label="Counterfactual", **kwargs):
+        """Plot experiment results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -140,9 +144,11 @@ class PrePostFit(ExperimentalDesign):
         return (fig, ax)
 
     def get_coeffs(self):
+        """Returns model coefficients"""
         return np.squeeze(self.model.coef_)
 
     def plot_coeffs(self):
+        """Plots coefficient bar plot"""
         df = pd.DataFrame(
             {"predictor variable": self.labels, "ols_coef": self.get_coeffs()}
         )
@@ -463,6 +469,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
+        """Plot results"""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(

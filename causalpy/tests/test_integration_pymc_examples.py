@@ -8,6 +8,15 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 @pytest.mark.integration
 def test_did():
+    """
+    Test Difference in Differences (DID) PyMC experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiements.DifferenceInDifferences returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = cp.load_data("did")
     result = cp.pymc_experiments.DifferenceInDifferences(
         df,
@@ -27,6 +36,18 @@ def test_did():
 
 @pytest.mark.integration
 def test_did_banks_simple():
+    """
+    Test simple Differences In Differences Experiment on the 'banks' data set.
+
+    formula="bib ~ 1 + district * post_treatment"
+
+    Loads, transforms data and checks:
+    1. data is a dataframe
+    2. pymc_experiements.DifferenceInDifferences returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+
+    """
     treatment_time = 1930.5
     df = (
         cp.load_data("banks")
@@ -67,6 +88,18 @@ def test_did_banks_simple():
 
 @pytest.mark.integration
 def test_did_banks_multi():
+    """
+    Test multiple regression Differences In Differences Experiment on the 'banks'
+    data set.
+
+    formula="bib ~ 1 + year + district + post_treatment + district:post_treatment"
+
+    Loads, transforms data and checks:
+    1. data is a dataframe
+    2. pymc_experiements.DifferenceInDifferences returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     treatment_time = 1930.5
     df = (
         cp.load_data("banks")
@@ -106,6 +139,15 @@ def test_did_banks_multi():
 
 @pytest.mark.integration
 def test_rd():
+    """
+    Test Regression Discontinuity experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = cp.load_data("rd")
     result = cp.pymc_experiments.RegressionDiscontinuity(
         df,
@@ -122,6 +164,15 @@ def test_rd():
 
 @pytest.mark.integration
 def test_rd_bandwidth():
+    """
+    Test Regression Discontinuity experiment with bandwidth parameter.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = cp.load_data("rd")
     result = cp.pymc_experiments.RegressionDiscontinuity(
         df,
@@ -139,6 +190,15 @@ def test_rd_bandwidth():
 
 @pytest.mark.integration
 def test_rd_drinking():
+    """
+    Test Regression Discontinuity experiment on drinking age data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = (
         cp.load_data("drinking")
         .rename(columns={"agecell": "age"})
@@ -159,6 +219,15 @@ def test_rd_drinking():
 
 @pytest.mark.integration
 def test_its():
+    """
+    Test Interrupted Time-Series experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = (
         cp.load_data("its")
         .assign(date=lambda x: pd.to_datetime(x["date"]))
@@ -179,6 +248,16 @@ def test_its():
 
 @pytest.mark.integration
 def test_its_covid():
+    """
+    Test Interrupted Time-Series experiment on COVID data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.InterruptedtimeSeries returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
+
     df = (
         cp.load_data("covid")
         .assign(date=lambda x: pd.to_datetime(x["date"]))
@@ -199,6 +278,16 @@ def test_its_covid():
 
 @pytest.mark.integration
 def test_sc():
+    """
+    Test Synthetic Control experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
+
     df = cp.load_data("sc")
     treatment_time = 70
     result = cp.pymc_experiments.SyntheticControl(
@@ -215,6 +304,16 @@ def test_sc():
 
 @pytest.mark.integration
 def test_sc_brexit():
+    """
+    Test Synthetic Control experiment on Brexit data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
+
     df = (
         cp.load_data("brexit")
         .assign(Time=lambda x: pd.to_datetime(x["Time"]))
@@ -243,6 +342,15 @@ def test_sc_brexit():
 
 @pytest.mark.integration
 def test_ancova():
+    """
+    Test Pre-PostNEGD experiment on anova1 data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.PrePostNEGD returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = cp.load_data("anova1")
     result = cp.pymc_experiments.PrePostNEGD(
         df,
@@ -259,6 +367,15 @@ def test_ancova():
 
 @pytest.mark.integration
 def test_geolift1():
+    """
+    Test Synthetic Control experiment on geo lift data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. pymc_experiments.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    """
     df = (
         cp.load_data("geolift1")
         .assign(time=lambda x: pd.to_datetime(x["time"]))

@@ -11,7 +11,16 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 class MyToyModel(ModelBuilder):
+    """
+    A subclass of ModelBuilder with a simple regression model for use in tests.
+    """
+
     def build_model(self, X, y, coords):
+        """
+        Required .build_model() method of a ModelBuilder subclass
+
+        This is a basic 1-variable linear regression model for use in tests.
+        """
         with self:
             X_ = pm.MutableData(name="X", value=X)
             y_ = pm.MutableData(name="y", value=y)
@@ -22,7 +31,17 @@ class MyToyModel(ModelBuilder):
 
 
 class TestModelBuilder:
+    """
+    Related tests that check aspects of ModelBuilder objects.
+    """
+
     def test_init(self):
+        """
+        Test initialization.
+
+        Creates ModelBuilder() object and checks that idata is None and no sample
+        kwargs are specified.
+        """
         mb = ModelBuilder()
         assert mb.idata is None
         assert mb.sample_kwargs == {}
@@ -37,12 +56,20 @@ class TestModelBuilder:
         argnames="X", argvalues=[np.ones(2), None], ids=["X-array", "X-None"]
     )
     def test_model_builder(self, X, y, coords) -> None:
+        """
+        Tests that a ModelBuilder() object without a .build_model() method raises
+        appropriate exception.
+        """
         with pytest.raises(
             NotImplementedError, match="This method must be implemented by a subclass"
         ):
             ModelBuilder().build_model(X=X, y=y, coords=coords)
 
     def test_fit_build_not_implemented(self):
+        """
+        Tests that a ModelBuilder() object without a .fit() method raises appropriate
+        exception.
+        """
         with pytest.raises(
             NotImplementedError, match="This method must be implemented by a subclass"
         ):
@@ -54,6 +81,16 @@ class TestModelBuilder:
         ids=["None-coords", "dict-coords"],
     )
     def test_fit_predict(self, coords, rng) -> None:
+        """
+        Test fit and predict methods on MyToyModel.
+
+        Generates normal data, fits the model, makes predictions, scores the model
+        then:
+        1. checks that model.idata is az.InferenceData type
+        2. checks that beta, sigma, mu, and y_hat can be extract from idata
+        3. checks score is a pandas series of the correct shape
+        4. checks that predictions are az.InferenceData type
+        """
         X = rng.normal(loc=0, scale=1, size=(20, 2))
         y = rng.normal(loc=0, scale=1, size=(20,))
         model = MyToyModel(sample_kwargs={"chains": 2, "draws": 2})

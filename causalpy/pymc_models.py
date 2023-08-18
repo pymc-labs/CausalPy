@@ -40,6 +40,7 @@ class ModelBuilder(pm.Model):
         raise NotImplementedError("This method must be implemented by a subclass")
 
     def _data_setter(self, X) -> None:
+        """Set data for the model."""
         with self.model:
             pm.set_data({"X": X})
 

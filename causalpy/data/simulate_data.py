@@ -11,6 +11,9 @@ rng = np.random.default_rng(RANDOM_SEED)
 def _smoothed_gaussian_random_walk(
     gaussian_random_walk_mu, gaussian_random_walk_sigma, N, lowess_kwargs
 ):
+    """
+    Generates Gaussian random walk data and applies LOWESS
+    """
     x = np.arange(N)
     y = norm(gaussian_random_walk_mu, gaussian_random_walk_sigma).rvs(N).cumsum()
     filtered = lowess(y, x, **lowess_kwargs)

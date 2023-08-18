@@ -1,3 +1,7 @@
+"""
+Plotting utility functions.
+"""
+
 from typing import Any, Dict, Optional, Tuple, Union
 
 import arviz as az

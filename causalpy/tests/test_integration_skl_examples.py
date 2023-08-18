@@ -9,6 +9,14 @@ import causalpy as cp
 
 @pytest.mark.integration
 def test_did():
+    """
+    Test Difference in Differences (DID) Sci-Kit Learn experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.DifferenceInDifferences returns correct type
+    """
+
     data = cp.load_data("did")
     result = cp.skl_experiments.DifferenceInDifferences(
         data,
@@ -25,6 +33,13 @@ def test_did():
 
 @pytest.mark.integration
 def test_rd_drinking():
+    """
+    Test Regression Discontinuity Sci-Kit Learn experiment on drinking age data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.RegressionDiscontinuity returns correct type
+    """
     df = (
         cp.load_data("drinking")
         .rename(columns={"agecell": "age"})
@@ -44,6 +59,14 @@ def test_rd_drinking():
 
 @pytest.mark.integration
 def test_its():
+    """
+    Test Interrupted Time Series Sci-Kit Learn experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.SyntheticControl returns correct type
+    """
+
     df = (
         cp.load_data("its")
         .assign(date=lambda x: pd.to_datetime(x["date"]))
@@ -62,6 +85,13 @@ def test_its():
 
 @pytest.mark.integration
 def test_sc():
+    """
+    Test Synthetic Control Sci-Kit Learn experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.SyntheticControl returns correct type
+    """
     df = cp.load_data("sc")
     treatment_time = 70
     result = cp.skl_experiments.SyntheticControl(
@@ -76,6 +106,13 @@ def test_sc():
 
 @pytest.mark.integration
 def test_rd_linear_main_effects():
+    """
+    Test Regression Discontinuity Sci-Kit Learn experiment main effects.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.RegressionDiscontinuity returns correct type
+    """
     data = cp.load_data("rd")
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
@@ -90,6 +127,14 @@ def test_rd_linear_main_effects():
 
 @pytest.mark.integration
 def test_rd_linear_main_effects_bandwidth():
+    """
+    Test Regression Discontinuity Sci-Kit Learn experiment, main effects with
+    bandwidth parameter.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.RegressionDiscontinuity returns correct type
+    """
     data = cp.load_data("rd")
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
@@ -105,6 +150,13 @@ def test_rd_linear_main_effects_bandwidth():
 
 @pytest.mark.integration
 def test_rd_linear_with_interaction():
+    """
+    Test Regression Discontinuity Sci-Kit Learn experiment with interaction.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.RegressionDiscontinuity returns correct type
+    """
     data = cp.load_data("rd")
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
@@ -119,6 +171,13 @@ def test_rd_linear_with_interaction():
 
 @pytest.mark.integration
 def test_rd_linear_with_gaussian_process():
+    """
+    Test Regression Discontinuity Sci-Kit Learn experiment with Gaussian process model.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. skl_experiements.RegressionDiscontinuity returns correct type
+    """
     data = cp.load_data("rd")
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.skl_experiments.RegressionDiscontinuity(

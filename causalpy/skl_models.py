@@ -1,3 +1,9 @@
+"""
+Scikit-Learn Models
+
+Includes:
+1. Weighted Proportion
+"""
 from functools import partial
 
 import numpy as np
@@ -18,9 +24,11 @@ class WeightedProportion(LinearModel, RegressorMixin):
     """
 
     def loss(self, W, X, y):
+        """Compute root mean squared loss with data X, weights W, and predictor y"""
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))
 
     def fit(self, X, y):
+        """Fit model on data X with predictor y"""
         w_start = [1 / X.shape[1]] * X.shape[1]
         coef_ = fmin_slsqp(
             partial(self.loss, X=X, y=y),
@@ -34,4 +42,5 @@ class WeightedProportion(LinearModel, RegressorMixin):
         return self
 
     def predict(self, X):
+        """Predict results for data X"""
         return np.dot(X, self.coef_.T)
