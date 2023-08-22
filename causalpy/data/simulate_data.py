@@ -1,3 +1,6 @@
+"""
+Functions that generate data sets used in examples
+"""
 import numpy as np
 import pandas as pd
 from scipy.stats import dirichlet, gamma, norm, uniform
@@ -13,6 +16,15 @@ def _smoothed_gaussian_random_walk(
 ):
     """
     Generates Gaussian random walk data and applies LOWESS
+
+    :param gaussian_random_walk_mu:
+        Mean of the random walk
+    :param gaussian_random_walk_sigma:
+        Standard deviation of the random walk
+    :param N:
+        Length of the random walk
+    :param lowess_kwargs:
+        Keyword argument dictionary passed to statsmodels lowess
     """
     x = np.arange(N)
     y = norm(gaussian_random_walk_mu, gaussian_random_walk_sigma).rvs(N).cumsum()
@@ -29,13 +41,24 @@ def generate_synthetic_control_data(
     lowess_kwargs=default_lowess_kwargs,
 ):
     """
+    Generates data for synthetic control example.
+
+    :param N:
+        Number fo data points
+    :param treatment_time:
+        Index where treatment begins in the generated data frame
+    :param grw_mu:
+        Mean of Gaussian Random Walk
+    :param grw_sigma:
+        Standard deviation of Gaussian Random Walk
+    :lowess_kwargs:
+        Keyword argument dictionary passed to statsmodels lowess
+
     Example
     --------
-    >>> import pathlib
     >>> df, weightings_true = generate_synthetic_control_data(
     ...                             treatment_time=treatment_time
     ... )
-    >>> df.to_csv(pathlib.Path.cwd() / 'synthetic_control.csv', index=False)
     """
 
     # 1. Generate non-treated variables
@@ -74,7 +97,21 @@ def generate_synthetic_control_data(
 def generate_time_series_data(
     N=100, treatment_time=70, beta_temp=-1, beta_linear=0.5, beta_intercept=3
 ):
-    """ """
+    """
+    Generates interrupted time series example data
+
+    :param N:
+        Length of the time series
+    :param treatment_time:
+        Index of when treatment begins
+    :param beta_temp:
+        The temperature coefficient
+    :param beta_linear:
+        The linear coefficient
+    :param beta_intercept:
+        The intercept
+
+    """
     x = np.arange(0, 100, 1)
     df = pd.DataFrame(
         {
@@ -104,7 +141,9 @@ def generate_time_series_data(
 
 
 def generate_time_series_data_seasonal(treatment_time):
-    """ """
+    """
+    Generates 10 years of monthly data with seasonality
+    """
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )
@@ -170,6 +209,7 @@ def generate_did():
     def outcome(
         t, control_intercept, treat_intercept_delta, trend, Δ, group, post_treatment
     ):
+        """Compute the outcome of each unit"""
         return (
             control_intercept
             + (treat_intercept_delta * group)
@@ -214,9 +254,11 @@ def generate_regression_discontinuity_data(
     """
 
     def is_treated(x):
+        """Check if x was treated"""
         return np.greater_equal(x, true_treatment_threshold)
 
     def impact(x):
+        """Assign true_causal_impact to all treaated entries"""
         y = np.zeros(len(x))
         y[is_treated(x)] = true_causal_impact
         return y
@@ -263,6 +305,10 @@ def generate_geolift_data():
     causal_impact = 0.2
 
     def create_series(n=52, amplitude=1, length_scale=2):
+        """
+        Returns numpy tile with generated seasonality data repeated over
+        multiple years
+        """
         return np.tile(
             generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + 3, n_years
         )
