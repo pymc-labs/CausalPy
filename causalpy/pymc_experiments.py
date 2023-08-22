@@ -30,7 +30,7 @@ az.style.use("arviz-darkgrid")
 
 
 class ExperimentalDesign:
-    """Base class"""
+    """Base class for other experiment types"""
 
     model = None
     expt_type = None
@@ -43,7 +43,7 @@ class ExperimentalDesign:
 
     @property
     def idata(self):
-        """Access to the InferenceData object"""
+        """Access to the models InferenceData object"""
         return self.model.idata
 
     def print_coefficients(self) -> None:
@@ -66,8 +66,32 @@ class ExperimentalDesign:
 
 
 class PrePostFit(ExperimentalDesign):
-    """A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data."""
+    """
+    A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data.
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> sc = cp.load_data("sc")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.PrePostFit(
+    ...     sc,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
+    ...     ),
+    ... )
+    """
 
     def __init__(
         self,
@@ -256,13 +280,64 @@ class PrePostFit(ExperimentalDesign):
 
 
 class InterruptedTimeSeries(PrePostFit):
-    """Interrupted time series analysis"""
+    """
+    A wrapper around PrePostFit class
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> df = (
+    ...     cp.load_data("its")
+    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+    ...     .set_index("date")
+    ... )
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ... )
+    """
 
     expt_type = "Interrupted Time Series"
 
 
 class SyntheticControl(PrePostFit):
-    """A wrapper around the PrePostFit class"""
+    """A wrapper around the PrePostFit class
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.SyntheticControl(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
+    ...     ),
+    ... )
+    """
 
     expt_type = "Synthetic Control"
 
@@ -285,6 +360,28 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         There is no pre/post intervention data distinction for DiD, we fit all the
         data available.
+    :param data:
+        A pandas data frame
+    :param formula:
+        A statistical model formula
+    :param time_variable_name:
+        Name of the data column for the time variable
+    :param group_variable_name:
+        Name of the data column for the group variable
+    :param model:
+        A PyMC model for difference in differences
+
+    Example
+    --------
+    >>> df = cp.load_data("did")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.DifferenceInDifferences(
+    ...     df,
+    ...     formula="y ~ 1 + group*post_treatment",
+    ...     time_variable_name="t",
+    ...     group_variable_name="group",
+    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...  )
 
     """
 
@@ -572,6 +669,18 @@ class RegressionDiscontinuity(ExperimentalDesign):
     :param bandwidth:
         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
         the model.
+
+    Example
+    --------
+    >>> df = cp.load_data("rd")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.RegressionDiscontinuity(
+    ...     df,
+    ...     formula="y ~ 1 + x + treated + x:treated",
+    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...     treatment_threshold=0.5,
+    ... )
+
     """
 
     def __init__(
@@ -742,7 +851,33 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
 
 class PrePostNEGD(ExperimentalDesign):
-    """A class to analyse data from pretest/posttest designs"""
+    """
+    A class to analyse data from pretest/posttest designs
+
+    :param data:
+        A pandas data frame
+    :param formula:
+        A statistical model formula
+    :param group_variable_name:
+        Name of the column in data for the group variable
+    :param pretreatment_variable_name:
+        Name of the column in data for the pretreatment variable
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> df = cp.load_data("anova1")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.PrePostNEGD(
+    ...     df,
+    ...     formula="post ~ 1 + C(group) + pre",
+    ...     group_variable_name="group",
+    ...     pretreatment_variable_name="pre",
+    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ... )
+
+    """
 
     def __init__(
         self,

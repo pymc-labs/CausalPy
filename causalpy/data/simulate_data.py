@@ -29,12 +29,13 @@ def generate_synthetic_control_data(
     lowess_kwargs=default_lowess_kwargs,
 ):
     """
-    Example:
-    >> import pathlib
-    >> df, weightings_true = generate_synthetic_control_data(
-                                treatment_time=treatment_time
-                            )
-    >> df.to_csv(pathlib.Path.cwd() / 'synthetic_control.csv', index=False)
+    Example
+    --------
+    >>> import pathlib
+    >>> df, weightings_true = generate_synthetic_control_data(
+    ...                             treatment_time=treatment_time
+    ... )
+    >>> df.to_csv(pathlib.Path.cwd() / 'synthetic_control.csv', index=False)
     """
 
     # 1. Generate non-treated variables
@@ -73,6 +74,7 @@ def generate_synthetic_control_data(
 def generate_time_series_data(
     N=100, treatment_time=70, beta_temp=-1, beta_linear=0.5, beta_intercept=3
 ):
+    """ """
     x = np.arange(0, 100, 1)
     df = pd.DataFrame(
         {
@@ -102,6 +104,7 @@ def generate_time_series_data(
 
 
 def generate_time_series_data_seasonal(treatment_time):
+    """ """
     dates = pd.date_range(
         start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
     )
@@ -149,6 +152,13 @@ def generate_time_series_data_simple(treatment_time, slope=0.0):
 
 
 def generate_did():
+    """
+    Generate Difference in Differences data
+
+    Example
+    --------
+    >>> df = generate_did()
+    """
     # true parameters
     control_intercept = 1
     treat_intercept_delta = 0.25
@@ -194,10 +204,13 @@ def generate_regression_discontinuity_data(
     N=100, true_causal_impact=0.5, true_treatment_threshold=0.0
 ):
     """
-    Example use:
-    >> import pathlib
-    >> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
-    >> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv', index=False)
+    Generate regression discontinuity example data
+
+    Example
+    --------
+    >>> import pathlib
+    >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
+    >>> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv', index=False)
     """
 
     def is_treated(x):
@@ -217,6 +230,20 @@ def generate_regression_discontinuity_data(
 def generate_ancova_data(
     N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
 ):
+    """
+    Generate ANCOVA eample data
+
+    Example
+    --------
+    >>> import pathlib
+    >>> df = generate_ancova_data(
+    ...     N=200,
+    ...     pre_treatment_threshold=np.array([10, 12]),
+    ...     treatment_effect=2,
+    ...     sigma=1
+    ... )
+    >>> df.to_csv(pathlib.Path.cwd() / 'ancova_data.csv', index=False)
+    """
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
     post = pre + treatment_effect * group + np.random.normal(size=N) * sigma

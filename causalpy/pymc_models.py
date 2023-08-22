@@ -1,3 +1,8 @@
+"""
+Defines generic PyMC ModelBuilder class and subclasses for
+* WeightedSumFitter model for Synthetic Control experiments
+* LinearRegression model
+"""
 from typing import Any, Dict, Optional
 
 import arviz as az
@@ -11,6 +16,13 @@ from arviz import r2_score
 class ModelBuilder(pm.Model):
     """
     This is a wrapper around pm.Model to give scikit-learn like API.
+
+    Public Methods
+    --------
+    * build_model: must be implemented by subclasses
+    * fit: populates idata attribute
+    * predict: returns predictions on new data
+    * score: returns Bayesian R^2
     """
 
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
@@ -40,13 +52,57 @@ class ModelBuilder(pm.Model):
         raise NotImplementedError("This method must be implemented by a subclass")
 
     def _data_setter(self, X) -> None:
-        """Set data for the model."""
+        """
+        Set data for the model.
+
+        This method is used internally to register new data for the model for
+        prediction.
+        """
         with self.model:
             pm.set_data({"X": X})
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions.
+        """Draw samples fromposterior, prior predictive, and posterior predictive
+        distributions, placing them in the model's idata attribute.
+
+        Example
+        -------
+        >>> import numpy as np
+        >>> import pymc as pm
+        >>> from causalpy.pymc_models import ModelBuilder
+        >>> class MyToyModel(ModelBuilder):
+        ...    def build_model(self, X, y, coords):
+        ...        with self:
+        ...            X_ = pm.MutableData(name="X", value=X)
+        ...            y_ = pm.MutableData(name="y", value=y)
+        ...            beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        ...            sigma = pm.HalfNormal("sigma", sigma=1)
+        ...            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        ...            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+
+        >>> rng = np.random.default_rng(seed=42)
+        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
+        >>> y = rng.normal(loc=0, scale=1, size=(20,))
+        >>> model = MyToyModel(sample_kwargs={"chains": 2, "draws": 2})
+        >>> model.fit(X, y)
+        Only 2 samples in chain.
+        Auto-assigning NUTS sampler...
+        Initializing NUTS using jitter+adapt_diag...
+        Multiprocess sampling (2 chains in 4 jobs)
+        NUTS: [beta, sigma]
+        Sampling 2 chains for 1_000 tune and 2 draw iterations (2_000 + 4 draws total)
+          took 0 seconds.gences]
+        The number of samples is too small to check convergence reliably.
+        Sampling: [beta, sigma, y_hat]
+        Sampling: [y_hat]
+        Inference data with groups:
+                > posterior
+                > posterior_predictive
+                > sample_stats
+                > prior
+                > prior_predictive
+                > observed_data
+                > constant_data
         """
         self.build_model(X, y, coords)
         with self.model:
@@ -58,7 +114,25 @@ class ModelBuilder(pm.Model):
         return self.idata
 
     def predict(self, X):
-        """Predict data given input data `X`"""
+        """
+        Predict data given input data `X`
+
+        Results in KeyError if model hasn't been fit.
+
+        Example
+        -------
+        # Assumes `model` has been initialized and .fit() has been run,
+        # see ModelBuilder().fit() for example
+
+        >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
+        >>> model.predict(X_new)
+        Sampling: [beta, y_hat]
+        Inference data with groups:
+                > posterior_predictive
+                > observed_data
+                > constant_data
+        """
+
         self._data_setter(X)
         with self.model:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
@@ -74,6 +148,14 @@ class ModelBuilder(pm.Model):
             The Bayesian :math:`R^2` is not the same as the traditional coefficient of
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
+        Example
+        --------
+        # Assuming `model` has been fit
+        >>> model.score(X, y) # X, y are random data here
+        Sampling: [y_hat]
+        r2        0.352251
+        r2_std    0.051624
+        dtype: float64
         """
         yhat = self.predict(X)
         yhat = az.extract(
@@ -86,10 +168,33 @@ class ModelBuilder(pm.Model):
 
 
 class WeightedSumFitter(ModelBuilder):
-    """Used for synthetic control experiments"""
+    """
+    Used for synthetic control experiments
+
+    Defines model:
+    y ~ Normal(mu, sigma)
+    sigma ~ HalfNormal(1)
+    mu = X * beta
+    beta ~ Dirichlet(1,...,1)
+
+    Public Methods
+    ---------------
+    * build_model
+    """
 
     def build_model(self, X, y, coords):
-        """Defines the PyMC model"""
+        """
+        Defines the PyMC model:
+
+        y ~ Normal(mu, sigma)
+        sigma ~ HalfNormal(1)
+        mu = X * beta
+        beta ~ Dirichlet(1,...,1)
+
+        Example
+        --------
+
+        """
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
@@ -107,10 +212,27 @@ class WeightedSumFitter(ModelBuilder):
 
 
 class LinearRegression(ModelBuilder):
-    """Custom PyMC model for linear regression"""
+    """
+    Custom PyMC model for linear regression
+
+    Public Methods
+    ---------------
+    * build_model
+    """
 
     def build_model(self, X, y, coords):
-        """Defines the PyMC model"""
+        """
+        Defines the PyMC model
+
+        y ~ Normal(mu, sigma)
+        mu = X * beta
+        beta ~ Normal(0, 50)
+        sigma ~ HalfNormal(1)
+
+        Example
+        --------
+
+        """
         with self:
             self.add_coords(coords)
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
