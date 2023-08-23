@@ -1,8 +1,8 @@
 """
 Scikit-Learn Models
 
-Includes:
-1. Weighted Proportion
+- Weighted Proportion
+
 """
 from functools import partial
 
@@ -21,6 +21,29 @@ class WeightedProportion(LinearModel, RegressorMixin):
 
     Inspiration taken from this blog post
     https://towardsdatascience.com/understanding-synthetic-control-methods-dd9a291885a1
+
+    Example
+    --------
+    >>> rng = np.random.default_rng(seed=42)
+    >>> X = rng.normal(loc=0, scale=1, size=(20,2))
+    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> wp.fit(X, y)
+    WeightedProportion()
+    >>> wp.coef_
+    array([[0.36719946, 0.63280054]])
+    >>> X_new = rng.normal(loc=0, scale=1, size=(10,2))
+    >>> wp.predict(X_new)
+    array([[-0.8298643 ],
+       [ 0.43072465],
+       [ 0.76319257],
+       [-0.42062812],
+       [ 0.1939908 ],
+       [-1.18557609],
+       [-0.0230188 ],
+       [ 0.48923816],
+       [-0.05656294],
+       [ 0.0339618 ]])
+
     """
 
     def loss(self, W, X, y):
