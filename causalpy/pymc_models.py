@@ -136,8 +136,7 @@ class InstrumentalVariableRegression(ModelBuilder):
         :param priors: An optional dictionary of priors for the mus and
                       sigmas of both regressions
 
-        e.g priors = {'mus': [[10, 0], [2, 0]], 'sigmas': [[1, 1], [1, 1]]
-                      'eta': 2, 'lkj_sd': 2}
+        :code:`priors = {"mus": [0, 0], "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}`
 
         """
 

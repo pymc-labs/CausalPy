@@ -1002,11 +1002,12 @@ class InstrumentalVariable(ExperimentalDesign):
                 as an outcome variable and in the data object to be used as a covariate.
                 """
             )
-        check_binary = len(self.data[treatment.strip()].unique()) > 2
+        Z = self.data[treatment.strip()]
+        check_binary = len(np.unique(Z)) > 2
         if check_binary:
             warnings.warn(
                 """Warning. The treatment variable is not Binary.
-                This is not necessarily aproblem but it violates
+                This is not necessarily a problem but it violates
                 the assumption of a simple IV experiment.
-                Change your interpretation of model coefficients accordingly."""
+                The coefficients should be interpreted appropriately."""
             )
