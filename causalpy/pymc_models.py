@@ -1,7 +1,12 @@
 """
 Defines generic PyMC ModelBuilder class and subclasses for
-* WeightedSumFitter model for Synthetic Control experiments
-* LinearRegression model
+
+- WeightedSumFitter model for Synthetic Control experiments
+- LinearRegression model
+
+Models are intended to be used from inside an experiment
+class (see pymc_experiments.py). This is why the examples require some extra
+manipulation input data, often to ensure `y` has the correct shape.
 """
 from typing import Any, Dict, Optional
 
@@ -18,11 +23,11 @@ class ModelBuilder(pm.Model):
     This is a wrapper around pm.Model to give scikit-learn like API.
 
     Public Methods
-    --------
-    * build_model: must be implemented by subclasses
-    * fit: populates idata attribute
-    * predict: returns predictions on new data
-    * score: returns Bayesian R^2
+    ---------------
+    - build_model: must be implemented by subclasses
+    - fit: populates idata attribute
+    - predict: returns predictions on new data
+    - score: returns Bayesian R^2
     """
 
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
@@ -35,7 +40,7 @@ class ModelBuilder(pm.Model):
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
 
     def build_model(self, X, y, coords) -> None:
-        """Build the model.
+        """Build the model, must be implemented by subclass.
 
         Example
         -------
@@ -65,6 +70,9 @@ class ModelBuilder(pm.Model):
         """Draw samples fromposterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
 
+        .. note::
+            Calls the build_model method
+
         Example
         -------
         >>> import numpy as np
@@ -79,7 +87,6 @@ class ModelBuilder(pm.Model):
         ...            sigma = pm.HalfNormal("sigma", sigma=1)
         ...            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
         ...            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
-
         >>> rng = np.random.default_rng(seed=42)
         >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
         >>> y = rng.normal(loc=0, scale=1, size=(20,))
@@ -117,12 +124,13 @@ class ModelBuilder(pm.Model):
         """
         Predict data given input data `X`
 
-        Results in KeyError if model hasn't been fit.
+        .. caution::
+            Results in KeyError if model hasn't been fit.
 
         Example
         -------
-        # Assumes `model` has been initialized and .fit() has been run,
-        # see ModelBuilder().fit() for example
+        Assumes `model` has been initialized and .fit() has been run,
+        see ModelBuilder().fit() for example.
 
         >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
         >>> model.predict(X_new)
@@ -150,7 +158,8 @@ class ModelBuilder(pm.Model):
 
         Example
         --------
-        # Assuming `model` has been fit
+        Assuming `model` has been fit
+
         >>> model.score(X, y) # X, y are random data here
         Sampling: [y_hat]
         r2        0.352251
@@ -171,28 +180,49 @@ class WeightedSumFitter(ModelBuilder):
     """
     Used for synthetic control experiments
 
-    Defines model:
-    y ~ Normal(mu, sigma)
-    sigma ~ HalfNormal(1)
-    mu = X * beta
-    beta ~ Dirichlet(1,...,1)
+    .. note: Generally, the `.fit()` method should be rather than calling
+    `.build_model()` directly.
 
-    Public Methods
-    ---------------
-    * build_model
+    Defines the PyMC model:
+
+    - y ~ Normal(mu, sigma)
+    - sigma ~ HalfNormal(1)
+    - mu = X * beta
+    - beta ~ Dirichlet(1,...,1)
+
+    Example
+    --------
+    >>> sc = cp.load_data("sc")
+    >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
+    >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
+    >>> wsf = WeightedSumFitter()
+    >>> wsf.fit(X,y)
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 3 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Inference data with groups:
+        > posterior
+        > posterior_predictive
+        > sample_stats
+        > prior
+        > prior_predictive
+        > observed_data
+        > constant_data
     """
 
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model:
 
-        y ~ Normal(mu, sigma)
-        sigma ~ HalfNormal(1)
-        mu = X * beta
-        beta ~ Dirichlet(1,...,1)
-
-        Example
-        --------
+        - y ~ Normal(mu, sigma)
+        - sigma ~ HalfNormal(1)
+        - mu = X * beta
+        - beta ~ Dirichlet(1,...,1)
 
         """
         with self:
@@ -215,23 +245,53 @@ class LinearRegression(ModelBuilder):
     """
     Custom PyMC model for linear regression
 
-    Public Methods
-    ---------------
-    * build_model
+    .. note: Generally, the `.fit()` method should be rather than calling
+    `.build_model()` directly.
+
+    Defines the PyMC model
+
+    - y ~ Normal(mu, sigma)
+    - mu = X * beta
+    - beta ~ Normal(0, 50)
+    - sigma ~ HalfNormal(1)
+
+    Example
+    --------
+    >>> rd = cp.load_data("rd")
+    >>> X = rd[["x", "treated"]]
+    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
+    >>> lr = LinearRegression()
+    >>> lr.fit(X, y, coords={
+                        'coeffs': ['x', 'treated'],
+                        'obs_indx': np.arange(rd.shape[0])
+                    }
+            )
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations (
+        4_000 + 4_000 draws total) took 1 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Inference data with groups:
+        > posterior
+        > posterior_predictive
+        > sample_stats
+        > prior
+        > prior_predictive
+        > observed_data
+        > constant_data
     """
 
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
 
-        y ~ Normal(mu, sigma)
-        mu = X * beta
-        beta ~ Normal(0, 50)
-        sigma ~ HalfNormal(1)
-
-        Example
-        --------
-
+        - y ~ Normal(mu, sigma)
+        - mu = X * beta
+        - beta ~ Normal(0, 50)
+        - sigma ~ HalfNormal(1)
         """
         with self:
             self.add_coords(coords)

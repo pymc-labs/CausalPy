@@ -1,13 +1,16 @@
 """
 Experiment routines for PyMC models.
 
-Includes:
-1. ExperimentalDesign base class
-2. Pre-Post Fit
-3. Synthetic Control
-4. Difference in differences
-5. Regression Discontinuity
+- ExperimentalDesign base class
+- Pre-Post Fit
+- Interrupted Time Series
+- Synthetic Control
+- Difference in differences
+- Regression Discontinuity
+- Pretest/Posttest Nonequivalent Group Design
+
 """
+
 import warnings
 from typing import Optional, Union
 
@@ -30,7 +33,11 @@ az.style.use("arviz-darkgrid")
 
 
 class ExperimentalDesign:
-    """Base class for other experiment types"""
+    """
+    Base class for other experiment types
+
+    See subclasses for examples of most methods
+    """
 
     model = None
     expt_type = None
@@ -43,11 +50,63 @@ class ExperimentalDesign:
 
     @property
     def idata(self):
-        """Access to the models InferenceData object"""
+        """
+        Access to the models InferenceData object
+
+        Example
+        --------
+        If `result` is the result of the Difference in Differences experiment example
+
+        >>> result.idata
+        Inference data with groups:
+                > posterior
+                > posterior_predictive
+                > sample_stats
+                > prior
+                > prior_predictive
+                > observed_data
+                > constant_data
+        >>> result.idata.posterior
+        <xarray.Dataset>
+        Dimensions:  (chain: 4, draw: 1000, coeffs: 4, obs_ind: 40)
+        Coordinates:
+            * chain    (chain) int64 0 1 2 3
+            * draw     (draw) int64 0 1 2 3 4 5 6 7 8 ... 992 993 994 995 996 997 998
+            999
+            * coeffs   (coeffs) <U28 'Intercept' ... 'group:post_treatment[T.True]'
+            * obs_ind  (obs_ind) int64 0 1 2 3 4 5 6 7 8 9 ... 31 32 33 34 35 36 37
+            38 39
+        Data variables:
+           beta     (chain, draw, coeffs) float64 1.04 1.013 0.173 ... 0.1873 0.5225
+           sigma    (chain, draw) float64 0.09331 0.1031 0.1024 ... 0.0824 0.06907
+           mu       (chain, draw, obs_ind) float64 1.04 2.053 1.213 ... 1.265 2.747
+        Attributes:
+           created_at:                 2023-08-23T20:03:45.709265
+           arviz_version:              0.16.1
+           inference_library:          pymc
+           inference_library_version:  5.7.2
+           sampling_time:              0.8851289749145508
+           tuning_steps:               1000
+        """
+
         return self.model.idata
 
     def print_coefficients(self) -> None:
-        """Prints the model coefficients"""
+        """
+        Prints the model coefficients
+
+        Example
+        --------
+        If `result` is from the Difference in Differences experiment example
+
+        >>> result.print_coefficients()
+        Model coefficients:
+        Intercept                     1.08, 94% HDI [1.03, 1.13]
+        post_treatment[T.True]        0.98, 94% HDI [0.91, 1.06]
+        group                         0.16, 94% HDI [0.09, 0.23]
+        group:post_treatment[T.True]  0.51, 94% HDI [0.41, 0.61]
+        sigma                         0.08, 94% HDI [0.07, 0.10]
+        """
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
         # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
@@ -82,6 +141,7 @@ class PrePostFit(ExperimentalDesign):
     Example
     --------
     >>> sc = cp.load_data("sc")
+    >>> treatment_time = 70
     >>> seed = 42
     >>> result = cp.pymc_experiments.PrePostFit(
     ...     sc,
@@ -91,6 +151,17 @@ class PrePostFit(ExperimentalDesign):
     ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
     ...     ),
     ... )
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 11 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     def __init__(
@@ -105,6 +176,8 @@ class PrePostFit(ExperimentalDesign):
         self._input_validation(data, treatment_time)
 
         self.treatment_time = treatment_time
+        # set experiment type - usually done in subclasses
+        self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
         self.datapre = data[data.index <= self.treatment_time]
         self.datapost = data[data.index > self.treatment_time]
@@ -171,7 +244,14 @@ class PrePostFit(ExperimentalDesign):
             )
 
     def plot(self, counterfactual_label="Counterfactual", **kwargs):
-        """Plot the results"""
+        """
+        Plot the results
+
+        Example
+        --------
+        >>> result.plot()
+
+        """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # TOP PLOT --------------------------------------------------
@@ -271,7 +351,24 @@ class PrePostFit(ExperimentalDesign):
         return (fig, ax)
 
     def summary(self) -> None:
-        """Print text output summarising the results"""
+        """
+        Print text output summarising the results
+
+        Example
+        ---------
+        >>> result.summary()
+        ===============================Synthetic Control===============================
+        Formula: actual ~ 0 + a + b + c + d + e + f + g
+        Model coefficients:
+        a                             0.33, 94% HDI [0.30, 0.38]
+        b                             0.05, 94% HDI [0.01, 0.09]
+        c                             0.31, 94% HDI [0.26, 0.35]
+        d                             0.06, 94% HDI [0.01, 0.10]
+        e                             0.02, 94% HDI [0.00, 0.06]
+        f                             0.20, 94% HDI [0.12, 0.26]
+        g                             0.04, 94% HDI [0.00, 0.08]
+        sigma                         0.26, 94% HDI [0.22, 0.30]
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -307,6 +404,17 @@ class InterruptedTimeSeries(PrePostFit):
     ...     formula="y ~ 1 + t + C(month)",
     ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
     ... )
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 3 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     expt_type = "Interrupted Time Series"
@@ -337,6 +445,17 @@ class SyntheticControl(PrePostFit):
     ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
     ...     ),
     ... )
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 11 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     expt_type = "Synthetic Control"
@@ -382,7 +501,17 @@ class DifferenceInDifferences(ExperimentalDesign):
     ...     group_variable_name="group",
     ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
     ...  )
-
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 1 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     def __init__(
@@ -503,6 +632,12 @@ class DifferenceInDifferences(ExperimentalDesign):
     def plot(self):
         """Plot the results.
         Creating the combined mean + HDI legend entries is a bit involved.
+
+        Example
+        --------
+        Assuming `result` is the result of a DiD experiment:
+
+        >>> result.plot()
         """
         fig, ax = plt.subplots()
 
@@ -639,7 +774,25 @@ class DifferenceInDifferences(ExperimentalDesign):
         return f"Causal impact = {causal_impact + ci}"
 
     def summary(self) -> None:
-        """Print text output summarising the results"""
+        """
+        Print text output summarising the results
+
+        Example
+        --------
+        Assuming `result` is a DiD experiment
+
+        >>> result.summary()
+        ==========================Difference in Differences=========================
+        Formula: y ~ 1 + group*post_treatment
+        Results:
+        Causal impact = 0.51, $CI_{94%}$[0.41, 0.61]
+        Model coefficients:
+        Intercept                     1.08, 94% HDI [1.03, 1.13]
+        post_treatment[T.True]        0.98, 94% HDI [0.91, 1.06]
+        group                         0.16, 94% HDI [0.09, 0.23]
+        group:post_treatment[T.True]  0.51, 94% HDI [0.41, 0.61]
+        sigma                         0.08, 94% HDI [0.07, 0.10]
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -680,7 +833,17 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
     ...     treatment_threshold=0.5,
     ... )
-
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 2 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     def __init__(
@@ -791,7 +954,13 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
-        """Plot the results"""
+        """
+        Plot the results
+
+        Example
+        --------
+        >>> result.plot()
+        """
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -837,7 +1006,25 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return (fig, ax)
 
     def summary(self) -> None:
-        """Print text output summarising the results"""
+        """
+        Print text output summarising the results
+
+        Example
+        --------
+        >>> result.summary()
+        ============================Regression Discontinuity==========================
+        Formula: y ~ 1 + x + treated + x:treated
+        Running variable: x
+        Threshold on running variable: 0.5
+        Results:
+        Discontinuity at threshold = 0.92
+        Model coefficients:
+        Intercept                     0.09, 94% HDI [0.00, 0.17]
+        treated[T.True]               2.48, 94% HDI [1.66, 3.27]
+        x                             1.32, 94% HDI [1.14, 1.50]
+        x:treated[T.True]             -3.12, 94% HDI [-4.17, -2.05]
+        sigma                         0.35, 94% HDI [0.31, 0.41]
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -876,7 +1063,16 @@ class PrePostNEGD(ExperimentalDesign):
     ...     pretreatment_variable_name="pre",
     ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
     ... )
-
+    Auto-assigning NUTS sampler...
+    Initializing NUTS using jitter+adapt_diag...
+    Multiprocess sampling (4 chains in 4 jobs)
+    NUTS: [beta, sigma]
+    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
+    (4_000 + 4_000 draws total) took 3 seconds.
+    Sampling: [beta, sigma, y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
+    Sampling: [y_hat]
     """
 
     def __init__(
@@ -1010,7 +1206,23 @@ class PrePostNEGD(ExperimentalDesign):
         return f"Causal impact = {causal_impact + ci}"
 
     def summary(self) -> None:
-        """Print text output summarising the results"""
+        """
+        Print text output summarising the results
+
+        Example
+        --------
+        >>> result.summary()
+        =================Pretest/posttest Nonequivalent Group Design================
+        Formula: post ~ 1 + C(group) + pre
+        Results:
+        Causal impact = 1.89, $CI_{94%}$[1.70, 2.07]
+        Model coefficients:
+        Intercept                     -0.46, 94% HDI [-1.17, 0.22]
+        C(group)[T.1]                 1.89, 94% HDI [1.70, 2.07]
+        pre                           1.05, 94% HDI [0.98, 1.12]
+        sigma                         0.51, 94% HDI [0.46, 0.56]
+
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
