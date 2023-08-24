@@ -276,3 +276,28 @@ def test_geolift1():
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+
+@pytest.mark.integration
+def test_iv_reg():
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.pymc_experiments.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.pymc_experiments.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
