@@ -298,7 +298,6 @@ class DifferenceInDifferences(ExperimentalDesign):
     Example
     --------
     >>> df = cp.load_data("did")
-    >>> seed = 42
     >>> result = cp.skl_experiments.DifferenceInDifferences(
     ...     data,
     ...     formula="y ~ 1 + group*post_treatment",

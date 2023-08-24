@@ -5,10 +5,13 @@ Defines generic PyMC ModelBuilder class and subclasses for
 - LinearRegression model
 
 Models are intended to be used from inside an experiment
-class (see pymc_experiments.py). This is why the examples require some extra
+class (see `pymc_experiments.py
+<https://causalpy.readthedocs.io/en/latest/api_pymc_experiments.html>`_).
+This is why the examples require some extra
 manipulation input data, often to ensure `y` has the correct shape.
 
 """
+
 from typing import Any, Dict, Optional
 
 import arviz as az
