@@ -13,10 +13,10 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.0.14"
+version = "0.1.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.io" }]
 requires-python = ">=3.8"
 
@@ -48,13 +48,9 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = [
-    "pathlib",
-    "pre-commit",
-    "twine",
-    "interrogate",
-    ]
-docs = ["ipykernel",
+dev = ["pathlib", "pre-commit", "twine", "interrogate"]
+docs = [
+    "ipykernel",
     "linkify-it-py",
     "myst-nb",
     "pathlib",
@@ -65,19 +61,17 @@ docs = ["ipykernel",
     "sphinx-rtd-theme",
     "statsmodels",
     "sphinxcontrib-bibtex",
-    ]
-lint = ["black",
+]
+lint = [
+    "black",
     "flake8",
     "interrogate",
     "isort",
     "nbqa",
     "pre-commit",
-    "pylint"
-    ]
-test = [
-    "pytest",
-    "pytest-cov",
-    ]
+    "pylint",
+]
+test = ["pytest", "pytest-cov"]
 
 [metadata]
 description-file = 'README.md'
@@ -107,7 +101,7 @@ testpaths = "causalpy/tests"
 markers = [
     "integration: mark as an integration test.",
     "slow: mark test as slow.",
-    ]
+]
 
 [tool.interrogate]
 ignore-init-method = true
