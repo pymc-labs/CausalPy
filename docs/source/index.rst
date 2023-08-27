@@ -113,7 +113,7 @@ Instrumental Variable Regression
 """""""""""""""""""""""
 Instrumental Variable regression is an appropriate technique when you wish to estimate the treatment effect of some variable on another, but are concerned that the treatment variable is endogenous in the system of interest i.e. correlated with the errors. In this case an "instrument" variable can be used in a regression context to disentangle treatment effect due to the threat of confounding due to endogeneity.
 
-.. image:: _static/iv_reg.png
+.. image:: _static/iv_reg2.png
 
 
 Support
