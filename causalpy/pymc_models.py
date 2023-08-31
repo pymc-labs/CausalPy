@@ -48,15 +48,17 @@ class ModelBuilder(pm.Model):
 
         Example
         -------
+        >>> import pymc as pm
+        >>> from causalpy.pymc_models import ModelBuilder
         >>> class CausalPyModel(ModelBuilder):
-        >>>    def build_model(self, X, y):
-        >>>        with self:
-        >>>            X_ = pm.MutableData(name="X", value=X)
-        >>>            y_ = pm.MutableData(name="y", value=y)
-        >>>            beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        >>>            sigma = pm.HalfNormal("sigma", sigma=1)
-        >>>            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        >>>            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+        ...     def build_model(self, X, y):
+        ...         with self:
+        ...             X_ = pm.MutableData(name="X", value=X)
+        ...             y_ = pm.MutableData(name="y", value=y)
+        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        ...             sigma = pm.HalfNormal("sigma", sigma=1)
+        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
         """
         raise NotImplementedError("This method must be implemented by a subclass")
 
@@ -83,37 +85,22 @@ class ModelBuilder(pm.Model):
         >>> import pymc as pm
         >>> from causalpy.pymc_models import ModelBuilder
         >>> class MyToyModel(ModelBuilder):
-        ...    def build_model(self, X, y, coords):
-        ...        with self:
-        ...            X_ = pm.MutableData(name="X", value=X)
-        ...            y_ = pm.MutableData(name="y", value=y)
-        ...            beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        ...            sigma = pm.HalfNormal("sigma", sigma=1)
-        ...            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        ...            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+        ...     def build_model(self, X, y, coords):
+        ...         with self:
+        ...             X_ = pm.MutableData(name="X", value=X)
+        ...             y_ = pm.MutableData(name="y", value=y)
+        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        ...             sigma = pm.HalfNormal("sigma", sigma=1)
+        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
         >>> rng = np.random.default_rng(seed=42)
         >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
         >>> y = rng.normal(loc=0, scale=1, size=(20,))
-        >>> model = MyToyModel(sample_kwargs={"chains": 2, "draws": 2})
-        >>> model.fit(X, y)
-        Only 2 samples in chain.
-        Auto-assigning NUTS sampler...
-        Initializing NUTS using jitter+adapt_diag...
-        Multiprocess sampling (2 chains in 4 jobs)
-        NUTS: [beta, sigma]
-        Sampling 2 chains for 1_000 tune and 2 draw iterations (2_000 + 4 draws total)
-          took 0 seconds.gences]
-        The number of samples is too small to check convergence reliably.
-        Sampling: [beta, sigma, y_hat]
-        Sampling: [y_hat]
-        Inference data with groups:
-                > posterior
-                > posterior_predictive
-                > sample_stats
-                > prior
-                > prior_predictive
-                > observed_data
-                > constant_data
+        >>> model = MyToyModel(
+        ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
+        ... )
+        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        Inference ...
         """
         self.build_model(X, y, coords)
         with self.model:
@@ -133,16 +120,30 @@ class ModelBuilder(pm.Model):
 
         Example
         -------
-        Assumes `model` has been initialized and .fit() has been run,
-        see ModelBuilder().fit() for example.
-
+        >>> import causalpy as cp
+        >>> import numpy as np
+        >>> import pymc as pm
+        >>> from causalpy.pymc_models import ModelBuilder
+        >>> class MyToyModel(ModelBuilder):
+        ...     def build_model(self, X, y, coords):
+        ...         with self:
+        ...             X_ = pm.MutableData(name="X", value=X)
+        ...             y_ = pm.MutableData(name="y", value=y)
+        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        ...             sigma = pm.HalfNormal("sigma", sigma=1)
+        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+        >>> rng = np.random.default_rng(seed=42)
+        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
+        >>> y = rng.normal(loc=0, scale=1, size=(20,))
+        >>> model = MyToyModel(
+        ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
+        ... )
+        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        Inference...
         >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
-        >>> model.predict(X_new)
-        Sampling: [beta, y_hat]
-        Inference data with groups:
-                > posterior_predictive
-                > observed_data
-                > constant_data
+        >>> model.predict(X_new) # doctest: +ELLIPSIS
+        Inference...
         """
 
         self._data_setter(X)
@@ -162,9 +163,28 @@ class ModelBuilder(pm.Model):
 
         Example
         --------
-        Assuming `model` has been fit
-
-        >>> model.score(X, y) # X, y are random data here
+        >>> import causalpy as cp
+        >>> import numpy as np
+        >>> import pymc as pm
+        >>> from causalpy.pymc_models import ModelBuilder
+        >>> class MyToyModel(ModelBuilder):
+        ...     def build_model(self, X, y, coords):
+        ...         with self:
+        ...             X_ = pm.MutableData(name="X", value=X)
+        ...             y_ = pm.MutableData(name="y", value=y)
+        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+        ...             sigma = pm.HalfNormal("sigma", sigma=1)
+        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+        >>> rng = np.random.default_rng(seed=42)
+        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
+        >>> y = rng.normal(loc=0, scale=1, size=(20,))
+        >>> model = MyToyModel(
+        ...         sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
+        ... )
+        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        Inference...
+        >>> model.score(X, y)
         Sampling: [y_hat]
         r2        0.352251
         r2_std    0.051624
@@ -196,27 +216,14 @@ class WeightedSumFitter(ModelBuilder):
 
     Example
     --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import WeightedSumFitter
     >>> sc = cp.load_data("sc")
     >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
-    >>> wsf = WeightedSumFitter()
-    >>> wsf.fit(X,y)
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 3 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Inference data with groups:
-        > posterior
-        > posterior_predictive
-        > sample_stats
-        > prior
-        > prior_predictive
-        > observed_data
-        > constant_data
+    >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
+    >>> _ = wsf.fit(X,y)
     """
 
     def build_model(self, X, y, coords):
@@ -261,31 +268,19 @@ class LinearRegression(ModelBuilder):
 
     Example
     --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import LinearRegression
     >>> rd = cp.load_data("rd")
     >>> X = rd[["x", "treated"]]
     >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
-    >>> lr = LinearRegression()
+    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
     >>> lr.fit(X, y, coords={
-                        'coeffs': ['x', 'treated'],
-                        'obs_indx': np.arange(rd.shape[0])
-                    }
-            )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations (
-        4_000 + 4_000 draws total) took 1 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Inference data with groups:
-        > posterior
-        > posterior_predictive
-        > sample_stats
-        > prior
-        > prior_predictive
-        > observed_data
-        > constant_data
+    ...                 'coeffs': ['x', 'treated'],
+    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                },
+    ... ) # doctest: +ELLIPSIS
+    Inference...
     """
 
     def build_model(self, X, y, coords):
