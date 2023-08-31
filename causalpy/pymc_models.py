@@ -180,14 +180,14 @@ class ModelBuilder(pm.Model):
         >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
         >>> y = rng.normal(loc=0, scale=1, size=(20,))
         >>> model = MyToyModel(
-        ...         sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
+        ...         sample_kwargs={"chains": 2, "draws": 200, "progressbar": False}
         ... )
         >>> model.fit(X, y) # doctest: +ELLIPSIS
         Inference...
         >>> model.score(X, y)
         Sampling: [y_hat]
-        r2        0.352251
-        r2_std    0.051624
+        r2        0.376489
+        r2_std    0.081305
         dtype: float64
         """
         yhat = self.predict(X)

@@ -55,38 +55,22 @@ class ExperimentalDesign:
 
         Example
         --------
-        If `result` is the result of the Difference in Differences experiment example
-
-        >>> result.idata
-        Inference data with groups:
-                > posterior
-                > posterior_predictive
-                > sample_stats
-                > prior
-                > prior_predictive
-                > observed_data
-                > constant_data
-        >>> result.idata.posterior
+        >>> import causalpy as cp
+        >>> df = cp.load_data("did")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.DifferenceInDifferences(
+        ...     df,
+        ...     formula="y ~ 1 + group*post_treatment",
+        ...     time_variable_name="t",
+        ...     group_variable_name="group",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...             sample_kwargs={"random_seed": seed, "progressbar": False}),
+        ...  )
+        >>> result.idata # doctest: +ELLIPSIS
+        Inference data...
+        >>> result.idata.posterior # doctest: +ELLIPSIS
         <xarray.Dataset>
-        Dimensions:  (chain: 4, draw: 1000, coeffs: 4, obs_ind: 40)
-        Coordinates:
-            * chain    (chain) int64 0 1 2 3
-            * draw     (draw) int64 0 1 2 3 4 5 6 7 8 ... 992 993 994 995 996 997 998
-            999
-            * coeffs   (coeffs) <U28 'Intercept' ... 'group:post_treatment[T.True]'
-            * obs_ind  (obs_ind) int64 0 1 2 3 4 5 6 7 8 9 ... 31 32 33 34 35 36 37
-            38 39
-        Data variables:
-           beta     (chain, draw, coeffs) float64 1.04 1.013 0.173 ... 0.1873 0.5225
-           sigma    (chain, draw) float64 0.09331 0.1031 0.1024 ... 0.0824 0.06907
-           mu       (chain, draw, obs_ind) float64 1.04 2.053 1.213 ... 1.265 2.747
-        Attributes:
-           created_at:                 2023-08-23T20:03:45.709265
-           arviz_version:              0.16.1
-           inference_library:          pymc
-           inference_library_version:  5.7.2
-           sampling_time:              0.8851289749145508
-           tuning_steps:               1000
+        Dimensions...
         """
 
         return self.model.idata
@@ -97,8 +81,17 @@ class ExperimentalDesign:
 
         Example
         --------
-        If `result` is from the Difference in Differences experiment example
-
+        >>> import causalpy as cp
+        >>> df = cp.load_data("did")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.DifferenceInDifferences(
+        ...     df,
+        ...     formula="y ~ 1 + group*post_treatment",
+        ...     time_variable_name="t",
+        ...     group_variable_name="group",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...             sample_kwargs={"random_seed": seed, "progressbar": False}),
+        ...  )
         >>> result.print_coefficients()
         Model coefficients:
         Intercept                     1.08, 94% HDI [1.03, 1.13]
@@ -140,6 +133,7 @@ class PrePostFit(ExperimentalDesign):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> sc = cp.load_data("sc")
     >>> treatment_time = 70
     >>> seed = 42
@@ -148,20 +142,13 @@ class PrePostFit(ExperimentalDesign):
     ...     treatment_time,
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False
+    ...         }
     ...     ),
     ... )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 11 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     def __init__(
@@ -249,8 +236,7 @@ class PrePostFit(ExperimentalDesign):
 
         Example
         --------
-        >>> result.plot()
-
+        >>> result.plot() # doctest: +SKIP
         """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -356,6 +342,22 @@ class PrePostFit(ExperimentalDesign):
 
         Example
         ---------
+        >>> import causalpy as cp
+        >>> sc = cp.load_data("sc")
+        >>> treatment_time = 70
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.PrePostFit(
+        ...     sc,
+        ...     treatment_time,
+        ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+        ...     model=cp.pymc_models.WeightedSumFitter(
+        ...         sample_kwargs={
+        ...             "target_accept": 0.95,
+        ...             "random_seed": seed,
+        ...             "progressbar": False,
+        ...         }
+        ...     ),
+        ... )
         >>> result.summary()
         ===============================Synthetic Control===============================
         Formula: actual ~ 0 + a + b + c + d + e + f + g
@@ -391,6 +393,7 @@ class InterruptedTimeSeries(PrePostFit):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> df = (
     ...     cp.load_data("its")
     ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
@@ -402,19 +405,14 @@ class InterruptedTimeSeries(PrePostFit):
     ...     df,
     ...     treatment_time,
     ...     formula="y ~ 1 + t + C(month)",
-    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
     ... )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 3 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     expt_type = "Interrupted Time Series"
@@ -434,6 +432,7 @@ class SyntheticControl(PrePostFit):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> df = cp.load_data("sc")
     >>> treatment_time = 70
     >>> seed = 42
@@ -442,20 +441,13 @@ class SyntheticControl(PrePostFit):
     ...     treatment_time,
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={"target_accept": 0.95, "random_seed": seed}
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
     ...     ),
     ... )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 11 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     expt_type = "Synthetic Control"
@@ -492,6 +484,7 @@ class DifferenceInDifferences(ExperimentalDesign):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> df = cp.load_data("did")
     >>> seed = 42
     >>> result = cp.pymc_experiments.DifferenceInDifferences(
@@ -499,19 +492,14 @@ class DifferenceInDifferences(ExperimentalDesign):
     ...     formula="y ~ 1 + group*post_treatment",
     ...     time_variable_name="t",
     ...     group_variable_name="group",
-    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
     ...  )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 1 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     def __init__(
@@ -637,7 +625,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         --------
         Assuming `result` is the result of a DiD experiment:
 
-        >>> result.plot()
+        >>> result.plot() # doctest: +SKIP
         """
         fig, ax = plt.subplots()
 
@@ -825,25 +813,21 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> df = cp.load_data("rd")
     >>> seed = 42
     >>> result = cp.pymc_experiments.RegressionDiscontinuity(
     ...     df,
     ...     formula="y ~ 1 + x + treated + x:treated",
-    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         },
+    ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 2 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     def __init__(
@@ -959,7 +943,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
         Example
         --------
-        >>> result.plot()
+        >>> result.plot() # doctest: +SKIP
         """
         fig, ax = plt.subplots()
         # Plot raw data
@@ -1054,6 +1038,7 @@ class PrePostNEGD(ExperimentalDesign):
 
     Example
     --------
+    >>> import causalpy as cp
     >>> df = cp.load_data("anova1")
     >>> seed = 42
     >>> result = cp.pymc_experiments.PrePostNEGD(
@@ -1061,18 +1046,14 @@ class PrePostNEGD(ExperimentalDesign):
     ...     formula="post ~ 1 + C(group) + pre",
     ...     group_variable_name="group",
     ...     pretreatment_variable_name="pre",
-    ...     model=cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": seed}),
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
     ... )
-    Auto-assigning NUTS sampler...
-    Initializing NUTS using jitter+adapt_diag...
-    Multiprocess sampling (4 chains in 4 jobs)
-    NUTS: [beta, sigma]
-    Sampling 4 chains for 1_000 tune and 1_000 draw iterations
-    (4_000 + 4_000 draws total) took 3 seconds.
-    Sampling: [beta, sigma, y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
-    Sampling: [y_hat]
     """
 
     def __init__(
