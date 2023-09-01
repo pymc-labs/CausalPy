@@ -34,6 +34,10 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Run doctests
+        run: |
+          pip install -e .[test]
+          pytest --doctest-modules causalpy/
       - name: Run tests
         run: |
           pip install -e .[test]

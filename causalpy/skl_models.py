@@ -24,26 +24,19 @@ class WeightedProportion(LinearModel, RegressorMixin):
 
     Example
     --------
+    >>> import numpy as np
+    >>> from causalpy.skl_models import WeightedProportion
     >>> rng = np.random.default_rng(seed=42)
     >>> X = rng.normal(loc=0, scale=1, size=(20,2))
     >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> wp = WeightedProportion()
     >>> wp.fit(X, y)
     WeightedProportion()
     >>> wp.coef_
     array([[0.36719946, 0.63280054]])
     >>> X_new = rng.normal(loc=0, scale=1, size=(10,2))
     >>> wp.predict(X_new)
-    array([[-0.8298643 ],
-       [ 0.43072465],
-       [ 0.76319257],
-       [-0.42062812],
-       [ 0.1939908 ],
-       [-1.18557609],
-       [-0.0230188 ],
-       [ 0.48923816],
-       [-0.05656294],
-       [ 0.0339618 ]])
-
+    array(...)
     """
 
     def loss(self, W, X, y):

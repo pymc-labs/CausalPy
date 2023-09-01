@@ -59,7 +59,6 @@ class PrePostFit(ExperimentalDesign):
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model = cp.skl_models.WeightedProportion()
     ... )
-
     """
 
     def __init__(
@@ -181,10 +180,18 @@ class PrePostFit(ExperimentalDesign):
 
         Example
         --------
+        >>> from sklearn.linear_model import LinearRegression
+        >>> import causalpy as cp
+        >>> df = cp.load_data("sc")
+        >>> treatment_time = 70
+        >>> result = cp.skl_experiments.PrePostFit(
+        ...     df,
+        ...     treatment_time,
+        ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+        ...     model = cp.skl_models.WeightedProportion()
+        ... )
         >>> result.get_coeffs()
-        array([3.97370896e-01, 1.53881980e-01, 4.48747123e-01, 1.04639857e-16,
-        0.00000000e+00, 0.00000000e+00, 2.92931287e-16])
-
+        array(...)
         """
         return np.squeeze(self.model.coef_)
 
@@ -262,7 +269,6 @@ class SyntheticControl(PrePostFit):
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model = cp.skl_models.WeightedProportion()
     ... )
-
     """
 
     def plot(self, plot_predictors=False, **kwargs):
@@ -293,13 +299,15 @@ class DifferenceInDifferences(ExperimentalDesign):
     :param group_variable_name:
         Name of the data column for the group variable
     :param model:
-        A PyMC model for difference in differences
+        An skl model for difference in differences
 
     Example
     --------
+    >>> import causalpy as cp
+    >>> from sklearn.linear_model import LinearRegression
     >>> df = cp.load_data("did")
     >>> result = cp.skl_experiments.DifferenceInDifferences(
-    ...     data,
+    ...     df,
     ...     formula="y ~ 1 + group*post_treatment",
     ...     time_variable_name="t",
     ...     group_variable_name="group",
@@ -307,7 +315,6 @@ class DifferenceInDifferences(ExperimentalDesign):
     ...     untreated=0,
     ...     model=LinearRegression(),
     ... )
-
     """
 
     def __init__(
@@ -497,6 +504,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
     Example
     --------
+    >>> import causalpy as cp
+    >>> from sklearn.linear_model import LinearRegression
     >>> data = cp.load_data("rd")
     >>> result = cp.skl_experiments.RegressionDiscontinuity(
     ...     data,
@@ -504,7 +513,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     model=LinearRegression(),
     ...     treatment_threshold=0.5,
     ... )
-
     """
 
     def __init__(
@@ -640,18 +648,27 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
         Example
         --------
-        >>> result.summary()
+        >>> import causalpy as cp
+        >>> from sklearn.linear_model import LinearRegression
+        >>> data = cp.load_data("rd")
+        >>> result = cp.skl_experiments.RegressionDiscontinuity(
+        ...     data,
+        ...     formula="y ~ 1 + x + treated",
+        ...     model=LinearRegression(),
+        ...     treatment_threshold=0.5,
+        ... )
+        >>> result.summary() # doctest: +NORMALIZE_WHITESPACE
         Difference in Differences experiment
         Formula: y ~ 1 + x + treated
         Running variable: x
         Threshold on running variable: 0.5
+        <BLANKLINE>
         Results:
         Discontinuity at threshold = 0.19
         Model coefficients:
-                Intercept		0.0
-                treated[T.True]		0.19034196317793994
-                x		1.229600855360073
-
+           Intercept		0.0
+           treated[T.True]		0.19034196317793994
+           x		1.229600855360073
         """
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")

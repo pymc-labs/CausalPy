@@ -359,7 +359,7 @@ class PrePostFit(ExperimentalDesign):
         ...     ),
         ... )
         >>> result.summary()
-        ===============================Synthetic Control===============================
+        ==================================Pre-Post Fit==================================
         Formula: actual ~ 0 + a + b + c + d + e + f + g
         Model coefficients:
         a                             0.33, 94% HDI [0.30, 0.38]
@@ -757,7 +757,7 @@ class DifferenceInDifferences(ExperimentalDesign):
     def _causal_impact_summary_stat(self) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = "$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
@@ -767,16 +767,31 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         Example
         --------
-        Assuming `result` is a DiD experiment
-
+        >>> import causalpy as cp
+        >>> df = cp.load_data("did")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.DifferenceInDifferences(
+        ...     df,
+        ...     formula="y ~ 1 + group*post_treatment",
+        ...     time_variable_name="t",
+        ...     group_variable_name="group",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...         sample_kwargs={
+        ...             "target_accept": 0.95,
+        ...             "random_seed": seed,
+        ...             "progressbar": False,
+        ...         }
+        ...     )
+        ...  )
         >>> result.summary()
-        ==========================Difference in Differences=========================
+        ===========================Difference in Differences============================
         Formula: y ~ 1 + group*post_treatment
+        <BLANKLINE>
         Results:
         Causal impact = 0.51, $CI_{94%}$[0.41, 0.61]
         Model coefficients:
         Intercept                     1.08, 94% HDI [1.03, 1.13]
-        post_treatment[T.True]        0.98, 94% HDI [0.91, 1.06]
+        post_treatment[T.True]        0.98, 94% HDI [0.92, 1.05]
         group                         0.16, 94% HDI [0.09, 0.23]
         group:post_treatment[T.True]  0.51, 94% HDI [0.41, 0.61]
         sigma                         0.08, 94% HDI [0.07, 0.10]
@@ -995,19 +1010,35 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
         Example
         --------
+        >>> import causalpy as cp
+        >>> df = cp.load_data("rd")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.RegressionDiscontinuity(
+        ...     df,
+        ...     formula="y ~ 1 + x + treated + x:treated",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...         sample_kwargs={
+        ...             "target_accept": 0.95,
+        ...             "random_seed": seed,
+        ...             "progressbar": False,
+        ...         },
+        ...     ),
+        ...     treatment_threshold=0.5,
+        ... )
         >>> result.summary()
-        ============================Regression Discontinuity==========================
+        ============================Regression Discontinuity============================
         Formula: y ~ 1 + x + treated + x:treated
         Running variable: x
         Threshold on running variable: 0.5
+        <BLANKLINE>
         Results:
-        Discontinuity at threshold = 0.92
+        Discontinuity at threshold = 0.91
         Model coefficients:
-        Intercept                     0.09, 94% HDI [0.00, 0.17]
-        treated[T.True]               2.48, 94% HDI [1.66, 3.27]
+        Intercept                     0.09, 94% HDI [-0.00, 0.17]
+        treated[T.True]               2.45, 94% HDI [1.66, 3.28]
         x                             1.32, 94% HDI [1.14, 1.50]
-        x:treated[T.True]             -3.12, 94% HDI [-4.17, -2.05]
-        sigma                         0.35, 94% HDI [0.31, 0.41]
+        x:treated[T.True]             -3.08, 94% HDI [-4.17, -2.05]
+        sigma                         0.36, 94% HDI [0.31, 0.41]
         """
 
         print(f"{self.expt_type:=^80}")
@@ -1182,7 +1213,7 @@ class PrePostNEGD(ExperimentalDesign):
     def _causal_impact_summary_stat(self) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = r"$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
@@ -1192,14 +1223,31 @@ class PrePostNEGD(ExperimentalDesign):
 
         Example
         --------
+        >>> import causalpy as cp
+        >>> df = cp.load_data("anova1")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.PrePostNEGD(
+        ...     df,
+        ...     formula="post ~ 1 + C(group) + pre",
+        ...     group_variable_name="group",
+        ...     pretreatment_variable_name="pre",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...         sample_kwargs={
+        ...             "target_accept": 0.95,
+        ...             "random_seed": seed,
+        ...             "progressbar": False,
+        ...         }
+        ...     )
+        ... )
         >>> result.summary()
-        =================Pretest/posttest Nonequivalent Group Design================
+        ==================Pretest/posttest Nonequivalent Group Design===================
         Formula: post ~ 1 + C(group) + pre
+        <BLANKLINE>
         Results:
-        Causal impact = 1.89, $CI_{94%}$[1.70, 2.07]
+        Causal impact = 1.88, $CI_{94%}$[1.69, 2.07]
         Model coefficients:
-        Intercept                     -0.46, 94% HDI [-1.17, 0.22]
-        C(group)[T.1]                 1.89, 94% HDI [1.70, 2.07]
+        Intercept                     -0.47, 94% HDI [-1.16, 0.24]
+        C(group)[T.1]                 1.88, 94% HDI [1.69, 2.07]
         pre                           1.05, 94% HDI [0.98, 1.12]
         sigma                         0.51, 94% HDI [0.46, 0.56]
 

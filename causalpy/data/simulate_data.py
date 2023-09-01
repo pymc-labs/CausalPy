@@ -56,8 +56,9 @@ def generate_synthetic_control_data(
 
     Example
     --------
+    >>> from causalpy.data.simulate_data import generate_synthetic_control_data
     >>> df, weightings_true = generate_synthetic_control_data(
-    ...                             treatment_time=treatment_time
+    ...                             treatment_time=70
     ... )
     """
 
@@ -196,6 +197,7 @@ def generate_did():
 
     Example
     --------
+    >>> from causalpy.data.simulate_data import generate_did
     >>> df = generate_did()
     """
     # true parameters
@@ -249,6 +251,7 @@ def generate_regression_discontinuity_data(
     Example
     --------
     >>> import pathlib
+    >>> from causalpy.data.simulate_data import generate_regression_discontinuity_data
     >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
     >>> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv', index=False)
     """
@@ -278,9 +281,10 @@ def generate_ancova_data(
     Example
     --------
     >>> import pathlib
+    >>> from causalpy.data.simulate_data import generate_ancova_data
     >>> df = generate_ancova_data(
     ...     N=200,
-    ...     pre_treatment_threshold=np.array([10, 12]),
+    ...     pre_treatment_means=np.array([10, 12]),
     ...     treatment_effect=2,
     ...     sigma=1
     ... )

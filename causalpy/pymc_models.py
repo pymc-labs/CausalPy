@@ -99,7 +99,7 @@ class ModelBuilder(pm.Model):
         >>> model = MyToyModel(
         ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
         ... )
-        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        >>> model.fit(X, y)
         Inference ...
         """
         self.build_model(X, y, coords)
@@ -139,10 +139,10 @@ class ModelBuilder(pm.Model):
         >>> model = MyToyModel(
         ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
         ... )
-        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        >>> model.fit(X, y)
         Inference...
         >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
-        >>> model.predict(X_new) # doctest: +ELLIPSIS
+        >>> model.predict(X_new)
         Inference...
         """
 
@@ -177,17 +177,16 @@ class ModelBuilder(pm.Model):
         ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
         ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
         >>> rng = np.random.default_rng(seed=42)
-        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-        >>> y = rng.normal(loc=0, scale=1, size=(20,))
+        >>> X = rng.normal(loc=0, scale=1, size=(200, 2))
+        >>> y = rng.normal(loc=0, scale=1, size=(200,))
         >>> model = MyToyModel(
-        ...         sample_kwargs={"chains": 2, "draws": 200, "progressbar": False}
+        ...         sample_kwargs={"chains": 2, "draws": 2000, "progressbar": False}
         ... )
-        >>> model.fit(X, y) # doctest: +ELLIPSIS
+        >>> model.fit(X, y)
         Inference...
-        >>> model.score(X, y)
-        Sampling: [y_hat]
-        r2        0.376489
-        r2_std    0.081305
+        >>> round(model.score(X, y),2) # using round() to simplify doctest
+        r2        0.34
+        r2_std    0.02
         dtype: float64
         """
         yhat = self.predict(X)
@@ -223,7 +222,8 @@ class WeightedSumFitter(ModelBuilder):
     >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> _ = wsf.fit(X,y)
+    >>> wsf.fit(X,y)
+    Inference ...
     """
 
     def build_model(self, X, y, coords):
@@ -279,7 +279,7 @@ class LinearRegression(ModelBuilder):
     ...                 'coeffs': ['x', 'treated'],
     ...                 'obs_indx': np.arange(rd.shape[0])
     ...                },
-    ... ) # doctest: +ELLIPSIS
+    ... )
     Inference...
     """
 
