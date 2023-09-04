@@ -1301,6 +1301,40 @@ class InstrumentalVariable(ExperimentalDesign):
                                     "lkj_sd": 2,
                                     }
 
+    Example
+    --------
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> from causalpy.pymc_experiments import InstrumentalVariable
+    >>> from causalpy.pymc_models import InstrumentalVariableRegression
+    >>> import numpy as np
+    >>> N = 100
+    >>> e1 = np.random.normal(0, 3, N)
+    >>> e2 = np.random.normal(0, 1, N)
+    >>> Z = np.random.uniform(0, 1, N)
+    >>> ## Ensure the endogeneity of the the treatment variable
+    >>> X = -1 + 4 * Z + e2 + 2 * e1
+    >>> y = 2 + 3 * X + 3 * e1
+    >>> test_data = pd.DataFrame({"y": y, "X": X, "Z": Z})
+    >>> sample_kwargs = {
+    ...     "tune": 10,
+    ...     "draws": 20,
+    ...     "chains": 4,
+    ...     "cores": 4,
+    ...     "target_accept": 0.95,
+    ...     "progressbar": False,
+    ...     }
+    >>> instruments_formula = "X  ~ 1 + Z"
+    >>> formula = "y ~  1 + X"
+    >>> instruments_data = test_data[["X", "Z"]]
+    >>> data = test_data[["y", "X"]]
+    >>> iv = InstrumentalVariable(
+    ...     instruments_data=instruments_data,
+    ...     data=data,
+    ...     instruments_formula=instruments_formula,
+    ...     formula=formula,
+    ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ... )
     """
 
     def __init__(
@@ -1355,6 +1389,12 @@ class InstrumentalVariable(ExperimentalDesign):
         )
 
     def get_2SLS_fit(self):
+        """
+        Two Stage Least Squares Fit
+
+        This function is called by the experiment, results are used for
+        priors if none are provided.
+        """
         first_stage_reg = sk_lin_reg().fit(self.Z, self.t)
         fitted_Z_values = first_stage_reg.predict(self.Z)
         X2 = self.data.copy(deep=True)
@@ -1371,6 +1411,11 @@ class InstrumentalVariable(ExperimentalDesign):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self):
+        """
+        Naive Ordinary Least Squares
+
+        This function is called by the experiment.
+        """
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])

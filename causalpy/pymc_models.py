@@ -303,7 +303,42 @@ class LinearRegression(ModelBuilder):
 
 
 class InstrumentalVariableRegression(ModelBuilder):
-    """Custom PyMC model for instrumental linear regression"""
+    """Custom PyMC model for instrumental linear regression
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import InstrumentalVariableRegression
+    >>> N = 10
+    >>> e1 = np.random.normal(0, 3, N)
+    >>> e2 = np.random.normal(0, 1, N)
+    >>> Z = np.random.uniform(0, 1, N)
+    >>> ## Ensure the endogeneity of the the treatment variable
+    >>> X = -1 + 4 * Z + e2 + 2 * e1
+    >>> y = 2 + 3 * X + 3 * e1
+    >>> t = X.reshape(10,1)
+    >>> y = y.reshape(10,1)
+    >>> Z = np.asarray([[1, Z[i]] for i in range(0,10)])
+    >>> X = np.asarray([[1, X[i]] for i in range(0,10)])
+    >>> COORDS = {'instruments': ['Intercept', 'Z'], 'covariates': ['Intercept', 'X']}
+    >>> sample_kwargs = {
+    ...     "tune": 5,
+    ...     "draws": 10,
+    ...     "chains": 2,
+    ...     "cores": 2,
+    ...     "target_accept": 0.95,
+    ...     "progressbar": False,
+    ... }
+    >>> iv_reg = InstrumentalVariableRegression(sample_kwargs=sample_kwargs)
+    >>> iv_reg.fit(X, Z,y, t, COORDS, {
+    ...                  "mus": [[-2,4], [0.5, 3]],
+    ...                  "sigmas": [1, 1],
+    ...                  "eta": 2,
+    ...                  "lkj_sd": 2,
+    ...              })
+    Inference data...
+    """
 
     def build_model(self, X, Z, y, t, coords, priors):
         """Specify model with treatment regression and focal regression data and priors
