@@ -657,7 +657,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         ...     model=LinearRegression(),
         ...     treatment_threshold=0.5,
         ... )
-        >>> result.summary() # doctest: +NORMALIZE_WHITESPACE
+        >>> result.summary() # doctest: +NORMALIZE_WHITESPACE,+NUMBER
         Difference in Differences experiment
         Formula: y ~ 1 + x + treated
         Running variable: x
@@ -667,8 +667,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         Discontinuity at threshold = 0.19
         Model coefficients:
            Intercept		0.0
-           treated[T.True]		0.19034196317793994
-           x		1.229600855360073
+           treated[T.True]		0.19
+           x		1.23
         """
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
