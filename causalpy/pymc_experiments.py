@@ -66,9 +66,9 @@ class ExperimentalDesign:
         ...     model=cp.pymc_models.LinearRegression(
         ...             sample_kwargs={"random_seed": seed, "progressbar": False}),
         ...  )
-        >>> result.idata # doctest: +ELLIPSIS
+        >>> result.idata
         Inference data...
-        >>> result.idata.posterior # doctest: +ELLIPSIS
+        >>> result.idata.posterior
         <xarray.Dataset>
         Dimensions...
         """
