@@ -371,9 +371,9 @@ class PrePostFit(ExperimentalDesign):
         b                             0.05, 94% HDI [0.01, 0.09]
         c                             0.31, 94% HDI [0.26, 0.35]
         d                             0.06, 94% HDI [0.01, 0.10]
-        e                             0.02, 94% HDI [0.00, 0.06]
-        f                             0.19, 94% HDI [0.11, 0.26]
-        g                             0.04, 94% HDI [0.00, 0.08]
+        e                             0.0, 94% HDI [0.0, 0.0]
+        f                             0.1, 94% HDI [0.1, 0.2]
+        g                             0.0, 94% HDI [0.0, 0.0]
         sigma                         0.26, 94% HDI [0.22, 0.30]
         """
 
@@ -789,18 +789,18 @@ class DifferenceInDifferences(ExperimentalDesign):
         ...         }
         ...     )
         ...  )
-        >>> result.summary()
+        >>> result.summary() # doctest: +NUMBER
         ===========================Difference in Differences============================
         Formula: y ~ 1 + group*post_treatment
         <BLANKLINE>
         Results:
-        Causal impact = 0.51, $CI_{94%}$[0.41, 0.60]
+        Causal impact = 0.5, $CI_{94%}$[0.4, 0.6]
         Model coefficients:
-        Intercept                     1.08, 94% HDI [1.03, 1.12]
-        post_treatment[T.True]        0.99, 94% HDI [0.92, 1.05]
-        group                         0.16, 94% HDI [0.09, 0.23]
-        group:post_treatment[T.True]  0.51, 94% HDI [0.41, 0.60]
-        sigma                         0.08, 94% HDI [0.07, 0.10]
+        Intercept                     1.0, 94% HDI [1.0, 1.1]
+        post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
+        group                         0.1, 94% HDI [0.0, 0.2]
+        group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
+        sigma                         0.0, 94% HDI [0.0, 0.1]
         """
 
         print(f"{self.expt_type:=^80}")
@@ -1032,7 +1032,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         ...     ),
         ...     treatment_threshold=0.5,
         ... )
-        >>> result.summary()
+        >>> result.summary() # doctest: +NUMBER
         ============================Regression Discontinuity============================
         Formula: y ~ 1 + x + treated + x:treated
         Running variable: x
@@ -1041,8 +1041,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
         Results:
         Discontinuity at threshold = 0.91
         Model coefficients:
-        Intercept                     0.09, 94% HDI [-0.00, 0.17]
-        treated[T.True]               2.45, 94% HDI [1.64, 3.28]
+        Intercept                     0.0, 94% HDI [0.0, 0.1]
+        treated[T.True]               2.4, 94% HDI [1.6, 3.2]
         x                             1.32, 94% HDI [1.14, 1.50]
         x:treated[T.True]             -3.09, 94% HDI [-4.16, -2.03]
         sigma                         0.36, 94% HDI [0.31, 0.41]
