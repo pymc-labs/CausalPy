@@ -5,7 +5,8 @@ Defines generic PyMC ModelBuilder class and subclasses for
 - LinearRegression model
 
 Models are intended to be used from inside an experiment
-class (see `pymc_experiments.py
+class (see :py:mod:`pymc_experiments.py<.pymc_experiments.py>` old
+link `pymc_experiments.py
 <https://causalpy.readthedocs.io/en/latest/api_pymc_experiments.html>`_).
 This is why the examples require some extra
 manipulation input data, often to ensure `y` has the correct shape.
@@ -31,7 +32,7 @@ class ModelBuilder(pm.Model):
     - build_model: must be implemented by subclasses
     - fit: populates idata attribute
     - predict: returns predictions on new data
-    - score: returns Bayesian R^2
+    - score: returns Bayesian :math: `R^2`
     """
 
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
@@ -208,10 +209,15 @@ class WeightedSumFitter(ModelBuilder):
 
     Defines the PyMC model:
 
-    - y ~ Normal(mu, sigma)
-    - sigma ~ HalfNormal(1)
-    - mu = X * beta
-    - beta ~ Dirichlet(1,...,1)
+    .. math::
+
+        sigma \sim HalfNormal(1)
+
+        beta \sim Dirichlet(1,...,1)
+
+        mu = X * beta
+
+        y \sim Normal(mu, sigma)
 
     Example
     --------
@@ -224,18 +230,23 @@ class WeightedSumFitter(ModelBuilder):
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
     >>> wsf.fit(X,y)
     Inference ...
-    """
+    """  # noqa: W605
 
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model:
 
-        - y ~ Normal(mu, sigma)
-        - sigma ~ HalfNormal(1)
-        - mu = X * beta
-        - beta ~ Dirichlet(1,...,1)
+        .. math::
 
-        """
+            sigma \sim HalfNormal(1)
+
+            beta \sim Dirichlet(1,...,1)
+
+            mu = X * beta
+
+            y \sim Normal(mu, sigma)
+
+        """  # noqa: W605
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
@@ -261,10 +272,14 @@ class LinearRegression(ModelBuilder):
 
     Defines the PyMC model
 
-    - y ~ Normal(mu, sigma)
-    - mu = X * beta
-    - beta ~ Normal(0, 50)
-    - sigma ~ HalfNormal(1)
+    .. math::
+        beta \sim Normal(0, 50)
+
+        sigma \sim HalfNormal(1)
+
+        mu = X * beta
+
+        y \sim Normal(mu, sigma)
 
     Example
     --------
@@ -281,17 +296,22 @@ class LinearRegression(ModelBuilder):
     ...                },
     ... )
     Inference...
-    """
+    """  # noqa: W605
 
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
 
-        - y ~ Normal(mu, sigma)
-        - mu = X * beta
-        - beta ~ Normal(0, 50)
-        - sigma ~ HalfNormal(1)
-        """
+        .. math::
+            beta \sim Normal(0, 50)
+
+            sigma \sim HalfNormal(1)
+
+            mu = X * beta
+
+            y \sim Normal(mu, sigma)
+
+        """  # noqa: W605
         with self:
             self.add_coords(coords)
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])

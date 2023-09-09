@@ -39,7 +39,7 @@ def test_did_banks_simple():
     """
     Test simple Differences In Differences Experiment on the 'banks' data set.
 
-    formula="bib ~ 1 + district * post_treatment"
+    :code: `formula="bib ~ 1 + district * post_treatment"`
 
     Loads, transforms data and checks:
     1. data is a dataframe
@@ -92,7 +92,7 @@ def test_did_banks_multi():
     Test multiple regression Differences In Differences Experiment on the 'banks'
     data set.
 
-    formula="bib ~ 1 + year + district + post_treatment + district:post_treatment"
+    :code: `formula="bib ~ 1 + year + district + post_treatment + district:post_treatment"` # noqa: E501
 
     Loads, transforms data and checks:
     1. data is a dataframe
