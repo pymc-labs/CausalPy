@@ -5,9 +5,7 @@ Defines generic PyMC ModelBuilder class and subclasses for
 - LinearRegression model
 
 Models are intended to be used from inside an experiment
-class (see :py:mod:`pymc_experiments.py<.pymc_experiments.py>` old
-link `pymc_experiments.py
-<https://causalpy.readthedocs.io/en/latest/api_pymc_experiments.html>`_).
+class (see :doc:`PyMC experiments</api_pymc_experiments>`).
 This is why the examples require some extra
 manipulation input data, often to ensure `y` has the correct shape.
 
@@ -181,11 +179,16 @@ class ModelBuilder(pm.Model):
         >>> X = rng.normal(loc=0, scale=1, size=(200, 2))
         >>> y = rng.normal(loc=0, scale=1, size=(200,))
         >>> model = MyToyModel(
-        ...         sample_kwargs={"chains": 2, "draws": 2000, "progressbar": False}
+        ...         sample_kwargs={
+        ...             "chains": 2,
+        ...             "draws": 2000,
+        ...             "progressbar": False,
+        ...             "random_seed": rng
+        ...         }
         ... )
         >>> model.fit(X, y)
         Inference...
-        >>> round(model.score(X, y),2) # using round() to simplify doctest
+        >>> model.score(X, y) # doctest: +NUMBER
         r2        0.34
         r2_std    0.02
         dtype: float64
