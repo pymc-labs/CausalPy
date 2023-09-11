@@ -54,7 +54,7 @@ Regression Discontinuity
 
 
 Instrumental Variables Regression
-========================
+=================================
 
 .. toctree::
    :titlesonly:
