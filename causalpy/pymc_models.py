@@ -30,7 +30,43 @@ class ModelBuilder(pm.Model):
     - build_model: must be implemented by subclasses
     - fit: populates idata attribute
     - predict: returns predictions on new data
-    - score: returns Bayesian :math: `R^2`
+    - score: returns Bayesian :math:`R^2`
+
+    Example
+    -------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> import pymc as pm
+    >>> from causalpy.pymc_models import ModelBuilder
+    >>> class MyToyModel(ModelBuilder):
+    ...     def build_model(self, X, y, coords):
+    ...         with self:
+    ...             X_ = pm.MutableData(name="X", value=X)
+    ...             y_ = pm.MutableData(name="y", value=y)
+    ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+    ...             sigma = pm.HalfNormal("sigma", sigma=1)
+    ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+    ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+    >>> rng = np.random.default_rng(seed=42)
+    >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
+    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> model = MyToyModel(
+    ...             sample_kwargs={
+    ...                 "chains": 2,
+    ...                 "draws": 2000,
+    ...                 "progressbar": False,
+    ...                 "random_seed": rng,
+    ...             }
+    ... )
+    >>> model.fit(X, y)
+    Inference...
+    >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
+    >>> model.predict(X_new)
+    Inference...
+    >>> model.score(X, y) # doctest: +NUMBER
+    r2        0.38
+    r2_std    0.08
+    dtype: float64
     """
 
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
@@ -43,22 +79,7 @@ class ModelBuilder(pm.Model):
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
 
     def build_model(self, X, y, coords) -> None:
-        """Build the model, must be implemented by subclass.
-
-        Example
-        -------
-        >>> import pymc as pm
-        >>> from causalpy.pymc_models import ModelBuilder
-        >>> class CausalPyModel(ModelBuilder):
-        ...     def build_model(self, X, y):
-        ...         with self:
-        ...             X_ = pm.MutableData(name="X", value=X)
-        ...             y_ = pm.MutableData(name="y", value=y)
-        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        ...             sigma = pm.HalfNormal("sigma", sigma=1)
-        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
-        """
+        """Build the model, must be implemented by subclass."""
         raise NotImplementedError("This method must be implemented by a subclass")
 
     def _data_setter(self, X) -> None:
@@ -74,32 +95,6 @@ class ModelBuilder(pm.Model):
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
         """Draw samples fromposterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
-
-        .. note::
-            Calls the build_model method
-
-        Example
-        -------
-        >>> import numpy as np
-        >>> import pymc as pm
-        >>> from causalpy.pymc_models import ModelBuilder
-        >>> class MyToyModel(ModelBuilder):
-        ...     def build_model(self, X, y, coords):
-        ...         with self:
-        ...             X_ = pm.MutableData(name="X", value=X)
-        ...             y_ = pm.MutableData(name="y", value=y)
-        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        ...             sigma = pm.HalfNormal("sigma", sigma=1)
-        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
-        >>> rng = np.random.default_rng(seed=42)
-        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-        >>> y = rng.normal(loc=0, scale=1, size=(20,))
-        >>> model = MyToyModel(
-        ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
-        ... )
-        >>> model.fit(X, y)
-        Inference ...
         """
         self.build_model(X, y, coords)
         with self.model:
@@ -117,32 +112,6 @@ class ModelBuilder(pm.Model):
         .. caution::
             Results in KeyError if model hasn't been fit.
 
-        Example
-        -------
-        >>> import causalpy as cp
-        >>> import numpy as np
-        >>> import pymc as pm
-        >>> from causalpy.pymc_models import ModelBuilder
-        >>> class MyToyModel(ModelBuilder):
-        ...     def build_model(self, X, y, coords):
-        ...         with self:
-        ...             X_ = pm.MutableData(name="X", value=X)
-        ...             y_ = pm.MutableData(name="y", value=y)
-        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        ...             sigma = pm.HalfNormal("sigma", sigma=1)
-        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
-        >>> rng = np.random.default_rng(seed=42)
-        >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-        >>> y = rng.normal(loc=0, scale=1, size=(20,))
-        >>> model = MyToyModel(
-        ...             sample_kwargs={"chains": 2, "draws": 2, "progressbar": False}
-        ... )
-        >>> model.fit(X, y)
-        Inference...
-        >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
-        >>> model.predict(X_new)
-        Inference...
         """
 
         self._data_setter(X)
@@ -160,38 +129,6 @@ class ModelBuilder(pm.Model):
             The Bayesian :math:`R^2` is not the same as the traditional coefficient of
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
-        Example
-        --------
-        >>> import causalpy as cp
-        >>> import numpy as np
-        >>> import pymc as pm
-        >>> from causalpy.pymc_models import ModelBuilder
-        >>> class MyToyModel(ModelBuilder):
-        ...     def build_model(self, X, y, coords):
-        ...         with self:
-        ...             X_ = pm.MutableData(name="X", value=X)
-        ...             y_ = pm.MutableData(name="y", value=y)
-        ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-        ...             sigma = pm.HalfNormal("sigma", sigma=1)
-        ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-        ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
-        >>> rng = np.random.default_rng(seed=42)
-        >>> X = rng.normal(loc=0, scale=1, size=(200, 2))
-        >>> y = rng.normal(loc=0, scale=1, size=(200,))
-        >>> model = MyToyModel(
-        ...         sample_kwargs={
-        ...             "chains": 2,
-        ...             "draws": 2000,
-        ...             "progressbar": False,
-        ...             "random_seed": rng
-        ...         }
-        ... )
-        >>> model.fit(X, y)
-        Inference...
-        >>> model.score(X, y) # doctest: +NUMBER
-        r2        0.34
-        r2_std    0.02
-        dtype: float64
         """
         yhat = self.predict(X)
         yhat = az.extract(
@@ -207,7 +144,7 @@ class WeightedSumFitter(ModelBuilder):
     """
     Used for synthetic control experiments
 
-    .. note: Generally, the `.fit()` method should be rather than calling
+    .. note: Generally, the `.fit()` method should be used rather than calling
     `.build_model()` directly.
 
     Defines the PyMC model:
@@ -237,19 +174,8 @@ class WeightedSumFitter(ModelBuilder):
 
     def build_model(self, X, y, coords):
         """
-        Defines the PyMC model:
-
-        .. math::
-
-            sigma \sim HalfNormal(1)
-
-            beta \sim Dirichlet(1,...,1)
-
-            mu = X * beta
-
-            y \sim Normal(mu, sigma)
-
-        """  # noqa: W605
+        Defines the PyMC model
+        """
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
@@ -270,7 +196,7 @@ class LinearRegression(ModelBuilder):
     """
     Custom PyMC model for linear regression
 
-    .. note: Generally, the `.fit()` method should be rather than calling
+    .. note: Generally, the `.fit()` method should be used rather than calling
     `.build_model()` directly.
 
     Defines the PyMC model
@@ -304,17 +230,7 @@ class LinearRegression(ModelBuilder):
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
-
-        .. math::
-            beta \sim Normal(0, 50)
-
-            sigma \sim HalfNormal(1)
-
-            mu = X * beta
-
-            y \sim Normal(mu, sigma)
-
-        """  # noqa: W605
+        """
         with self:
             self.add_coords(coords)
             X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])

@@ -46,7 +46,7 @@ def generate_synthetic_control_data(
     :param N:
         Number fo data points
     :param treatment_time:
-        Index where treatment begins in the generated data frame
+        Index where treatment begins in the generated dataframe
     :param grw_mu:
         Mean of Gaussian Random Walk
     :param grw_sigma:

@@ -1,7 +1,7 @@
 """
 Experiments for Scikit-Learn models
 
-- ExperimentalDesign: base class for skl experiments
+- ExperimentalDesign: base class for scikit-learn experiments
 - PrePostFit: base class for synthetic control and interrupted time series
 - SyntheticControl
 - InterruptedTimeSeries
@@ -45,7 +45,7 @@ class PrePostFit(ExperimentalDesign):
     :param formula:
         A statistical model formula
     :param model:
-        An sklearn model object
+        An scikit-learn model object
 
     Example
     --------
@@ -59,6 +59,8 @@ class PrePostFit(ExperimentalDesign):
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model = cp.skl_models.WeightedProportion()
     ... )
+    >>> result.get_coeffs()
+    array(...)
     """
 
     def __init__(
@@ -177,21 +179,6 @@ class PrePostFit(ExperimentalDesign):
     def get_coeffs(self):
         """
         Returns model coefficients
-
-        Example
-        --------
-        >>> from sklearn.linear_model import LinearRegression
-        >>> import causalpy as cp
-        >>> df = cp.load_data("sc")
-        >>> treatment_time = 70
-        >>> result = cp.skl_experiments.PrePostFit(
-        ...     df,
-        ...     treatment_time,
-        ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-        ...     model = cp.skl_models.WeightedProportion()
-        ... )
-        >>> result.get_coeffs()
-        array(...)
         """
         return np.squeeze(self.model.coef_)
 
@@ -299,7 +286,7 @@ class DifferenceInDifferences(ExperimentalDesign):
     :param group_variable_name:
         Name of the data column for the group variable
     :param model:
-        An skl model for difference in differences
+        An scikit-learn model for difference in differences
 
     Example
     --------
@@ -513,6 +500,18 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     model=LinearRegression(),
     ...     treatment_threshold=0.5,
     ... )
+    >>> result.summary() # doctest: +NORMALIZE_WHITESPACE,+NUMBER
+    Difference in Differences experiment
+    Formula: y ~ 1 + x + treated
+    Running variable: x
+    Threshold on running variable: 0.5
+    <BLANKLINE>
+    Results:
+    Discontinuity at threshold = 0.19
+    Model coefficients:
+        Intercept		0.0
+        treated[T.True]		0.19
+        x		1.23
     """
 
     def __init__(
@@ -645,30 +644,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
     def summary(self):
         """
         Print text output summarising the results
-
-        Example
-        --------
-        >>> import causalpy as cp
-        >>> from sklearn.linear_model import LinearRegression
-        >>> data = cp.load_data("rd")
-        >>> result = cp.skl_experiments.RegressionDiscontinuity(
-        ...     data,
-        ...     formula="y ~ 1 + x + treated",
-        ...     model=LinearRegression(),
-        ...     treatment_threshold=0.5,
-        ... )
-        >>> result.summary() # doctest: +NORMALIZE_WHITESPACE,+NUMBER
-        Difference in Differences experiment
-        Formula: y ~ 1 + x + treated
-        Running variable: x
-        Threshold on running variable: 0.5
-        <BLANKLINE>
-        Results:
-        Discontinuity at threshold = 0.19
-        Model coefficients:
-           Intercept		0.0
-           treated[T.True]		0.19
-           x		1.23
         """
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
