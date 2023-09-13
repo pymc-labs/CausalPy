@@ -128,6 +128,7 @@ class PrePostFit(ExperimentalDesign):
     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
     ...     model=cp.pymc_models.WeightedSumFitter(
     ...         sample_kwargs={
+    ...             "draws": 2000,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False
@@ -138,12 +139,12 @@ class PrePostFit(ExperimentalDesign):
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + b + c + d + e + f + g
     Model coefficients:
-    a                             0.33, 94% HDI [0.30, 0.38]
+    a                             0.34, 94% HDI [0.30, 0.38]
     b                             0.05, 94% HDI [0.01, 0.09]
     c                             0.31, 94% HDI [0.26, 0.35]
     d                             0.06, 94% HDI [0.01, 0.10]
     e                             0.02, 94% HDI [0.00, 0.06]
-    f                             0.20, 94% HDI [0.12, 0.26]
+    f                             0.19, 94% HDI [0.11, 0.26]
     g                             0.04, 94% HDI [0.00, 0.08]
     sigma                         0.26, 94% HDI [0.22, 0.30]
     """
@@ -773,6 +774,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     formula="y ~ 1 + x + treated + x:treated",
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={
+    ...             "draws": 2000,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False,
@@ -790,9 +792,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
     Discontinuity at threshold = 0.91
     Model coefficients:
     Intercept                     0.09, 94% HDI [-0.00, 0.17]
-    treated[T.True]               2.45, 94% HDI [1.66, 3.28]
+    treated[T.True]               2.45, 94% HDI [1.64, 3.28]
     x                             1.32, 94% HDI [1.14, 1.50]
-    x:treated[T.True]             -3.08, 94% HDI [-4.17, -2.05]
+    x:treated[T.True]             -3.09, 94% HDI [-4.16, -2.03]
     sigma                         0.36, 94% HDI [0.31, 0.41]
     """
 
@@ -1224,12 +1226,13 @@ class InstrumentalVariable(ExperimentalDesign):
     >>> instruments_data = test_data[["X", "Z"]]
     >>> data = test_data[["y", "X"]]
     >>> iv = InstrumentalVariable(
-    ...     instruments_data=instruments_data,
-    ...     data=data,
-    ...     instruments_formula=instruments_formula,
-    ...     formula=formula,
-    ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ...         instruments_data=instruments_data,
+    ...         data=data,
+    ...         instruments_formula=instruments_formula,
+    ...         formula=formula,
+    ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
+
     """
 
     def __init__(

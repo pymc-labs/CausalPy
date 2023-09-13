@@ -64,8 +64,8 @@ class ModelBuilder(pm.Model):
     >>> model.predict(X_new)
     Inference...
     >>> model.score(X, y) # doctest: +NUMBER
-    r2        0.38
-    r2_std    0.08
+    r2        0.3
+    r2_std    0.0
     dtype: float64
     """
 
@@ -144,8 +144,9 @@ class WeightedSumFitter(ModelBuilder):
     """
     Used for synthetic control experiments
 
-    .. note: Generally, the `.fit()` method should be used rather than calling
-    `.build_model()` directly.
+    .. note::
+        Generally, the `.fit()` method should be used rather than
+        calling `.build_model()` directly.
 
     Defines the PyMC model:
 
@@ -196,8 +197,9 @@ class LinearRegression(ModelBuilder):
     """
     Custom PyMC model for linear regression
 
-    .. note: Generally, the `.fit()` method should be used rather than calling
-    `.build_model()` directly.
+    .. note:
+        Generally, the `.fit()` method should be used rather than
+        calling `.build_model()` directly.
 
     Defines the PyMC model
 
@@ -291,8 +293,8 @@ class InstrumentalVariableRegression(ModelBuilder):
                        instruments and covariates
         :param priors: An optional dictionary of priors for the mus and
                       sigmas of both regressions
-
-        :code:`priors = {"mus": [0, 0], "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}`
+                      :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
+                      "eta": 2, "lkj_sd": 2}`
 
         """
 
