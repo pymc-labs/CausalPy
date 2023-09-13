@@ -143,7 +143,7 @@ class PrePostFit(ExperimentalDesign):
     b                             0.05, 94% HDI [0.01, 0.09]
     c                             0.31, 94% HDI [0.26, 0.35]
     d                             0.06, 94% HDI [0.01, 0.10]
-    e                             0.02, 94% HDI [0.00, 0.06]
+    e                             0.02, 94% HDI [0.00, 0.07]
     f                             0.19, 94% HDI [0.11, 0.26]
     g                             0.04, 94% HDI [0.00, 0.08]
     sigma                         0.26, 94% HDI [0.22, 0.30]
@@ -791,11 +791,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
     Results:
     Discontinuity at threshold = 0.91
     Model coefficients:
-    Intercept                     0.09, 94% HDI [-0.00, 0.17]
-    treated[T.True]               2.45, 94% HDI [1.64, 3.28]
-    x                             1.32, 94% HDI [1.14, 1.50]
-    x:treated[T.True]             -3.09, 94% HDI [-4.16, -2.03]
-    sigma                         0.36, 94% HDI [0.31, 0.41]
+    Intercept                     0.0, 94% HDI [0.0, 0.1]
+    treated[T.True]               2.4, 94% HDI [1.6, 3.2]
+    x                             1.3, 94% HDI [1.1, 1.5]
+    x:treated[T.True]             -3.0, 94% HDI [-4.1, -2.0]
+    sigma                         0.3, 94% HDI [0.3, 0.4]
     """
 
     def __init__(
