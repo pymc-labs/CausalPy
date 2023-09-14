@@ -253,7 +253,8 @@ def generate_regression_discontinuity_data(
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_regression_discontinuity_data
     >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
-    >>> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv', index=False)
+    >>> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv',
+    ...     index=False) # doctest: +SKIP
     """
 
     def is_treated(x):
@@ -288,7 +289,8 @@ def generate_ancova_data(
     ...     treatment_effect=2,
     ...     sigma=1
     ... )
-    >>> df.to_csv(pathlib.Path.cwd() / 'ancova_data.csv', index=False)
+    >>> df.to_csv(pathlib.Path.cwd() / 'ancova_data.csv',
+    ...     index=False) # doctest: +SKIP
     """
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
