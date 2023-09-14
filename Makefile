@@ -17,6 +17,10 @@ check_lint:
 	nbqa isort --check-only .
 	interrogate .
 
+doctest:
+	pip install causalpy[test]
+	pytest --doctest-modules causalpy/
+
 test:
 	pip install causalpy[test]
 	pytest

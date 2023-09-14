@@ -121,6 +121,20 @@ We recommend that your contribution complies with the following guidelines befor
 
 - All public methods must have informative docstrings with sample usage when appropriate.
 
+- Example usage in docstrings is tested via doctest, which can be run via
+
+    ```bash
+    make doctest
+    ```
+
+- Doctest can also be run directly via pytest, which can be helpful to run only specific tests during development. The following commands run all doctests, only doctests in the pymc_models module, and only the doctests for the `ModelBuilder` class in pymc_models:
+
+    ```bash
+    pytest --doctest-modules causalpy/
+    pytest --doctest-modules causalpy/pymc_models.py
+    pytest --doctest-modules causalpy/pmyc_models.py::causalpy.pymc_models.ModelBuilder
+    ```
+
 - To indicate a work in progress please mark the PR as `draft`. Drafts may be useful to (1) indicate you are working on something to avoid duplicated work, (2) request broad review of functionality or API, or (3) seek collaborators.
 
 - All other tests pass when everything is rebuilt from scratch. Tests can be run with:
