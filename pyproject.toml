@@ -38,6 +38,7 @@ dependencies = [
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
+    "statsmodels",
     "xarray>=v2022.11.0",
 ]
 
@@ -96,6 +97,7 @@ addopts = [
     "--strict-config",
     "--cov=causalpy",
     "--cov-report=term-missing",
+    "--doctest-modules",
 ]
 testpaths = "causalpy/tests"
 markers = [
@@ -114,7 +116,7 @@ ignore-module = false
 ignore-nested-functions = false
 ignore-nested-classes = true
 ignore-setters = false
-fail-under = 40
+fail-under = 85
 exclude = ["setup.py", "docs", "build"]
 ignore-regex = ["^get$", "^mock_.*", ".*BaseClass.*"]
 # possible values: 0 (minimal output), 1 (-v), 2 (-vv)

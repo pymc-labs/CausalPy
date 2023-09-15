@@ -1,3 +1,7 @@
+"""
+Tests for utility functions
+"""
+
 import pandas as pd
 
 from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels

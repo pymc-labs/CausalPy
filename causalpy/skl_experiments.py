@@ -1,3 +1,13 @@
+"""
+Experiments for Scikit-Learn models
+
+- ExperimentalDesign: base class for scikit-learn experiments
+- PrePostFit: base class for synthetic control and interrupted time series
+- SyntheticControl
+- InterruptedTimeSeries
+- DifferenceInDifferences
+- RegressionDiscontinuity
+"""
 import warnings
 from typing import Optional
 
@@ -24,8 +34,34 @@ class ExperimentalDesign:
 
 
 class PrePostFit(ExperimentalDesign):
-    """A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data."""
+    """
+    A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data.
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The index or time value of when treatment begins
+    :param formula:
+        A statistical model formula
+    :param model:
+        An scikit-learn model object
+
+    Example
+    --------
+    >>> from sklearn.linear_model import LinearRegression
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> result = cp.skl_experiments.PrePostFit(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model = cp.skl_models.WeightedProportion()
+    ... )
+    >>> result.get_coeffs()
+    array(...)
+    """
 
     def __init__(
         self,
@@ -78,6 +114,7 @@ class PrePostFit(ExperimentalDesign):
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
     def plot(self, counterfactual_label="Counterfactual", **kwargs):
+        """Plot experiment results"""
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -140,9 +177,13 @@ class PrePostFit(ExperimentalDesign):
         return (fig, ax)
 
     def get_coeffs(self):
+        """
+        Returns model coefficients
+        """
         return np.squeeze(self.model.coef_)
 
     def plot_coeffs(self):
+        """Plots coefficient bar plot"""
         df = pd.DataFrame(
             {"predictor variable": self.labels, "ols_coef": self.get_coeffs()}
         )
@@ -155,13 +196,67 @@ class PrePostFit(ExperimentalDesign):
 
 
 class InterruptedTimeSeries(PrePostFit):
-    """Interrupted time series analysis"""
+    """
+    Interrupted time series analysis, a wrapper around the PrePostFit class
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The index or time value of when treatment begins
+    :param formula:
+        A statistical model formula
+    :param model:
+        An sklearn model object
+
+    Example
+    --------
+    >>> from sklearn.linear_model import LinearRegression
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> df = (
+    ...     cp.load_data("its")
+    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+    ...     .set_index("date")
+    ... )
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> result = cp.skl_experiments.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model = LinearRegression()
+    ... )
+
+    """
 
     expt_type = "Interrupted Time Series"
 
 
 class SyntheticControl(PrePostFit):
-    """A wrapper around the PrePostFit class"""
+    """
+    A wrapper around the PrePostFit class
+
+    :param data:
+        A pandas data frame
+    :param treatment_time:
+        The index or time value of when treatment begins
+    :param formula:
+        A statistical model formula
+    :param model:
+        An sklearn model object
+
+    Example
+    --------
+    >>> from sklearn.linear_model import LinearRegression
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> result = cp.skl_experiments.SyntheticControl(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model = cp.skl_models.WeightedProportion()
+    ... )
+    """
 
     def plot(self, plot_predictors=False, **kwargs):
         """Plot the results"""
@@ -181,6 +276,32 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         There is no pre/post intervention data distinction for DiD, we fit all the data
         available.
+
+    :param data:
+        A pandas data frame
+    :param formula:
+        A statistical model formula
+    :param time_variable_name:
+        Name of the data column for the time variable
+    :param group_variable_name:
+        Name of the data column for the group variable
+    :param model:
+        An scikit-learn model for difference in differences
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> from sklearn.linear_model import LinearRegression
+    >>> df = cp.load_data("did")
+    >>> result = cp.skl_experiments.DifferenceInDifferences(
+    ...     df,
+    ...     formula="y ~ 1 + group*post_treatment",
+    ...     time_variable_name="t",
+    ...     group_variable_name="group",
+    ...     treated=1,
+    ...     untreated=0,
+    ...     model=LinearRegression(),
+    ... )
     """
 
     def __init__(
@@ -367,6 +488,30 @@ class RegressionDiscontinuity(ExperimentalDesign):
     :param bandwidth:
         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
         the model.
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> from sklearn.linear_model import LinearRegression
+    >>> data = cp.load_data("rd")
+    >>> result = cp.skl_experiments.RegressionDiscontinuity(
+    ...     data,
+    ...     formula="y ~ 1 + x + treated",
+    ...     model=LinearRegression(),
+    ...     treatment_threshold=0.5,
+    ... )
+    >>> result.summary() # doctest: +NORMALIZE_WHITESPACE,+NUMBER
+    Difference in Differences experiment
+    Formula: y ~ 1 + x + treated
+    Running variable: x
+    Threshold on running variable: 0.5
+    <BLANKLINE>
+    Results:
+    Discontinuity at threshold = 0.19
+    Model coefficients:
+        Intercept		0.0
+        treated[T.True]		0.19
+        x		1.23
     """
 
     def __init__(
@@ -463,6 +608,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
+        """Plot results"""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -496,7 +642,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return (fig, ax)
 
     def summary(self):
-        """Print text output summarising the results"""
+        """
+        Print text output summarising the results
+        """
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")

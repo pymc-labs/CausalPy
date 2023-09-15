@@ -1,3 +1,16 @@
+"""
+Experiment routines for PyMC models.
+
+- ExperimentalDesign base class
+- Pre-Post Fit
+- Interrupted Time Series
+- Synthetic Control
+- Difference in differences
+- Regression Discontinuity
+- Pretest/Posttest Nonequivalent Group Design
+
+"""
+
 import warnings
 from typing import Optional, Union
 
@@ -20,7 +33,11 @@ az.style.use("arviz-darkgrid")
 
 
 class ExperimentalDesign:
-    """Base class"""
+    """
+    Base class for other experiment types
+
+    See subclasses for examples of most methods
+    """
 
     model = None
     expt_type = None
@@ -33,11 +50,41 @@ class ExperimentalDesign:
 
     @property
     def idata(self):
-        """Access to the InferenceData object"""
+        """
+        Access to the models InferenceData object
+        """
+
         return self.model.idata
 
-    def print_coefficients(self):
-        """Prints the model coefficients"""
+    def print_coefficients(self) -> None:
+        """
+        Prints the model coefficients
+
+        Example
+        --------
+        >>> import causalpy as cp
+        >>> df = cp.load_data("did")
+        >>> seed = 42
+        >>> result = cp.pymc_experiments.DifferenceInDifferences(
+        ...     df,
+        ...     formula="y ~ 1 + group*post_treatment",
+        ...     time_variable_name="t",
+        ...     group_variable_name="group",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...             sample_kwargs={
+        ...                 "draws": 2000,
+        ...                 "random_seed": seed,
+        ...                 "progressbar": False
+        ...             }),
+        ...  )
+        >>> result.print_coefficients() # doctest: +NUMBER
+        Model coefficients:
+        Intercept                     1.0, 94% HDI [1.0, 1.1]
+        post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
+        group                         0.1, 94% HDI [0.0, 0.2]
+        group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
+        sigma                         0.0, 94% HDI [0.0, 0.1]
+        """
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
         # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
@@ -56,8 +103,51 @@ class ExperimentalDesign:
 
 
 class PrePostFit(ExperimentalDesign):
-    """A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data."""
+    """
+    A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data.
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> sc = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.PrePostFit(
+    ...     sc,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={
+    ...             "draws": 2000,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False
+    ...         }
+    ...     ),
+    ... )
+    >>> result.summary() # doctest: +NUMBER
+    ==================================Pre-Post Fit==================================
+    Formula: actual ~ 0 + a + b + c + d + e + f + g
+    Model coefficients:
+    a                             0.3, 94% HDI [0.3, 0.3]
+    b                             0.0, 94% HDI [0.0, 0.0]
+    c                             0.3, 94% HDI [0.2, 0.3]
+    d                             0.0, 94% HDI [0.0, 0.1]
+    e                             0.0, 94% HDI [0.0, 0.0]
+    f                             0.1, 94% HDI [0.1, 0.2]
+    g                             0.0, 94% HDI [0.0, 0.0]
+    sigma                         0.2, 94% HDI [0.2, 0.3]
+    """
 
     def __init__(
         self,
@@ -71,6 +161,8 @@ class PrePostFit(ExperimentalDesign):
         self._input_validation(data, treatment_time)
 
         self.treatment_time = treatment_time
+        # set experiment type - usually done in subclasses
+        self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
         self.datapre = data[data.index <= self.treatment_time]
         self.datapost = data[data.index > self.treatment_time]
@@ -137,7 +229,9 @@ class PrePostFit(ExperimentalDesign):
             )
 
     def plot(self, counterfactual_label="Counterfactual", **kwargs):
-        """Plot the results"""
+        """
+        Plot the results
+        """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # TOP PLOT --------------------------------------------------
@@ -236,8 +330,10 @@ class PrePostFit(ExperimentalDesign):
 
         return (fig, ax)
 
-    def summary(self):
-        """Print text output summarising the results"""
+    def summary(self) -> None:
+        """
+        Print text output summarising the results
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -246,13 +342,76 @@ class PrePostFit(ExperimentalDesign):
 
 
 class InterruptedTimeSeries(PrePostFit):
-    """Interrupted time series analysis"""
+    """
+    A wrapper around PrePostFit class
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = (
+    ...     cp.load_data("its")
+    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+    ...     .set_index("date")
+    ... )
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ... )
+    """
 
     expt_type = "Interrupted Time Series"
 
 
 class SyntheticControl(PrePostFit):
-    """A wrapper around the PrePostFit class"""
+    """A wrapper around the PrePostFit class
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.SyntheticControl(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     ),
+    ... )
+    """
 
     expt_type = "Synthetic Control"
 
@@ -275,7 +434,47 @@ class DifferenceInDifferences(ExperimentalDesign):
 
         There is no pre/post intervention data distinction for DiD, we fit all the
         data available.
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param time_variable_name:
+        Name of the data column for the time variable
+    :param group_variable_name:
+        Name of the data column for the group variable
+    :param model:
+        A PyMC model for difference in differences
 
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("did")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.DifferenceInDifferences(
+    ...     df,
+    ...     formula="y ~ 1 + group*post_treatment",
+    ...     time_variable_name="t",
+    ...     group_variable_name="group",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ...  )
+    >>> result.summary() # doctest: +NUMBER
+    ===========================Difference in Differences============================
+    Formula: y ~ 1 + group*post_treatment
+    <BLANKLINE>
+    Results:
+    Causal impact = 0.5, $CI_{94%}$[0.4, 0.6]
+    Model coefficients:
+    Intercept                     1.0, 94% HDI [1.0, 1.1]
+    post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
+    group                         0.1, 94% HDI [0.0, 0.2]
+    group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
+    sigma                         0.0, 94% HDI [0.0, 0.1]
     """
 
     def __init__(
@@ -524,14 +723,17 @@ class DifferenceInDifferences(ExperimentalDesign):
             va="center",
         )
 
-    def _causal_impact_summary_stat(self):
+    def _causal_impact_summary_stat(self) -> str:
+        """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = "$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self):
-        """Print text output summarising the results"""
+    def summary(self) -> None:
+        """
+        Print text output summarising the results
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -561,6 +763,39 @@ class RegressionDiscontinuity(ExperimentalDesign):
     :param bandwidth:
         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
         the model.
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("rd")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.RegressionDiscontinuity(
+    ...     df,
+    ...     formula="y ~ 1 + x + treated + x:treated",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "draws": 2000,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         },
+    ...     ),
+    ...     treatment_threshold=0.5,
+    ... )
+    >>> result.summary() # doctest: +NUMBER
+    ============================Regression Discontinuity============================
+    Formula: y ~ 1 + x + treated + x:treated
+    Running variable: x
+    Threshold on running variable: 0.5
+    <BLANKLINE>
+    Results:
+    Discontinuity at threshold = 0.91
+    Model coefficients:
+    Intercept                     0.0, 94% HDI [0.0, 0.1]
+    treated[T.True]               2.4, 94% HDI [1.6, 3.2]
+    x                             1.3, 94% HDI [1.1, 1.5]
+    x:treated[T.True]             -3.0, 94% HDI [-4.1, -2.0]
+    sigma                         0.3, 94% HDI [0.3, 0.4]
     """
 
     def __init__(
@@ -671,7 +906,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
-        """Plot the results"""
+        """
+        Plot the results
+        """
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -716,8 +953,10 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         return (fig, ax)
 
-    def summary(self):
-        """Print text output summarising the results"""
+    def summary(self) -> None:
+        """
+        Print text output summarising the results
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -731,7 +970,50 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
 
 class PrePostNEGD(ExperimentalDesign):
-    """A class to analyse data from pretest/posttest designs"""
+    """
+    A class to analyse data from pretest/posttest designs
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param group_variable_name:
+        Name of the column in data for the group variable
+    :param pretreatment_variable_name:
+        Name of the column in data for the pretreatment variable
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("anova1")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.PrePostNEGD(
+    ...     df,
+    ...     formula="post ~ 1 + C(group) + pre",
+    ...     group_variable_name="group",
+    ...     pretreatment_variable_name="pre",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ... )
+    >>> result.summary() # doctest: +NUMBER
+    ==================Pretest/posttest Nonequivalent Group Design===================
+    Formula: post ~ 1 + C(group) + pre
+    <BLANKLINE>
+    Results:
+    Causal impact = 1.8, $CI_{94%}$[1.6, 2.0]
+    Model coefficients:
+    Intercept                     -0.4, 94% HDI [-1.2, 0.2]
+    C(group)[T.1]                 1.8, 94% HDI [1.6, 2.0]
+    pre                           1.0, 94% HDI [0.9, 1.1]
+    sigma                         0.5, 94% HDI [0.4, 0.5]
+    """
 
     def __init__(
         self,
@@ -795,7 +1077,7 @@ class PrePostNEGD(ExperimentalDesign):
 
         # ================================================================
 
-    def _input_validation(self):
+    def _input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if not _series_has_2_levels(self.data[self.group_variable_name]):
             raise DataException(
@@ -856,14 +1138,17 @@ class PrePostNEGD(ExperimentalDesign):
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
-    def _causal_impact_summary_stat(self):
+    def _causal_impact_summary_stat(self) -> str:
+        """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = r"$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self):
-        """Print text output summarising the results"""
+    def summary(self) -> None:
+        """
+        Print text output summarising the results
+        """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -912,6 +1197,41 @@ class InstrumentalVariable(ExperimentalDesign):
                                     "eta": 2,
                                     "lkj_sd": 2,
                                     }
+
+    Example
+    --------
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> from causalpy.pymc_experiments import InstrumentalVariable
+    >>> from causalpy.pymc_models import InstrumentalVariableRegression
+    >>> import numpy as np
+    >>> N = 100
+    >>> e1 = np.random.normal(0, 3, N)
+    >>> e2 = np.random.normal(0, 1, N)
+    >>> Z = np.random.uniform(0, 1, N)
+    >>> ## Ensure the endogeneity of the the treatment variable
+    >>> X = -1 + 4 * Z + e2 + 2 * e1
+    >>> y = 2 + 3 * X + 3 * e1
+    >>> test_data = pd.DataFrame({"y": y, "X": X, "Z": Z})
+    >>> sample_kwargs = {
+    ...     "tune": 1,
+    ...     "draws": 5,
+    ...     "chains": 1,
+    ...     "cores": 4,
+    ...     "target_accept": 0.95,
+    ...     "progressbar": False,
+    ...     }
+    >>> instruments_formula = "X  ~ 1 + Z"
+    >>> formula = "y ~  1 + X"
+    >>> instruments_data = test_data[["X", "Z"]]
+    >>> data = test_data[["y", "X"]]
+    >>> iv = InstrumentalVariable(
+    ...         instruments_data=instruments_data,
+    ...         data=data,
+    ...         instruments_formula=instruments_formula,
+    ...         formula=formula,
+    ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ... )
 
     """
 
@@ -967,6 +1287,12 @@ class InstrumentalVariable(ExperimentalDesign):
         )
 
     def get_2SLS_fit(self):
+        """
+        Two Stage Least Squares Fit
+
+        This function is called by the experiment, results are used for
+        priors if none are provided.
+        """
         first_stage_reg = sk_lin_reg().fit(self.Z, self.t)
         fitted_Z_values = first_stage_reg.predict(self.Z)
         X2 = self.data.copy(deep=True)
@@ -983,6 +1309,11 @@ class InstrumentalVariable(ExperimentalDesign):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self):
+        """
+        Naive Ordinary Least Squares
+
+        This function is called by the experiment.
+        """
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])

@@ -1,3 +1,5 @@
+"""Input validation tests"""
+
 import pandas as pd
 import pytest
 
@@ -205,6 +207,7 @@ def test_rd_validation_treated_is_dummy():
 
 
 def test_iv_treatment_var_is_present():
+    """Test the treatment variable is present for Instrumental Variable experiment"""
     data = pd.DataFrame({"x": [1, 2, 3], "y": [2, 4, 5]})
     instruments_formula = "risk  ~ 1 + logmort0"
     formula = "loggdp ~  1 + risk"

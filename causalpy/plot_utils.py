@@ -1,3 +1,7 @@
+"""
+Plotting utility functions.
+"""
+
 from typing import Any, Dict, Optional, Tuple, Union
 
 import arviz as az
@@ -17,7 +21,22 @@ def plot_xY(
     hdi_prob: float = 0.94,
     label: Union[str, None] = None,
 ) -> Tuple[Line2D, PolyCollection]:
-    """Utility function to plot HDI intervals."""
+    """
+    Utility function to plot HDI intervals.
+
+    :param x:
+        Pandas datetime index or numpy array of x-axis values
+    :param y:
+        Xarray data array of y-axis data
+    :param ax:
+        Matplotlib ax object
+    :param plot_hdi_kwargs:
+        Dictionary of keyword arguments passed to ax.plot()
+    :param hdi_prob:
+        The size of the HDI, default is 0.94
+    :param label:
+        The plot label
+    """
 
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
