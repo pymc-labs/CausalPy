@@ -1,19 +1,22 @@
 [build-system]
 # Minimum requirements for the build system to execute.
-build-backend = "setuptools.build_meta"
-requires = ["setuptools>=61.0"]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core>=3.4,<4"]
 
-# This is configuration specific to the `setuptools` build backend.
+# This is configuration specific to the `flit` build backend.
 # If you are using a different build backend, you will need to change this.
-[tool.setuptools.packages.find]
-exclude = ["causalpy.test*", "docs*"]
+[tool.flit.sdist]
+exclude = ["causalpy/test*", "docs/*", "dist/*"]
 
-[tool.setuptools.package-data]
-"causalpy.data" = ["*.csv"]
+[tool.flit.external-data]
+directory = "causalpy/data"
+
+[tool.flit.module]
+name="causalpy"
 
 [project]
 name = "CausalPy"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
