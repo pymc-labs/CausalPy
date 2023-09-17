@@ -822,13 +822,15 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # REGRESSION DISCONTINUITY ALGORITHM ~~~~~~~~~~~~~~~~~~~~~
         y, X = self.bandwidth_clip(formula)
         self.process_design_matrix(y, X)
-        # fit the model to the observed data
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        self.score = self.model.score(X=self.X, y=self.y)
+        self.fit(X, y)
+        self.score = self.model.score(X, y)
         self.calc_model_predictions()
         self.calc_discontinuity()
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    def fit(self, X, y):
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.model.fit(X, y, coords=COORDS)
 
     def process_design_matrix(self, y, X):
         self._y_design_info = y.design_info
