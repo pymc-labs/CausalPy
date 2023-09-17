@@ -198,6 +198,6 @@ Here are some general resources about causal inference:
 
 <img src="docs/source/_static/pymc-labs-log.png" align="right" width="50%" />
 
-This repository is supported by [PyMC Labs](https://www.pymc-labs.io).
+This repository is supported by [PyMC Labs](https://www.pymc-labs.com).
 
-If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.io](mailto:ben.vincent@pymc-labs.io). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
+If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.com](mailto:ben.vincent@pymc-labs.com). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
