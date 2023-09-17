@@ -17,6 +17,9 @@ import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 
+from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.utils import _is_variable_dummy_coded
+
 LEGEND_FONT_SIZE = 12
 
 
@@ -526,12 +529,14 @@ class RegressionDiscontinuity(ExperimentalDesign):
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
+        self.expt_type = "Regression Discontinuity"
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold
-        self.bandwidth = bandwidth
         self.epsilon = epsilon
+        self.bandwidth = bandwidth
+        self._input_validation()
 
         if self.bandwidth is not None:
             fmin = self.treatment_threshold - self.bandwidth
@@ -555,7 +560,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         # TODO: `treated` is a deterministic function of x and treatment_threshold, so
         # this could be a function rather than supplied data
 
-        # fit the model to all the data
+        # fit the model to the observed data
         self.model.fit(X=self.X, y=self.y)
 
         # score the goodness of fit to all data
@@ -596,6 +601,18 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.discontinuity_at_threshold = np.squeeze(self.pred_discon[1]) - np.squeeze(
             self.pred_discon[0]
         )
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        if "treated" not in self.formula:
+            raise FormulaException(
+                "A predictor called `treated` should be in the formula"
+            )
+
+        if _is_variable_dummy_coded(self.data["treated"]) is False:
+            raise DataException(
+                """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
+            )
 
     def _is_treated(self, x):
         """Returns ``True`` if ``x`` is greater than or equal to the treatment

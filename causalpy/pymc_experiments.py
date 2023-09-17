@@ -819,49 +819,25 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.bandwidth = bandwidth
         self._input_validation()
 
-        if self.bandwidth is not None:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                )
-            y, X = dmatrices(formula, filtered_data)
-        else:
-            y, X = dmatrices(formula, self.data)
+        # REGRESSION DISCONTINUITY ALGORITHM ~~~~~~~~~~~~~~~~~~~~~
+        y, X = self.bandwidth_clip(formula)
+        self.process_design_matrix(y, X)
+        # fit the model to the observed data
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.model.fit(X=self.X, y=self.y, coords=COORDS)
+        self.score = self.model.score(X=self.X, y=self.y)
+        self.calc_model_predictions()
+        self.calc_discontinuity()
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    def process_design_matrix(self, y, X):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # DEVIATION FROM SKL EXPERIMENT CODE =============================
-        # fit the model to the observed (pre-intervention) data
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        # ================================================================
-
-        # score the goodness of fit to all data
-        self.score = self.model.score(X=self.X, y=self.y)
-
-        # get the model predictions of the observed data
-        if self.bandwidth is not None:
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
-
+    def calc_discontinuity(self):
         # calculate discontinuity by evaluating the difference in model expectation on
         # either side of the discontinuity
         # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
@@ -883,6 +859,39 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
         )
+
+    def calc_model_predictions(self):
+        # get the model predictions of the observed data
+        if self.bandwidth is not None:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
+            xi = np.linspace(fmin, fmax, 200)
+        else:
+            xi = np.linspace(
+                np.min(self.data[self.running_variable_name]),
+                np.max(self.data[self.running_variable_name]),
+                200,
+            )
+        self.x_pred = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        self.pred = self.model.predict(X=np.asarray(new_x))
+
+    def bandwidth_clip(self, formula):
+        if self.bandwidth is not None:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
+            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+            if len(filtered_data) <= 10:
+                warnings.warn(
+                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+                    UserWarning,
+                )
+            y, X = dmatrices(formula, filtered_data)
+        else:
+            y, X = dmatrices(formula, self.data)
+        return y, X
 
     def _input_validation(self):
         """Validate the input data and model formula for correctness"""
