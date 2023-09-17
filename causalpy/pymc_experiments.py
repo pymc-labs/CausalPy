@@ -12,7 +12,7 @@ Experiment routines for PyMC models.
 """
 
 import warnings
-from typing import Optional, Union
+from typing import Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -25,6 +25,7 @@ from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import BadIndexException  # NOQA
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments import RDD, ExperimentalDesign
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels
 
@@ -32,74 +33,74 @@ LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
 
 
-class ExperimentalDesign:
-    """
-    Base class for other experiment types
+# class ExperimentalDesign:
+#     """
+#     Base class for other experiment types
 
-    See subclasses for examples of most methods
-    """
+#     See subclasses for examples of most methods
+#     """
 
-    model = None
-    expt_type = None
+#     model = None
+#     expt_type = None
 
-    def __init__(self, model=None, **kwargs):
-        if model is not None:
-            self.model = model
-        if self.model is None:
-            raise ValueError("fitting_model not set or passed.")
+#     def __init__(self, model=None, **kwargs):
+#         if model is not None:
+#             self.model = model
+#         if self.model is None:
+#             raise ValueError("fitting_model not set or passed.")
 
-    @property
-    def idata(self):
-        """
-        Access to the models InferenceData object
-        """
+#     @property
+#     def idata(self):
+#         """
+#         Access to the models InferenceData object
+#         """
 
-        return self.model.idata
+#         return self.model.idata
 
-    def print_coefficients(self) -> None:
-        """
-        Prints the model coefficients
+# def print_coefficients(self) -> None:
+#     """
+#     Prints the model coefficients
 
-        Example
-        --------
-        >>> import causalpy as cp
-        >>> df = cp.load_data("did")
-        >>> seed = 42
-        >>> result = cp.pymc_experiments.DifferenceInDifferences(
-        ...     df,
-        ...     formula="y ~ 1 + group*post_treatment",
-        ...     time_variable_name="t",
-        ...     group_variable_name="group",
-        ...     model=cp.pymc_models.LinearRegression(
-        ...             sample_kwargs={
-        ...                 "draws": 2000,
-        ...                 "random_seed": seed,
-        ...                 "progressbar": False
-        ...             }),
-        ...  )
-        >>> result.print_coefficients() # doctest: +NUMBER
-        Model coefficients:
-        Intercept                     1.0, 94% HDI [1.0, 1.1]
-        post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
-        group                         0.1, 94% HDI [0.0, 0.2]
-        group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
-        sigma                         0.0, 94% HDI [0.0, 0.1]
-        """
-        print("Model coefficients:")
-        coeffs = az.extract(self.idata.posterior, var_names="beta")
-        # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
-        # the stats despite variable names of different lengths
-        for name in self.labels:
-            coeff_samples = coeffs.sel(coeffs=name)
-            print(
-                f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
-            )
-        # add coeff for measurement std
-        coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
-        name = "sigma"
-        print(
-            f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
-        )
+#     Example
+#     --------
+#     >>> import causalpy as cp
+#     >>> df = cp.load_data("did")
+#     >>> seed = 42
+#     >>> result = cp.pymc_experiments.DifferenceInDifferences(
+#     ...     df,
+#     ...     formula="y ~ 1 + group*post_treatment",
+#     ...     time_variable_name="t",
+#     ...     group_variable_name="group",
+#     ...     model=cp.pymc_models.LinearRegression(
+#     ...             sample_kwargs={
+#     ...                 "draws": 2000,
+#     ...                 "random_seed": seed,
+#     ...                 "progressbar": False
+#     ...             }),
+#     ...  )
+#     >>> result.print_coefficients() # doctest: +NUMBER
+#     Model coefficients:
+#     Intercept                     1.0, 94% HDI [1.0, 1.1]
+#     post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
+#     group                         0.1, 94% HDI [0.0, 0.2]
+#     group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
+#     sigma                         0.0, 94% HDI [0.0, 0.1]
+#     """
+#     print("Model coefficients:")
+#     coeffs = az.extract(self.idata.posterior, var_names="beta")
+#     # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
+#     # the stats despite variable names of different lengths
+#     for name in self.labels:
+#         coeff_samples = coeffs.sel(coeffs=name)
+#         print(
+#             f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
+#         )
+#     # add coeff for measurement std
+#     coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
+#     name = "sigma"
+#     print(
+#         f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
+#     )
 
 
 class PrePostFit(ExperimentalDesign):
@@ -743,7 +744,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.print_coefficients()
 
 
-class RegressionDiscontinuity(ExperimentalDesign):
+class RegressionDiscontinuity(RDD):
     """
     A class to analyse sharp regression discontinuity experiments.
 
@@ -782,62 +783,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    >>> result.summary() # doctest: +NUMBER
-    ============================Regression Discontinuity============================
-    Formula: y ~ 1 + x + treated + x:treated
-    Running variable: x
-    Threshold on running variable: 0.5
-    <BLANKLINE>
-    Results:
-    Discontinuity at threshold = 0.91
-    Model coefficients:
-    Intercept                     0.0, 94% HDI [0.0, 0.1]
-    treated[T.True]               2.4, 94% HDI [1.6, 3.2]
-    x                             1.3, 94% HDI [1.1, 1.5]
-    x:treated[T.True]             -3.0, 94% HDI [-4.1, -2.0]
-    sigma                         0.3, 94% HDI [0.3, 0.4]
     """
-
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        formula: str,
-        treatment_threshold: float,
-        model=None,
-        running_variable_name: str = "x",
-        epsilon: float = 0.001,
-        bandwidth: Optional[float] = None,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.expt_type = "Regression Discontinuity"
-        self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.treatment_threshold = treatment_threshold
-        self.epsilon = epsilon
-        self.bandwidth = bandwidth
-        self._input_validation()
-
-        # REGRESSION DISCONTINUITY ALGORITHM ~~~~~~~~~~~~~~~~~~~~~
-        y, X = self.bandwidth_clip(formula)
-        self.process_design_matrix(y, X)
-        self.fit(X, y)
-        self.score = self.model.score(X, y)
-        self.calc_model_predictions()
-        self.calc_discontinuity()
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     def fit(self, X, y):
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
         self.model.fit(X, y, coords=COORDS)
-
-    def process_design_matrix(self, y, X):
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
 
     def calc_discontinuity(self):
         # calculate discontinuity by evaluating the difference in model expectation on
@@ -861,60 +811,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
         )
-
-    def calc_model_predictions(self):
-        # get the model predictions of the observed data
-        if self.bandwidth is not None:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
-
-    def bandwidth_clip(self, formula):
-        if self.bandwidth is not None:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                )
-            y, X = dmatrices(formula, filtered_data)
-        else:
-            y, X = dmatrices(formula, self.data)
-        return y, X
-
-    def _input_validation(self):
-        """Validate the input data and model formula for correctness"""
-        if "treated" not in self.formula:
-            raise FormulaException(
-                "A predictor called `treated` should be in the formula"
-            )
-
-        if _is_variable_dummy_coded(self.data["treated"]) is False:
-            raise DataException(
-                """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
-            )
-
-    def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
-
-        .. warning::
-
-            Assumes treatment is given to those ABOVE the treatment threshold.
-        """
-        return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
         """
