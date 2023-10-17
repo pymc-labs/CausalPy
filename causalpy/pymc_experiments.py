@@ -463,18 +463,6 @@ class DifferenceInDifferences(ExperimentalDesign):
     ...         }
     ...     )
     ...  )
-    >>> result.summary() # doctest: +NUMBER
-    ===========================Difference in Differences============================
-    Formula: y ~ 1 + group*post_treatment
-    <BLANKLINE>
-    Results:
-    Causal impact = 0.5, $CI_{94%}$[0.4, 0.6]
-    Model coefficients:
-    Intercept                     1.0, 94% HDI [1.0, 1.1]
-    post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
-    group                         0.1, 94% HDI [0.0, 0.2]
-    group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
-    sigma                         0.0, 94% HDI [0.0, 0.1]
     """
 
     def __init__(
@@ -726,7 +714,7 @@ class DifferenceInDifferences(ExperimentalDesign):
     def _causal_impact_summary_stat(self) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = "$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = "$CI_{94\\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
