@@ -17,7 +17,7 @@ version = "0.1.2"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
-authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.io" }]
+authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
 requires-python = ">=3.8"
 
 # This field lists other packages that your project depends on to run.
