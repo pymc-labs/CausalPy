@@ -17,20 +17,6 @@
 
 A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
 
-## Comparison to related packages
-
-Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability.
-
-Another distinctive feature of this package is the ability to use different models. Currently, users can fit with `scikit-learn` models or Bayesian models with `PyMC`.
-
-|                           | [CausalImpact](https://google.github.io/CausalImpact/) from Google | [GeoLift](https://github.com/facebookincubator/GeoLift/) from Meta | CausalPy from [PyMC Labs](https://www.pymc-labs.io) |
-|---------------------------|--------------------------------|---------|----------------------------------------|
-| Synthetic control         | ✅                              | ✅       | ✅                                      |
-| Regression discontinuity  | ❌                              | ❌       | ✅                                      |
-| Difference in differences | ❌                              | ❌       | ✅                                      |
-| Language                  | R (but see [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact))  | R       | Python                                 |
-| Models                    | Bayesian structural timeseries | Augmented synthetic control      | Flexible: Traditional OLS and Bayesian models |
-
 ## Installation
 
 To get the latest release:
@@ -176,6 +162,12 @@ Interrupted time series analysis is appropriate when you have a time series of o
 | coming soon | ![](docs/source/_static/interrupted_time_series_pymc.svg) |
 
 > The data, pre-treatment model fit, and counterfactual are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
+
+### Instrumental Variable Regression
+
+Instrumental Variable regression is an appropriate technique when you wish to estimate the treatment effect of some variable on another, but are concerned that the treatment variable is endogenous in the system of interest i.e. correlated with the errors. In this case an “instrument” variable can be used in a regression context to disentangle treatment effect due to the threat of confounding due to endogeneity.
+
+![](docs/source/_static/iv_reg1.png)
 
 ## Learning resources
 
