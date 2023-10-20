@@ -1016,6 +1016,7 @@ class RegressionKink(ExperimentalDesign):
         self.x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
+        # self.x_pred = pd.DataFrame({self.running_variable_name: xi})
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.model.predict(X=np.asarray(new_x))
 
@@ -1041,19 +1042,19 @@ class RegressionKink(ExperimentalDesign):
         self.gradient_left = (
             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-        )
+        ) / self.epsilon
         self.gradient_right = (
             self.pred_discon["posterior_predictive"].sel(obs_ind=2)["mu"]
             - self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-        )
+        ) / self.epsilon
         self.gradient_change = self.gradient_right - self.gradient_left
 
     def _input_validation(self):
         """Validate the input data and model formula for correctness"""
-        # if "treated" not in self.formula:
-        #     raise FormulaException(
-        #         "A predictor called `treated` should be in the formula"
-        #     )
+        if "treated" not in self.formula:
+            raise FormulaException(
+                "A predictor called `treated` should be in the formula"
+            )
 
         if _is_variable_dummy_coded(self.data["treated"]) is False:
             raise DataException(

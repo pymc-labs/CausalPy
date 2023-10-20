@@ -10,6 +10,7 @@ repos:
             exclude_types: [svg]
           - id: check-yaml
           - id: check-added-large-files
+            args: ['--maxkb=1500']
     - repo: https://github.com/pycqa/isort
       rev: 5.12.0
       hooks:
