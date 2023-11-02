@@ -69,6 +69,9 @@ Glossary
    Regression discontinuity design
       A quasi–experimental comparison to estimate a treatment effect where units are assigned to treatment conditions based on a cut-off score on a quantitative assignment variable (aka running variable).
 
+   Regression kink design
+      A quasi-experimental research design that estimates treatment effects by analyzing the impact of a treatment or intervention precisely at a defined threshold or "kink" point in a quantitative assignment variable (running variable). Unlike traditional regression discontinuity designs, regression kink design look for a change in the slope of an outcome variable at the kink, instead of a discontinuity.
+
    Sharp regression discontinuity design
       A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function.
 
