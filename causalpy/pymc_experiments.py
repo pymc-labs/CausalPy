@@ -992,7 +992,7 @@ class RegressionKink(ExperimentalDesign):
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
-        self.expt_type = "Regression Discontinuity"
+        self.expt_type = "Regression Kink"
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
@@ -1084,12 +1084,7 @@ class RegressionKink(ExperimentalDesign):
             )
 
     def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
-
-        .. warning::
-
-            Assumes treatment is given to those ABOVE the treatment threshold.
-        """
+        """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
     def plot(self):
@@ -1148,11 +1143,9 @@ class RegressionKink(ExperimentalDesign):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
-        print(f"Threshold on running variable: {self.kink_point}")
+        print(f"Kink point on running variable: {self.kink_point}")
         print("\nResults:")
-        print(
-            f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
-        )
+        print(f"Change in slope at kink point = {self.gradient_change.mean():.2f}")
         self.print_coefficients()
 
 
