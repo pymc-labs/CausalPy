@@ -958,6 +958,28 @@ class RegressionDiscontinuity(ExperimentalDesign):
 
 
 class RegressionKink(ExperimentalDesign):
+    """
+    A class to analyse sharp regression kink experiments.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param kink_point:
+        A scalar threshold value at which there is a change in the first derivative of
+        the assignment function
+    :param model:
+        A PyMC model
+    :param running_variable_name:
+        The name of the predictor variable that the kink_point is based upon
+    :param epsilon:
+        A small scalar value which determines how far above and below the kink point to
+        evaluate the causal impact.
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+        the model.
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,
