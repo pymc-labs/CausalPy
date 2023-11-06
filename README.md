@@ -144,6 +144,25 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 > The data, model fit, and counterfactual are plotted (top). Frequentist analysis shows the causal impact with the blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fits. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect (bottom).
 
+### Regression kink designs
+
+Regression discontinuity designs are used when treatment is applied to units according to a cutoff on a running variable, which is typically not time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
+
+| Running variable | Outcome |
+|-----------|-----------|
+| $x_0$     | $y_0$     |
+| $x_1$     | $y_0$     |
+| $\ldots$  | $\ldots$  |
+| $x_{N-1}$ | $y_{N-1}$ |
+| $x_N$     | $y_N$     |
+
+
+| Frequentist | Bayesian |
+|--|--|
+| coming soon | ![](docs/source/_static/regression_kink_pymc.svg) |
+
+> The data and model fit. The Bayesian analysis shows the posterior mean with credible intervals (shaded regions). We also report the Bayesian $R^2$ on the data along with the posterior mean and credible intervals of the change in gradient at the kink point.
+
 ### Interrupted time series
 
 Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time. Multiple predictors can be included.
