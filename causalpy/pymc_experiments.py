@@ -1139,12 +1139,17 @@ class RegressionKink(ExperimentalDesign):
         Print text output summarising the results
         """
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        print(f"Running variable: {self.running_variable_name}")
-        print(f"Kink point on running variable: {self.kink_point}")
-        print("\nResults:")
-        print(f"Change in slope at kink point = {self.gradient_change.mean():.2f}")
+        print(
+            f"""
+        {self.expt_type:=^80}
+        Formula: {self.formula}
+        Running variable: {self.running_variable_name}
+        Kink point on running variable: {self.kink_point}
+
+        Results:
+        Change in slope at kink point = {self.gradient_change.mean():.2f}
+        """
+        )
         self.print_coefficients()
 
 
