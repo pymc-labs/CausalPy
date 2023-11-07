@@ -5,7 +5,7 @@
 ----
 
 ![Build](https://github.com/pymc-labs/CausalPy/workflows/ci/badge.svg)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)]([https://codecov.io/gh/pymc-labs/pymc-marketing](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json))
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)]([https://codecov.io/gh/pymc-labs/CausalPy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json))
 [![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
 ![Read the Docs](https://img.shields.io/readthedocs/causalpy)
