@@ -19,3 +19,24 @@ def test_did_summary():
     )
     print(type(result._causal_impact_summary_stat()))
     assert isinstance(result._causal_impact_summary_stat(), str)
+
+
+def test_regression_kink_gradient_change():
+    """Test function to numerically calculate the change in gradient around the kink
+    point in regression kink designs"""
+    # test no change in gradient
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(-1, 0, 1, 1) == 0.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(1, 0, -1, 1) == 0.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(0, 0, 0, 1) == 0.0
+    # test positive change in gradient
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(0, 0, 1, 1) == 1.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(0, 0, 2, 1) == 2.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(-1, -1, 2, 1) == 3.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(-1, 0, 2, 1) == 1.0
+    # test negative change in gradient
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(0, 0, -1, 1) == -1.0
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(0, 0, -2, 1) == -2.0
+    assert (
+        cp.pymc_experiments.RegressionKink._eval_gradient_change(-1, -1, -2, 1) == -1.0
+    )
+    assert cp.pymc_experiments.RegressionKink._eval_gradient_change(1, 0, -2, 1) == -1.0
