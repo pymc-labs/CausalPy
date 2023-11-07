@@ -1041,11 +1041,28 @@ class RegressionKink(ExperimentalDesign):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.model.predict(X=np.asarray(new_x))
 
-        # Calculate the change in gradient by evaluating the function below the kink
-        # point, at the kink point, and above the kink point.
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
-        # (not below) the threshold
-        self.x_discon = pd.DataFrame(
+        # evaluate gradient change around kink point
+        mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
+        self.gradient_change = self._eval_gradient_change(
+            mu_kink_left, mu_kink, mu_kink_right, epsilon
+        )
+
+    @staticmethod
+    def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
+        """Evaluate the gradient change at the kink point.
+        It works by evaluating the model below the kink point, at the kink point,
+        and above the kink point.
+        This is a static method for ease of testing.
+        """
+        gradient_left = (mu_kink - mu_kink_left) / epsilon
+        gradient_right = (mu_kink_right - mu_kink) / epsilon
+        gradient_change = gradient_right - gradient_left
+        return gradient_change
+
+    def _probe_kink_point(self):
+        # Create a dataframe to evaluate predicted outcome at the kink point and either
+        # side
+        x_predict = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
                     [
@@ -1057,18 +1074,13 @@ class RegressionKink(ExperimentalDesign):
                 "treated": np.array([0, 1, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-
-        self.gradient_left = (
-            self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-            - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-        ) / self.epsilon
-        self.gradient_right = (
-            self.pred_discon["posterior_predictive"].sel(obs_ind=2)["mu"]
-            - self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-        ) / self.epsilon
-        self.gradient_change = self.gradient_right - self.gradient_left
+        (new_x,) = build_design_matrices([self._x_design_info], x_predict)
+        predicted = self.model.predict(X=np.asarray(new_x))
+        # extract predicted mu values
+        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
+        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
+        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        return mu_kink_left, mu_kink, mu_kink_right
 
     def _input_validation(self):
         """Validate the input data and model formula for correctness"""
