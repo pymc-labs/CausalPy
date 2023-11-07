@@ -12,7 +12,7 @@ Experiment routines for PyMC models.
 """
 
 import warnings
-from typing import Optional, Union
+from typing import Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -794,7 +794,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         model=None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
-        bandwidth: Optional[float] = None,
+        bandwidth: float = np.inf,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
@@ -807,7 +807,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.bandwidth = bandwidth
         self._input_validation()
 
-        if self.bandwidth is not None:
+        if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
             fmax = self.treatment_threshold + self.bandwidth
             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
@@ -836,7 +836,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.score = self.model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        if self.bandwidth is not None:
+        if self.bandwidth is not np.inf:
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
@@ -988,7 +988,7 @@ class RegressionKink(ExperimentalDesign):
         model=None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
-        bandwidth: Optional[float] = None,
+        bandwidth: float = np.inf,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
@@ -1001,7 +1001,7 @@ class RegressionKink(ExperimentalDesign):
         self.bandwidth = bandwidth
         self._input_validation()
 
-        if self.bandwidth is not None:
+        if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
@@ -1027,7 +1027,7 @@ class RegressionKink(ExperimentalDesign):
         self.score = self.model.score(X=self.X, y=self.y)
 
         # get the model predictions of the observed data
-        if self.bandwidth is not None:
+        if self.bandwidth is not np.inf:
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(

@@ -7,18 +7,6 @@ import causalpy as cp
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
-
-
 @pytest.mark.integration
 def test_did():
     """
@@ -230,6 +218,33 @@ def test_rd_drinking():
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
 
 
+def setup_regression_kink_data(kink):
+    """Set up data for regression kink design tests"""
+    # define parameters for data generation
+    seed = 42
+    rng = np.random.default_rng(seed)
+    N = 50
+    kink = 0.5
+    beta = [0, -1, 0, 2, 0]
+    sigma = 0.05
+    # generate data
+    x = rng.uniform(-1, 1, N)
+    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
+    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
+
+
+def reg_kink_function(x, beta, kink):
+    """Utility function for regression kink design. Returns a piecewise linear function
+    evaluated at x with a kink at kink and parameters beta"""
+    return (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink) * (x >= kink)
+        + beta[4] * (x - kink) ** 2 * (x >= kink)
+    )
+
+
 @pytest.mark.integration
 def test_rkink():
     """
@@ -241,18 +256,8 @@ def test_rkink():
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
     kink = 0.5
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    df = pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-    # run experiment
+    df = setup_regression_kink_data(kink)
     result = cp.pymc_experiments.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
@@ -276,18 +281,8 @@ def test_rkink_bandwidth():
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
     kink = 0.5
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    df = pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-    # run experiment
+    df = setup_regression_kink_data(kink)
     result = cp.pymc_experiments.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
