@@ -328,7 +328,7 @@ class PrePostFit(ExperimentalDesign):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        return (fig, ax)
+        return fig, ax
 
     def summary(self) -> None:
         """
@@ -424,7 +424,7 @@ class SyntheticControl(PrePostFit):
             ax[0].plot(
                 self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
             )
-        return (fig, ax)
+        return fig, ax
 
 
 class DifferenceInDifferences(ExperimentalDesign):
@@ -903,7 +903,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             self.data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
-            c="k",  # hue="treated",
+            c="k",
             ax=ax,
         )
 
@@ -939,7 +939,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
-        return (fig, ax)
+        return fig, ax
 
     def summary(self) -> None:
         """
@@ -1038,7 +1038,6 @@ class RegressionKink(ExperimentalDesign):
         self.x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        # self.x_pred = pd.DataFrame({self.running_variable_name: xi})
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.model.predict(X=np.asarray(new_x))
 
@@ -1133,7 +1132,7 @@ class RegressionKink(ExperimentalDesign):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
-        return (fig, ax)
+        return fig, ax
 
     def summary(self) -> None:
         """
