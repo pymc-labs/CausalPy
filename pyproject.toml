@@ -63,15 +63,7 @@ docs = [
     "statsmodels",
     "sphinxcontrib-bibtex",
 ]
-lint = [
-    "black",
-    "flake8",
-    "interrogate",
-    "isort",
-    "nbqa",
-    "pre-commit",
-    "pylint",
-]
+lint = ["interrogate", "nbqa", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov"]
 
 [metadata]
@@ -82,13 +74,6 @@ license_files = 'LICENSE'
 Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
 "Source" = "https://github.com/pymc-labs/CausalPy"
-
-[tool.black]
-line_length = 88
-
-[tool.isort]
-profile = "black"
-skip_gitignore = true
 
 [tool.pytest.ini_options]
 addopts = [
