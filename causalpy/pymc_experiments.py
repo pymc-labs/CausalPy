@@ -1082,6 +1082,12 @@ class RegressionKink(ExperimentalDesign):
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
 
+        if self.bandwidth <= 0:
+            raise ValueError("The bandwidth must be greater than zero.")
+
+        if self.epsilon <= 0:
+            raise ValueError("Epsilon must be greater than zero.")
+
     def _is_treated(self, x):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
