@@ -235,7 +235,6 @@ def setup_regression_kink_data(kink):
     seed = 42
     rng = np.random.default_rng(seed)
     N = 50
-    kink = 0.5
     beta = [0, -1, 0, 2, 0]
     sigma = 0.05
     # generate data
