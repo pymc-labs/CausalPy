@@ -1,5 +1,6 @@
 """Input validation tests"""
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -222,4 +223,83 @@ def test_iv_treatment_var_is_present():
             model=cp.pymc_models.InstrumentalVariableRegression(
                 sample_kwargs=sample_kwargs
             ),
+        )
+
+
+# Regression kink design
+
+
+def setup_regression_kink_data(kink):
+    """Set up data for regression kink design tests"""
+    # define parameters for data generation
+    seed = 42
+    rng = np.random.default_rng(seed)
+    N = 50
+    beta = [0, -1, 0, 2, 0]
+    sigma = 0.05
+    # generate data
+    x = rng.uniform(-1, 1, N)
+    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
+    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
+
+
+def reg_kink_function(x, beta, kink):
+    """Utility function for regression kink design. Returns a piecewise linear function
+    evaluated at x with a kink at kink and parameters beta"""
+    return (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink) * (x >= kink)
+        + beta[4] * (x - kink) ** 2 * (x >= kink)
+    )
+
+
+def test_rkink_bandwidth_check():
+    """Test that we get exceptions when bandwidth parameter is <= 0"""
+    with pytest.raises(ValueError):
+        kink = 0.5
+        df = setup_regression_kink_data(kink)
+        _ = cp.pymc_experiments.RegressionKink(
+            df,
+            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            kink_point=kink,
+            bandwidth=0,
+        )
+
+    with pytest.raises(ValueError):
+        kink = 0.5
+        df = setup_regression_kink_data(kink)
+        _ = cp.pymc_experiments.RegressionKink(
+            df,
+            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            kink_point=kink,
+            bandwidth=-1,
+        )
+
+
+def test_rkink_epsilon_check():
+    """Test that we get exceptions when epsilon parameter is <= 0"""
+    with pytest.raises(ValueError):
+        kink = 0.5
+        df = setup_regression_kink_data(kink)
+        _ = cp.pymc_experiments.RegressionKink(
+            df,
+            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            kink_point=kink,
+            epsilon=0,
+        )
+
+    with pytest.raises(ValueError):
+        kink = 0.5
+        df = setup_regression_kink_data(kink)
+        _ = cp.pymc_experiments.RegressionKink(
+            df,
+            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            kink_point=kink,
+            epsilon=-1,
         )

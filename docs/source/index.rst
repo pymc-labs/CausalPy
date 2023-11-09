@@ -103,6 +103,13 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 .. image:: _static/regression_discontinuity_pymc.svg
 
+Regression kink designs
+"""""""""""""""""""""""
+
+Regression kink designs are used when there is a change in the level of treatment at a "kink point" on a running variable, which is typically not time. By looking for the presence of a discontinuity in the gradient at the kink point then we can make causal claims about the potential impact of changes in the treatment.
+
+.. image:: _static/regression_kink_pymc.svg
+
 Interrupted time series
 """""""""""""""""""""""
 Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time.

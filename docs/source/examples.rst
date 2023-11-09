@@ -52,6 +52,14 @@ Regression Discontinuity
    notebooks/rd_pymc_drinking.ipynb
    notebooks/rd_skl_drinking.ipynb
 
+Regression Kink Design
+======================
+
+.. toctree::
+   :titlesonly:
+
+   notebooks/rkink_pymc.ipynb
+
 
 Instrumental Variables Regression
 =================================
