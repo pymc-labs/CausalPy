@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/pymc-labs/CausalPy"><img width="60%" src="docs/source/_static/logo.png"></a>
+  <a href="https://github.com/pymc-labs/CausalPy"><img width="60%" src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/logo.png"></a>
 </div>
 
 ----
@@ -82,7 +82,7 @@ This is appropriate when you have multiple units, one of which is treated. You b
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](docs/source/_static/synthetic_control_skl.svg) | ![](docs/source/_static/synthetic_control_pymc.svg) |
+| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/synthetic_control_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/synthetic_control_pymc.svg) |
 
 > The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
@@ -121,7 +121,7 @@ Data is expected to be in the following form. Shown are just two units - one in 
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](docs/source/_static/difference_in_differences_skl.svg) | ![](docs/source/_static/difference_in_differences_pymc.svg) |
+| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/difference_in_differences_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/difference_in_differences_pymc.svg) |
 
 >The data, model fit, and counterfactual are plotted. Frequentist model fits result in points estimates, but the Bayesian analysis results in posterior distributions, represented by the violin plots. The causal impact is the difference between the counterfactual prediction (treated group, post treatment) and the observed values for the treated group, post treatment.
 
@@ -140,7 +140,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](docs/source/_static/regression_discontinuity_skl.svg) | ![](docs/source/_static/regression_discontinuity_pymc.svg) |
+| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_discontinuity_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_discontinuity_pymc.svg) |
 
 > The data, model fit, and counterfactual are plotted (top). Frequentist analysis shows the causal impact with the blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fits. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect (bottom).
 
@@ -159,7 +159,7 @@ Regression discontinuity designs are used when treatment is applied to units acc
 
 | Frequentist | Bayesian |
 |--|--|
-| coming soon | ![](docs/source/_static/regression_kink_pymc.svg) |
+| coming soon | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_kink_pymc.svg) |
 
 > The data and model fit. The Bayesian analysis shows the posterior mean with credible intervals (shaded regions). We also report the Bayesian $R^2$ on the data along with the posterior mean and credible intervals of the change in gradient at the kink point.
 
@@ -178,7 +178,7 @@ Interrupted time series analysis is appropriate when you have a time series of o
 
 | Frequentist | Bayesian |
 |--|--|
-| coming soon | ![](docs/source/_static/interrupted_time_series_pymc.svg) |
+| coming soon | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_pymc.svg) |
 
 > The data, pre-treatment model fit, and counterfactual are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
@@ -186,7 +186,7 @@ Interrupted time series analysis is appropriate when you have a time series of o
 
 Instrumental Variable regression is an appropriate technique when you wish to estimate the treatment effect of some variable on another, but are concerned that the treatment variable is endogenous in the system of interest i.e. correlated with the errors. In this case an “instrument” variable can be used in a regression context to disentangle treatment effect due to the threat of confounding due to endogeneity.
 
-![](docs/source/_static/iv_reg1.png)
+![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/iv_reg1.png)
 
 ## Learning resources
 
@@ -207,7 +207,7 @@ Here are some general resources about causal inference:
 
 ## Support
 
-<img src="docs/source/_static/pymc-labs-log.png" align="right" width="50%" />
+<img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="50%" />
 
 This repository is supported by [PyMC Labs](https://www.pymc-labs.com).
 
