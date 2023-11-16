@@ -234,6 +234,9 @@ class PrePostFit(ExperimentalDesign):
     def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
         """
         Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -419,7 +422,11 @@ class SyntheticControl(PrePostFit):
     expt_type = "Synthetic Control"
 
     def plot(self, plot_predictors=False, **kwargs):
-        """Plot the results"""
+        """Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
             # plot control units as well
@@ -585,7 +592,9 @@ class DifferenceInDifferences(ExperimentalDesign):
 
     def plot(self, round_to=None):
         """Plot the results.
-        Creating the combined mean + HDI legend entries is a bit involved.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
         fig, ax = plt.subplots()
 
@@ -902,6 +911,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
     def plot(self, round_to=None):
         """
         Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
         fig, ax = plt.subplots()
         # Plot raw data
@@ -1116,6 +1128,9 @@ class RegressionKink(ExperimentalDesign):
     def plot(self, round_to=None):
         """
         Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
         fig, ax = plt.subplots()
         # Plot raw data
@@ -1305,7 +1320,11 @@ class PrePostNEGD(ExperimentalDesign):
             )
 
     def plot(self, round_to=None):
-        """Plot the results"""
+        """Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
         )

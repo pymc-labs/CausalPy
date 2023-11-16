@@ -116,7 +116,11 @@ class PrePostFit(ExperimentalDesign):
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
     def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
-        """Plot experiment results"""
+        """Plot experiment results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -263,7 +267,11 @@ class SyntheticControl(PrePostFit):
     """
 
     def plot(self, plot_predictors=False, round_to=None, **kwargs):
-        """Plot the results"""
+        """Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = super().plot(
             counterfactual_label="Synthetic control", round_to=round_to, **kwargs
         )
@@ -404,7 +412,11 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
 
     def plot(self, round_to=None):
-        """Plot results"""
+        """Plot results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -614,7 +626,11 @@ class RegressionDiscontinuity(ExperimentalDesign):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self, round_to=None):
-        """Plot results"""
+        """Plot results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
