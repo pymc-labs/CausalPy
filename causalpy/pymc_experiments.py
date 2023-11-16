@@ -23,10 +23,13 @@ import xarray as xr
 from patsy import build_design_matrices, dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
-from causalpy.custom_exceptions import BadIndexException  # NOQA
-from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.custom_exceptions import (
+    BadIndexException,  # NOQA
+    DataException,
+    FormulaException,
+)
 from causalpy.plot_utils import plot_xY
-from causalpy.utils import _is_variable_dummy_coded
+from causalpy.utils import _is_variable_dummy_coded, round_num
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
@@ -228,7 +231,7 @@ class PrePostFit(ExperimentalDesign):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def plot(self, counterfactual_label="Counterfactual", **kwargs):
+    def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
         """
         Plot the results
         """
@@ -275,8 +278,8 @@ class PrePostFit(ExperimentalDesign):
 
         ax[0].set(
             title=f"""
-            Pre-intervention Bayesian $R^2$: {self.score.r2:.3f}
-            (std = {self.score.r2_std:.3f})
+            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
+            (std = {round_num(self.score.r2_std, round_to)})
             """
         )
 
@@ -580,7 +583,7 @@ class DifferenceInDifferences(ExperimentalDesign):
                 coded. Consisting of 0's and 1's only."""
             )
 
-    def plot(self):
+    def plot(self, round_to=None):
         """Plot the results.
         Creating the combined mean + HDI legend entries is a bit involved.
         """
@@ -658,7 +661,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         # formatting
         ax.set(
             xticks=self.x_pred_treatment[self.time_variable_name].values,
-            title=self._causal_impact_summary_stat(),
+            title=self._causal_impact_summary_stat(round_to),
         )
         ax.legend(
             handles=(h_tuple for h_tuple in handles),
@@ -711,11 +714,14 @@ class DifferenceInDifferences(ExperimentalDesign):
             va="center",
         )
 
-    def _causal_impact_summary_stat(self) -> str:
+    def _causal_impact_summary_stat(self, round_to=None) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = "$CI_{94\\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
-        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        ci = (
+            "$CI_{94\\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
     def summary(self) -> None:
@@ -893,7 +899,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         """
         return np.greater_equal(x, self.treatment_threshold)
 
-    def plot(self):
+    def plot(self, round_to=None):
         """
         Plot the results
         """
@@ -918,12 +924,15 @@ class RegressionDiscontinuity(ExperimentalDesign):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
         discon = f"""
-            Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f},
+            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
             """
         ax.set(title=r2 + "\n" + discon + ci)
         # Intervention line
@@ -1104,7 +1113,7 @@ class RegressionKink(ExperimentalDesign):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def plot(self):
+    def plot(self, round_to=None):
         """
         Plot the results
         """
@@ -1129,12 +1138,15 @@ class RegressionKink(ExperimentalDesign):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{self.score.r2:.3f} (std = {self.score.r2_std:.3f})"
+        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94\%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
         grad_change = f"""
-            Change in gradient = {self.gradient_change.mean():.2f},
+            Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
             """
         ax.set(title=r2 + "\n" + grad_change + ci)
         # Intervention line
@@ -1292,7 +1304,7 @@ class PrePostNEGD(ExperimentalDesign):
                 """
             )
 
-    def plot(self):
+    def plot(self, round_to=None):
         """Plot the results"""
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
@@ -1339,18 +1351,21 @@ class PrePostNEGD(ExperimentalDesign):
         )
 
         # Plot estimated caual impact / treatment effect
-        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1])
+        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
-    def _causal_impact_summary_stat(self) -> str:
+    def _causal_impact_summary_stat(self, round_to) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = r"$CI_{94%}$" + f"[{percentiles[0]:.2f}, {percentiles[1]:.2f}]"
+        ci = (
+            r"$CI_{94%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
         causal_impact = f"{self.causal_impact.mean():.2f}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
         """
@@ -1359,7 +1374,7 @@ class PrePostNEGD(ExperimentalDesign):
         print(f"Formula: {self.formula}")
         print("\nResults:")
         # TODO: extra experiment specific outputs here
-        print(self._causal_impact_summary_stat())
+        print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients()
 
     def _get_treatment_effect_coeff(self) -> str:
