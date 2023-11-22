@@ -11,7 +11,7 @@ Experiment routines for PyMC models.
 
 """
 
-import warnings
+import warnings  # noqa: I001
 from typing import Union
 
 import arviz as az
@@ -23,7 +23,7 @@ import xarray as xr
 from patsy import build_design_matrices, dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
-from causalpy.custom_exceptions import BadIndexException  # NOQA
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import _is_variable_dummy_coded

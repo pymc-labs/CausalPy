@@ -1,11 +1,11 @@
 """Input validation tests"""
 
-import numpy as np
+import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.custom_exceptions import BadIndexException  # NOQA
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
