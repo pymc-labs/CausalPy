@@ -5,16 +5,15 @@ init:
 
 lint:
 	pip install causalpy[lint]
-	isort .
-	black .
+	ruff check --fix .
+	ruff format .
 
 check_lint:
 	pip install causalpy[lint]
-	flake8 .
-	isort --check-only .
-	black --diff --check --fast .
+	ruff check .
+	ruff format --diff --check .
 	nbqa black --check .
-	nbqa isort --check-only .
+	nbqa ruff .
 	interrogate .
 
 doctest:
