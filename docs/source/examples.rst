@@ -16,6 +16,7 @@ Synthetic Control
    notebooks/sc_pymc.ipynb
    notebooks/sc_skl.ipynb
    notebooks/sc_pymc_brexit.ipynb
+   notebooks/power_analysis.ipynb
    notebooks/geolift1.ipynb
 
 
