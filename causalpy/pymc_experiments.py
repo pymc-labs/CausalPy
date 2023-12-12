@@ -11,7 +11,7 @@ Experiment routines for PyMC models.
 
 """
 
-import warnings
+import warnings  # noqa: I001
 from typing import Union
 
 import arviz as az
