@@ -37,7 +37,7 @@ jobs:
       - name: Run doctests
         run: |
           pip install -e .[test]
-          pytest --doctest-modules causalpy/
+          pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
       - name: Run tests
         run: |
           pip install -e .[test]
