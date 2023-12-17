@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
 
+defaults:
+  run:
+    # Ensure activation for micromamba
+    shell: bash -leo pipefail {0} {0}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -30,10 +35,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v3
+      - name: Rename lockfile
+        run: |
+          mv conda/conda-lock-${{ matrix.python-version }}.yaml conda/conda-lock.yml
+      - uses: mamba-org/setup-micromamba@v1
         with:
-          python-version: ${{ matrix.python-version }}
+          micromamba-version: 1.5.5-0
+          environment-file: conda/conda-lock.yml
+          environment-name: causalpy-test-${{ matrix.python-version }}
+          cache-environment: true
+          create-args: >-
+            --category main
+            --category dev
       - name: Run doctests
         run: |
           pip install -e .[test]

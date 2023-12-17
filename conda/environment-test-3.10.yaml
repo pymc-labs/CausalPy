@@ -1,0 +1,9 @@
+name: casualpy-test-3.10
+channels:
+- conda-forge
+- nodefaults
+dependencies:
+- python=3.10.*
+- pip
+platforms:
+- linux-64
