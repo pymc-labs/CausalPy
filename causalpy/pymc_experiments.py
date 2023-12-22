@@ -59,9 +59,12 @@ class ExperimentalDesign:
 
         return self.model.idata
 
-    def print_coefficients(self) -> None:
+    def print_coefficients(self, round_to=None) -> None:
         """
         Prints the model coefficients
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
 
         Example
         --------
@@ -80,13 +83,13 @@ class ExperimentalDesign:
         ...                 "progressbar": False
         ...             }),
         ...  )
-        >>> result.print_coefficients() # doctest: +NUMBER
+        >>> result.print_coefficients(round_to=1) # doctest: +NUMBER
         Model coefficients:
-        Intercept                     1.0, 94% HDI [1.0, 1.1]
-        post_treatment[T.True]        0.9, 94% HDI [0.9, 1.0]
-        group                         0.1, 94% HDI [0.0, 0.2]
+        Intercept                     1, 94% HDI [1, 1]
+        post_treatment[T.True]        1, 94% HDI [0.9, 1]
+        group                         0.2, 94% HDI [0.09, 0.2]
         group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
-        sigma                         0.0, 94% HDI [0.0, 0.1]
+        sigma                         0.08, 94% HDI [0.07, 0.1]
         """
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
@@ -95,13 +98,13 @@ class ExperimentalDesign:
         for name in self.labels:
             coeff_samples = coeffs.sel(coeffs=name)
             print(
-                f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
+                f"{name: <30}{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
             )
         # add coeff for measurement std
         coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
         name = "sigma"
         print(
-            f"{name: <30}{coeff_samples.mean().data:.2f}, 94% HDI [{coeff_samples.quantile(0.03).data:.2f}, {coeff_samples.quantile(1-0.03).data:.2f}]"  # noqa: E501
+            f"{name: <30}{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
         )
 
 
@@ -138,18 +141,18 @@ class PrePostFit(ExperimentalDesign):
     ...         }
     ...     ),
     ... )
-    >>> result.summary() # doctest: +NUMBER
+    >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + b + c + d + e + f + g
     Model coefficients:
-    a                             0.3, 94% HDI [0.3, 0.3]
-    b                             0.0, 94% HDI [0.0, 0.0]
-    c                             0.3, 94% HDI [0.2, 0.3]
-    d                             0.0, 94% HDI [0.0, 0.1]
-    e                             0.0, 94% HDI [0.0, 0.0]
-    f                             0.1, 94% HDI [0.1, 0.2]
-    g                             0.0, 94% HDI [0.0, 0.0]
-    sigma                         0.2, 94% HDI [0.2, 0.3]
+    a                             0.3, 94% HDI [0.3, 0.4]
+    b                             0.05, 94% HDI [0.009, 0.09]
+    c                             0.3, 94% HDI [0.3, 0.3]
+    d                             0.05, 94% HDI [0.01, 0.1]
+    e                             0.03, 94% HDI [0.001, 0.07]
+    f                             0.2, 94% HDI [0.1, 0.3]
+    g                             0.04, 94% HDI [0.003, 0.09]
+    sigma                         0.3, 94% HDI [0.2, 0.3]
     """
 
     def __init__(
@@ -336,15 +339,18 @@ class PrePostFit(ExperimentalDesign):
 
         return fig, ax
 
-    def summary(self) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         # TODO: extra experiment specific outputs here
-        self.print_coefficients()
+        self.print_coefficients(round_to)
 
 
 class InterruptedTimeSeries(PrePostFit):
@@ -733,17 +739,19 @@ class DifferenceInDifferences(ExperimentalDesign):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self) -> None:
+    def summary(self, round_to=None) -> None:
         """
-        Print text output summarising the results
+        Print text output summarising the results.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")
-        # TODO: extra experiment specific outputs here
-        print(self._causal_impact_summary_stat())
-        self.print_coefficients()
+        print(round_num(self._causal_impact_summary_stat(), round_to))
+        self.print_coefficients(round_to)
 
 
 class RegressionDiscontinuity(ExperimentalDesign):
@@ -785,20 +793,20 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    >>> result.summary() # doctest: +NUMBER
+    >>> result.summary(round_to=1) # doctest: +NUMBER
     ============================Regression Discontinuity============================
     Formula: y ~ 1 + x + treated + x:treated
     Running variable: x
     Threshold on running variable: 0.5
     <BLANKLINE>
     Results:
-    Discontinuity at threshold = 0.91
+    Discontinuity at threshold = 0.9
     Model coefficients:
-    Intercept                     0.0, 94% HDI [0.0, 0.1]
-    treated[T.True]               2.4, 94% HDI [1.6, 3.2]
-    x                             1.3, 94% HDI [1.1, 1.5]
-    x:treated[T.True]             -3.0, 94% HDI [-4.1, -2.0]
-    sigma                         0.3, 94% HDI [0.3, 0.4]
+    Intercept                     0.09, 94% HDI [-0.001, 0.2]
+    treated[T.True]               2, 94% HDI [2, 3]
+    x                             1, 94% HDI [1, 2]
+    x:treated[T.True]             -3, 94% HDI [-4, -2]
+    sigma                         0.4, 94% HDI [0.3, 0.4]
     """
 
     def __init__(
@@ -962,9 +970,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
         )
         return fig, ax
 
-    def summary(self) -> None:
+    def summary(self, round_to: None) -> None:
         """
         Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
@@ -973,9 +984,9 @@ class RegressionDiscontinuity(ExperimentalDesign):
         print(f"Threshold on running variable: {self.treatment_threshold}")
         print("\nResults:")
         print(
-            f"Discontinuity at threshold = {self.discontinuity_at_threshold.mean():.2f}"
+            f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}"
         )
-        self.print_coefficients()
+        self.print_coefficients(round_to)
 
 
 class RegressionKink(ExperimentalDesign):
@@ -1179,9 +1190,12 @@ class RegressionKink(ExperimentalDesign):
         )
         return fig, ax
 
-    def summary(self) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
 
         print(
@@ -1192,10 +1206,10 @@ class RegressionKink(ExperimentalDesign):
         Kink point on running variable: {self.kink_point}
 
         Results:
-        Change in slope at kink point = {self.gradient_change.mean():.2f}
+        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
         """
         )
-        self.print_coefficients()
+        self.print_coefficients(round_to)
 
 
 class PrePostNEGD(ExperimentalDesign):
@@ -1232,17 +1246,17 @@ class PrePostNEGD(ExperimentalDesign):
     ...         }
     ...     )
     ... )
-    >>> result.summary() # doctest: +NUMBER
+    >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>
     Results:
-    Causal impact = 1.8, $CI_{94%}$[1.7, 2.1]
+    Causal impact = 2, $CI_{94%}$[2, 2]
     Model coefficients:
-    Intercept                     -0.4, 94% HDI [-1.1, 0.2]
-    C(group)[T.1]                 1.8, 94% HDI [1.6, 2.0]
-    pre                           1.0, 94% HDI [0.9, 1.1]
-    sigma                         0.5, 94% HDI [0.4, 0.5]
+    Intercept                     -0.5, 94% HDI [-1, 0.2]
+    C(group)[T.1]                 2, 94% HDI [2, 2]
+    pre                           1, 94% HDI [1, 1]
+    sigma                         0.5, 94% HDI [0.5, 0.6]
     """
 
     def __init__(
@@ -1381,12 +1395,15 @@ class PrePostNEGD(ExperimentalDesign):
             r"$CI_{94%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
-        causal_impact = f"{self.causal_impact.mean():.2f}, "
+        causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
     def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
@@ -1394,7 +1411,7 @@ class PrePostNEGD(ExperimentalDesign):
         print("\nResults:")
         # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat(round_to))
-        self.print_coefficients()
+        self.print_coefficients(round_to)
 
     def _get_treatment_effect_coeff(self) -> str:
         """Find the beta regression coefficient corresponding to the
@@ -1471,7 +1488,6 @@ class InstrumentalVariable(ExperimentalDesign):
     ...         formula=formula,
     ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
-
     """
 
     def __init__(
