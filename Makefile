@@ -18,7 +18,7 @@ check_lint:
 
 doctest:
 	pip install causalpy[test]
-	pytest --doctest-modules causalpy/
+	pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
 
 test:
 	pip install causalpy[test]
