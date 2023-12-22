@@ -76,8 +76,8 @@ class PrePostFit(ExperimentalDesign):
         super().__init__(model=model, **kwargs)
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
-        self.datapre = data[data.index <= self.treatment_time]
-        self.datapost = data[data.index > self.treatment_time]
+        self.datapre = data[data.index < self.treatment_time]
+        self.datapost = data[data.index >= self.treatment_time]
 
         self.formula = formula
 
