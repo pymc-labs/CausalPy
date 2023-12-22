@@ -1237,7 +1237,7 @@ class PrePostNEGD(ExperimentalDesign):
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>
     Results:
-    Causal impact = 1.88, $CI_{94%}$[1.7, 2.1]
+    Causal impact = 1.8, $CI_{94%}$[1.7, 2.1]
     Model coefficients:
     Intercept                     -0.4, 94% HDI [-1.1, 0.2]
     C(group)[T.1]                 1.8, 94% HDI [1.6, 2.0]
