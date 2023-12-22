@@ -34,7 +34,7 @@ dependencies = [
     "numpy<1.26.0",
     "pandas",
     "patsy",
-    "pymc>=5.10.3",
+    "pymc",
     "pytensor>=2.18.4",
     "scikit-learn>=1",
     "scipy",
