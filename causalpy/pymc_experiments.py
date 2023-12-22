@@ -164,8 +164,8 @@ class PrePostFit(ExperimentalDesign):
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
-        self.datapre = data[data.index <= self.treatment_time]
-        self.datapost = data[data.index > self.treatment_time]
+        self.datapre = data[data.index < self.treatment_time]
+        self.datapost = data[data.index >= self.treatment_time]
 
         self.formula = formula
 
