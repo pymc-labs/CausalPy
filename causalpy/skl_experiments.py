@@ -17,6 +17,8 @@ import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 
+from causalpy.utils import round_num
+
 LEGEND_FONT_SIZE = 12
 
 
@@ -113,8 +115,12 @@ class PrePostFit(ExperimentalDesign):
         # cumulative impact post
         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
-    def plot(self, counterfactual_label="Counterfactual", **kwargs):
-        """Plot experiment results"""
+    def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
+        """Plot experiment results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
@@ -128,7 +134,9 @@ class PrePostFit(ExperimentalDesign):
             ls=":",
             c="k",
         )
-        ax[0].set(title=f"$R^2$ on pre-intervention data = {self.score:.3f}")
+        ax[0].set(
+            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+        )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")
         ax[1].plot(
@@ -258,9 +266,15 @@ class SyntheticControl(PrePostFit):
     ... )
     """
 
-    def plot(self, plot_predictors=False, **kwargs):
-        """Plot the results"""
-        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
+    def plot(self, plot_predictors=False, round_to=None, **kwargs):
+        """Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
+        fig, ax = super().plot(
+            counterfactual_label="Synthetic control", round_to=round_to, **kwargs
+        )
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
@@ -397,8 +411,12 @@ class DifferenceInDifferences(ExperimentalDesign):
         # TODO: THIS IS NOT YET CORRECT
         self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
 
-    def plot(self):
-        """Plot results"""
+    def plot(self, round_to=None):
+        """Plot results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -462,7 +480,7 @@ class DifferenceInDifferences(ExperimentalDesign):
             xlim=[-0.05, 1.1],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {self.causal_impact[0]:.2f}",
+            title=f"Causal impact = {round_num(self.causal_impact[0], round_to)}",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
@@ -607,8 +625,12 @@ class RegressionDiscontinuity(ExperimentalDesign):
         """
         return np.greater_equal(x, self.treatment_threshold)
 
-    def plot(self):
-        """Plot results"""
+    def plot(self, round_to=None):
+        """Plot results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+        """
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -627,8 +649,8 @@ class RegressionDiscontinuity(ExperimentalDesign):
             label="model fit",
         )
         # create strings to compose title
-        r2 = f"$R^2$ on all data = {self.score:.3f}"
-        discon = f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}"
+        r2 = f"$R^2$ on all data = {round_num(self.score, round_to)}"
+        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
         # Intervention line
         ax.axvline(
