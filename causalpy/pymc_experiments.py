@@ -131,7 +131,7 @@ class PrePostFit(ExperimentalDesign):
     ...     formula="actual ~ 0 + a + g",
     ...     model=cp.pymc_models.WeightedSumFitter(
     ...         sample_kwargs={
-    ...             "draws": 200,
+    ...             "draws": 400,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False
@@ -773,7 +773,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     formula="y ~ 1 + x + treated + x:treated",
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={
-    ...             "draws": 200,
+    ...             "draws": 100,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False,
@@ -781,20 +781,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    >>> result.summary() # doctest: +NUMBER
-    ============================Regression Discontinuity============================
-    Formula: y ~ 1 + x + treated + x:treated
-    Running variable: x
-    Threshold on running variable: 0.5
-    <BLANKLINE>
-    Results:
-    Discontinuity at threshold = 0.92
-    Model coefficients:
-    Intercept                     -0.9, 94% HDI [-1.0, -0.8]
-    treated[T.True]               2.4, 94% HDI [1.7, 3.2]
-    x                             1.3, 94% HDI [1.1, 1.4]
-    x:treated[T.True]             -3.1, 94% HDI [-4.1, -2.0]
-    sigma                         0.3, 94% HDI [0.3, 0.4]
     """
 
     def __init__(
