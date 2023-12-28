@@ -385,28 +385,32 @@ class PrePostFit(ExperimentalDesign):
 
         # Posterior Mean
         results["posterior_estimation"] = {
-            "cumulative": np.mean(_mu_samples_cumulative.values),
-            "mean": np.mean(_mu_samples_mean.values),
+            "cumulative": round(np.mean(_mu_samples_cumulative.values), 2),
+            "mean": round(np.mean(_mu_samples_mean.values), 2),
         }
 
-        results["results"] = {"cumulative": cumulative_results, "mean": mean_results}
+        results["results"] = {
+            "cumulative": round(cumulative_results, 2),
+            "mean": round(mean_results, 2),
+        }
 
         # Causal Effect
         results["causal_effect"] = {
-            "cumulative": cumulative_results
-            - results["posterior_estimation"]["cumulative"],
-            "mean": mean_results - results["posterior_estimation"]["mean"],
+            "cumulative": round(
+                cumulative_results - results["posterior_estimation"]["cumulative"], 2
+            ),
+            "mean": round(mean_results - results["posterior_estimation"]["mean"], 2),
         }
 
         # Confidence Intervals
         results["ci"] = {
             "cumulative": [
-                np.percentile(_mu_samples_cumulative, ci),
-                np.percentile(_mu_samples_cumulative, 100 - ci),
+                round(np.percentile(_mu_samples_cumulative, ci), 2),
+                round(np.percentile(_mu_samples_cumulative, 100 - ci), 2),
             ],
             "mean": [
-                np.percentile(_mu_samples_mean, ci),
-                np.percentile(_mu_samples_mean, 100 - ci),
+                round(np.percentile(_mu_samples_mean, ci), 2),
+                round(np.percentile(_mu_samples_mean, 100 - ci), 2),
             ],
         }
 
@@ -415,7 +419,9 @@ class PrePostFit(ExperimentalDesign):
 
         return results_df
 
-    def summary(self, version="coefficients", **kwargs) -> Union[None, pd.DataFrame]:
+    def summary(
+        self, version: str = "coefficients", **kwargs
+    ) -> Union[None, pd.DataFrame]:
         """
         Print text output summarising the results
         """
@@ -465,11 +471,14 @@ class PrePostFit(ExperimentalDesign):
 
         # Posterior Mean
         results["posterior_estimation"] = {
-            "cumulative": np.mean(_mu_samples_cumulative.values),
-            "mean": np.mean(_mu_samples_mean.values),
+            "cumulative": round(np.mean(_mu_samples_cumulative.values), 2),
+            "mean": round(np.mean(_mu_samples_mean.values), 2),
         }
 
-        results["results"] = {"cumulative": cumulative_results, "mean": mean_results}
+        results["results"] = {
+            "cumulative": round(cumulative_results, 2),
+            "mean": round(mean_results, 2),
+        }
 
         results["_systematic_differences"] = {
             "cumulative": results["results"]["cumulative"]
@@ -484,34 +493,36 @@ class PrePostFit(ExperimentalDesign):
 
         results["ci"] = {
             "cumulative": [
-                np.percentile(_mu_samples_cumulative, ci),
-                np.percentile(_mu_samples_cumulative, 100 - ci),
+                round(np.percentile(_mu_samples_cumulative, ci), 2),
+                round(np.percentile(_mu_samples_cumulative, 100 - ci), 2),
             ],
             "mean": [
-                np.percentile(_mu_samples_mean, ci),
-                np.percentile(_mu_samples_mean, 100 - ci),
+                round(np.percentile(_mu_samples_mean, ci), 2),
+                round(np.percentile(_mu_samples_mean, 100 - ci), 2),
             ],
         }
 
-        cumulative_upper_mde = (
+        cumulative_upper_mde = round(
             results["ci"]["cumulative"][1]
-            - results["posterior_estimation"]["cumulative"]
+            - results["posterior_estimation"]["cumulative"],
+            2,
         )
-        cumulative_lower_mde = (
+        cumulative_lower_mde = round(
             results["posterior_estimation"]["cumulative"]
-            - results["ci"]["cumulative"][0]
+            - results["ci"]["cumulative"][0],
+            2,
         )
 
-        mean_upper_mde = (
-            results["ci"]["mean"][1] - results["posterior_estimation"]["mean"]
+        mean_upper_mde = round(
+            results["ci"]["mean"][1] - results["posterior_estimation"]["mean"], 2
         )
-        mean_lower_mde = (
-            results["posterior_estimation"]["mean"] - results["ci"]["mean"][0]
+        mean_lower_mde = round(
+            results["posterior_estimation"]["mean"] - results["ci"]["mean"][0], 2
         )
 
         results["posterior_mde"] = {
-            "cumulative": (cumulative_upper_mde + cumulative_lower_mde) / 2,
-            "mean": (mean_upper_mde + mean_lower_mde) / 2,
+            "cumulative": round((cumulative_upper_mde + cumulative_lower_mde) / 2, 2),
+            "mean": round((mean_upper_mde + mean_lower_mde) / 2, 2),
         }
         return results
 
