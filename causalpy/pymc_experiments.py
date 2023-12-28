@@ -29,8 +29,11 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.utils import _is_variable_dummy_coded, compute_bayesian_tail_probability
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    compute_bayesian_tail_probability,
+    round_num,
+)
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")

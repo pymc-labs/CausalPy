@@ -42,6 +42,7 @@ def compute_bayesian_tail_probability(posterior, x) -> float:
 
     return abs(round(probability, 2))
 
+
 def round_num(n, round_to):
     """
     Return a string representing a number with `round_to` significant figures.
