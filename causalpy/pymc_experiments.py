@@ -142,9 +142,9 @@ class PrePostFit(ExperimentalDesign):
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
     Model coefficients:
-    a                             0.62, 94% HDI [0.61, 0.64]
-    g                             0.38, 94% HDI [0.36, 0.39]
-    sigma                         0.76, 94% HDI [0.64, 0.90]
+    a                             0.6, 94% HDI [0.6, 0.6]
+    g                             0.3, 94% HDI [0.3, 0.3]
+    sigma                         0.7, 94% HDI [0.6, 0.9]
     """
 
     def __init__(
