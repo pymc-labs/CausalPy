@@ -766,7 +766,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("rd")
-    >>> df['y'] = df['y'] - 1   # added for doctest stability
     >>> seed = 42
     >>> result = cp.pymc_experiments.RegressionDiscontinuity(
     ...     df,
