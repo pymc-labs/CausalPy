@@ -4,7 +4,7 @@ Tests for utility functions
 
 import pandas as pd
 
-from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels
+from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels, round_num
 
 
 def test_dummy_coding():
@@ -24,3 +24,23 @@ def test_2_level_series():
     assert _series_has_2_levels(pd.Series(["water", "tea", "coffee"])) is False
     assert _series_has_2_levels(pd.Series([0, 1, 0, 1])) is True
     assert _series_has_2_levels(pd.Series([0, 1, 0, 2])) is False
+
+
+def test_round_num():
+    """Test if the function to round numbers works correctly"""
+    assert round_num(0.12345, None) == "0.12"
+    assert round_num(0.12345, 0) == "0.1"
+    assert round_num(0.12345, 1) == "0.1"
+    assert round_num(0.12345, 2) == "0.12"
+    assert round_num(0.12345, 3) == "0.123"
+    assert round_num(0.12345, 4) == "0.1235"
+    assert round_num(0.12345, 5) == "0.12345"
+    assert round_num(0.12345, 6) == "0.12345"
+    assert round_num(123.456, None) == "123"
+    assert round_num(123.456, 1) == "123"
+    assert round_num(123.456, 2) == "123"
+    assert round_num(123.456, 3) == "123"
+    assert round_num(123.456, 4) == "123.5"
+    assert round_num(123.456, 5) == "123.46"
+    assert round_num(123.456, 6) == "123.456"
+    assert round_num(123.456, 7) == "123.456"
