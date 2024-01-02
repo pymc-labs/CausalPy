@@ -37,9 +37,6 @@ def test_summary_intervention():
     # Invoke the power_plot method
     power_plot_fig = result.power_plot(alpha=alpha, correction=correction)
 
-    alpha = 0.05
-    correction = False
-
     # Invoke the power_summary method
     power_summary_df = result.power_summary(alpha=alpha, correction=correction)
 
