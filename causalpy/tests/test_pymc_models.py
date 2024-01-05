@@ -125,7 +125,11 @@ def test_idata_property():
     assert isinstance(result.idata, az.InferenceData)
 
 
-def test_result_reproducibility():
+seeds = [1234, 42, 123456789]
+
+
+@pytest.mark.parametrize("seed", seeds)
+def test_result_reproducibility(seed):
     """Test that we can reproduce the results from the model. We could in theory test
     this with all the model and experiment types, but what is being targetted is
     the ModelBuilder.fit method, so we should be safe testing with just one model. Here
@@ -133,7 +137,7 @@ def test_result_reproducibility():
     # Load the data
     df = cp.load_data("did")
     # Set a random seed
-    sample_kwargs["random_seed"] = 42
+    sample_kwargs["random_seed"] = seed
     # Calculate the result twice
     result1 = cp.pymc_experiments.DifferenceInDifferences(
         df,
