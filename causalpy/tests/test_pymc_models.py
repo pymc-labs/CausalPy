@@ -123,3 +123,42 @@ def test_idata_property():
     )
     assert hasattr(result, "idata")
     assert isinstance(result.idata, az.InferenceData)
+
+
+seeds = [1234, 42, 123456789]
+
+
+@pytest.mark.parametrize("seed", seeds)
+def test_result_reproducibility(seed):
+    """Test that we can reproduce the results from the model. We could in theory test
+    this with all the model and experiment types, but what is being targetted is
+    the ModelBuilder.fit method, so we should be safe testing with just one model. Here
+    we use the DifferenceInDifferences experiment class."""
+    # Load the data
+    df = cp.load_data("did")
+    # Set a random seed
+    sample_kwargs["random_seed"] = seed
+    # Calculate the result twice
+    result1 = cp.pymc_experiments.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group + t + group:post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        treated=1,
+        untreated=0,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result2 = cp.pymc_experiments.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group + t + group:post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        treated=1,
+        untreated=0,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert np.all(result1.idata.posterior.mu == result2.idata.posterior.mu)
+    assert np.all(result1.idata.prior.mu == result2.idata.prior.mu)
+    assert np.all(
+        result1.idata.prior_predictive.y_hat == result2.idata.prior_predictive.y_hat
+    )

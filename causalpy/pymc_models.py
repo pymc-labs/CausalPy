@@ -96,12 +96,22 @@ class ModelBuilder(pm.Model):
         """Draw samples fromposterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
         """
+
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        if "random_seed" in self.sample_kwargs:
+            random_seed = self.sample_kwargs["random_seed"]
+        else:
+            random_seed = None
+
         self.build_model(X, y, coords)
         with self.model:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive())
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
-                pm.sample_posterior_predictive(self.idata, progressbar=False)
+                pm.sample_posterior_predictive(
+                    self.idata, progressbar=False, random_seed=random_seed
+                )
             )
         return self.idata
 
