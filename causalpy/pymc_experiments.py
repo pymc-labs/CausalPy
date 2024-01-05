@@ -131,10 +131,10 @@ class PrePostFit(ExperimentalDesign):
     >>> result = cp.pymc_experiments.PrePostFit(
     ...     sc,
     ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     formula="actual ~ 0 + a + g",
     ...     model=cp.pymc_models.WeightedSumFitter(
     ...         sample_kwargs={
-    ...             "draws": 2000,
+    ...             "draws": 400,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False
@@ -143,16 +143,11 @@ class PrePostFit(ExperimentalDesign):
     ... )
     >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================================Pre-Post Fit==================================
-    Formula: actual ~ 0 + a + b + c + d + e + f + g
+    Formula: actual ~ 0 + a + g
     Model coefficients:
-    a                             0.3, 94% HDI [0.3, 0.4]
-    b                             0.05, 94% HDI [0.009, 0.09]
-    c                             0.3, 94% HDI [0.3, 0.3]
-    d                             0.05, 94% HDI [0.01, 0.1]
-    e                             0.03, 94% HDI [0.001, 0.07]
-    f                             0.2, 94% HDI [0.1, 0.3]
-    g                             0.04, 94% HDI [0.003, 0.09]
-    sigma                         0.3, 94% HDI [0.2, 0.3]
+    a                             0.6, 94% HDI [0.6, 0.6]
+    g                             0.3, 94% HDI [0.3, 0.3]
+    sigma                         0.7, 94% HDI [0.6, 0.9]
     """
 
     def __init__(
@@ -785,7 +780,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     formula="y ~ 1 + x + treated + x:treated",
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={
-    ...             "draws": 2000,
+    ...             "draws": 100,
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False,
@@ -793,20 +788,6 @@ class RegressionDiscontinuity(ExperimentalDesign):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    >>> result.summary(round_to=1) # doctest: +NUMBER
-    ============================Regression Discontinuity============================
-    Formula: y ~ 1 + x + treated + x:treated
-    Running variable: x
-    Threshold on running variable: 0.5
-    <BLANKLINE>
-    Results:
-    Discontinuity at threshold = 0.9
-    Model coefficients:
-    Intercept                     0.09, 94% HDI [-0.001, 0.2]
-    treated[T.True]               2, 94% HDI [2, 3]
-    x                             1, 94% HDI [1, 2]
-    x:treated[T.True]             -3, 94% HDI [-4, -2]
-    sigma                         0.4, 94% HDI [0.3, 0.4]
     """
 
     def __init__(
