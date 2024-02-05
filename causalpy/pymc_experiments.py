@@ -64,7 +64,7 @@ class ExperimentalDesign:
         Prints the model coefficients
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
 
         Example
         --------
@@ -234,7 +234,7 @@ class PrePostFit(ExperimentalDesign):
         Plot the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -339,7 +339,7 @@ class PrePostFit(ExperimentalDesign):
         Print text output summarising the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
@@ -426,7 +426,7 @@ class SyntheticControl(PrePostFit):
         """Plot the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
         if plot_predictors:
@@ -595,7 +595,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         """Plot the results.
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = plt.subplots()
 
@@ -739,7 +739,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         Print text output summarising the results.
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
@@ -902,7 +902,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         Plot the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = plt.subplots()
         # Plot raw data
@@ -956,7 +956,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         Print text output summarising the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
@@ -1122,7 +1122,7 @@ class RegressionKink(ExperimentalDesign):
         Plot the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = plt.subplots()
         # Plot raw data
@@ -1176,7 +1176,7 @@ class RegressionKink(ExperimentalDesign):
         Print text output summarising the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
         print(
@@ -1318,7 +1318,7 @@ class PrePostNEGD(ExperimentalDesign):
         """Plot the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
@@ -1384,7 +1384,7 @@ class PrePostNEGD(ExperimentalDesign):
         Print text output summarising the results
 
         :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "none" to return raw numbers.
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
         print(f"{self.expt_type:=^80}")
