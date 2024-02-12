@@ -89,7 +89,7 @@ class ModelBuilder(pm.Model):
         This method is used internally to register new data for the model for
         prediction.
         """
-        with self.model:
+        with self:
             pm.set_data({"X": X})
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
@@ -105,7 +105,7 @@ class ModelBuilder(pm.Model):
             random_seed = None
 
         self.build_model(X, y, coords)
-        with self.model:
+        with self:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
@@ -125,7 +125,7 @@ class ModelBuilder(pm.Model):
         """
 
         self._data_setter(X)
-        with self.model:  # sample with new input data
+        with self:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
                 self.idata, var_names=["y_hat", "mu"], progressbar=False
             )
@@ -354,7 +354,7 @@ class InstrumentalVariableRegression(ModelBuilder):
         distributions.
         """
         self.build_model(X, Z, y, t, coords, priors)
-        with self.model:
+        with self:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive())
             self.idata.extend(
