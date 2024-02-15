@@ -12,7 +12,7 @@ Experiment routines for PyMC models.
 """
 
 import warnings  # noqa: I001
-from typing import Union
+from typing import Union, Dict
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -355,6 +355,84 @@ class PrePostFit(ExperimentalDesign):
             self.print_coefficients()
         elif version == "intervention":
             return self._summary_intervention(**kwargs)
+
+    def _power_estimation(self, alpha: float = 0.05, correction: bool = False) -> Dict:
+        """
+        Estimate the statistical power of an intervention based on cumulative and mean results.
+        This function calculates posterior estimates, systematic differences, confidence intervals, and
+        minimum detectable effects (MDE) for both cumulative and mean measures. It can apply corrections to
+        account for systematic differences in the data.
+        Parameters:
+        - alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
+        - correction (bool, optional): If True, applies corrections to account for systematic differences in
+        cumulative and mean calculations. Default is False.
+        Returns:
+        - Dict: A dictionary containing key statistical measures such as posterior estimation,
+        systematic differences, confidence intervals, and posterior MDE for both cumulative and mean results.
+        """
+        results = {}
+        ci = (alpha * 100) / 2
+        # Cumulative calculations
+        cumulative_results = self.post_y.sum()
+        _mu_samples_cumulative = (
+            self.post_pred["posterior_predictive"]
+            .mu.stack(sample=("chain", "draw"))
+            .sum("obs_ind")
+        )
+        # Mean calculations
+        mean_results = self.post_y.mean()
+        _mu_samples_mean = (
+            self.post_pred["posterior_predictive"]
+            .mu.stack(sample=("chain", "draw"))
+            .mean("obs_ind")
+        )
+        # Posterior Mean
+        results["posterior_estimation"] = {
+            "cumulative": np.mean(_mu_samples_cumulative.values),
+            "mean": np.mean(_mu_samples_mean.values),
+        }
+        results["results"] = {
+            "cumulative": cumulative_results,
+            "mean": mean_results,
+        }
+        results["_systematic_differences"] = {
+            "cumulative": results["results"]["cumulative"]
+            - results["posterior_estimation"]["cumulative"],
+            "mean": results["results"]["mean"]
+            - results["posterior_estimation"]["mean"],
+        }
+        if correction:
+            _mu_samples_cumulative += results["_systematic_differences"]["cumulative"]
+            _mu_samples_mean += results["_systematic_differences"]["mean"]
+        results["ci"] = {
+            "cumulative": [
+                np.percentile(_mu_samples_cumulative, ci),
+                np.percentile(_mu_samples_cumulative, 100 - ci),
+            ],
+            "mean": [
+                np.percentile(_mu_samples_mean, ci),
+                np.percentile(_mu_samples_mean, 100 - ci),
+            ],
+        }
+        cumulative_upper_mde = (
+            results["ci"]["cumulative"][1]
+            - results["posterior_estimation"]["cumulative"]
+        )
+        cumulative_lower_mde = (
+            results["posterior_estimation"]["cumulative"]
+            - results["ci"]["cumulative"][0]
+        )
+        mean_upper_mde = (
+            results["ci"]["mean"][1] - results["posterior_estimation"]["mean"]
+        )
+        mean_lower_mde = (
+            results["posterior_estimation"]["mean"] - results["ci"]["mean"][0]
+        )
+        results["posterior_mde"] = {
+            "cumulative": (cumulative_upper_mde + cumulative_lower_mde) / 2,
+            "mean": (mean_upper_mde + mean_lower_mde) / 2,
+        }
+        return results
 
     def _summary_intervention(self, alpha: float = 0.05, **kwargs) -> pd.DataFrame:
         """
