@@ -29,7 +29,11 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    round_num,
+    compute_bayesian_tail_probability,
+)
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
@@ -334,7 +338,9 @@ class PrePostFit(ExperimentalDesign):
 
         return fig, ax
 
-    def summary(self, round_to=None) -> None:
+    def summary(
+        self, round_to=None, version: str = "coefficients", **kwargs
+    ) -> Union[None, pd.DataFrame]:
         """
         Print text output summarising the results
 
@@ -342,10 +348,207 @@ class PrePostFit(ExperimentalDesign):
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        # TODO: extra experiment specific outputs here
-        self.print_coefficients(round_to)
+        if version == "coefficients":
+            print(f"{self.expt_type:=^80}")
+            print(f"Formula: {self.formula}")
+            # TODO: extra experiment specific outputs here
+            self.print_coefficients()
+        elif version == "intervention":
+            return self._summary_intervention(**kwargs)
+
+    def _summary_intervention(self, alpha: float = 0.05, **kwargs) -> pd.DataFrame:
+        """
+        Calculate and summarize the intervention analysis results in a DataFrame format.
+
+        This function performs cumulative and mean calculations on the posterior predictive distributions,
+        computes Bayesian tail probabilities, posterior estimations, causal effects, and confidence intervals.
+        It optionally applies corrections to the cumulative and mean calculations.
+
+        Parameters
+        ----------
+        - alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
+        - kwargs (Dict[str, Any], optional): Additional keyword arguments.
+            - "correction" (bool or Dict[str, float]): If True, applies predefined corrections to cumulative and mean results.
+            If a dictionary, the corrections for 'cumulative' and 'mean' should be provided. Default is False.
+
+        Returns
+        -------
+        - pd.DataFrame: A DataFrame where each row represents different statistical measures such as
+        Bayesian tail probability, posterior estimation, causal effect, and confidence intervals for cumulative and mean results.
+        """
+        correction = kwargs.get("correction", False)
+
+        results = {}
+        ci = (alpha * 100) / 2
+
+        # Cumulative calculations
+        cumulative_results = self.post_y.sum()
+        _mu_samples_cumulative = (
+            self.post_pred["posterior_predictive"]
+            .mu.stack(sample=("chain", "draw"))
+            .sum("obs_ind")
+        )
+
+        # Mean calculations
+        mean_results = self.post_y.mean()
+        _mu_samples_mean = (
+            self.post_pred["posterior_predictive"]
+            .mu.stack(sample=("chain", "draw"))
+            .mean("obs_ind")
+        )
+
+        if not isinstance(correction, bool):
+            _mu_samples_cumulative += correction["cumulative"]
+            _mu_samples_mean += correction["mean"]
+
+        # Bayesian Tail Probability
+        results["bayesian_tail_probability"] = {
+            "cumulative": compute_bayesian_tail_probability(
+                posterior=_mu_samples_cumulative, x=cumulative_results
+            ),
+            "mean": compute_bayesian_tail_probability(
+                posterior=_mu_samples_mean, x=mean_results
+            ),
+        }
+
+        # Posterior Mean
+        results["posterior_estimation"] = {
+            "cumulative": np.mean(_mu_samples_cumulative.values),
+            "mean": np.mean(_mu_samples_mean.values),
+        }
+
+        results["results"] = {
+            "cumulative": cumulative_results,
+            "mean": mean_results,
+        }
+
+        # Causal Effect
+        results["causal_effect"] = {
+            "cumulative": cumulative_results
+            - results["posterior_estimation"]["cumulative"],
+            "mean": mean_results - results["posterior_estimation"]["mean"],
+        }
+
+        # Confidence Intervals
+        results["ci"] = {
+            "cumulative": [
+                np.percentile(_mu_samples_cumulative, ci),
+                np.percentile(_mu_samples_cumulative, 100 - ci),
+            ],
+            "mean": [
+                np.percentile(_mu_samples_mean, ci),
+                np.percentile(_mu_samples_mean, 100 - ci),
+            ],
+        }
+
+        # Convert to DataFrame
+        results_df = pd.DataFrame(results)
+
+        return results_df
+
+    def power_summary(
+        self, alpha: float = 0.05, correction: bool = False
+    ) -> pd.DataFrame:
+        """
+        Summarize the power estimation results in a DataFrame format.
+
+        This function perform a power estimation and then
+        converts the resulting dictionary into a pandas DataFrame for easier analysis and visualization.
+
+        Parameters
+        ----------
+        - alpha (float, optional): The significance level for confidence interval calculations used in power estimation. Default is 0.05.
+        - correction (bool, optional): Indicates whether to apply corrections in the power estimation process. Default is False.
+
+        Returns
+        -------
+        - pd.DataFrame: A DataFrame representing the power estimation results, including posterior estimations,
+        systematic differences, confidence intervals, and posterior MDE for cumulative and mean results.
+        """
+        return pd.DataFrame(self._power_estimation(alpha=alpha, correction=correction))
+
+    def plot_power(self, alpha: float = 0.05, correction: bool = False) -> plt.Figure:
+        """
+        Generate and return a figure containing plots that visualize power estimation results.
+
+        This function creates a two-panel plot (for mean and cumulative measures) to visualize the posterior distributions
+        along with the confidence intervals, real mean, and posterior mean values. It allows for adjustments based on
+        systematic differences if the correction is applied.
+
+        Parameters
+        ----------
+        - alpha (float, optional): The significance level for confidence interval calculations used in power estimation. Default is 0.05.
+        - correction (bool, optional): Indicates whether to apply corrections for systematic differences in the plotting process. Default is False.
+
+        Returns
+        -------
+        - plt.Figure: A matplotlib figure object containing the plots.
+        """
+        _estimates = self._power_estimation(alpha=alpha, correction=correction)
+
+        fig, axs = plt.subplots(1, 2, figsize=(20, 6))  # Two subplots side by side
+
+        # Adjustments for Mean and Cumulative plots
+        for i, key in enumerate(["mean", "cumulative"]):
+            _mu_samples = self.post_pred["posterior_predictive"].mu.stack(
+                sample=("chain", "draw")
+            )
+            if key == "mean":
+                _mu_samples = _mu_samples.mean("obs_ind")
+            elif key == "cumulative":
+                _mu_samples = _mu_samples.sum("obs_ind")
+
+            if correction:
+                _mu_samples += _estimates["_systematic_differences"][key]
+
+            # Histogram and KDE
+            sns.histplot(
+                _mu_samples,
+                bins=30,
+                kde=True,
+                ax=axs[i],
+                color="C0",
+                stat="density",
+                alpha=0.6,
+            )
+            kde_x, kde_y = (
+                sns.kdeplot(_mu_samples, color="C1", fill=True, ax=axs[i])
+                .get_lines()[0]
+                .get_data()
+            )
+
+            # Adjust y-limits based on max density
+            max_density = max(kde_y)
+            axs[i].set_ylim(0, max_density + 0.05 * max_density)  # Adding 5% buffer
+
+            # Fill between for the percentile interval
+            axs[i].fill_betweenx(
+                y=np.linspace(0, max_density + 0.05 * max_density, 100),
+                x1=_estimates["ci"][key][0],
+                x2=_estimates["ci"][key][1],
+                color="C0",
+                alpha=0.3,
+                label="C.I",
+            )
+
+            # Vertical lines for the means
+            axs[i].axvline(
+                _estimates["results"][key], color="C3", linestyle="-", label="Real Mean"
+            )
+            if not correction:
+                axs[i].axvline(
+                    _estimates["posterior_estimation"][key],
+                    color="C4",
+                    linestyle="--",
+                    label="Posterior Mean",
+                )
+
+            axs[i].set_title(f"Posterior of mu ({key.capitalize()})")
+            axs[i].set_xlabel("mu")
+            axs[i].set_ylabel("Density")
+            axs[i].legend()
+
+        return fig, axs
 
 
 class InterruptedTimeSeries(PrePostFit):
