@@ -17,6 +17,11 @@ import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 
+from causalpy.data_validation import (
+    DiDDataValidator,
+    PrePostFitDataValidator,
+    RDDataValidator,
+)
 from causalpy.utils import round_num
 
 LEGEND_FONT_SIZE = 12
@@ -35,7 +40,7 @@ class ExperimentalDesign:
             raise ValueError("fitting_model not set or passed.")
 
 
-class PrePostFit(ExperimentalDesign):
+class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     """
     A class to analyse quasi-experiments where parameter estimation is based on just
     the pre-intervention data.
@@ -74,6 +79,7 @@ class PrePostFit(ExperimentalDesign):
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
+        self._input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         # split data in to pre and post intervention
         self.datapre = data[data.index < self.treatment_time]
@@ -284,7 +290,7 @@ class SyntheticControl(PrePostFit):
         return (fig, ax)
 
 
-class DifferenceInDifferences(ExperimentalDesign):
+class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
     """
     .. note::
 
@@ -334,6 +340,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
+        self._input_validation()
         self.treated = treated  # level of the group_variable_name that was treated
         self.untreated = (
             untreated  # level of the group_variable_name that was untreated
@@ -486,7 +493,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         return (fig, ax)
 
 
-class RegressionDiscontinuity(ExperimentalDesign):
+class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     """
     A class to analyse sharp regression discontinuity experiments.
 
@@ -550,6 +557,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.treatment_threshold = treatment_threshold
         self.bandwidth = bandwidth
         self.epsilon = epsilon
+        self._input_validation()
 
         if self.bandwidth is not None:
             fmin = self.treatment_threshold - self.bandwidth
