@@ -33,7 +33,6 @@ from causalpy.data_validation import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import (
-    _is_variable_dummy_coded,
     round_num,
     compute_bayesian_tail_probability,
 )
@@ -530,6 +529,9 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         - pd.DataFrame: A DataFrame representing the power estimation results, including posterior estimations,
         systematic differences, confidence intervals, and posterior MDE for cumulative and mean results.
         """
+        warnings.warn(
+            "The power function is experimental and the API may change in the future."
+        )
         return pd.DataFrame(self._power_estimation(alpha=alpha, correction=correction))
 
     def plot_power(self, alpha: float = 0.05, correction: bool = False) -> plt.Figure:
@@ -612,7 +614,9 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             axs[i].set_xlabel("mu")
             axs[i].set_ylabel("Density")
             axs[i].legend()
-
+        warnings.warn(
+            "The power function is experimental and the API may change in the future."
+        )
         return fig, axs
 
 
