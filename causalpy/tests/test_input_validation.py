@@ -35,6 +35,17 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
+    with pytest.raises(FormulaException):
+        _ = cp.skl_experiments.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_SOMETHING",
+            time_variable_name="t",
+            group_variable_name="group",
+            treated=1,
+            untreated=0,
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
 
 def test_did_validation_post_treatment_data():
     """Test that we get a DataException if do not include post_treatment in the data"""
@@ -54,6 +65,17 @@ def test_did_validation_post_treatment_data():
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    with pytest.raises(DataException):
+        _ = cp.skl_experiments.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            treated=1,
+            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -79,6 +101,17 @@ def test_did_validation_unit_data():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
+    with pytest.raises(DataException):
+        _ = cp.skl_experiments.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            treated=1,
+            untreated=0,
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
 
 def test_did_validation_group_dummy_coded():
     """Test that we get a DataException if the group variable is not dummy coded"""
@@ -101,6 +134,17 @@ def test_did_validation_group_dummy_coded():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
+    with pytest.raises(DataException):
+        _ = cp.skl_experiments.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            treated=1,
+            untreated=0,
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
 
 # Synthetic Control
 
@@ -116,6 +160,16 @@ def test_sc_input_error():
             treatment_time,
             formula="actual ~ 0 + a + b + c + d + e + f + g",
             model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        )
+
+    with pytest.raises(BadIndexException):
+        df = cp.load_data("sc")
+        treatment_time = pd.to_datetime("2016 June 24")
+        _ = cp.skl_experiments.SyntheticControl(
+            df,
+            treatment_time,
+            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            model=cp.skl_models.WeightedProportion(),
         )
 
 
@@ -187,6 +241,16 @@ def test_rd_validation_treated_in_formula():
             treatment_threshold=0.5,
         )
 
+    with pytest.raises(FormulaException):
+        from sklearn.linear_model import LinearRegression
+
+        _ = cp.skl_experiments.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x",
+            model=LinearRegression(),
+            treatment_threshold=0.5,
+        )
+
 
 def test_rd_validation_treated_is_dummy():
     """Test that we get a DataException if treated is not dummy coded"""
@@ -203,6 +267,16 @@ def test_rd_validation_treated_is_dummy():
             df,
             formula="y ~ 1 + x + treated",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=0.5,
+        )
+
+    from sklearn.linear_model import LinearRegression
+
+    with pytest.raises(DataException):
+        _ = cp.skl_experiments.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated",
+            model=LinearRegression(),
             treatment_threshold=0.5,
         )
 
