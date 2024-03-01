@@ -204,13 +204,13 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         # causal impact pre (ie the residuals of the model fit to observed)
         pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
         self.pre_impact = (
-            pre_data - self.pre_pred["posterior_predictive"].mu
+            pre_data - self.pre_pred["posterior_predictive"]["y_hat"]
         ).transpose(..., "obs_ind")
 
         # causal impact post (ie the residuals of the model fit to observed)
         post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
         self.post_impact = (
-            post_data - self.post_pred["posterior_predictive"].mu
+            post_data - self.post_pred["posterior_predictive"]["y_hat"]
         ).transpose(..., "obs_ind")
 
         # cumulative impact post
