@@ -59,10 +59,10 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda activate CausalPy
     ```
 
-    Install the package (in editable mode) and its development dependencies:
+    Install the package (in editable mode) and its development dependencies. The `--no-deps` flag is used to avoid installing the dependencies of `CausalPy` as they are already installed when installing the development dependencies. This can end up interfering with the conda-only install of pymc.
 
     ```bash
-    pip install -e .
+    pip install -e . --no-deps
     ```
 
 	Install development dependencies
