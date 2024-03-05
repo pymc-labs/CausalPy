@@ -903,7 +903,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         )
         return fig, ax
 
-    def summary(self, round_to: None) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
 
