@@ -17,8 +17,10 @@ def test_did_summary():
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    print(type(result._causal_impact_summary_stat()))
-    assert isinstance(result._causal_impact_summary_stat(), str)
+    round_to = None
+    print(type(result._causal_impact_summary_stat(round_to)))
+    print(result._causal_impact_summary_stat(round_to))
+    assert isinstance(result._causal_impact_summary_stat(round_to), str)
 
 
 def test_regression_kink_gradient_change():
