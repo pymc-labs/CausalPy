@@ -18,6 +18,7 @@ def test_did_summary():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     print(type(result._causal_impact_summary_stat()))
+    print(result._causal_impact_summary_stat())
     assert isinstance(result._causal_impact_summary_stat(), str)
 
 
