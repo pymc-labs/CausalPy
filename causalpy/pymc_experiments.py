@@ -709,7 +709,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")
-        print(round_num(self._causal_impact_summary_stat(), round_to))
+        print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
 
@@ -903,7 +903,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         )
         return fig, ax
 
-    def summary(self, round_to: None) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
 
