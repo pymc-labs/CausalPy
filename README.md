@@ -178,7 +178,7 @@ Interrupted time series analysis is appropriate when you have a time series of o
 
 | Frequentist | Bayesian |
 |--|--|
-| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_pymc.svg) |
+| coming soon | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_pymc.svg) |
 
 > The data, pre-treatment model fit, and counterfactual are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
 
