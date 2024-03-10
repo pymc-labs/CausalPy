@@ -363,10 +363,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         """
         assert 0 <= alpha <= 1, "Alpha must be in the range [0, 1]."
 
-        if not isinstance(correction, bool):
-            raise ValueError("Correction must be a boolean value.")
-        elif correction not in [True, False]:
-            raise ValueError("Correction must be either True or False.")
+        if not isinstance(correction, pd.Series) and correction is not False:
+            raise ValueError(
+                "Correction must be a Pandas series (`pd.Series`) or False."
+            )
+        elif isinstance(correction, pd.Series) and set(correction.index) != {
+            "cumulative",
+            "mean",
+        }:
+            raise ValueError(
+                "Correction index must have ['cumulative', 'mean'] values."
+            )
 
         results = {}
         ci = (alpha * 100) / 2
@@ -454,10 +461,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         """
         correction = kwargs.get("correction", False)
 
-        if not isinstance(correction, bool):
-            raise ValueError("Correction must be a boolean value.")
-        elif correction not in [True, False]:
-            raise ValueError("Correction must be either True or False.")
+        if not isinstance(correction, pd.Series) and correction is not False:
+            raise ValueError(
+                "Correction must be a Pandas series (`pd.Series`) or False."
+            )
+        elif isinstance(correction, pd.Series) and set(correction.index) != {
+            "cumulative",
+            "mean",
+        }:
+            raise ValueError(
+                "Correction index must have ['cumulative', 'mean'] values."
+            )
 
         results = {}
         ci = (alpha * 100) / 2
@@ -568,10 +582,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         -------
         - plt.Figure: A matplotlib figure object containing the plots.
         """
-        if not isinstance(correction, bool):
-            raise ValueError("Correction must be a boolean value.")
-        elif correction not in [True, False]:
-            raise ValueError("Correction must be either True or False.")
+        if not isinstance(correction, pd.Series) and correction is not False:
+            raise ValueError(
+                "Correction must be a Pandas series (`pd.Series`) or False."
+            )
+        elif isinstance(correction, pd.Series) and set(correction.index) != {
+            "cumulative",
+            "mean",
+        }:
+            raise ValueError(
+                "Correction index must have ['cumulative', 'mean'] values."
+            )
 
         _estimates = self._power_estimation(alpha=alpha, correction=correction)
 
