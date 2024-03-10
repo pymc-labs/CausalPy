@@ -348,14 +348,26 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         This function calculates posterior estimates, systematic differences, confidence intervals, and
         minimum detectable effects (MDE) for both cumulative and mean measures. It can apply corrections to
         account for systematic differences in the data.
-        Parameters:
-        - alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
+
+        Parameters
+        ----------
+        - alpha (float, optional): The significance level for confidence interval calculations.
+            Should be a fraction between 0 and 1, not a percentage between 0 and 100. Default is 0.05.
         - correction (bool, optional): If True, applies corrections to account for systematic differences in
-        cumulative and mean calculations. Default is False.
-        Returns:
+            cumulative and mean calculations. Default is False.
+
+        Returns
+        -------
         - Dict: A dictionary containing key statistical measures such as posterior estimation,
-        systematic differences, confidence intervals, and posterior MDE for both cumulative and mean results.
+            systematic differences, confidence intervals, and posterior MDE for both cumulative and mean results.
         """
+        assert 0 <= alpha <= 1, "Alpha must be in the range [0, 1]."
+
+        if not isinstance(correction, bool):
+            raise ValueError("Correction must be a boolean value.")
+        elif correction not in [True, False]:
+            raise ValueError("Correction must be either True or False.")
+
         results = {}
         ci = (alpha * 100) / 2
         # Cumulative calculations
@@ -441,6 +453,11 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Bayesian tail probability, posterior estimation, causal effect, and confidence intervals for cumulative and mean results.
         """
         correction = kwargs.get("correction", False)
+
+        if not isinstance(correction, bool):
+            raise ValueError("Correction must be a boolean value.")
+        elif correction not in [True, False]:
+            raise ValueError("Correction must be either True or False.")
 
         results = {}
         ci = (alpha * 100) / 2
@@ -551,6 +568,11 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         -------
         - plt.Figure: A matplotlib figure object containing the plots.
         """
+        if not isinstance(correction, bool):
+            raise ValueError("Correction must be a boolean value.")
+        elif correction not in [True, False]:
+            raise ValueError("Correction must be either True or False.")
+
         _estimates = self._power_estimation(alpha=alpha, correction=correction)
 
         fig, axs = plt.subplots(1, 2, figsize=(20, 6))  # Two subplots side by side
