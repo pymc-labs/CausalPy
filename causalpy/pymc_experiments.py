@@ -363,17 +363,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         """
         assert 0 <= alpha <= 1, "Alpha must be in the range [0, 1]."
 
-        if not isinstance(correction, pd.Series) and correction is not False:
-            raise ValueError(
-                "Correction must be a Pandas series (`pd.Series`) or False."
-            )
-        elif isinstance(correction, pd.Series) and set(correction.index) != {
-            "cumulative",
-            "mean",
-        }:
-            raise ValueError(
-                "Correction index must have ['cumulative', 'mean'] values."
-            )
+        if not isinstance(correction, bool):
+            raise ValueError("Correction must be either True or False.")
 
         results = {}
         ci = (alpha * 100) / 2
@@ -451,7 +442,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         ----------
         - alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
         - kwargs (Dict[str, Any], optional): Additional keyword arguments.
-            - "correction" (bool or Dict[str, float]): If True, applies predefined corrections to cumulative and mean results.
+            - "correction" (bool | Dict[str, float] | pd.Series): If True, applies predefined corrections to cumulative and mean results.
             If a dictionary, the corrections for 'cumulative' and 'mean' should be provided. Default is False.
 
         Returns
@@ -459,19 +450,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         - pd.DataFrame: A DataFrame where each row represents different statistical measures such as
         Bayesian tail probability, posterior estimation, causal effect, and confidence intervals for cumulative and mean results.
         """
-        correction = kwargs.get("correction", False)
 
-        if not isinstance(correction, pd.Series) and correction is not False:
-            raise ValueError(
-                "Correction must be a Pandas series (`pd.Series`) or False."
-            )
-        elif isinstance(correction, pd.Series) and set(correction.index) != {
-            "cumulative",
-            "mean",
-        }:
-            raise ValueError(
-                "Correction index must have ['cumulative', 'mean'] values."
-            )
+        correction = kwargs.get("correction", False)
 
         results = {}
         ci = (alpha * 100) / 2
@@ -493,6 +473,36 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         )
 
         if not isinstance(correction, bool):
+            if not isinstance(correction, (pd.Series, Dict)):
+                raise ValueError(
+                    "Correction must be a Pandas series (`pd.Series`), Dictionary."
+                )
+            elif isinstance(correction, pd.Series):
+                if set(correction.index) != {"cumulative", "mean"}:
+                    raise ValueError(
+                        "Correction index must have ['cumulative', 'mean'] values."
+                    )
+                if not all(
+                    isinstance(value, (float, int)) and not isinstance(value, bool)
+                    for value in correction.values
+                ):
+                    raise ValueError(
+                        "All values in the correction Pandas Series must be integers or floats, and not boolean."
+                    )
+
+            elif isinstance(correction, Dict):
+                if set(correction.keys()) != {"cumulative", "mean"}:
+                    raise ValueError(
+                        "Correction dictionary must have keys ['cumulative', 'mean']."
+                    )
+                if not all(
+                    isinstance(value, (float, int)) and not isinstance(value, bool)
+                    for value in correction.values()
+                ):
+                    raise ValueError(
+                        "All values in the correction dictionary must be integers or floats, and not boolean."
+                    )
+
             _mu_samples_cumulative += correction["cumulative"]
             _mu_samples_mean += correction["mean"]
 
@@ -582,17 +592,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         -------
         - plt.Figure: A matplotlib figure object containing the plots.
         """
-        if not isinstance(correction, pd.Series) and correction is not False:
-            raise ValueError(
-                "Correction must be a Pandas series (`pd.Series`) or False."
-            )
-        elif isinstance(correction, pd.Series) and set(correction.index) != {
-            "cumulative",
-            "mean",
-        }:
-            raise ValueError(
-                "Correction index must have ['cumulative', 'mean'] values."
-            )
+        if not isinstance(correction, bool):
+            raise ValueError("Correction must be either True or False.")
 
         _estimates = self._power_estimation(alpha=alpha, correction=correction)
 
