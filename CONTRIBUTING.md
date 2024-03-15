@@ -62,7 +62,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     Install the package (in editable mode) and its development dependencies:
 
     ```bash
-    pip install -e .
+    pip install --no-deps -e .
     ```
 
 	Install development dependencies
