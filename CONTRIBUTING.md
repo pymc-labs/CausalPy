@@ -72,6 +72,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 	pip install 'causalpy[docs]'
 	pip install 'causalpy[test]'
 	pip install 'causalpy[lint]'
+	pip install 'pylint'
 	```
 
 	It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, run `brew install pandoc`.
