@@ -133,3 +133,11 @@ class IVDataValidator:
                 the assumption of a simple IV experiment.
                 The coefficients should be interpreted appropriately."""
             )
+
+
+class PropensityDataValidator:
+    """Mixin class for validating the input data and model formula for IV experiments."""
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        pass

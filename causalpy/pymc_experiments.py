@@ -30,6 +30,7 @@ from causalpy.data_validation import (
     RegressionKinkDataValidator,
     PrePostNEGDDataValidator,
     IVDataValidator,
+    PropensityDataValidator
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import round_num
@@ -1477,3 +1478,207 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
         beta_params.insert(0, ols_reg.intercept_[0])
         self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
         self.ols_reg = ols_reg
+
+
+class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
+    """
+    A class to analyse inverse propensity weighting experiments.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula for the propensity model
+    :param outcome_variable
+        A string denoting the outcome variable in datq to be reweighted
+    :param weighting_scheme:
+        A string denoting which weighting scheme to use among: 'raw', 'robust', 
+        'doubly robust'
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("rd")
+    >>> seed = 42
+    >>> result = cp.pymc_experiments.InversePropensityWeighting(
+    ...     df,
+    ...     formula="t ~ 1 + x",
+    ...     outcome_variable ="y",
+    ...     weighting_scheme="robust",
+    ...     model=cp.pymc_models.PropensityScore(
+    ...         sample_kwargs={
+    ...             "draws": 100,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         },
+    ...     ),
+    ... )
+    """
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        formula: str,
+        outcome_variable: str,
+        weighting_scheme: str,
+        model=None,
+        **kwargs,
+    ):
+        super().__init__(model=model, **kwargs)
+        self.expt_type = "Inverse Propensity Score Weighting"
+        self.data = data
+        self.formula = formula
+        self.outcome_variable = outcome_variable
+        self.weighting_scheme = weighting_scheme
+        self._input_validation()
+
+        t, X = dmatrices(formula, self.data)
+        self._t_design_info = t.design_info
+        self._t_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.t, self.X = np.asarray(t), np.asarray(X)
+        self.y = self.data[self.outcome_variable]
+
+        COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
+        self.coords = COORDS
+        self.model.fit(
+            X=self.X, t=self.t, coords=COORDS
+        )
+
+    def make_robust_adjustments(self, ps):
+        X = pd.DataFrame(self.X, columns=self.labels)
+        X['ps'] = ps
+        X[self.outcome_variable] = self.y
+        t = self.t.flatten()
+        p_of_t = np.mean(t)
+        X["i_ps"] = np.where(t==1, (p_of_t / X["ps"]), (1 - p_of_t) / (1 - X["ps"]))
+        n_ntrt = X[t == 0].shape[0]
+        n_trt = X[t == 1].shape[0]
+        outcome_trt = X[t == 1][self.outcome_variable]
+        outcome_ntrt = X[t == 0][self.outcome_variable]
+        i_propensity0 = X[t == 0]["i_ps"]
+        i_propensity1 = X[t == 1]["i_ps"]
+        weighted_outcome1 = outcome_trt * i_propensity1
+        weighted_outcome0 = outcome_ntrt * i_propensity0
+        return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
+
+
+    def make_raw_adjustments(self, ps):
+        X = pd.DataFrame(self.X, columns=self.labels)
+        X['ps'] = ps
+        X[self.outcome_variable] = self.y
+        t = self.t.flatten()
+        X["ps"] = np.where(t, X["ps"], 1 - X["ps"])
+        X["i_ps"] = 1 / X["ps"]
+        n_ntrt = n_trt = len(X)
+        outcome_trt = X[t == 1][self.outcome_variable]
+        outcome_ntrt = X[t == 0][self.outcome_variable]
+        i_propensity0 = X[t == 0]["i_ps"]
+        i_propensity1 = X[t == 1]["i_ps"]
+        weighted_outcome1 = outcome_trt * i_propensity1
+        weighted_outcome0 = outcome_ntrt * i_propensity0
+        return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
+    
+
+    def make_overlap_adjustments(self, ps):
+        X = pd.DataFrame(self.X, columns=self.labels)
+        X['ps'] = ps
+        X[self.outcome_variable] = self.y
+        t = self.t.flatten()
+        X["i_ps"] = np.where(t, (1-X["ps"])*t, X["ps"]*(1-t))
+        n_ntrt = (1-t[t == 0])*X[t == 0]['i_ps']
+        n_trt = t[t == 1]*X[t == 1]['i_ps']
+        outcome_trt = X[t == 1][self.outcome_variable]
+        outcome_ntrt = X[t == 0][self.outcome_variable]
+        i_propensity0 = X[t == 0]["i_ps"]
+        i_propensity1 = X[t == 1]["i_ps"]
+        weighted_outcome1 = t[t == 1]*outcome_trt * i_propensity1
+        weighted_outcome0 = (1-t[t == 0])*outcome_ntrt * i_propensity0
+        return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
+
+
+    def make_doubly_robust_adjustment(self, ps):
+        X = pd.DataFrame(self.X, columns=self.labels)
+        X['ps'] = ps
+        t = self.t.flatten()
+        m0 = sk_lin_reg().fit(X[t == 0].astype(float), self.y[t == 0])
+        m1 = sk_lin_reg().fit(X[t == 1].astype(float), self.y[t == 1])
+        m0_pred = m0.predict(X)
+        m1_pred = m1.predict(X)
+        ## Compromise between outcome and treatement assignment model
+        weighted_outcome0 = (1 - t) * (self.y - m0_pred) / (1 - X["ps"]) + m0_pred
+        weighted_outcome1 = t * (self.y - m1_pred) / X["ps"] + m1_pred
+        return weighted_outcome0, weighted_outcome1, None, None
+    
+    def get_ate(self, i, idata, method="doubly_robust"):
+        ### Post processing the sample posterior distribution for propensity scores
+        ### One sample at a time.
+        ps = idata["posterior"]["p"].stack(z=("chain", "draw"))[:, i].values
+        if method == "robust":
+            weighted_outcome_ntrt, weighted_outcome_trt, n_ntrt, n_trt = self.make_robust_adjustments(ps)
+            ntrt = weighted_outcome_ntrt.sum() / n_ntrt
+            trt = weighted_outcome_trt.sum() / n_trt
+        elif method == "raw":
+            weighted_outcome_ntrt, weighted_outcome_trt, n_ntrt, n_trt = self.make_raw_adjustments(ps)
+            ntrt = weighted_outcome_ntrt.sum() / n_ntrt
+            trt = weighted_outcome_trt.sum() / n_trt
+        elif method == "overlap":
+            weighted_outcome_ntrt, weighted_outcome_trt, n_ntrt, n_trt = self.make_overlap_adjustments(ps)
+            ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt) 
+            trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)
+        else:
+            weighted_outcome_ntrt, weighted_outcome_trt, n_ntrt, n_trt = self.make_doubly_robust_adjustment(
+                ps
+            )
+            trt = np.mean(weighted_outcome_trt)
+            ntrt = np.mean(weighted_outcome_ntrt)
+        ate = trt - ntrt
+        return [ate, trt, ntrt]
+    
+    def plot_ATE(self, idata=None, method=None, prop_draws=100, ate_draws=300):
+        if idata is None:
+            idata = self.idata
+        if method is None: 
+            method = self.weighting_scheme
+        
+        def plot_weights(bins, top0, top1, ax):
+            ax.axhline(0, c="gray", linewidth=1)
+            bars0 = ax.bar(bins[:-1] + 0.025, top0, width=0.04, facecolor="red", alpha=0.3)
+            bars1 = ax.bar(bins[:-1] + 0.025, -top1, width=0.04, facecolor="blue", alpha=0.3)
+
+            for bars in (bars0, bars1):
+                for bar in bars:
+                    bar.set_edgecolor("black")
+
+        def make_hists(idata, i, axs):
+            p_i = az.extract(idata)['p'][:, i].values
+            bins = np.arange(0.025, .99, 0.005)
+            top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
+            top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
+            plot_weights(bins, top0, top1, axs[0])
+
+        mosaic = """AAAAAA
+                    BBBBCC"""
+
+        fig, axs = plt.subplot_mosaic(mosaic, figsize=(20, 13))
+        axs = [axs[k] for k in axs.keys()]
+        axs[0].axvline(0.1, linestyle='--', label='Low Extreme Propensity Scores', color='black')
+        axs[0].axvline(0.9, linestyle='--', label='Hi Extreme Propensity Scores', color='black')
+        axs[0].set_title("Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20)
+
+        [make_hists(idata, i, axs) for i in range(prop_draws)];
+        ate_df = pd.DataFrame([self.get_ate(i, idata, method=method) for i in range(ate_draws)], columns=['ATE', 'Y(1)', 'Y(0)'])
+        axs[1].hist(ate_df['Y(1)'], label='E(Y(1))', ec='black', bins=10, alpha=0.8, color='blue');
+        axs[1].hist(ate_df['Y(0)'], label='E(Y(0))', ec='black', bins=10, alpha=0.8, color='red');
+        axs[1].legend()
+        axs[1].set_title(f'The Outcomes \n Under the {method} re-weighting scheme', fontsize=20)
+        axs[2].hist(ate_df['ATE'], label= 'ATE',  ec='black', bins=10, color='slateblue', alpha=0.6);
+        axs[2].axvline(ate_df['ATE'].mean(), label='E(ATE)')
+        axs[2].legend()
+        axs[2].set_title("Average Treatment Effect", fontsize=20);
+
+
+        
+
