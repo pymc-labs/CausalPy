@@ -67,7 +67,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
 	Install development dependencies
 
-	```
+	```bash
 	pip install 'causalpy[dev]'
 	pip install 'causalpy[docs]'
 	pip install 'causalpy[test]'
