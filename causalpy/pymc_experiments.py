@@ -1499,12 +1499,12 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
     Example
     --------
     >>> import causalpy as cp
-    >>> df = cp.load_data("rd")
+    >>> df = cp.load_data("nhefs")
     >>> seed = 42
     >>> result = cp.pymc_experiments.InversePropensityWeighting(
     ...     df,
-    ...     formula="t ~ 1 + x",
-    ...     outcome_variable ="y",
+    ...     formula="trt ~ 1 + age + race",
+    ...     outcome_variable ="outcome",
     ...     weighting_scheme="robust",
     ...     model=cp.pymc_models.PropensityScore(
     ...         sample_kwargs={

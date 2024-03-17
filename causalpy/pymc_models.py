@@ -390,11 +390,11 @@ class PropensityScore(ModelBuilder):
     >>> import numpy as np
     >>> from causalpy.pymc_models import PropensityScore
     >>> df = cp.load_data('nhefs')
-    >>> X = df[["outcome", "trt", "age", "race"]]
-    >>> t = np.asarray(df["trt"]).reshape((df["trt"].shape[0],1))
+    >>> X = df[["age", "race"]]
+    >>> t = np.asarray(df["trt"])
     >>> ps = PropensityScore(sample_kwargs={"progressbar": False})
-    >>> ps.fit(X, y, coords={
-    ...                 'coeffs': ['trt', 'age', 'race'],
+    >>> ps.fit(X, t, coords={
+    ...                 'coeffs': ['age', 'race'],
     ...                 'obs_indx': np.arange(df.shape[0])
     ...                },
     ... )
