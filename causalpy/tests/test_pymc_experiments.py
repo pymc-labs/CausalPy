@@ -50,16 +50,14 @@ def test_inverse_prop_param_recovery():
     df = cp.load_data("nhefs")
     seed = 42
     result = cp.pymc_experiments.InversePropensityWeighting(
-            df,
-            formula="trt ~ 1 + age + race",
-            outcome_variable ="outcome",
-            weighting_scheme="robust",
-            model=cp.pymc_models.PropensityScore(
-                sample_kwargs=sample_kwargs
-            ),
+        df,
+        formula="trt ~ 1 + age + race",
+        outcome_variable="outcome",
+        weighting_scheme="robust",
+        model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
     )
     assert isinstance(result.idata, az.InferenceData)
-    ps = result.idata.posterior['p'].mean(dim=('chain', 'draw'))
+    ps = result.idata.posterior["p"].mean(dim=("chain", "draw"))
     w1, w2, _, _ = result.make_doubly_robust_adjustment(ps)
     assert isinstance(w1, pd.Series)
     assert isinstance(w2, pd.Series)
@@ -72,6 +70,3 @@ def test_inverse_prop_param_recovery():
     w1, w2, n1, n2 = result.make_overlap_adjustments(ps)
     assert isinstance(w1, pd.Series)
     assert isinstance(w2, pd.Series)
-
-
-
