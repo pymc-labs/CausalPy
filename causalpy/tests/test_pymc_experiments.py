@@ -78,7 +78,7 @@ def test_inverse_prop():
     assert isinstance(ate_list, list)
     ate_list = result.get_ate(0, result.idata, method="overlap")
     assert isinstance(ate_list, list)
-    fig = result.plot_ATE()
+    fig = result.plot_ATE(prop_draws=10, ate_draws=10)
     assert isinstance(fig, mpl.figure.Figure)
     fig = result.plot_balance_ecdf("age")
     assert isinstance(fig, mpl.figure.Figure)
