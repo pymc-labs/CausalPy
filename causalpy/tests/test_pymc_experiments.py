@@ -49,6 +49,7 @@ def test_regression_kink_gradient_change():
 
 def test_inverse_prop():
     df = cp.load_data("nhefs")
+    sample_kwargs = {"tune": 100, "draws": 100, "chains": 2, "cores": 2}
     result = cp.pymc_experiments.InversePropensityWeighting(
         df,
         formula="trt ~ 1 + age + race",
