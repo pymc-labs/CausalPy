@@ -142,7 +142,7 @@ class PropensityDataValidator:
         """Validate the input data and model formula for correctness"""
         treatment = self.formula.split("~")[0]
         test = treatment.strip() in self.data.columns
-        test  = test & (self.outcome_variable in self.data.columns)
+        test = test & (self.outcome_variable in self.data.columns)
         if not test:
             raise DataException(
                 f"""
