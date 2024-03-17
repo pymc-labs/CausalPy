@@ -46,7 +46,7 @@ def test_regression_kink_gradient_change():
     assert cp.pymc_experiments.RegressionKink._eval_gradient_change(1, 0, -2, 1) == -1.0
 
 
-def test_inverse_prop_param_recovery():
+def test_inverse_prop():
     df = cp.load_data("nhefs")
     result = cp.pymc_experiments.InversePropensityWeighting(
         df,
@@ -69,3 +69,11 @@ def test_inverse_prop_param_recovery():
     w1, w2, n1, n2 = result.make_overlap_adjustments(ps)
     assert isinstance(w1, pd.Series)
     assert isinstance(w2, pd.Series)
+    ate_list = result.get_ate(0, result.idata)
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="raw")
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="robust")
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="overlap")
+    assert isinstance(ate_list, list)
