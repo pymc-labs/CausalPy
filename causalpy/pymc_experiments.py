@@ -1723,6 +1723,8 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[2].legend()
         axs[2].set_title("Average Treatment Effect", fontsize=20)
 
+        return fig
+
     def weighted_percentile(self, data, weights, perc):
         """
         perc : percentile in [0-1]!
@@ -1792,3 +1794,4 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[0].set_xlabel("Quantiles")
         axs[1].legend()
         axs[0].legend()
+        return fig

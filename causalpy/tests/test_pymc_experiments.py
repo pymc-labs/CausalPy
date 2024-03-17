@@ -2,6 +2,7 @@
 Unit tests for pymc_experiments.py
 """
 import arviz as az
+import matplotlib as mpl
 import pandas as pd
 
 import causalpy as cp
@@ -77,3 +78,7 @@ def test_inverse_prop():
     assert isinstance(ate_list, list)
     ate_list = result.get_ate(0, result.idata, method="overlap")
     assert isinstance(ate_list, list)
+    fig = result.plot_ATE()
+    assert isinstance(fig, mpl.figure.Figure)
+    fig = result.plot_balance_ecdf("age")
+    assert isinstance(fig, mpl.figure.Figure)
