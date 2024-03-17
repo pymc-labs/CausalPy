@@ -3,6 +3,8 @@ Unit tests for pymc_experiments.py
 """
 
 import causalpy as cp
+import arviz as az
+import pandas as pd
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -42,3 +44,34 @@ def test_regression_kink_gradient_change():
         cp.pymc_experiments.RegressionKink._eval_gradient_change(-1, -1, -2, 1) == -1.0
     )
     assert cp.pymc_experiments.RegressionKink._eval_gradient_change(1, 0, -2, 1) == -1.0
+
+
+def test_inverse_prop_param_recovery():
+    df = cp.load_data("nhefs")
+    seed = 42
+    result = cp.pymc_experiments.InversePropensityWeighting(
+            df,
+            formula="trt ~ 1 + age + race",
+            outcome_variable ="outcome",
+            weighting_scheme="robust",
+            model=cp.pymc_models.PropensityScore(
+                sample_kwargs=sample_kwargs
+            ),
+    )
+    assert isinstance(result.idata, az.InferenceData)
+    ps = result.idata.posterior['p'].mean(dim=('chain', 'draw'))
+    w1, w2, _, _ = result.make_doubly_robust_adjustment(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, nw = result.make_raw_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, n2 = result.make_robust_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, n2 = result.make_overlap_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+
+
+
