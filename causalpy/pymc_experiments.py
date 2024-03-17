@@ -1680,5 +1680,52 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[2].set_title("Average Treatment Effect", fontsize=20);
 
 
+    def weighted_percentile(self, data, weights, perc):
+        """
+        perc : percentile in [0-1]!
+        """
+        ix = np.argsort(data)
+        data = data[ix] # sort data
+        weights = weights[ix] # sort weights
+        cdf = (np.cumsum(weights) - 0.5 * weights) / np.sum(weights) # 'like' a CDF function
+        return np.interp(perc, cdf, data)
+    
+    def plot_balance_ecdf(self, covariate, idata=None, weighting_scheme=None):
+        if idata is None:
+            idata = self.idata
+        if weighting_scheme is None: 
+            weighting_scheme = self.weighting_scheme
+        
+        ps = az.extract(idata)['p'].mean(dim='sample').values
+        X = pd.DataFrame(self.X, columns=self.labels)
+        X['ps'] = ps
+        t = self.t.flatten()
+        if weighting_scheme == 'raw': 
+            w1 = 1 / ps[t == 1]
+            w0 = 1 / (1-ps[t == 0])
+        elif weighting_scheme == 'robust':
+            p_of_t = np.mean(t)
+            w1 = p_of_t /  (ps[t == 1]) 
+            w0 = (1 - p_of_t) / (1 - ps[t == 0])
+        else:
+            w1 = (1-ps[t == 1])*t[t==1]
+            w0 = (ps[t == 0]*(1-t[t==0]))
+        fig, axs = plt.subplots(1, 2, figsize=(20, 6))
+        raw_trt = [self.weighted_percentile(X[t == 1][covariate].values, np.ones(len(X[t == 1])), p) for p in np.linspace(0, 1, 1000)]
+        raw_ntrt = [self.weighted_percentile(X[t == 0][covariate].values, np.ones(len(X[t == 0])), p) for p in np.linspace(0, 1, 1000)]
+        w_trt = [self.weighted_percentile(X[t == 1][covariate].values, w1, p) for p in np.linspace(0, 1, 1000)]
+        w_ntrt = [self.weighted_percentile(X[t == 0][covariate].values, w0, p) for p in np.linspace(0, 1, 1000)]
+        axs[0].plot(np.linspace(0, 1, 1000), raw_trt, color='blue', label='Raw Treated')
+        axs[0].plot(np.linspace(0, 1, 1000), raw_ntrt, color='red', label='Raw Control')
+        axs[0].set_title(f"ECDF \n Raw: {covariate}")
+        axs[1].set_title(f"ECDF \n Weighted {weighting_scheme} adjustment for {covariate}")
+        axs[1].plot(np.linspace(0, 1, 1000), w_trt, color='blue', label='Reweighted Treated')
+        axs[1].plot(np.linspace(0, 1, 1000), w_ntrt, color='red', label='Reweighted Control')
+        axs[1].set_xlabel("Quantiles")
+        axs[0].set_xlabel("Quantiles")
+        axs[1].legend()
+        axs[0].legend()
+
+
         
 

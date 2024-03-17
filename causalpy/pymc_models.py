@@ -374,7 +374,7 @@ class PropensityScore(ModelBuilder):
     Defines the PyMC model
 
     .. math::
-        \\beta &\sim \mathrm{Normal}(0, 50)
+        \\beta &\sim \mathrm{Normal}(0, 1)
 
         \sigma &\sim \mathrm{HalfNormal}(1)
 
@@ -389,13 +389,13 @@ class PropensityScore(ModelBuilder):
     >>> import causalpy as cp
     >>> import numpy as np
     >>> from causalpy.pymc_models import PropensityScore
-    >>> rd = cp.load_data("rd")
-    >>> X = rd[["x", "treated"]]
-    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
+    >>> df = cp.load_data('nhefs')
+    >>> X = df[["outcome", "trt", "age", "race"]]
+    >>> t = np.asarray(df["trt"]).reshape((df["trt"].shape[0],1))
     >>> ps = PropensityScore(sample_kwargs={"progressbar": False})
     >>> ps.fit(X, y, coords={
-    ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                 'coeffs': ['trt', 'age', 'race'],
+    ...                 'obs_indx': np.arange(df.shape[0])
     ...                },
     ... )
     Inference...
