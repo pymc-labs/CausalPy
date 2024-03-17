@@ -410,7 +410,7 @@ class PropensityScore(ModelBuilder):
             b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
             mu = pm.math.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
-            t_pred = pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
+            pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
     def fit(self, X, t, coords):
         """Draw samples from posterior, prior predictive, and posterior predictive
