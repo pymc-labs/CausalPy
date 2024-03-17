@@ -1,10 +1,10 @@
 """
 Unit tests for pymc_experiments.py
 """
-
-import causalpy as cp
 import arviz as az
 import pandas as pd
+
+import causalpy as cp
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -48,7 +48,6 @@ def test_regression_kink_gradient_change():
 
 def test_inverse_prop_param_recovery():
     df = cp.load_data("nhefs")
-    seed = 42
     result = cp.pymc_experiments.InversePropensityWeighting(
         df,
         formula="trt ~ 1 + age + race",
