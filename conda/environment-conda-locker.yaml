@@ -1,0 +1,6 @@
+name: conda-lock-env
+channels:
+- conda-forge
+dependencies:
+- mamba
+- conda-lock
