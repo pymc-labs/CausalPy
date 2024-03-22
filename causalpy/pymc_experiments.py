@@ -1656,25 +1656,57 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         if method is None:
             method = self.weighting_scheme
 
-        def plot_weights(bins, top0, top1, ax):
+        def plot_weights(bins, top0, top1, ax, color="population"):
+            colors_dict = {
+                "population": ["red", "blue", 0.9],
+                "pseudo_population": ["purple", "purple", 0.1],
+            }
+
             ax.axhline(0, c="gray", linewidth=1)
             bars0 = ax.bar(
-                bins[:-1] + 0.025, top0, width=0.04, facecolor="red", alpha=0.3
+                bins[:-1] + 0.025,
+                top0,
+                width=0.04,
+                facecolor=colors_dict[color][0],
+                alpha=colors_dict[color][2],
             )
             bars1 = ax.bar(
-                bins[:-1] + 0.025, -top1, width=0.04, facecolor="blue", alpha=0.3
+                bins[:-1] + 0.025,
+                -top1,
+                width=0.04,
+                facecolor=colors_dict[color][1],
+                alpha=colors_dict[color][2],
             )
 
             for bars in (bars0, bars1):
                 for bar in bars:
                     bar.set_edgecolor("black")
 
-        def make_hists(idata, i, axs):
+        def make_hists(idata, i, axs, method=method):
             p_i = az.extract(idata)["p"][:, i].values
+            if method == "raw":
+                weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
+                weight1 = 1 / (p_i[self.t.flatten() == 1])
+            elif method == "overlap":
+                t = self.t.flatten()
+                weight1 = (1 - p_i[t == 1]) * t[t == 1]
+                weight0 = p_i[t == 0] * (1 - t[t == 0])
+            else:
+                t = self.t.flatten()
+                p_of_t = np.mean(t)
+                weight1 = p_of_t / p_i[t == 1]
+                weight0 = (1 - p_of_t) / (1 - p_i[t == 0])
             bins = np.arange(0.025, 0.99, 0.005)
             top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
             top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
             plot_weights(bins, top0, top1, axs[0])
+            top0, _ = np.histogram(
+                p_i[self.t.flatten() == 0], bins=bins, weights=weight0
+            )
+            top1, _ = np.histogram(
+                p_i[self.t.flatten() == 1], bins=bins, weights=weight1
+            )
+            plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
 
         mosaic = """AAAAAA
                     BBBBCC"""
@@ -1690,6 +1722,7 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[0].set_title(
             "Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20
         )
+        axs[0].legend()
 
         [make_hists(idata, i, axs) for i in range(prop_draws)]
         ate_df = pd.DataFrame(
