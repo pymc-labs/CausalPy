@@ -22,6 +22,8 @@ import seaborn as sns
 import xarray as xr
 from patsy import build_design_matrices, dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
+from matplotlib.lines import Line2D
+
 
 from causalpy.data_validation import (
     PrePostFitDataValidator,
@@ -1658,7 +1660,7 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
 
         def plot_weights(bins, top0, top1, ax, color="population"):
             colors_dict = {
-                "population": ["red", "blue", 0.9],
+                "population": ["lightcoral", "skyblue", 0.6],
                 "pseudo_population": ["purple", "purple", 0.1],
             }
 
@@ -1722,7 +1724,17 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[0].set_title(
             "Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20
         )
-        axs[0].legend()
+        custom_lines = [
+            Line2D([0], [0], color="skyblue", lw=2),
+            Line2D([0], [0], color="lightcoral", lw=2),
+            Line2D([0], [0], color="purple", lw=2),
+            Line2D([0], [0], color="black", lw=2, linestyle="--"),
+        ]
+
+        axs[0].legend(
+            custom_lines,
+            ["Control PS", "Treatment PS", "Weighted Pseudo Population", "Extreme PS"],
+        )
 
         [make_hists(idata, i, axs) for i in range(prop_draws)]
         ate_df = pd.DataFrame(
@@ -1734,11 +1746,16 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             label="E(Y(1))",
             ec="black",
             bins=10,
-            alpha=0.8,
-            color="blue",
+            alpha=0.6,
+            color="skyblue",
         )
         axs[1].hist(
-            ate_df["Y(0)"], label="E(Y(0))", ec="black", bins=10, alpha=0.8, color="red"
+            ate_df["Y(0)"],
+            label="E(Y(0))",
+            ec="black",
+            bins=10,
+            alpha=0.6,
+            color="lightcoral",
         )
         axs[1].legend()
         axs[1].set_title(
@@ -1811,17 +1828,24 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             self.weighted_percentile(X[t == 0][covariate].values, w0, p)
             for p in np.linspace(0, 1, 1000)
         ]
-        axs[0].plot(np.linspace(0, 1, 1000), raw_trt, color="blue", label="Raw Treated")
-        axs[0].plot(np.linspace(0, 1, 1000), raw_ntrt, color="red", label="Raw Control")
+        axs[0].plot(
+            np.linspace(0, 1, 1000), raw_trt, color="skyblue", label="Raw Treated"
+        )
+        axs[0].plot(
+            np.linspace(0, 1, 1000), raw_ntrt, color="lightcoral", label="Raw Control"
+        )
         axs[0].set_title(f"ECDF \n Raw: {covariate}")
         axs[1].set_title(
             f"ECDF \n Weighted {weighting_scheme} adjustment for {covariate}"
         )
         axs[1].plot(
-            np.linspace(0, 1, 1000), w_trt, color="blue", label="Reweighted Treated"
+            np.linspace(0, 1, 1000), w_trt, color="skyblue", label="Reweighted Treated"
         )
         axs[1].plot(
-            np.linspace(0, 1, 1000), w_ntrt, color="red", label="Reweighted Control"
+            np.linspace(0, 1, 1000),
+            w_ntrt,
+            color="lightcoral",
+            label="Reweighted Control",
         )
         axs[1].set_xlabel("Quantiles")
         axs[0].set_xlabel("Quantiles")
