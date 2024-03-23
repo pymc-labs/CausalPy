@@ -1660,8 +1660,8 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
 
         def plot_weights(bins, top0, top1, ax, color="population"):
             colors_dict = {
-                "population": ["lightcoral", "skyblue", 0.6],
-                "pseudo_population": ["purple", "purple", 0.1],
+                "population": ["orange", "skyblue", 0.6],
+                "pseudo_population": ["grey", "grey", 0.1],
             }
 
             ax.axhline(0, c="gray", linewidth=1)
@@ -1724,16 +1724,17 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[0].set_title(
             "Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20
         )
+        axs[0].set_xlabel("Propensity Scores")
         custom_lines = [
             Line2D([0], [0], color="skyblue", lw=2),
-            Line2D([0], [0], color="lightcoral", lw=2),
-            Line2D([0], [0], color="purple", lw=2),
+            Line2D([0], [0], color="orange", lw=2),
+            Line2D([0], [0], color="grey", lw=2),
             Line2D([0], [0], color="black", lw=2, linestyle="--"),
         ]
 
         axs[0].legend(
             custom_lines,
-            ["Control PS", "Treatment PS", "Weighted Pseudo Population", "Extreme PS"],
+            ["Treatment PS", "Control PS", "Weighted Pseudo Population", "Extreme PS"],
         )
 
         [make_hists(idata, i, axs) for i in range(prop_draws)]
@@ -1755,9 +1756,10 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             ec="black",
             bins=10,
             alpha=0.6,
-            color="lightcoral",
+            color="orange",
         )
         axs[1].legend()
+        axs[1].set_xlabel(self.outcome_variable)
         axs[1].set_title(
             f"The Outcomes \n Under the {method} re-weighting scheme", fontsize=20
         )
@@ -1766,9 +1768,10 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             label="ATE",
             ec="black",
             bins=10,
-            color="slateblue",
+            color="grey",
             alpha=0.6,
         )
+        axs[2].set_xlabel("Difference")
         axs[2].axvline(ate_df["ATE"].mean(), label="E(ATE)")
         axs[2].legend()
         axs[2].set_title("Average Treatment Effect", fontsize=20)
@@ -1832,7 +1835,7 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             np.linspace(0, 1, 1000), raw_trt, color="skyblue", label="Raw Treated"
         )
         axs[0].plot(
-            np.linspace(0, 1, 1000), raw_ntrt, color="lightcoral", label="Raw Control"
+            np.linspace(0, 1, 1000), raw_ntrt, color="orange", label="Raw Control"
         )
         axs[0].set_title(f"ECDF \n Raw: {covariate}")
         axs[1].set_title(
@@ -1844,7 +1847,7 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         axs[1].plot(
             np.linspace(0, 1, 1000),
             w_ntrt,
-            color="lightcoral",
+            color="orange",
             label="Reweighted Control",
         )
         axs[1].set_xlabel("Quantiles")
