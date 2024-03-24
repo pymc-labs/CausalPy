@@ -475,7 +475,10 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         )
         ax.annotate(
             "causal\nimpact",
-            xy=(1.05, np.mean([self.y_pred_counterfactual, self.y_pred_treatment[1]])),
+            xy=(
+                1.05,
+                np.mean([self.y_pred_counterfactual[0], self.y_pred_treatment[1]]),
+            ),
             xycoords="data",
             xytext=(5, 0),
             textcoords="offset points",
