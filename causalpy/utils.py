@@ -3,6 +3,7 @@ Utility functions
 """
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
@@ -48,3 +49,29 @@ def _format_sig_figs(value, default=None):
     if value == 0:
         return 1
     return max(int(np.log10(np.abs(value))) + 1, default)
+
+
+def compute_bayesian_tail_probability(posterior, x) -> float:
+    """
+    Calculate the probability of a given value being in a distribution defined by the posterior,
+
+    Args:
+    - data: a list or array-like object containing the data to define the distribution
+    - x: a numeric value for which to calculate the probability of being in the distribution
+
+    Returns:
+    - prob: a numeric value representing the probability of x being in the distribution
+    """
+    lower_bound, upper_bound = min(posterior), max(posterior)
+    mean, std = np.mean(posterior), np.std(posterior)
+
+    cdf_lower = norm.cdf(lower_bound, mean, std)
+    cdf_upper = 1 - norm.cdf(upper_bound, mean, std)
+    cdf_x = norm.cdf(x, mean, std)
+
+    if cdf_x <= 0.5:
+        probability = 2 * (cdf_x - cdf_lower) / (1 - cdf_lower - cdf_upper)
+    else:
+        probability = 2 * (1 - cdf_x + cdf_lower) / (1 - cdf_lower - cdf_upper)
+
+    return abs(probability)
