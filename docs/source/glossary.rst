@@ -93,6 +93,9 @@ Glossary
    2SLS
       An estimation technique for estimating the parameters of an IV regression. It takes its name from the fact that it uses two OLS regressions - a first and second stage.
 
+   Propensity scores
+      An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
+
 
 References
 ----------

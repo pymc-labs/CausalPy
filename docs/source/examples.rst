@@ -68,3 +68,11 @@ Instrumental Variables Regression
    :titlesonly:
 
    notebooks/iv_pymc.ipynb
+
+Inverse Propensity Score Weighting
+=================================
+
+.. toctree::
+   :titlesonly:
+
+   notebooks/inv_prop_pymc.ipynb
