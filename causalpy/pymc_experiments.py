@@ -345,7 +345,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     def _power_estimation(self, alpha: float = 0.05, correction: bool = False) -> Dict:
         """
         Estimate the statistical power of an intervention based on cumulative and mean results.
-        This function calculates posterior estimates, systematic differences, confidence intervals, and
+        This function calculates posterior estimates, systematic differences, credible intervals, and
         minimum detectable effects (MDE) for both cumulative and mean measures. It can apply corrections to
         account for systematic differences in the data.
 
@@ -359,7 +359,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Returns
         -------
         - Dict: A dictionary containing key statistical measures such as posterior estimation,
-            systematic differences, confidence intervals, and posterior MDE for both cumulative and mean results.
+            systematic differences, credible intervals, and posterior MDE for both cumulative and mean results.
         """
         assert 0 <= alpha <= 1, "Alpha must be in the range [0, 1]."
 
@@ -435,20 +435,20 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Calculate and summarize the intervention analysis results in a DataFrame format.
 
         This function performs cumulative and mean calculations on the posterior predictive distributions,
-        computes Bayesian tail probabilities, posterior estimations, causal effects, and confidence intervals.
+        computes Bayesian tail probabilities, posterior estimations, causal effects, and credible intervals.
         It optionally applies corrections to the cumulative and mean calculations.
 
         Parameters
         ----------
-        - alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
-        - kwargs (Dict[str, Any], optional): Additional keyword arguments.
+        alpha (float, optional): The significance level for confidence interval calculations. Default is 0.05.
+        kwargs (Dict[str, Any], optional): Additional keyword arguments.
             - "correction" (bool | Dict[str, float] | pd.Series): If True, applies predefined corrections to cumulative and mean results.
             If a dictionary, the corrections for 'cumulative' and 'mean' should be provided. Default is False.
 
         Returns
         -------
         - pd.DataFrame: A DataFrame where each row represents different statistical measures such as
-        Bayesian tail probability, posterior estimation, causal effect, and confidence intervals for cumulative and mean results.
+        Bayesian tail probability, posterior estimation, causal effect, and credible intervals for cumulative and mean results.
         """
 
         correction = kwargs.get("correction", False)
@@ -534,7 +534,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             "mean": mean_results - results["posterior_estimation"]["mean"],
         }
 
-        # Confidence Intervals
+        # credible intervals
         results["ci"] = {
             "cumulative": [
                 np.percentile(_mu_samples_cumulative, ci),
@@ -568,7 +568,11 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Returns
         -------
         - pd.DataFrame: A DataFrame representing the power estimation results, including posterior estimations,
-        systematic differences, confidence intervals, and posterior MDE for cumulative and mean results.
+        systematic differences, credible intervals, and posterior MDE for cumulative and mean results.
+
+        References
+        ----------
+        https://causalpy.readthedocs.io/en/latest/notebooks/sc_power_analysis.html
         """
         warnings.warn(
             "The power function is experimental and the API may change in the future."
@@ -580,7 +584,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Generate and return a figure containing plots that visualize power estimation results.
 
         This function creates a two-panel plot (for mean and cumulative measures) to visualize the posterior distributions
-        along with the confidence intervals, real mean, and posterior mean values. It allows for adjustments based on
+        along with the credible intervals, real mean, and posterior mean values. It allows for adjustments based on
         systematic differences if the correction is applied.
 
         Parameters
@@ -591,6 +595,10 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Returns
         -------
         - plt.Figure: A matplotlib figure object containing the plots.
+
+        References
+        ----------
+        https://causalpy.readthedocs.io/en/latest/notebooks/sc_power_analysis.html
         """
         if not isinstance(correction, bool):
             raise ValueError("Correction must be either True or False.")
