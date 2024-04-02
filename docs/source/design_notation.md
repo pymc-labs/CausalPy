@@ -1,4 +1,4 @@
-# Experimental design notation
+# Quasi-experimental design notation
 
 This page provides a concise summary of the tabular notation used by Shadish Cook & Campbell (2002) and Reichardt (2009). This notation provides a compact description of various experimental designs.  While it is possible to describe randomised designs using this notation, we focus purely on quasi-experimental designs here, with non-random allocation (abbreviated as `NR`). Observations are denoted by $O$. Time proceeds from left to right, so observations made through time are labelled as $O_1$, $O_2$, etc. The treatment is denoted by `X`. Rows represent different groups of units. Remember, a unit is a person, place, or thing that is the subject of the study.
 
