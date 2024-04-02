@@ -207,13 +207,13 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         # causal impact pre (ie the residuals of the model fit to observed)
         pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
         self.pre_impact = (
-            pre_data - self.pre_pred["posterior_predictive"].mu
+            pre_data - self.pre_pred["posterior_predictive"]["y_hat"]
         ).transpose(..., "obs_ind")
 
         # causal impact post (ie the residuals of the model fit to observed)
         post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
         self.post_impact = (
-            post_data - self.post_pred["posterior_predictive"].mu
+            post_data - self.post_pred["posterior_predictive"]["y_hat"]
         ).transpose(..., "obs_ind")
 
         # cumulative impact post
@@ -1047,7 +1047,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")
-        print(round_num(self._causal_impact_summary_stat(), round_to))
+        print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
 
@@ -1241,7 +1241,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         )
         return fig, ax
 
-    def summary(self, round_to: None) -> None:
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
 
