@@ -347,7 +347,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         Estimate the statistical power of an intervention based on cumulative and mean results.
         This function calculates posterior estimates, systematic differences, credible intervals, and
         minimum detectable effects (MDE) for both cumulative and mean measures. It can apply corrections to
-        account for systematic differences in the data.
+        account for systematic differences in the data if the mean pre-intervention is consider far from the
+        real mean.
 
         Parameters
         ----------
