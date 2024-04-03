@@ -48,7 +48,7 @@ Glossary
 
    Non-equivalent group designs
    NEGD
-      A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
+      A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design). This can be problematic when assigning causal influence of the treatment - differences in outcomes between groups could be due to the treatment or due to differences in the group attributes themselves.
 
    One-group posttest-only design
       A design where a single group is exposed to a treatment and assessed on an outcome measure. There is no pretest measure or comparison group.

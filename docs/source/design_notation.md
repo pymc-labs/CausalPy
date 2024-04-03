@@ -22,9 +22,11 @@ This would allow us to estimate how the group was changing over time before the 
 
 ## Nonequivalent group designs
 
-In randomized experiments, with large enough groups, the randomization process should ensure that the treatment and control groups are equivalent. However, in quasi-experimental designs, with non-random (`NR`) allocation, we could expect there to be differences between the treatment and control groups. This poses some challenges in making strong causal claims about the impact of the treatment.
+In randomized experiments, with large enough groups, the randomization process should ensure that the treatment and control groups are approximately equivalent in terms of their attributes. This is positive for causal inference as we can be more sure that differences between control and test groups are due to treatment exposure, not because of differences in attributes of the groups.
 
-For example, in the simplest {term}`nonequivalent group design<NEGD>`, we have two groups, one treated and one not treated, and just one posttest. See p114 of {cite:t}`reichardt2019quasi`.
+However, in quasi-experimental designs, with non-random (`NR`) allocation, we could expect there to be differences between the treatment and control groups' attributes. This poses some challenges in making strong causal claims about the impact of the treatment - we can't be sure that differences between the groups at the posttest are due to the treatment, or due to pre-existing differences between the groups.
+
+In the simplest {term}`nonequivalent group design<NEGD>`, we have two groups, one treated and one not treated, and just one posttest. See p114 of {cite:t}`reichardt2019quasi`.
 
 |     |   |    |
 |-----|---|----|
