@@ -43,7 +43,7 @@ This limitation can be addressed by adding a pretest measure. See p115 of {cite:
 | NR: | $O_1$ |   | $O_2$ |
 
 Non-equivalent group designs like this, with a pretest and a posttest measure could be analysed in a number of ways:
-1. **{term}`ANCOVA`:** Here, the group would be a categorical predictor, the pretest measure would be a covariate, and the posttest measure would be the outcome.
+1. **{term}`ANCOVA`:** Here, the group would be a categorical predictor (e.g. treated/untreated), the pretest measure would be a covariate (though there could be more than one), and the posttest measure would be the outcome.
 2. **{term}`Difference in differences`:** We can apply linear modeling approaches such as `y ~ group + time + group:time` to estimate the treatment effect. Here, `y` is the outcome measure, `group` is a binary variable indicating treatment or control group, and `time` is a binary variable indicating pretest or posttest. Note that this approach has a strong assumption of [parallel trends](https://en.wikipedia.org/wiki/Difference_in_differences#Assumptions) - that the treatment and control groups would have changed in the same way in the absence of the treatment.
 
 A limitation of the nonequivalent group designs with single pre and posttest measures is that we don't know how the groups were changing over time before the treatment was introduced. This can be addressed by adding multiple pretest measures and can help in assessing if the parallel trends assumption is reasonable. See p154 of {cite:t}`reichardt2019quasi`.
