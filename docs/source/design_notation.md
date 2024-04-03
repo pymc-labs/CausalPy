@@ -71,7 +71,7 @@ The comparative interrupted time series design incorporates aspects of **interru
 | NR: | $O_1$ | $O_2$ | $O_3$ | $O_4$ |   | $O_5$ | $O_6$ | $O_7$ | $O_8$ |
 
 
-Because this design is very similar to the nonequivalent group design, simply with multiple pre and ppost test measures, it is well-suited to analysis under the difference-in-differences approach.
+Because this design is very similar to the nonequivalent group design, simply with multiple pre and post test measures, it is well-suited to analysis under the difference-in-differences approach.
 
 However, if we have many untreated units and one treated unit, then this design could be analysed with the synthetic control approach.
 
