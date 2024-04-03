@@ -18,6 +18,9 @@ Glossary
    Change score analysis
       A statistical procedure where the outcome variable is the difference between the posttest and protest scores.
 
+   Causal impact
+      An umbrella term for the estimated effect of a treatment on an outcome.
+
    Comparative interrupted time-series
    CITS
       An interrupted time series design with added comparison time series observations.
@@ -35,7 +38,6 @@ Glossary
    Interrupted time series design
    ITS
       A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
-
 
    Instrumental Variable regression
    IV
@@ -67,6 +69,7 @@ Glossary
       An emprical comparison used to estimate the effects of treatments where units are assigned to treatment conditions randomly.
 
    Regression discontinuity design
+   RDD
       A quasi–experimental comparison to estimate a treatment effect where units are assigned to treatment conditions based on a cut-off score on a quantitative assignment variable (aka running variable).
 
    Regression kink design
@@ -87,7 +90,6 @@ Glossary
 
    Wilkinson notation
       A notation for describing statistical models :footcite:p:`wilkinson1973symbolic`.
-
 
    Two Stage Least Squares
    2SLS
