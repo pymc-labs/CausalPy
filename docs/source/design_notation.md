@@ -10,7 +10,7 @@ One of the simplest designs is the pretest-posttest design. Here we have one row
 |----|---|----|
 $O_1$ | X | $O_2$ |
 
-Informally, if we think about drawing conclusions about the {term}`causal impact` of the treatment based on the change from $O_1$ to $O_2$, we might say that the treatment caused the change. However, this is a tenuous conclusion because we have no way of knowing what would have happened in the absence of the treatment.
+Informally, if we think about drawing conclusions about the {term}`causal impact` of the treatment based on the change from $O_1$ to $O_2$, we might say that the treatment caused the change. However, this is a tenuous conclusion because we have no way of knowing what would have happened in the ({term}`counterfactual`) absence of the treatment.
 
 A variation of this design which may (slightly) improve this situation from the perspective of making causal claims, would be to take multiple pretest measures. This is shown below, see p107 of {cite:t}`reichardt2019quasi`.
 
@@ -73,7 +73,7 @@ The {term}`comparative interrupted time-series<CITS>` design incorporates aspect
 | NR: | $O_1$ | $O_2$ | $O_3$ | $O_4$ |   | $O_5$ | $O_6$ | $O_7$ | $O_8$ |
 
 
-Because this design is very similar to the nonequivalent group design, simply with multiple pre and post test measures, it is well-suited to analysis under the difference-in-differences approach.
+Because this design is very similar to the nonequivalent group design, simply with multiple pre and posttest measures, it is well-suited to analysis under the difference-in-differences approach.
 
 However, if we have many untreated units and one treated unit, then this design could be analysed with the {term}`synthetic control` approach.
 
