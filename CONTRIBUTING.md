@@ -47,7 +47,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create a new environment using Python >=3.8, for example 3.11
+1. Create a new environment using Python >=3.10, for example 3.11
 
     ```bash
     conda create --name CausalPy python=3.11
