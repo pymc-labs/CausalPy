@@ -138,9 +138,10 @@ Documentation outline
 =====================
 
 .. toctree::
-   :titlesonly:
+   :caption: Knowledge Base
 
-   glossary
+   design_notation.md
+   glossary.rst
 
 .. toctree::
    :caption: Examples
