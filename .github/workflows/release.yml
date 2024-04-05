@@ -17,7 +17,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.8
+          python-version: 3.11
       - name: Build the sdist and the wheel
         run: |
           pip install build
@@ -62,7 +62,7 @@ jobs:
           repository_url: https://test.pypi.org/legacy/
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.8
+          python-version: 3.11
       - name: Test pip install from test.pypi
         run: |
           # Give time to test.pypi to update its index. If we don't wait,
