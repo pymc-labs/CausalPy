@@ -75,6 +75,9 @@ Glossary
    Regression kink design
       A quasi-experimental research design that estimates treatment effects by analyzing the impact of a treatment or intervention precisely at a defined threshold or "kink" point in a quantitative assignment variable (running variable). Unlike traditional regression discontinuity designs, regression kink design looks for a change in the slope of an outcome variable at the kink, instead of a discontinuity. This is useful when the assignment variable is not discrete, jumping from 0 to 1 at a threshold. Instead, regression kink designs are appropriate when there is a change in the first derivative of the assignment function at the kink point.
 
+   Running variable
+      In regression discontinuity designs, the running variable is the variable that determines the assignment of units to treatment or control conditions. This is typically a continuous variable. Examples could include a test score, age, income, or spatial location. But the running variable would not be time, which is the case in interrupted time series designs.
+
    Sharp regression discontinuity design
       A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function.
 

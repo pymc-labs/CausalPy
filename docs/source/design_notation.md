@@ -18,7 +18,7 @@ A variation of this design which may (slightly) improve this situation from the 
 |----|--|---|----|
 $O_1$ | $O_2$ | X | $O_3$ |
 
-This would allow us to estimate how the group was changing over time before the treatment was introduced. This could be used to make a stronger causal claim about the impact of the treatment.
+This would allow us to estimate how the group was changing over time before the treatment was introduced. This could be used to make a stronger causal claim about the impact of the treatment. We could use {term}`interrupted time series<ITS>` analysis to help here.
 
 ## Nonequivalent group designs
 
@@ -63,6 +63,8 @@ While there is no control group, the {term}`interrupted time series design` is a
 |-----|----|---|----|---|----|----|----|----|
 | $O_1$ | $O_2$ | $O_3$ | $O_4$ | X | $O_5$ | $O_6$ | $O_7$ | $O_8$ |
 
+You can see that this is an example of a pretest-posttest design with multiple pre and posttest measures.
+
 ## Comparative interrupted time series designs
 
 The {term}`comparative interrupted time-series<CITS>` design incorporates aspects of **interrupted time series** (with only a treatment group), and **nonequivalent group designs** (with a treatment and control group). This design can be used to estimate the causal impact of a treatment by comparing the trajectory of the outcome variable before and after the treatment in the treatment group, and comparing this to the trajectory of the outcome variable in the control group. See p226 of {cite:t}`reichardt2019quasi`.
@@ -79,7 +81,7 @@ However, if we have many untreated units and one treated unit, then this design 
 
 ## Regression discontinuity designs
 
-The design notation for {term}`regression discontinuity designs<RDD>` are different from the others and take a bit of getting used to. We have two groups, but allocation to the groups are determined by a units' relation to a cutoff point `C` along a running variable. Also, $O_1$ now represents the value of the running variable, and $O_2$ represents the outcome variable. See p169 of {cite:t}`reichardt2019quasi`. This will make more sense if you consider the design notation alongside one of the example notebooks.
+The design notation for {term}`regression discontinuity designs<RDD>` are different from the others and take a bit of getting used to. We have two groups, but allocation to the groups are determined by a units' relation to a cutoff point `C` along a {term}`running variable`. Also, $O_1$ now represents the value of the running variable, and $O_2$ represents the outcome variable. See p169 of {cite:t}`reichardt2019quasi`. This will make more sense if you consider the design notation alongside one of the example notebooks.
 
 |     |    |   |    |
 |-----|----|---|----|
