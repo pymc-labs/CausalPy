@@ -6,6 +6,7 @@ on:
     branches: [main]
   release:
     types: [published]
+  workflow_dispatch: # This line enables manual triggers without inputs
 
 jobs:
   build:
