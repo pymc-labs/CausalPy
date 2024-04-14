@@ -13,12 +13,12 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.2.2"
+version = "0.2.3"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 # This field lists other packages that your project depends on to run.
 # Any package you put here will be installed by pip when your project is
@@ -115,5 +115,5 @@ badge-format = "svg"
 
 [tool.ruff.lint]
 extend-select = [
-  "I",  # isort
+    "I", # isort
 ]
