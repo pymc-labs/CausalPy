@@ -1494,7 +1494,9 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         A string denoting the outcome variable in datq to be reweighted
     :param weighting_scheme:
         A string denoting which weighting scheme to use among: 'raw', 'robust',
-        'doubly robust'
+        'doubly robust' or 'overlap'. See Aronow and Miller "Foundations
+        of Agnostic Statistics" for discussion and computation of these
+        weighting schemes. 
     :param model:
         A PyMC model
 
@@ -1548,6 +1550,9 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         self.model.fit(X=self.X, t=self.t, coords=COORDS)
 
     def make_robust_adjustments(self, ps):
+        """ This estimator is discussed in Aronow
+          and Miller's book as being related to the
+          Horvitz Thompson method """
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -1565,6 +1570,9 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
     def make_raw_adjustments(self, ps):
+        """ This estimator is discussed in Aronow and
+        Miller as the simplest of base form of 
+        inverse propensity weighting schemes"""
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -1581,6 +1589,10 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
     def make_overlap_adjustments(self, ps):
+        """This weighting scheme was adapted from 
+         Lucy D’Agostino McGowan's blog on 
+         Propensity Score Weights referenced in 
+         the primary CausalPy explainer notebook"""
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -1597,6 +1609,12 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
     def make_doubly_robust_adjustment(self, ps):
+        """ The doubly robust weighting scheme is also
+        discussed in Aronow and Miller, but a bit more generally
+        than our implementation here. Here we have specified
+        the outcome model to be a simple OLS model.
+        In this way the compromise between the outcome model and
+        the propensity model is always done with OLS."""
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
@@ -1722,8 +1740,9 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
             0.9, linestyle="--", label="Hi Extreme Propensity Scores", color="black"
         )
         axs[0].set_title(
-            "Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20
+            "Weighted and Unweighted Draws from the Posterior \n  Propensity Scores Distribution", fontsize=20
         )
+        axs[0].set_ylabel("Counts of Observations")
         axs[0].set_xlabel("Propensity Scores")
         custom_lines = [
             Line2D([0], [0], color="skyblue", lw=2),

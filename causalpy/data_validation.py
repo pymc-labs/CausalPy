@@ -136,7 +136,7 @@ class IVDataValidator:
 
 
 class PropensityDataValidator:
-    """Mixin class for validating the input data and model formula for IV experiments."""
+    """Mixin class for validating the input data and model formula for Propensity Weighting experiments."""
 
     def _input_validation(self):
         """Validate the input data and model formula for correctness"""
