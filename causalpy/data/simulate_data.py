@@ -1,6 +1,7 @@
 """
 Functions that generate data sets used in examples
 """
+
 import numpy as np
 import pandas as pd
 from scipy.stats import dirichlet, gamma, norm, uniform

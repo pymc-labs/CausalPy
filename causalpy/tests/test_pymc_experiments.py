@@ -1,6 +1,7 @@
 """
 Unit tests for pymc_experiments.py
 """
+
 import arviz as az
 import matplotlib as mpl
 import pandas as pd

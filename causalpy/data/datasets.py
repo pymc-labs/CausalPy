@@ -1,6 +1,7 @@
 """
 Functions to load example datasets
 """
+
 import pathlib
 
 import pandas as pd
