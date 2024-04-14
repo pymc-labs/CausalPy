@@ -123,7 +123,7 @@ Instrumental Variable regression is an appropriate technique when you wish to es
 .. image:: _static/iv_reg2.png
 
 Inverse Propensity Score Weighting
-""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""""""""
 Inverse Propensity Score Weighting is a technique used to correct selection effects in observational data by re-weighting observations to better reflect an as-if random allocation to treatment status. This helps recover unbiased causal effect estimates.
 
 .. image:: _static/propensity_weight.png
