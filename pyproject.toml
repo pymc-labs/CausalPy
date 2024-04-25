@@ -28,6 +28,7 @@ requires-python = ">=3.10"
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
     "arviz>=0.14.0",
+    "daft",
     "graphviz",
     "ipython!=8.7.0",
     "matplotlib>=3.5.3",
