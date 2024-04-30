@@ -27,7 +27,7 @@ jobs:
           mkdir -p test-sdist
           cd test-sdist
           python -m venv venv-sdist
-          venv-sdist/bin/python -m pip install ../dist/CausalPy*.tar.gz
+          venv-sdist/bin/python -m pip install ../dist/causalpy*.tar.gz
           echo "Checking import and version number (on release)"
           venv-sdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
           cd ..
