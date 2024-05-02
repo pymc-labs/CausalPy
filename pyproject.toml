@@ -26,7 +26,21 @@ requires-python = ">=3.8"
 #
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
-dependencies = []
+dependencies = [
+    "arviz>=0.14.0",
+    "graphviz",
+    "ipython!=8.7.0",
+    "matplotlib>=3.5.3",
+    "numpy<1.26.0",
+    "pandas",
+    "patsy",
+    "pymc>=5.14.0",
+    "scikit-learn>=1",
+    "scipy",
+    "seaborn>=0.11.2",
+    "statsmodels",
+    "xarray>=v2022.11.0",
+]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
 # will be able to install these using the "extras" syntax, for example:
@@ -101,5 +115,5 @@ badge-format = "svg"
 
 [tool.ruff.lint]
 extend-select = [
-  "I",  # isort
+    "I", # isort
 ]
