@@ -4,6 +4,7 @@ CausalPy Test Configuration
 Functions:
 * rng: random number generator with session level scope
 """
+
 import numpy as np
 import pytest
 

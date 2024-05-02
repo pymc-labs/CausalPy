@@ -4,6 +4,7 @@ Scikit-Learn Models
 - Weighted Proportion
 
 """
+
 from functools import partial
 
 import numpy as np
