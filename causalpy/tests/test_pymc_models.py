@@ -22,8 +22,8 @@ class MyToyModel(ModelBuilder):
         This is a basic 1-variable linear regression model for use in tests.
         """
         with self:
-            X_ = pm.MutableData(name="X", value=X)
-            y_ = pm.MutableData(name="y", value=y)
+            X_ = pm.Data(name="X", value=X)
+            y_ = pm.Data(name="y", value=y)
             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
             sigma = pm.HalfNormal("sigma", sigma=1)
             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
