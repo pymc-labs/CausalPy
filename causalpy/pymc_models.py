@@ -414,7 +414,8 @@ class PropensityScore(ModelBuilder):
 
     def fit(self, X, t, coords):
         """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions.
+        distributions. We overwrite the base method because the base method assumes
+        a variable y and we use t to indicate the treatment variable here.
         """
         self.build_model(X, t, coords)
         with self:

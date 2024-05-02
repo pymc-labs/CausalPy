@@ -1802,6 +1802,7 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         """
         perc : percentile in [0-1]!
         """
+        assert 0 <= perc <= 1
         ix = np.argsort(data)
         data = data[ix]  # sort data
         weights = weights[ix]  # sort weights
@@ -1811,6 +1812,13 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         return np.interp(perc, cdf, data)
 
     def plot_balance_ecdf(self, covariate, idata=None, weighting_scheme=None):
+        """
+        Plotting function takes a single covariate and shows the
+        differences in the ECDF between the treatment and control
+        groups before and after weighting. It provides a visual
+        check on the balance achieved by using the different weighting
+        schemes
+        """
         if idata is None:
             idata = self.idata
         if weighting_scheme is None:
