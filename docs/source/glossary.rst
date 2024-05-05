@@ -53,6 +53,9 @@ Glossary
    One-group posttest-only design
       A design where a single group is exposed to a treatment and assessed on an outcome measure. There is no pretest measure or comparison group.
 
+   Parallel trends assumption
+      An assumption made in difference in differences designs that the trends (over time) in the outcome variable would have been the same between the treatment and control groups in the absence of the treatment.
+
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
 
