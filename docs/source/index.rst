@@ -141,6 +141,7 @@ Documentation outline
    :caption: Knowledge Base
 
    design_notation.md
+   quasi_dags.ipynb
    glossary.rst
 
 .. toctree::
