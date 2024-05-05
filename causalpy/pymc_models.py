@@ -41,8 +41,8 @@ class ModelBuilder(pm.Model):
     >>> class MyToyModel(ModelBuilder):
     ...     def build_model(self, X, y, coords):
     ...         with self:
-    ...             X_ = pm.MutableData(name="X", value=X)
-    ...             y_ = pm.MutableData(name="y", value=y)
+    ...             X_ = pm.Data(name="X", value=X)
+    ...             y_ = pm.Data(name="y", value=y)
     ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
     ...             sigma = pm.HalfNormal("sigma", sigma=1)
     ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
@@ -190,8 +190,8 @@ class WeightedSumFitter(ModelBuilder):
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
             # TODO: There we should allow user-specified priors here
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
             # beta = pm.Dirichlet(
@@ -245,8 +245,8 @@ class LinearRegression(ModelBuilder):
         """
         with self:
             self.add_coords(coords)
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
