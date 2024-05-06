@@ -1568,6 +1568,8 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
     ...         },
     ...     ),
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     def __init__(

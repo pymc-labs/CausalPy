@@ -425,6 +425,8 @@ class PropensityScore(ModelBuilder):
     ...                 'obs_indx': np.arange(df.shape[0])
     ...                },
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
     Inference...
     """  # noqa: W605
 
