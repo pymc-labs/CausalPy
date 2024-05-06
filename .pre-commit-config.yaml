@@ -4,6 +4,14 @@ ci:
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
+  - repo: https://github.com/lucianopaz/head_of_apache
+    rev: "0.0.3"
+    hooks:
+      - id: head_of_apache
+        args:
+          - --author=The PyMC Labs Developers
+          - --exclude=docs/
+          - --exclude=scripts/
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -16,7 +24,7 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=1500"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.2
+    rev: v0.4.3
     hooks:
       - id: ruff
         args: ["--fix", "--output-format=full"]
