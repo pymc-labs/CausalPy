@@ -34,6 +34,7 @@ DATASETS = {
     "anova1": {"filename": "ancova_generated.csv"},
     "geolift1": {"filename": "geolift1.csv"},
     "risk": {"filename": "AJR2001.csv"},
+    "nhefs": {"filename": "nhefs.csv"},
 }
 
 

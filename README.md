@@ -188,6 +188,17 @@ Instrumental Variable regression is an appropriate technique when you wish to es
 
 ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/iv_reg1.png)
 
+
+### Inverse Propensity Score Weighting
+
+Propensity scores are often used to address the risks of bias or confounding introduced in an observational study by
+selection effects into the treatment condition. Propensity scores can be used in a number of ways, but here we demonstrate
+their usage within corrective weighting schemes aimed to recover as-if random allocation of subjects to the treatment condition.
+The technique "up-weights" or "down-weights" individual observations to better estimate a causal estimand such as the average treatment
+effect.
+
+![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/propensity_weight.png)
+
 ## Learning resources
 
 Here are some general resources about causal inference:

@@ -146,3 +146,29 @@ class IVDataValidator:
                 the assumption of a simple IV experiment.
                 The coefficients should be interpreted appropriately."""
             )
+
+
+class PropensityDataValidator:
+    """Mixin class for validating the input data and model formula for Propensity Weighting experiments."""
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        treatment = self.formula.split("~")[0]
+        test = treatment.strip() in self.data.columns
+        test = test & (self.outcome_variable in self.data.columns)
+        if not test:
+            raise DataException(
+                f"""
+                The treatment variable:
+                {treatment} must appear in the data to be used
+                as an outcome variable. And {self.outcome_variable}
+                must also be available in the data to be re-weighted
+                """
+            )
+        T = self.data[treatment.strip()]
+        check_binary = len(np.unique(T)) > 2
+        if check_binary:
+            raise DataException(
+                """Warning. The treatment variable is not 0-1 Binary.
+                """
+            )

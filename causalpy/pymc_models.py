@@ -388,3 +388,69 @@ class InstrumentalVariableRegression(ModelBuilder):
                 pm.sample_posterior_predictive(self.idata, progressbar=False)
             )
         return self.idata
+
+
+class PropensityScore(ModelBuilder):
+    """
+    Custom PyMC model for inverse propensity score models
+
+    .. note:
+        Generally, the `.fit()` method should be used rather than
+        calling `.build_model()` directly.
+
+    Defines the PyMC model
+
+    .. math::
+        \\beta &\sim \mathrm{Normal}(0, 1)
+
+        \sigma &\sim \mathrm{HalfNormal}(1)
+
+        \mu &= X * \\beta
+
+        p &= logit^{-1}(mu)
+
+        t &\sim \mathrm{Bernoulli}(p)
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import PropensityScore
+    >>> df = cp.load_data('nhefs')
+    >>> X = df[["age", "race"]]
+    >>> t = np.asarray(df["trt"])
+    >>> ps = PropensityScore(sample_kwargs={"progressbar": False})
+    >>> ps.fit(X, t, coords={
+    ...                 'coeffs': ['age', 'race'],
+    ...                 'obs_indx': np.arange(df.shape[0])
+    ...                },
+    ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    Inference...
+    """  # noqa: W605
+
+    def build_model(self, X, t, coords):
+        "Defines the PyMC propensity model"
+        with self:
+            self.add_coords(coords)
+            X_data = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
+            t_data = pm.MutableData("t", t.flatten(), dims="obs_ind")
+            b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
+            mu = pm.math.dot(X_data, b)
+            p = pm.Deterministic("p", pm.math.invlogit(mu))
+            pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
+
+    def fit(self, X, t, coords):
+        """Draw samples from posterior, prior predictive, and posterior predictive
+        distributions. We overwrite the base method because the base method assumes
+        a variable y and we use t to indicate the treatment variable here.
+        """
+        self.build_model(X, t, coords)
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive())
+            self.idata.extend(
+                pm.sample_posterior_predictive(self.idata, progressbar=False)
+            )
+        return self.idata
