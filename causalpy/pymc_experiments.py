@@ -1,3 +1,16 @@
+#   Copyright 2024 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
 """
 Experiment routines for PyMC models.
 
@@ -89,6 +102,11 @@ class ExperimentalDesign:
         ...                 "progressbar": False
         ...             }),
         ...  )
+        <BLANKLINE>
+        <BLANKLINE>
+        <BLANKLINE>
+        <BLANKLINE>
+        <BLANKLINE>
         >>> result.print_coefficients(round_to=1) # doctest: +NUMBER
         Model coefficients:
         Intercept                     1, 94% HDI [1, 1]
@@ -147,6 +165,11 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     ...         }
     ...     ),
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
@@ -373,6 +396,11 @@ class InterruptedTimeSeries(PrePostFit):
     ...         }
     ...     )
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     expt_type = "Interrupted Time Series"
@@ -408,6 +436,11 @@ class SyntheticControl(PrePostFit):
     ...         }
     ...     ),
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     expt_type = "Synthetic Control"
@@ -464,6 +497,11 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
     ...         }
     ...     )
     ...  )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     def __init__(
@@ -755,6 +793,11 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     def __init__(
@@ -1164,6 +1207,10 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
     ...         }
     ...     )
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
     >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
@@ -1394,6 +1441,8 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
     ...         formula=formula,
     ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
+    <BLANKLINE>
+    <BLANKLINE>
     """
 
     def __init__(

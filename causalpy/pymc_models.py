@@ -1,3 +1,16 @@
+#   Copyright 2024 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
 """
 Defines generic PyMC ModelBuilder class and subclasses for
 
@@ -41,8 +54,8 @@ class ModelBuilder(pm.Model):
     >>> class MyToyModel(ModelBuilder):
     ...     def build_model(self, X, y, coords):
     ...         with self:
-    ...             X_ = pm.MutableData(name="X", value=X)
-    ...             y_ = pm.MutableData(name="y", value=y)
+    ...             X_ = pm.Data(name="X", value=X)
+    ...             y_ = pm.Data(name="y", value=y)
     ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
     ...             sigma = pm.HalfNormal("sigma", sigma=1)
     ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
@@ -59,13 +72,17 @@ class ModelBuilder(pm.Model):
     ...             }
     ... )
     >>> model.fit(X, y)
-    Inference...
+    <BLANKLINE>
+    <BLANKLINE>
+    Inference data...
     >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
     >>> model.predict(X_new)
-    Inference...
-    >>> model.score(X, y) # doctest: +NUMBER
-    r2        0.3
-    r2_std    0.0
+    <BLANKLINE>
+    Inference data...
+    >>> model.score(X, y)
+    <BLANKLINE>
+    r2        0.390344
+    r2_std    0.081135
     dtype: float64
     """
 
@@ -99,10 +116,7 @@ class ModelBuilder(pm.Model):
 
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
-        if "random_seed" in self.sample_kwargs:
-            random_seed = self.sample_kwargs["random_seed"]
-        else:
-            random_seed = None
+        random_seed = self.sample_kwargs.get("random_seed", None)
 
         self.build_model(X, y, coords)
         with self:
@@ -124,10 +138,17 @@ class ModelBuilder(pm.Model):
 
         """
 
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
         self._data_setter(X)
         with self:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
-                self.idata, var_names=["y_hat", "mu"], progressbar=False
+                self.idata,
+                var_names=["y_hat", "mu"],
+                progressbar=False,
+                random_seed=random_seed,
             )
         return post_pred
 
@@ -180,7 +201,9 @@ class WeightedSumFitter(ModelBuilder):
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
     >>> wsf.fit(X,y)
-    Inference ...
+    <BLANKLINE>
+    <BLANKLINE>
+    Inference data...
     """  # noqa: W605
 
     def build_model(self, X, y, coords):
@@ -190,8 +213,8 @@ class WeightedSumFitter(ModelBuilder):
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
             # TODO: There we should allow user-specified priors here
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
             # beta = pm.Dirichlet(
@@ -236,7 +259,9 @@ class LinearRegression(ModelBuilder):
     ...                 'obs_indx': np.arange(rd.shape[0])
     ...                },
     ... )
-    Inference...
+    <BLANKLINE>
+    <BLANKLINE>
+    Inference data...
     """  # noqa: W605
 
     def build_model(self, X, y, coords):
@@ -245,8 +270,8 @@ class LinearRegression(ModelBuilder):
         """
         with self:
             self.add_coords(coords)
-            X = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.MutableData("y", y[:, 0], dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
@@ -288,6 +313,8 @@ class InstrumentalVariableRegression(ModelBuilder):
     ...                  "eta": 2,
     ...                  "lkj_sd": 2,
     ...              })
+    <BLANKLINE>
+    <BLANKLINE>
     Inference data...
     """
 

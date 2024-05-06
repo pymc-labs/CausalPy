@@ -1,3 +1,16 @@
+#   Copyright 2024 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -22,8 +35,8 @@ class MyToyModel(ModelBuilder):
         This is a basic 1-variable linear regression model for use in tests.
         """
         with self:
-            X_ = pm.MutableData(name="X", value=X)
-            y_ = pm.MutableData(name="y", value=y)
+            X_ = pm.Data(name="X", value=X)
+            y_ = pm.Data(name="y", value=y)
             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
             sigma = pm.HalfNormal("sigma", sigma=1)
             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
