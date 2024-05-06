@@ -138,9 +138,11 @@ Documentation outline
 =====================
 
 .. toctree::
-   :titlesonly:
+   :caption: Knowledge Base
 
-   glossary
+   design_notation.md
+   quasi_dags.ipynb
+   glossary.rst
 
 .. toctree::
    :caption: Examples

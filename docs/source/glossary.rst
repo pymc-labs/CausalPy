@@ -18,6 +18,9 @@ Glossary
    Change score analysis
       A statistical procedure where the outcome variable is the difference between the posttest and protest scores.
 
+   Causal impact
+      An umbrella term for the estimated effect of a treatment on an outcome.
+
    Comparative interrupted time-series
    CITS
       An interrupted time series design with added comparison time series observations.
@@ -36,7 +39,6 @@ Glossary
    ITS
       A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
 
-
    Instrumental Variable regression
    IV
       A quasi-experimental design  to estimate a treatment effect where the is a risk of confounding between the treatment and the outcome due to endogeniety.
@@ -46,10 +48,13 @@ Glossary
 
    Non-equivalent group designs
    NEGD
-      A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design).
+      A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design). This can be problematic when assigning causal influence of the treatment - differences in outcomes between groups could be due to the treatment or due to differences in the group attributes themselves.
 
    One-group posttest-only design
       A design where a single group is exposed to a treatment and assessed on an outcome measure. There is no pretest measure or comparison group.
+
+   Parallel trends assumption
+      An assumption made in difference in differences designs that the trends (over time) in the outcome variable would have been the same between the treatment and control groups in the absence of the treatment.
 
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
@@ -67,10 +72,14 @@ Glossary
       An emprical comparison used to estimate the effects of treatments where units are assigned to treatment conditions randomly.
 
    Regression discontinuity design
+   RDD
       A quasi–experimental comparison to estimate a treatment effect where units are assigned to treatment conditions based on a cut-off score on a quantitative assignment variable (aka running variable).
 
    Regression kink design
       A quasi-experimental research design that estimates treatment effects by analyzing the impact of a treatment or intervention precisely at a defined threshold or "kink" point in a quantitative assignment variable (running variable). Unlike traditional regression discontinuity designs, regression kink design looks for a change in the slope of an outcome variable at the kink, instead of a discontinuity. This is useful when the assignment variable is not discrete, jumping from 0 to 1 at a threshold. Instead, regression kink designs are appropriate when there is a change in the first derivative of the assignment function at the kink point.
+
+   Running variable
+      In regression discontinuity designs, the running variable is the variable that determines the assignment of units to treatment or control conditions. This is typically a continuous variable. Examples could include a test score, age, income, or spatial location. But the running variable would not be time, which is the case in interrupted time series designs.
 
    Sharp regression discontinuity design
       A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function.
@@ -87,7 +96,6 @@ Glossary
 
    Wilkinson notation
       A notation for describing statistical models :footcite:p:`wilkinson1973symbolic`.
-
 
    Two Stage Least Squares
    2SLS
