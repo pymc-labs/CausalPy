@@ -1,0 +1,17 @@
+name: CausalPy
+channels:
+  - conda-forge
+dependencies:
+  - arviz>=0.14.0
+  - graphviz
+  - ipython!=8.7.0
+  - matplotlib>=3.5.3
+  - numpy<1.26.0
+  - pandas
+  - patsy
+  - pymc>=5.14.0
+  - scikit-learn>=1
+  - scipy
+  - seaborn>=0.11.2
+  - statsmodels
+  - xarray>=v2022.11.0

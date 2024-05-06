@@ -1,7 +1,7 @@
 .PHONY: init lint check_lint test
 
 init:
-	python -m pip install -e .
+	python -m pip install -e . --no-deps
 
 lint:
 	ruff check --fix .

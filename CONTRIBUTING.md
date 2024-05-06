@@ -47,10 +47,10 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create a new environment using Python >=3.10, for example 3.11
+1. Create the environment from the `environment.yml` file.
 
     ```bash
-    conda create --name CausalPy python=3.11
+    mamba env create -f environment.yml
     ```
 
     Activate the environment.
@@ -59,7 +59,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda activate CausalPy
     ```
 
-    Install the package (in editable mode) and its development dependencies:
+    Install the package (in editable mode) and its development dependencies. The `--no-deps` flag is used to avoid installing the dependencies of `CausalPy` as they are already installed when installing the development dependencies. This can end up interfering with the conda-only install of pymc.
 
     ```bash
     pip install --no-deps -e .
