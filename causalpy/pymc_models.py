@@ -453,11 +453,17 @@ class PropensityScore(ModelBuilder):
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
         """
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
         self.build_model(X, t, coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive())
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
-                pm.sample_posterior_predictive(self.idata, progressbar=False)
+                pm.sample_posterior_predictive(
+                    self.idata, progressbar=False, random_seed=random_seed
+                )
             )
         return self.idata
