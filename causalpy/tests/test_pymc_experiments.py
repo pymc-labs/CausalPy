@@ -63,7 +63,7 @@ def test_regression_kink_gradient_change():
 
 def test_inverse_prop():
     df = cp.load_data("nhefs")
-    sample_kwargs = {"tune": 100, "draws": 100, "chains": 2, "cores": 2}
+    sample_kwargs = {"tune": 100, "draws": 500, "chains": 2, "cores": 2}
     result = cp.pymc_experiments.InversePropensityWeighting(
         df,
         formula="trt ~ 1 + age + race",
@@ -93,7 +93,7 @@ def test_inverse_prop():
     assert isinstance(ate_list, list)
     ate_list = result.get_ate(0, result.idata, method="overlap")
     assert isinstance(ate_list, list)
-    fig = result.plot_ATE(prop_draws=10, ate_draws=10)
+    fig = result.plot_ATE(prop_draws=1, ate_draws=10)
     assert isinstance(fig, mpl.figure.Figure)
     fig = result.plot_balance_ecdf("age")
     assert isinstance(fig, mpl.figure.Figure)
