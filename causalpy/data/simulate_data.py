@@ -109,69 +109,6 @@ def generate_synthetic_control_data(
     return df, weightings_true
 
 
-def generate_multicell_geolift_data(
-    N=100,
-    treatment_time=70,
-    grw_mu=0.25,
-    grw_sigma=1,
-    lowess_kwargs=default_lowess_kwargs,
-):
-    """
-    Generates data for a multi-cell geolift anaysis. We have multiple untreated units
-    _and_ multiple treated units.
-
-    :param N:
-        Number of data points
-    :param treatment_time:
-        Index where treatment begins in the generated dataframe
-    :param grw_mu:
-        Mean of Gaussian Random Walk
-    :param grw_sigma:
-        Standard deviation of Gaussian Random Walk
-    :lowess_kwargs:
-        Keyword argument dictionary passed to statsmodels lowess
-
-    Example
-    --------
-    >>> from causalpy.data.simulate_data import generate_synthetic_control_data
-    >>> df, weightings_true = generate_synthetic_control_data(
-    ...                             treatment_time=70
-    ... )
-    """
-
-    # 1. Generate non-treated variables
-    df = pd.DataFrame(
-        {
-            "a": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "b": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "c": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "d": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "e": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "f": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "g": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-        }
-    )
-
-    # 2. Generate counterfactual, based on weighted sum of non-treated variables. This
-    # is the counterfactual with NO treatment.
-    weightings_true = dirichlet(np.ones(7)).rvs(1)
-    df["counterfactual"] = np.dot(df.to_numpy(), weightings_true.T)
-
-    # 3. Generate the causal effect
-    causal_effect = gamma(10).pdf(np.arange(0, N, 1) - treatment_time)
-    df["causal effect"] = causal_effect * -50
-
-    # 4. Generate the actually observed data, ie the treated with the causal effect
-    # applied
-    df["actual"] = df["counterfactual"] + df["causal effect"]
-
-    # 5. apply observation noise to all relevant variables
-    for var in ["actual", "a", "b", "c", "d", "e", "f", "g"]:
-        df[var] += norm(0, 0.25).rvs(N)
-
-    return df, weightings_true
-
-
 def generate_time_series_data(
     N=100, treatment_time=70, beta_temp=-1, beta_linear=0.5, beta_intercept=3
 ):
@@ -377,6 +314,56 @@ def generate_ancova_data(
 
 
 def generate_geolift_data():
+    """Generate synthetic data for a geolift example. This will consists of 6 untreated
+    countries. The treated unit `Denmark` is a weighted combination of the untreated
+    units. We additionally specify a treatment effect which takes effect after the
+    `treatment_time`. The timeseries data is observed at weekly resolution and has
+    annual seasonality, with this seasonality being a drawn from a Gaussian Process with
+    a periodic kernel."""
+    n_years = 4
+    treatment_time = pd.to_datetime("2022-01-01")
+    causal_impact = 0.2
+
+    def create_series(n=52, amplitude=1, length_scale=2):
+        """
+        Returns numpy tile with generated seasonality data repeated over
+        multiple years
+        """
+        return np.tile(
+            generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + 3, n_years
+        )
+
+    time = pd.date_range(start="2019-01-01", periods=52 * n_years, freq="W")
+
+    untreated = [
+        "Austria",
+        "Belgium",
+        "Bulgaria",
+        "Croatia",
+        "Cyprus",
+        "Czech_Republic",
+    ]
+
+    df = (
+        pd.DataFrame({country: create_series() for country in untreated})
+        .assign(time=time)
+        .set_index("time")
+    )
+
+    # create treated unit as a weighted sum of the untreated units
+    weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
+    df = df.assign(Denmark=np.dot(df[untreated].values, weights))
+
+    # add observation noise
+    for col in untreated + ["Denmark"]:
+        df[col] += np.random.normal(size=len(df), scale=0.1)
+
+    # add treatment effect
+    df["Denmark"] += np.where(df.index < treatment_time, 0, causal_impact)
+    return df
+
+
+def generate_multicell_geolift_data():
     """Generate synthetic data for a geolift example. This will consists of 6 untreated
     countries. The treated unit `Denmark` is a weighted combination of the untreated
     units. We additionally specify a treatment effect which takes effect after the
