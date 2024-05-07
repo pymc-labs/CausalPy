@@ -16,7 +16,15 @@ Synthetic Control
    notebooks/sc_pymc.ipynb
    notebooks/sc_skl.ipynb
    notebooks/sc_pymc_brexit.ipynb
+
+Geographical lift testing
+=========================
+
+.. toctree::
+   :titlesonly:
+
    notebooks/geolift1.ipynb
+   notebooks/multi_cell_geolift.ipynb
 
 
 Difference in Differences

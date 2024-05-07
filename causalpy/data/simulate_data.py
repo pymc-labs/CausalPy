@@ -58,7 +58,70 @@ def generate_synthetic_control_data(
     Generates data for synthetic control example.
 
     :param N:
-        Number fo data points
+        Number of data points
+    :param treatment_time:
+        Index where treatment begins in the generated dataframe
+    :param grw_mu:
+        Mean of Gaussian Random Walk
+    :param grw_sigma:
+        Standard deviation of Gaussian Random Walk
+    :lowess_kwargs:
+        Keyword argument dictionary passed to statsmodels lowess
+
+    Example
+    --------
+    >>> from causalpy.data.simulate_data import generate_synthetic_control_data
+    >>> df, weightings_true = generate_synthetic_control_data(
+    ...                             treatment_time=70
+    ... )
+    """
+
+    # 1. Generate non-treated variables
+    df = pd.DataFrame(
+        {
+            "a": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "b": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "c": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "d": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "e": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "f": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "g": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+        }
+    )
+
+    # 2. Generate counterfactual, based on weighted sum of non-treated variables. This
+    # is the counterfactual with NO treatment.
+    weightings_true = dirichlet(np.ones(7)).rvs(1)
+    df["counterfactual"] = np.dot(df.to_numpy(), weightings_true.T)
+
+    # 3. Generate the causal effect
+    causal_effect = gamma(10).pdf(np.arange(0, N, 1) - treatment_time)
+    df["causal effect"] = causal_effect * -50
+
+    # 4. Generate the actually observed data, ie the treated with the causal effect
+    # applied
+    df["actual"] = df["counterfactual"] + df["causal effect"]
+
+    # 5. apply observation noise to all relevant variables
+    for var in ["actual", "a", "b", "c", "d", "e", "f", "g"]:
+        df[var] += norm(0, 0.25).rvs(N)
+
+    return df, weightings_true
+
+
+def generate_multicell_geolift_data(
+    N=100,
+    treatment_time=70,
+    grw_mu=0.25,
+    grw_sigma=1,
+    lowess_kwargs=default_lowess_kwargs,
+):
+    """
+    Generates data for a multi-cell geolift anaysis. We have multiple untreated units
+    _and_ multiple treated units.
+
+    :param N:
+        Number of data points
     :param treatment_time:
         Index where treatment begins in the generated dataframe
     :param grw_mu:
