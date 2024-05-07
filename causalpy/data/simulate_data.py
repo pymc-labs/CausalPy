@@ -400,16 +400,19 @@ def generate_multicell_geolift_data():
         .set_index("time")
     )
 
-    # create treated unit as a weighted sum of the untreated units
-    weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
-    df = df.assign(Denmark=np.dot(df[untreated].values, weights))
+    treated = ["t1", "t2", "t3", "t4"]
 
-    # add observation noise
-    for col in untreated + ["Denmark"]:
+    for treated_geo in treated:
+        # create treated unit as a weighted sum of the untreated units
+        weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
+        df[treated_geo] = np.dot(df[untreated].values, weights)
+        # add treatment effect
+        df[treated_geo] += np.where(df.index < treatment_time, 0, causal_impact)
+
+    # add observation noise to all geos
+    for col in untreated + treated:
         df[col] += np.random.normal(size=len(df), scale=0.1)
 
-    # add treatment effect
-    df["Denmark"] += np.where(df.index < treatment_time, 0, causal_impact)
     return df
 
 
