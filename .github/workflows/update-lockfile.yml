@@ -1,0 +1,73 @@
+name: Update lockfile
+
+on:
+  workflow_dispatch:
+  schedule:
+  # At 06:12 UTC on Monday
+  - cron: 12 6 * * MON
+
+jobs:
+  conda-lock:
+    strategy:
+        matrix:
+          python-version: ["3.8", "3.9", "3.10"]
+    defaults:
+      run:
+        # Ensure the environment is activated
+        # <https://github.com/mamba-org/setup-micromamba#about-login-shells>
+        shell: bash -l {0}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Conda environment with Micromamba
+      uses: mamba-org/setup-micromamba@v1
+      with:
+        environment-file: conda/environment-conda-locker.yaml
+        environment-name: conda-lock-env
+        cache-environment: true
+
+    - name: Run conda-lock
+      run: |
+        conda-lock lock --mamba \
+        --extras test \
+        --filter-extras \
+        --file pyproject.toml \
+        --file conda/environment-test-${{ matrix.python-version }}.yaml \
+        --lockfile conda/conda-lock-${{ matrix.python-version }}.yaml
+
+    - name: Upload lockfile
+      uses: actions/upload-artifact@v4
+      with:
+        name: lockfile-${{ matrix.python-version }}
+        path: conda/conda-lock-${{ matrix.python-version }}.yaml
+
+  open-pr:
+    needs: conda-lock
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+    - name: Download all lockfiles
+      uses: actions/download-artifact@v4
+      with:
+          path: /tmp/conda
+    - name: Replace existing lockfiles with downloaded ones
+      run: |
+        mv /tmp/conda/lockfile-*/* conda/
+    - name: Open a pull request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        # This PAT should have read-write permissions for "Pull Requests"
+        # and read-write permissions for "Contents".
+        token: ${{ secrets.GH_PAT_FOR_PR }}
+        commit-message: Relock dependencies
+        title: Relock dependencies
+        body: >
+          This pull request relocks the dependencies with conda-lock.
+          It was created automatically with the GitHub Action
+          [update-lockfile.yml](.github/workflows/update-lockfile.yml).
+        branch: relock-deps
+        labels: conda-lock
+        delete-branch: true
+        committer: update-lockfile.yml <nobody@pymc-labs.com>
+        author: update-lockfile.yml <nobody@pymc-labs.com>
