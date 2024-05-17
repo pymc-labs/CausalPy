@@ -28,3 +28,14 @@ def test_generate_multicell_geolift_data():
     df = generate_multicell_geolift_data()
     assert type(df) == pd.DataFrame
     assert np.all(df >= 0), "Found negative values in dataset"
+
+
+def test_generate_geolift_data():
+    """
+    Test the generate_geolift_data function.
+    """
+    from causalpy.data.simulate_data import generate_geolift_data
+
+    df = generate_geolift_data()
+    assert type(df) == pd.DataFrame
+    assert np.all(df >= 0), "Found negative values in dataset"
