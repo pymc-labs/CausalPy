@@ -324,15 +324,6 @@ def generate_geolift_data():
     treatment_time = pd.to_datetime("2022-01-01")
     causal_impact = 0.2
 
-    def create_series(n=52, amplitude=1, length_scale=2):
-        """
-        Returns numpy tile with generated seasonality data repeated over
-        multiple years
-        """
-        return np.tile(
-            generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + 3, n_years
-        )
-
     time = pd.date_range(start="2019-01-01", periods=52 * n_years, freq="W")
 
     untreated = [
@@ -345,7 +336,12 @@ def generate_geolift_data():
     ]
 
     df = (
-        pd.DataFrame({country: create_series() for country in untreated})
+        pd.DataFrame(
+            {
+                country: create_series(n_years=n_years, intercept=3)
+                for country in untreated
+            }
+        )
         .assign(time=time)
         .set_index("time")
     )
@@ -360,6 +356,10 @@ def generate_geolift_data():
 
     # add treatment effect
     df["Denmark"] += np.where(df.index < treatment_time, 0, causal_impact)
+
+    # ensure we never see any negative sales
+    df = df.clip(lower=0)
+
     return df
 
 
@@ -373,16 +373,6 @@ def generate_multicell_geolift_data():
     n_years = 4
     treatment_time = pd.to_datetime("2022-01-01")
     causal_impact = 0.2
-
-    def create_series(n=52, amplitude=1, length_scale=2):
-        """
-        Returns numpy tile with generated seasonality data repeated over
-        multiple years
-        """
-        return np.tile(
-            generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + 3, n_years
-        )
-
     time = pd.date_range(start="2019-01-01", periods=52 * n_years, freq="W")
 
     untreated = [
@@ -401,7 +391,12 @@ def generate_multicell_geolift_data():
     ]
 
     df = (
-        pd.DataFrame({country: create_series() for country in untreated})
+        pd.DataFrame(
+            {
+                country: create_series(n_years=n_years, intercept=3)
+                for country in untreated
+            }
+        )
         .assign(time=time)
         .set_index("time")
     )
@@ -418,6 +413,9 @@ def generate_multicell_geolift_data():
     # add observation noise to all geos
     for col in untreated + treated:
         df[col] += np.random.normal(size=len(df), scale=0.1)
+
+    # ensure we never see any negative sales
+    df = df.clip(lower=0)
 
     return df
 
@@ -445,4 +443,15 @@ def periodic_kernel(x1, x2, period=1, length_scale=1, amplitude=1):
     """Generate a periodic kernal for gaussian process"""
     return amplitude**2 * np.exp(
         -2 * np.sin(np.pi * np.abs(x1 - x2) / period) ** 2 / length_scale**2
+    )
+
+
+def create_series(n=52, amplitude=1, length_scale=2, n_years=4, intercept=3):
+    """
+    Returns numpy tile with generated seasonality data repeated over
+    multiple years
+    """
+    return np.tile(
+        generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + intercept,
+        n_years,
     )
