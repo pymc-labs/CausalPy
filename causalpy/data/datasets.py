@@ -35,6 +35,7 @@ DATASETS = {
     "geolift1": {"filename": "geolift1.csv"},
     "risk": {"filename": "AJR2001.csv"},
     "nhefs": {"filename": "nhefs.csv"},
+    "schoolReturns": {"filename": "schoolingReturns.csv"},
 }
 
 

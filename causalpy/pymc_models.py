@@ -376,24 +376,27 @@ class InstrumentalVariableRegression(ModelBuilder):
                 shape=(X.shape[0], 2),
             )
 
-    def fit(self, X, Z, y, t, coords, priors):
+    def fit(self, X, Z, y, t, coords, priors, sample_ppc=True):
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
+        # Use JAX for ppc sampling of multivariate likelihood
         random_seed = self.sample_kwargs.get("random_seed", None)
 
         self.build_model(X, Z, y, t, coords, priors)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata, progressbar=False, random_seed=random_seed
+            if sample_ppc:
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        random_seed=random_seed,
+                        compile_kwargs={"mode": "JAX"},
+                    )
                 )
-            )
         return self.idata
 
 
