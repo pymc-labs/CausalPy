@@ -547,7 +547,6 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     Formula: y ~ 1 + x + treated
     Running variable: x
     Threshold on running variable: 0.5
-    <BLANKLINE>
     Results:
     Discontinuity at threshold = 0.19
     Model coefficients:
