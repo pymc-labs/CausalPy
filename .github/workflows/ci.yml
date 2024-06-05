@@ -30,7 +30,7 @@ jobs:
           pip install -e .[test]
           pytest --cov-report=xml --no-cov-on-fail
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
           name: ${{ matrix.python-version }}
