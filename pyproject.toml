@@ -65,7 +65,12 @@ docs = [
     "sphinxcontrib-bibtex",
 ]
 lint = ["interrogate", "nbqa", "pre-commit", "ruff"]
-test = ["pytest", "pytest-cov"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "setuptools>=65.5.0; python_version >= '3.12'",
+    "wheel; python_version >= '3.12'",
+]
 
 [metadata]
 description-file = 'README.md'
