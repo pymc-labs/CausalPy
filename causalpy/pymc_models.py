@@ -72,15 +72,11 @@ class ModelBuilder(pm.Model):
     ...             }
     ... )
     >>> model.fit(X, y)
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
     >>> model.predict(X_new)
-    <BLANKLINE>
     Inference data...
     >>> model.score(X, y)
-    <BLANKLINE>
     r2        0.390344
     r2_std    0.081135
     dtype: float64
@@ -201,8 +197,6 @@ class WeightedSumFitter(ModelBuilder):
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
     >>> wsf.fit(X,y)
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     """  # noqa: W605
 
@@ -259,8 +253,6 @@ class LinearRegression(ModelBuilder):
     ...                 'obs_indx': np.arange(rd.shape[0])
     ...                },
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     """  # noqa: W605
 
@@ -313,8 +305,6 @@ class InstrumentalVariableRegression(ModelBuilder):
     ...                  "eta": 2,
     ...                  "lkj_sd": 2,
     ...              })
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     """
 
@@ -432,8 +422,6 @@ class PropensityScore(ModelBuilder):
     ...                 'obs_indx': np.arange(df.shape[0])
     ...                },
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     Inference...
     """  # noqa: W605
 

@@ -102,11 +102,6 @@ class ExperimentalDesign:
         ...                 "progressbar": False
         ...             }),
         ...  )
-        <BLANKLINE>
-        <BLANKLINE>
-        <BLANKLINE>
-        <BLANKLINE>
-        <BLANKLINE>
         >>> result.print_coefficients(round_to=1) # doctest: +NUMBER
         Model coefficients:
         Intercept                     1, 94% HDI [1, 1]
@@ -165,11 +160,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     ...         }
     ...     ),
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
@@ -396,11 +386,6 @@ class InterruptedTimeSeries(PrePostFit):
     ...         }
     ...     )
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     expt_type = "Interrupted Time Series"
@@ -436,11 +421,6 @@ class SyntheticControl(PrePostFit):
     ...         }
     ...     ),
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     expt_type = "Synthetic Control"
@@ -497,11 +477,6 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
     ...         }
     ...     )
     ...  )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     def __init__(
@@ -793,11 +768,6 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     ...     ),
     ...     treatment_threshold=0.5,
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     def __init__(
@@ -1207,10 +1177,6 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
     ...         }
     ...     )
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
-    <BLANKLINE>
     >>> result.summary(round_to=1) # doctest: +NUMBER
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
@@ -1441,8 +1407,6 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
     ...         formula=formula,
     ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     def __init__(
@@ -1568,8 +1532,6 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
     ...         },
     ...     ),
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     """
 
     def __init__(
