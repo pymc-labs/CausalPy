@@ -22,7 +22,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m ensurepip
-          pip install --upgrade pip setuptools wheel
+          pip install --upgrade pip
+          pip install setuptools==65.5.0 wheel
       - name: Run doctests
         run: |
           pip install -e .[test]
