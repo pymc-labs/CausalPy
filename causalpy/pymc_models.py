@@ -303,8 +303,8 @@ class InstrumentalVariableRegression(ModelBuilder):
     ...                  "mus": [[-2,4], [0.5, 3]],
     ...                  "sigmas": [1, 1],
     ...                  "eta": 2,
-    ...                  "lkj_sd": 2,
-    ...              })
+    ...                  "lkj_sd": 1,
+    ...              }, None)
     Inference data...
     """
 
