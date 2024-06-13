@@ -39,8 +39,7 @@ dependencies = [
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
-    "xarray>=v2022.11.0",
-    "jax"
+    "xarray>=v2022.11.0"
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users

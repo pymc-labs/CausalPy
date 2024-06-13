@@ -504,7 +504,6 @@ def test_iv_reg():
             sample_kwargs=sample_kwargs
         ),
     )
-    result.model.sample_predictive_distribution(ppc_sampler="jax")
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
