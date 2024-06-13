@@ -385,13 +385,14 @@ class InstrumentalVariableRegression(ModelBuilder):
                     )
                 )
         elif ppc_sampler == "pymc":
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    random_seed=random_seed,
+            with self:
+                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        random_seed=random_seed,
+                    )
                 )
-            )
 
     def fit(self, X, Z, y, t, coords, priors, ppc_sampler=None):
         """Draw samples from posterior distribution and potentially
