@@ -536,10 +536,6 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
-    def _causal_impact_summary_stat(self, round_to=None) -> str:
-        causal_impact = f"{round_num(self.causal_impact, round_to)}, "
-        return f"Causal impact = {causal_impact}"
-
     def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results.
