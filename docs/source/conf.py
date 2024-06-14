@@ -51,7 +51,9 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.intersphinx",
     "sphinx.ext.mathjax",
+    "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
+    "sphinx_copybutton",
 ]
 
 nb_execution_mode = "off"

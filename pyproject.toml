@@ -59,7 +59,7 @@ docs = [
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
-    "sphinx-design",
+    "sphinx-copybutton",
     "sphinx-rtd-theme",
     "statsmodels",
     "sphinxcontrib-bibtex",
