@@ -29,10 +29,6 @@ repos:
       - id: ruff
         args: ["--fix", "--output-format=full"]
       - id: ruff-format
-  - repo: https://github.com/nbQA-dev/nbQA
-    rev: 1.8.5
-    hooks:
-      - id: nbqa-ruff
   - repo: https://github.com/econchick/interrogate
     rev: 1.7.0
     hooks:
