@@ -588,12 +588,13 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     Formula: y ~ 1 + x + treated
     Running variable: x
     Threshold on running variable: 0.5
+    <BLANKLINE>
     Results:
     Discontinuity at threshold = 0.19
     Model coefficients:
-        Intercept		0.0
-        treated[T.True]		0.19
-        x		1.23
+       Intercept               0
+       treated[T.True]         0.19
+       x               1.2
     """
 
     def __init__(
