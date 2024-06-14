@@ -45,6 +45,7 @@ class ExperimentalDesign:
     """Base class for experiment designs"""
 
     model = None
+    expt_type = None
     outcome_variable_name = None
 
     def __init__(self, model=None, **kwargs):
@@ -52,6 +53,17 @@ class ExperimentalDesign:
             self.model = model
         if self.model is None:
             raise ValueError("fitting_model not set or passed.")
+
+    def print_coefficients(self, round_to=None) -> None:
+        """
+        Prints the model coefficients
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
+        print("Model coefficients:")
+        for name, val in zip(self.labels, self.model.coef_[0]):
+            print(f"\t{name}\t\t{round_num(val, round_to)}")
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
@@ -95,6 +107,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         super().__init__(model=model, **kwargs)
         self._input_validation(data, treatment_time)
         self.treatment_time = treatment_time
+        # set experiment type - usually done in subclasses
+        self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
         self.datapre = data[data.index < self.treatment_time]
         self.datapost = data[data.index >= self.treatment_time]
@@ -103,10 +117,10 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         # set things up with pre-intervention data
         y, X = dmatrices(formula, self.datapre)
+        self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.outcome_variable_name = y.design_info.column_names[0]
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
         # process post-intervention data
         (new_y, new_x) = build_design_matrices(
@@ -221,6 +235,18 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             y="predictor variable",
             palette=sns.color_palette("husl"),
         )
+
+    def summary(self, round_to=None) -> None:
+        """
+        Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        self.print_coefficients(round_to)
 
 
 class InterruptedTimeSeries(PrePostFit):
@@ -351,6 +377,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
     ):
         super().__init__(model=model, **kwargs)
         self.data = data
+        self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
@@ -508,6 +535,24 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
+
+    def _causal_impact_summary_stat(self, round_to=None) -> str:
+        causal_impact = f"{round_num(self.causal_impact, round_to)}, "
+        return f"Causal impact = {causal_impact}"
+
+    def summary(self, round_to=None) -> None:
+        """
+        Print text output summarising the results.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
+
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print("\nResults:")
+        print(f"Causal impact = {round_num(self.causal_impact[0], round_to)}")
+        self.print_coefficients(round_to)
 
 
 class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
@@ -687,9 +732,12 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
-    def summary(self):
+    def summary(self, round_to=None):
         """
         Print text output summarising the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         print("Difference in Differences experiment")
         print(f"Formula: {self.formula}")
@@ -697,6 +745,4 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         print(f"Threshold on running variable: {self.treatment_threshold}")
         print("\nResults:")
         print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
-        print("Model coefficients:")
-        for name, val in zip(self.labels, self.model.coef_[0]):
-            print(f"\t{name}\t\t{val}")
+        self.print_coefficients(round_to)

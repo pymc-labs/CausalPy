@@ -202,11 +202,9 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
 
-        # DEVIATION FROM SKL EXPERIMENT CODE =============================
         # fit the model to the observed (pre-intervention) data
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
         self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
-        # ================================================================
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
@@ -347,7 +345,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
-        # TODO: extra experiment specific outputs here
         self.print_coefficients(round_to)
 
 
