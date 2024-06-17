@@ -209,4 +209,3 @@ def test_rd_linear_with_gaussian_process():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
-    result.summary()
