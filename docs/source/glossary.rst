@@ -46,6 +46,10 @@ Glossary
    Endogenous Variable
       An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeniety violates the assumptions of the Gauss Markov theorem.
 
+   Local Average Treatment effect
+   LATE
+      Also known asthe complier average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
+
    Non-equivalent group designs
    NEGD
       A quasi-experimental design where units are assigned to conditions non-randomly, and not according to a running variable (see Regression discontinuity design). This can be problematic when assigning causal influence of the treatment - differences in outcomes between groups could be due to the treatment or due to differences in the group attributes themselves.
@@ -61,6 +65,9 @@ Glossary
 
    Pretest-posttest design
       A quasi-experimental design where the treatment effect is estimated by comparing an outcome measure before and after treatment.
+
+   Propensity scores
+      An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
 
    Quasi-experiment
       An empirical comparison used to estimate the effects of a treatment where units are not assigned to conditions at random.
@@ -101,8 +108,6 @@ Glossary
    2SLS
       An estimation technique for estimating the parameters of an IV regression. It takes its name from the fact that it uses two OLS regressions - a first and second stage.
 
-   Propensity scores
-      An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
 
 
 References
