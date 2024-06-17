@@ -42,6 +42,7 @@ def test_did():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.DifferenceInDifferences)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -68,6 +69,7 @@ def test_rd_drinking():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -94,6 +96,7 @@ def test_its():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.SyntheticControl)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -115,6 +118,7 @@ def test_sc():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.SyntheticControl)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -136,6 +140,7 @@ def test_rd_linear_main_effects():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -159,6 +164,7 @@ def test_rd_linear_main_effects_bandwidth():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -180,6 +186,7 @@ def test_rd_linear_with_interaction():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    result.summary()
 
 
 @pytest.mark.integration
@@ -202,3 +209,4 @@ def test_rd_linear_with_gaussian_process():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    result.summary()
