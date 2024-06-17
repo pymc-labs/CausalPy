@@ -21,14 +21,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Update pip and setuptools
         run: pip install --upgrade pip setuptools
+      - name: Setup environment
+        run: pip install -e .[test]
       - name: Run doctests
-        run: |
-          pip install -e .[test]
-          pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
+        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
       - name: Run tests
-        run: |
-          pip install -e .[test]
-          pytest --cov-report=xml --no-cov-on-fail
+        run: pytest --cov-report=xml --no-cov-on-fail
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
