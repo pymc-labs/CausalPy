@@ -58,6 +58,11 @@ extensions = [
 
 nb_execution_mode = "off"
 
+# configure copy button to avoid copying sphinx or console characters
+copybutton_exclude = ".linenos, .gp"
+copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
+copybutton_prompt_is_regexp = True
+
 source_suffix = {
     ".rst": "restructuredtext",
     ".ipynb": "myst-nb",
