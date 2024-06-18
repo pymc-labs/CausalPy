@@ -74,8 +74,15 @@ bibtex_reference_style = "author_year"
 
 # -- intersphinx config -------------------------------------------------------
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
+    "examples": ("https://www.pymc.io/projects/examples/en/latest/", None),
+    "mpl": ("https://matplotlib.org/stable", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
     "pymc": ("https://www.pymc.io/projects/docs/en/stable/", None),
+    "python": ("https://docs.python.org/3", None),
+    "scikit-learn": ("https://scikit-learn.org/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "xarray": ("https://docs.xarray.dev/en/stable/", None),
 }
 
 # MyST options for working with markdown files.
