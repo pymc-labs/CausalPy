@@ -62,8 +62,15 @@ class ExperimentalDesign:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
         print("Model coefficients:")
+        # Determine the width of the longest label
+        max_label_length = max(len(name) for name in self.labels)
+        # Print each coefficient with formatted alignment
         for name, val in zip(self.labels, self.model.coef_[0]):
-            print(f"\t{name}\t\t{round_num(val, round_to)}")
+            # Left-align the name
+            formatted_name = f"{name:<{max_label_length}}"
+            # Right-align the value with width 10
+            formatted_val = f"{round_num(val, round_to):>10}"
+            print(f"  {formatted_name}\t{formatted_val}")
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
@@ -729,7 +736,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
-    def summary(self, round_to=None):
+    def summary(self, round_to=None) -> None:
         """
         Print text output summarising the results
 
@@ -742,4 +749,5 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         print(f"Threshold on running variable: {self.treatment_threshold}")
         print("\nResults:")
         print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
+        print("\n")
         self.print_coefficients(round_to)
