@@ -102,14 +102,20 @@ class ExperimentalDesign:
         ...                 "progressbar": False
         ...             }),
         ...  )
-        >>> result.print_coefficients(round_to=1) # doctest: +NUMBER
+        >>> result.print_coefficients(round_to=1)
         Model coefficients:
-        Intercept                     1, 94% HDI [1, 1]
-        post_treatment[T.True]        1, 94% HDI [0.9, 1]
-        group                         0.2, 94% HDI [0.09, 0.2]
-        group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
-        sigma                         0.08, 94% HDI [0.07, 0.1]
+            Intercept                     1, 94% HDI [1, 1]
+            post_treatment[T.True]        1, 94% HDI [0.9, 1]
+            group                         0.2, 94% HDI [0.09, 0.2]
+            group:post_treatment[T.True]  0.5, 94% HDI [0.4, 0.6]
+            sigma                         0.08, 94% HDI [0.07, 0.1]
         """
+
+        def print_row(max_label_length, name, coeff_samples, round_to):
+            formatted_name = f"  {name: <{max_label_length}}"
+            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
+            print(f"  {formatted_name}  {formatted_val}")
+
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
@@ -118,16 +124,12 @@ class ExperimentalDesign:
 
         for name in self.labels:
             coeff_samples = coeffs.sel(coeffs=name)
-            print(
-                f"  {name: <{max_label_length}}\t{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
-            )
+            print_row(max_label_length, name, coeff_samples, round_to)
 
         # Add coefficient for measurement std
         coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
         name = "sigma"
-        print(
-            f"  {name: <{max_label_length}}\t{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
-        )
+        print_row(max_label_length, name, coeff_samples, round_to)
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
@@ -163,13 +165,13 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     ...         }
     ...     ),
     ... )
-    >>> result.summary(round_to=1) # doctest: +NUMBER
+    >>> result.summary(round_to=1)
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
     Model coefficients:
-    a                             0.6, 94% HDI [0.6, 0.6]
-    g                             0.4, 94% HDI [0.4, 0.4]
-    sigma                         0.8, 94% HDI [0.6, 0.9]
+        a      0.6, 94% HDI [0.6, 0.6]
+        g      0.4, 94% HDI [0.4, 0.4]
+        sigma  0.8, 94% HDI [0.6, 0.9]
     """
 
     def __init__(
@@ -1184,10 +1186,10 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
     Results:
     Causal impact = 2, $CI_{94%}$[2, 2]
     Model coefficients:
-    Intercept                     -0.5, 94% HDI [-1, 0.2]
-    C(group)[T.1]                 2, 94% HDI [2, 2]
-    pre                           1, 94% HDI [1, 1]
-    sigma                         0.5, 94% HDI [0.5, 0.6]
+        Intercept      -0.5, 94% HDI [-1, 0.2]
+        C(group)[T.1]  2, 94% HDI [2, 2]
+        pre            1, 94% HDI [1, 1]
+        sigma          0.5, 94% HDI [0.5, 0.6]
     """
 
     def __init__(
