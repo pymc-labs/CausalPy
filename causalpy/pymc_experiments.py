@@ -111,7 +111,10 @@ class ExperimentalDesign:
             sigma                         0.08, 94% HDI [0.07, 0.1]
         """
 
-        def print_row(max_label_length, name, coeff_samples, round_to):
+        def print_row(
+            max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
+        ) -> None:
+            """Print one row of the coefficient table"""
             formatted_name = f"  {name: <{max_label_length}}"
             formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
