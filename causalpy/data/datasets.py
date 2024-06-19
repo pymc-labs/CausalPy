@@ -36,6 +36,7 @@ DATASETS = {
     "geolift_multi_cell": {"filename": "geolift_multi_cell.csv"},
     "risk": {"filename": "AJR2001.csv"},
     "nhefs": {"filename": "nhefs.csv"},
+    "schoolReturns": {"filename": "schoolingReturns.csv"},
 }
 
 

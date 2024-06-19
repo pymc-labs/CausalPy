@@ -12,11 +12,17 @@ A Python package focussing on causal inference for quasi-experiments. The packag
 Installation
 ------------
 
-To get the latest release:
+To get the latest release you can use pip:
 
 .. code-block:: sh
 
    pip install CausalPy
+
+or conda:
+
+.. code-block:: sh
+
+   conda install causalpy -c conda-forge
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:
 
@@ -31,6 +37,7 @@ Quickstart
 .. code-block:: python
 
    import causalpy as cp
+   import matplotlib.pyplot as plt
 
 
    # Import and process data
@@ -54,6 +61,8 @@ Quickstart
 
    # Get a results summary
    result.summary()
+
+   plt.show()
 
 
 Videos

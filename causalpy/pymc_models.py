@@ -72,15 +72,11 @@ class ModelBuilder(pm.Model):
     ...             }
     ... )
     >>> model.fit(X, y)
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
     >>> model.predict(X_new)
-    <BLANKLINE>
     Inference data...
     >>> model.score(X, y)
-    <BLANKLINE>
     r2        0.390344
     r2_std    0.081135
     dtype: float64
@@ -201,8 +197,6 @@ class WeightedSumFitter(ModelBuilder):
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
     >>> wsf.fit(X,y)
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     """  # noqa: W605
 
@@ -259,8 +253,6 @@ class LinearRegression(ModelBuilder):
     ...                 'obs_indx': np.arange(rd.shape[0])
     ...                },
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     Inference data...
     """  # noqa: W605
 
@@ -311,10 +303,8 @@ class InstrumentalVariableRegression(ModelBuilder):
     ...                  "mus": [[-2,4], [0.5, 3]],
     ...                  "sigmas": [1, 1],
     ...                  "eta": 2,
-    ...                  "lkj_sd": 2,
-    ...              })
-    <BLANKLINE>
-    <BLANKLINE>
+    ...                  "lkj_sd": 1,
+    ...              }, None)
     Inference data...
     """
 
@@ -350,7 +340,7 @@ class InstrumentalVariableRegression(ModelBuilder):
                 sigma=priors["sigmas"][1],
                 dims="covariates",
             )
-            sd_dist = pm.HalfCauchy.dist(beta=priors["lkj_sd"], shape=2)
+            sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
             chol, corr, sigmas = pm.LKJCholeskyCov(
                 name="chol_cov",
                 eta=priors["eta"],
@@ -376,24 +366,52 @@ class InstrumentalVariableRegression(ModelBuilder):
                 shape=(X.shape[0], 2),
             )
 
-    def fit(self, X, Z, y, t, coords, priors):
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions.
+    def sample_predictive_distribution(self, ppc_sampler="jax"):
+        """Function to sample the Multivariate Normal posterior predictive
+        Likelihood term in the IV class. This can be slow without
+        using the JAX sampler compilation method. If using the
+        JAX sampler it will sample only the posterior predictive distribution.
+        If using the PYMC sampler if will sample both the prior
+        and posterior predictive distributions."""
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        if ppc_sampler == "jax":
+            with self:
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        random_seed=random_seed,
+                        compile_kwargs={"mode": "JAX"},
+                    )
+                )
+        elif ppc_sampler == "pymc":
+            with self:
+                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        random_seed=random_seed,
+                    )
+                )
+
+    def fit(self, X, Z, y, t, coords, priors, ppc_sampler=None):
+        """Draw samples from posterior distribution and potentially
+        from the prior and posterior predictive distributions. The
+        fit call can take values for the
+        ppc_sampler = ['jax', 'pymc', None]
+        We default to None, so the user can determine if they wish
+        to spend time sampling the posterior predictive distribution
+        independently.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
-        random_seed = self.sample_kwargs.get("random_seed", None)
+        # Use JAX for ppc sampling of multivariate likelihood
 
         self.build_model(X, Z, y, t, coords, priors)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata, progressbar=False, random_seed=random_seed
-                )
-            )
+        self.sample_predictive_distribution(ppc_sampler=ppc_sampler)
         return self.idata
 
 
@@ -432,8 +450,6 @@ class PropensityScore(ModelBuilder):
     ...                 'obs_indx': np.arange(df.shape[0])
     ...                },
     ... )
-    <BLANKLINE>
-    <BLANKLINE>
     Inference...
     """  # noqa: W605
 
