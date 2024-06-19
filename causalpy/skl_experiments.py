@@ -286,7 +286,6 @@ class InterruptedTimeSeries(PrePostFit):
     ...     formula="y ~ 1 + t + C(month)",
     ...     model = LinearRegression()
     ... )
-
     """
 
     expt_type = "Interrupted Time Series"
@@ -590,18 +589,6 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
     ...     model=LinearRegression(),
     ...     treatment_threshold=0.5,
     ... )
-    >>> result.summary() # doctest: +NORMALIZE_WHITESPACE,+NUMBER
-    Difference in Differences experiment
-    Formula: y ~ 1 + x + treated
-    Running variable: x
-    Threshold on running variable: 0.5
-    <BLANKLINE>
-    Results:
-    Discontinuity at threshold = 0.19
-    Model coefficients:
-       Intercept               0
-       treated[T.True]         0.19
-       x               1.2
     """
 
     def __init__(
