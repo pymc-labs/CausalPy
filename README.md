@@ -34,7 +34,7 @@ pip install git+https://github.com/pymc-labs/CausalPy.git
 
 ```python
 import causalpy as cp
-
+import matplotlib.pyplot as plt
 
 # Import and process data
 df = (
@@ -57,6 +57,8 @@ fig, ax = result.plot();
 
 # Get a results summary
 result.summary()
+
+plt.show()
 ```
 
 ## Roadmap

@@ -39,7 +39,7 @@ dependencies = [
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
-    "xarray>=v2022.11.0",
+    "xarray>=v2022.11.0"
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
@@ -54,17 +54,17 @@ docs = [
     "ipykernel",
     "daft",
     "linkify-it-py",
-    "myst-nb<=1.0.0",
+    "myst-nb!=1.1.0",
     "pathlib",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
-    "sphinx-design",
+    "sphinx-copybutton",
     "sphinx-rtd-theme",
     "statsmodels",
     "sphinxcontrib-bibtex",
 ]
-lint = ["interrogate", "nbqa", "pre-commit", "ruff"]
+lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov"]
 
 [metadata]

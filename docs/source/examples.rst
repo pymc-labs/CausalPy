@@ -68,6 +68,7 @@ Instrumental Variables Regression
    :titlesonly:
 
    notebooks/iv_pymc.ipynb
+   notebooks/iv_weak_instruments.ipynb
 
 Inverse Propensity Score Weighting
 =================================

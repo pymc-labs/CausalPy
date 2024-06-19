@@ -10,8 +10,6 @@ lint:
 check_lint:
 	ruff check .
 	ruff format --diff --check .
-	nbqa black --check .
-	nbqa ruff .
 	interrogate .
 
 doctest:

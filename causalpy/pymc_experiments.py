@@ -1450,7 +1450,7 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
                 "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                 "sigmas": [1, 1],
                 "eta": 2,
-                "lkj_sd": 2,
+                "lkj_sd": 1,
             }
         self.priors = priors
         self.model.fit(
