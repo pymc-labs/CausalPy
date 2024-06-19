@@ -43,6 +43,7 @@ def test_did():
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 # TODO: set up fixture for the banks dataset
@@ -98,6 +99,7 @@ def test_did_banks_simple():
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -149,6 +151,7 @@ def test_did_banks_multi():
     assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -174,6 +177,7 @@ def test_rd():
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -200,6 +204,7 @@ def test_rd_bandwidth():
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -229,6 +234,7 @@ def test_rd_drinking():
     assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 def setup_regression_kink_data(kink):
@@ -281,6 +287,7 @@ def test_rkink():
     assert isinstance(result, cp.pymc_experiments.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -307,6 +314,7 @@ def test_rkink_bandwidth():
     assert isinstance(result, cp.pymc_experiments.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -336,6 +344,7 @@ def test_its():
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -366,6 +375,7 @@ def test_its_covid():
     assert isinstance(result, cp.pymc_experiments.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -392,6 +402,7 @@ def test_sc():
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -430,6 +441,7 @@ def test_sc_brexit():
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -455,6 +467,7 @@ def test_ancova():
     assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
@@ -485,6 +498,7 @@ def test_geolift1():
     assert isinstance(result, cp.pymc_experiments.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
 
 
 @pytest.mark.integration
