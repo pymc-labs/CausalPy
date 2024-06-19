@@ -129,20 +129,6 @@ class ExperimentalDesign:
             f"  {name: <{max_label_length}}\t{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
         )
 
-        # # Note: f"{name: <30}" pads the name with spaces so that we have alignment of
-        # # the stats despite variable names of different lengths
-        # for name in self.labels:
-        #     coeff_samples = coeffs.sel(coeffs=name)
-        #     print(
-        #         f"{name: <30}{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
-        #     )
-        # # add coeff for measurement std
-        # coeff_samples = az.extract(self.model.idata.posterior, var_names="sigma")
-        # name = "sigma"
-        # print(
-        #     f"{name: <30}{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
-        # )
-
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     """
