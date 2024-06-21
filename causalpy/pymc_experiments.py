@@ -144,6 +144,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         A pandas dataframe
     :param treatment_time:
         The time when treatment occured, should be in reference to the data index
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param formula:
         A statistical model formula
     :param model:
@@ -171,6 +173,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     >>> result.summary(round_to=1)
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
+    Pre-intervention Bayesian $R^2$: 0.9 (std = 0.01)
     Model coefficients:
         a      0.6, 94% HDI [0.6, 0.6]
         g      0.4, 94% HDI [0.4, 0.4]
@@ -190,6 +193,13 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self._input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.validation_time = validation_time
+        # validate arguments
+        if self.validation_time is not None:
+            # check that validation time is less than treatment time
+            if self.validation_time >= self.treatment_time:
+                raise ValueError(
+                    "Validation time must be less than the treatment time."
+                )
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
@@ -397,6 +407,8 @@ class InterruptedTimeSeries(PrePostFit):
         The time when treatment occured, should be in reference to the data index
     :param formula:
         A statistical model formula
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param model:
         A PyMC model
 
@@ -436,6 +448,8 @@ class SyntheticControl(PrePostFit):
         The time when treatment occured, should be in reference to the data index
     :param formula:
         A statistical model formula
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param model:
         A PyMC model
 
