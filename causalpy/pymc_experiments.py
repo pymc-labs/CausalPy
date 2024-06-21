@@ -624,6 +624,12 @@ class InterruptedTimeSeries(PrePostFit):
     expt_type = "Interrupted Time Series"
 
 
+class InterruptedTimeSeriesWithValidation(PrePostFitWithValidation):
+    """ """
+
+    expt_type = "Interrupted Time Series (with validation period)"
+
+
 class SyntheticControl(PrePostFit):
     """A wrapper around the PrePostFit class
 
