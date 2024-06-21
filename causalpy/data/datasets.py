@@ -33,6 +33,7 @@ DATASETS = {
     "sc": {"filename": "synthetic_control.csv"},
     "anova1": {"filename": "ancova_generated.csv"},
     "geolift1": {"filename": "geolift1.csv"},
+    "geolift_multi_cell": {"filename": "geolift_multi_cell.csv"},
     "risk": {"filename": "AJR2001.csv"},
     "nhefs": {"filename": "nhefs.csv"},
     "schoolReturns": {"filename": "schoolingReturns.csv"},
