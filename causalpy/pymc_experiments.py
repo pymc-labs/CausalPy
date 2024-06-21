@@ -220,8 +220,22 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
         self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        if self.validation_time is None:
+            # We just have pre and post data, no validation data. So we can score the pre intervention data
+            self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        else:
+            # Score on the training data - before the validation time
+            self.datatrain = data[data.index < self.validation_time]
+            y, X = dmatrices(formula, self.datatrain)
+            self.score = self.model.score(X=X, y=y)
+            # Score on the validation data - after the validation time but
+            # before the treatment time
+            self.datavalidate = data[
+                (data.index >= self.validation_time)
+                & (data.index < self.treatment_time)
+            ]
+            y, X = dmatrices(formula, self.datavalidate)
+            self.score_validation = self.model.score(X=X, y=y)
 
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.pre_X)
