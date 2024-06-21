@@ -306,13 +306,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(
-            title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
-            (std = {round_num(self.score.r2_std, round_to)})
-            """
-        )
-
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
@@ -334,10 +327,10 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             alpha=0.25,
             label="Causal impact",
         )
-        ax[1].set(title="Causal Impact")
+        ax[1].set(ylabel="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
+        ax[2].set(ylabel="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
             self.post_impact_cumulative,
@@ -380,6 +373,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
+        # print goodness of fit scores
+        if self.validation_time is None:
+            print(
+                f"Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+            )
+        else:
+            print(
+                f"Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})\n"
+                f"Validation Bayesian $R^2$: {round_num(self.score_validation.r2, round_to)} (std = {round_num(self.score_validation.r2_std, round_to)})"
+            )
+        # print coefficients
         self.print_coefficients(round_to)
 
 
