@@ -63,6 +63,7 @@ docs = [
     "sphinx-rtd-theme",
     "statsmodels",
     "sphinxcontrib-bibtex",
+    "ipywidgets",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov"]
