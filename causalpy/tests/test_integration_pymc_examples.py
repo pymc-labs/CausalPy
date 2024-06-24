@@ -317,14 +317,15 @@ def test_rkink_bandwidth():
     result.summary()
 
 
+@pytest.mark.parametrize("validation_time", [None, pd.to_datetime("2015-01-01")])
 @pytest.mark.integration
-def test_its():
+def test_its(validation_time):
     """
     Test Interrupted Time-Series experiment.
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. pymc_experiments.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -334,14 +335,15 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.pymc_experiments.InterruptedTimeSeries(
         df,
         treatment_time,
+        validation_time=validation_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.pymc_experiments.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -379,7 +381,8 @@ def test_its_covid():
 
 
 @pytest.mark.integration
-def test_sc():
+@pytest.mark.parametrize("validation_time", [None, 50])
+def test_sc(validation_time):
     """
     Test Synthetic Control experiment.
 
@@ -395,6 +398,7 @@ def test_sc():
     result = cp.pymc_experiments.SyntheticControl(
         df,
         treatment_time,
+        validation_time=validation_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
