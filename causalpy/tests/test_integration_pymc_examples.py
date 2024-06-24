@@ -349,6 +349,27 @@ def test_its(validation_time):
     result.summary()
 
 
+def test_its_with_invalid_validation_time():
+    """
+    Test that we get a ValueError when validation_time is greater than validation_time.
+    """
+    df = (
+        cp.load_data("its")
+        .assign(date=lambda x: pd.to_datetime(x["date"]))
+        .set_index("date")
+    )
+    treatment_time = pd.to_datetime("2017-01-01")
+    validation_time = pd.to_datetime("2018-01-01")
+    with pytest.raises(ValueError):
+        _ = cp.pymc_experiments.InterruptedTimeSeries(
+            df,
+            treatment_time,
+            validation_time=validation_time,
+            formula="y ~ 1 + t + C(month)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+
 @pytest.mark.integration
 def test_its_covid():
     """
@@ -407,6 +428,23 @@ def test_sc(validation_time):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+
+
+def test_sc_with_invalid_validation_time():
+    """
+    Test that we get a ValueError when validation_time is greater than validation_time.
+    """
+    df = cp.load_data("sc")
+    treatment_time = 70
+    validation_time = 80
+    with pytest.raises(ValueError):
+        _ = cp.pymc_experiments.SyntheticControl(
+            df,
+            treatment_time,
+            validation_time=validation_time,
+            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        )
 
 
 @pytest.mark.integration
