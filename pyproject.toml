@@ -59,11 +59,15 @@ docs = [
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
+    "pydata-sphinx-theme>=0.12.0.dev0",
     "sphinx-copybutton",
     "sphinx-rtd-theme",
     "statsmodels",
     "sphinxcontrib-bibtex",
+    "sphinx-notfound-page",
     "ipywidgets",
+    "numpydoc",
+    "sphinx-design",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov"]

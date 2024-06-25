@@ -11,12 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Scikit-Learn Models
-
-- Weighted Proportion
-
-"""
+"""Custom scikit-learn models for causal inference"""
 
 from functools import partial
 

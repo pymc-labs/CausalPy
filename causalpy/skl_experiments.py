@@ -11,16 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Experiments for Scikit-Learn models
-
-- ExperimentalDesign: base class for scikit-learn experiments
-- PrePostFit: base class for synthetic control and interrupted time series
-- SyntheticControl
-- InterruptedTimeSeries
-- DifferenceInDifferences
-- RegressionDiscontinuity
-"""
+"""Quasi-Experiment classes for OLS inference"""
 
 import warnings
 from typing import Optional
