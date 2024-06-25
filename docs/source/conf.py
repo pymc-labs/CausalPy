@@ -44,17 +44,6 @@ release = __version__
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-# extensions = [
-#     "myst_nb",
-#     "sphinxcontrib.bibtex",
-#     "sphinx.ext.autodoc",
-#     "sphinx.ext.intersphinx",
-#     "sphinx.ext.mathjax",
-#     "sphinx.ext.viewcode",
-#     "sphinx_autodoc_typehints",
-#     "sphinx_copybutton",
-# ]
-
 # Add any Sphinx extension module names here, as strings
 extensions = [
     # extensions from sphinx base
@@ -147,7 +136,6 @@ myst_enable_extensions = [
 html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-# html_logo = "_static/logo.png"
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
