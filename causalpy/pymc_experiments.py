@@ -11,18 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Experiment routines for PyMC models.
-
-- ExperimentalDesign base class
-- Pre-Post Fit
-- Interrupted Time Series
-- Synthetic Control
-- Difference in differences
-- Regression Discontinuity
-- Pretest/Posttest Nonequivalent Group Design
-
-"""
+"""Quasi-Experiment classes for Bayesian causal inference"""
 
 import warnings  # noqa: I001
 from typing import Union

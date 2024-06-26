@@ -6,9 +6,11 @@ _build
 *.egg-info
 build/
 dist/
-docs/_build/
-docs/build/
-docs/jupyter_execute/
 *.vscode
 .coverage
 *.jupyterlab-workspace
+
+# Sphinx documentation
+docs/build/
+docs/jupyter_execute/
+docs/source/api/generated/
