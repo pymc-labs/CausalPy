@@ -1,5 +1,5 @@
 :::{image} _static/logo.png
-:width: 80 %
+:width: 60 %
 :align: center
 :alt: CausalPy logo
 :::
