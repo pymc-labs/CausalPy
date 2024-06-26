@@ -11,18 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Defines generic PyMC ModelBuilder class and subclasses for
-
-- WeightedSumFitter model for Synthetic Control experiments
-- LinearRegression model
-
-Models are intended to be used from inside an experiment
-class (see :doc:`PyMC experiments</api_pymc_experiments>`).
-This is why the examples require some extra
-manipulation input data, often to ensure `y` has the correct shape.
-
-"""
+"""Custom PyMC models for causal inference"""
 
 from typing import Any, Dict, Optional
 
