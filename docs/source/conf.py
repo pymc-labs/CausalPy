@@ -52,10 +52,9 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "sphinx.ext.intersphinx",
-    # "sphinx.ext.napoleon",
+    "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     # extensions provided by other packages
-    "numpydoc",
     "sphinxcontrib.bibtex",
     "matplotlib.sphinxext.plot_directive",  # needed to plot in docstrings
     "myst_nb",

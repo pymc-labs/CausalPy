@@ -66,7 +66,6 @@ docs = [
     "sphinxcontrib-bibtex",
     "sphinx-notfound-page",
     "ipywidgets",
-    "numpydoc",
     "sphinx-design",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
