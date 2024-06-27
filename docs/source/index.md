@@ -143,7 +143,7 @@ Inverse Propensity Score Weighting is a technique used to correct selection effe
 
 This repository is supported by [PyMC Labs](https://www.pymc-labs.io).
 
-For companies that want to use CusalPy in production, [PyMC Labs](https://www.pymc-labs.com) is available for consulting and training. We can help you build and deploy your models in production. We have experience with cutting edge Bayesian and causal modelling techniques which we have applied to a range of business domains.
+For companies that want to use CausalPy in production, [PyMC Labs](https://www.pymc-labs.com) is available for consulting and training. We can help you build and deploy your models in production. We have experience with cutting edge Bayesian and causal modelling techniques which we have applied to a range of business domains.
 
 <p align="center">
   <a href="https://www.pymc-labs.io">
