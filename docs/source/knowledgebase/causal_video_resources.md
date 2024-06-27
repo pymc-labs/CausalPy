@@ -21,7 +21,7 @@
 }
 </style>
 
-## What if Causal reasoning meets Bayesian Inference
+## What if? Causal reasoning meets Bayesian Inference
 
 <div class="video-container">
     <iframe src="https://www.youtube.com/embed/gV6wzTk3o1U" title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
