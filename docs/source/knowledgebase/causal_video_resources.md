@@ -39,7 +39,7 @@
     <iframe width="560" height="315" src="https://www.youtube.com/embed/b47wmTdcICE?si=aXufYM8AiHZAQ9Q0" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 </div>
 
-## Thomas Wiecki's Guide To Causal Inference Using PyMC
+## Guide To Causal Inference Using PyMC
 
 <div class="video-container">
     <iframe width="560" height="315" src="https://www.youtube.com/embed/QAzAFess1AA?si=zD6PrljOFUyvjm1I" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
