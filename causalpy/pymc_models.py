@@ -16,6 +16,7 @@
 from typing import Any, Dict, Optional
 
 import arviz as az
+import numpy as np
 import pandas as pd
 import pymc as pm
 import xarray as xr
@@ -154,6 +155,27 @@ class LinearRegression(BayesianModel):
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
+            sigma = pm.HalfNormal("sigma", 1)
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
+            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+
+
+class WeightedSumFitter(BayesianModel):
+    def build_model(self, X, y, coords):
+        """
+        Defines the PyMC model
+        """
+        with self:
+            self.add_coords(coords)
+            n_predictors = X.shape[1]
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
+            # TODO: There we should allow user-specified priors here
+            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
+            # beta = pm.Dirichlet(
+            #     name="beta", a=(1 / n_predictors) * np.ones(n_predictors),
+            #     dims="coeffs"
+            # )
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")

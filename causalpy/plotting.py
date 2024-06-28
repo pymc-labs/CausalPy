@@ -16,6 +16,7 @@ from abc import ABC
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import round_num
@@ -143,11 +144,102 @@ class BayesianPlotComponent(PlotComponent):
         )
         return fig, ax
 
-    def plot_difference_in_differences(self, experiment, impact):
-        pass
+    def plot_difference_in_differences(self, results):
+        data = results.data
+        time_variable_name = results.time_variable_name
+        outcome_variable_name = results.outcome_variable_name
+        group_variable_name = results.group_variable_name
+        x_pred_control = results.x_pred_control
+        y_pred_control = results.y_pred_control
+        x_pred_treatment = results.x_pred_treatment
+        y_pred_treatment = results.y_pred_treatment
+        x_pred_counterfactual = results.x_pred_counterfactual
+        y_pred_counterfactual = results.y_pred_counterfactual
 
-    def plot_synthetic_control(self, experiment, impact):
-        pass
+        fig, ax = plt.subplots()
+
+        # Plot raw data
+        sns.scatterplot(
+            data,
+            x=time_variable_name,
+            y=outcome_variable_name,
+            hue=group_variable_name,
+            alpha=1,
+            legend=False,
+            markers=True,
+            ax=ax,
+        )
+
+        # Plot model fit to control group
+        time_points = x_pred_control[time_variable_name].values
+        h_line, h_patch = plot_xY(
+            time_points,
+            y_pred_control.posterior_predictive.mu,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C0"},
+            label="Control group",
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Control group"]
+
+        # Plot model fit to treatment group
+        time_points = x_pred_control[time_variable_name].values
+        h_line, h_patch = plot_xY(
+            time_points,
+            y_pred_treatment.posterior_predictive.mu,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C1"},
+            label="Treatment group",
+        )
+        handles.append((h_line, h_patch))
+        labels.append("Treatment group")
+
+        # Plot counterfactual - post-test for treatment group IF no treatment
+        # had occurred.
+        time_points = x_pred_counterfactual[time_variable_name].values
+        if len(time_points) == 1:
+            parts = ax.violinplot(
+                az.extract(
+                    y_pred_counterfactual,
+                    group="posterior_predictive",
+                    var_names="mu",
+                ).values.T,
+                positions=x_pred_counterfactual[time_variable_name].values,
+                showmeans=False,
+                showmedians=False,
+                widths=0.2,
+            )
+            for pc in parts["bodies"]:
+                pc.set_facecolor("C0")
+                pc.set_edgecolor("None")
+                pc.set_alpha(0.5)
+        else:
+            h_line, h_patch = plot_xY(
+                time_points,
+                y_pred_counterfactual.posterior_predictive.mu,
+                ax=ax,
+                plot_hdi_kwargs={"color": "C2"},
+                label="Counterfactual",
+            )
+            handles.append((h_line, h_patch))
+            labels.append("Counterfactual")
+
+        # arrow to label the causal impact
+        # _plot_causal_impact_arrow(ax)
+
+        # formatting
+        ax.set(
+            xticks=x_pred_treatment[time_variable_name].values,
+            title=_causal_impact_summary_stat(round_to),
+        )
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+    # def plot_synthetic_control(self, experiment, impact):
+    #     pass
 
 
 class OLSPlotComponent(PlotComponent):
@@ -231,8 +323,85 @@ class OLSPlotComponent(PlotComponent):
 
         return (fig, ax)
 
-    def plot_difference_in_differences(self, experiment, impact):
-        pass
+    def plot_difference_in_differences(self, results):
+        data = results.data
+        time_variable_name = results.time_variable_name
+        outcome_variable_name = results.outcome_variable_name
+        group_variable_name = results.group_variable_name
+        x_pred_control = results.x_pred_control
+        y_pred_control = results.y_pred_control
+        x_pred_treatment = results.x_pred_treatment
+        y_pred_treatment = results.y_pred_treatment
+        x_pred_counterfactual = results.x_pred_counterfactual
+        y_pred_counterfactual = results.y_pred_counterfactual
 
-    def plot_synthetic_control(self, experiment, impact):
-        pass
+        fig, ax = plt.subplots()
+
+        # Plot raw data
+        sns.lineplot(
+            data,
+            x=time_variable_name,
+            y=outcome_variable_name,
+            hue="group",
+            units="unit",
+            estimator=None,
+            alpha=0.25,
+            ax=ax,
+        )
+        # Plot model fit to control group
+        ax.plot(
+            x_pred_control[time_variable_name],
+            y_pred_control,
+            "o",
+            c="C0",
+            markersize=10,
+            label="model fit (control group)",
+        )
+        # Plot model fit to treatment group
+        ax.plot(
+            x_pred_treatment[time_variable_name],
+            y_pred_treatment,
+            "o",
+            c="C1",
+            markersize=10,
+            label="model fit (treament group)",
+        )
+        # Plot counterfactual - post-test for treatment group IF no treatment
+        # had occurred.
+        ax.plot(
+            x_pred_counterfactual[time_variable_name],
+            y_pred_counterfactual,
+            "go",
+            markersize=10,
+            label="counterfactual",
+        )
+        # arrow to label the causal impact
+        ax.annotate(
+            "",
+            xy=(1.05, y_pred_counterfactual),
+            xycoords="data",
+            xytext=(1.05, y_pred_treatment[1]),
+            textcoords="data",
+            arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
+        )
+        ax.annotate(
+            "causal\nimpact",
+            xy=(
+                1.05,
+                np.mean([y_pred_counterfactual[0], y_pred_treatment[1]]),
+            ),
+            xycoords="data",
+            xytext=(5, 0),
+            textcoords="offset points",
+            color="green",
+            va="center",
+        )
+        # formatting
+        ax.set(
+            xlim=[-0.05, 1.1],
+            xticks=[0, 1],
+            xticklabels=["pre", "post"],
+            title=f"Causal impact = {round_num(causal_impact[0], round_to)}",
+        )
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        return (fig, ax)

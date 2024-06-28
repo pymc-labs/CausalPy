@@ -23,7 +23,6 @@ import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.data_validation import (
-    DiDDataValidator,
     RDDataValidator,
 )
 from causalpy.utils import round_num
@@ -31,188 +30,188 @@ from causalpy.utils import round_num
 LEGEND_FONT_SIZE = 12
 
 
-class ExperimentalDesign:
-    """Base class for experiment designs"""
+# class ExperimentalDesign:
+#     """Base class for experiment designs"""
 
-    model = None
-    expt_type = None
-    outcome_variable_name = None
+#     model = None
+#     expt_type = None
+#     outcome_variable_name = None
 
-    def __init__(self, model=None, **kwargs):
-        if model is not None:
-            self.model = model
-        if self.model is None:
-            raise ValueError("fitting_model not set or passed.")
+#     def __init__(self, model=None, **kwargs):
+#         if model is not None:
+#             self.model = model
+#         if self.model is None:
+#             raise ValueError("fitting_model not set or passed.")
 
-    def print_coefficients(self, round_to=None) -> None:
-        """
-        Prints the model coefficients
+#     def print_coefficients(self, round_to=None) -> None:
+#         """
+#         Prints the model coefficients
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        print("Model coefficients:")
-        # Determine the width of the longest label
-        max_label_length = max(len(name) for name in self.labels)
-        # Print each coefficient with formatted alignment
-        for name, val in zip(self.labels, self.model.coef_[0]):
-            # Left-align the name
-            formatted_name = f"{name:<{max_label_length}}"
-            # Right-align the value with width 10
-            formatted_val = f"{round_num(val, round_to):>10}"
-            print(f"  {formatted_name}\t{formatted_val}")
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         print("Model coefficients:")
+#         # Determine the width of the longest label
+#         max_label_length = max(len(name) for name in self.labels)
+#         # Print each coefficient with formatted alignment
+#         for name, val in zip(self.labels, self.model.coef_[0]):
+#             # Left-align the name
+#             formatted_name = f"{name:<{max_label_length}}"
+#             # Right-align the value with width 10
+#             formatted_val = f"{round_num(val, round_to):>10}"
+#             print(f"  {formatted_name}\t{formatted_val}")
 
-    # class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
-    #     """
-    #     A class to analyse quasi-experiments where parameter estimation is based on just
-    #     the pre-intervention data.
+# class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
+#     """
+#     A class to analyse quasi-experiments where parameter estimation is based on just
+#     the pre-intervention data.
 
-    #     :param data:
-    #         A pandas data frame
-    #     :param treatment_time:
-    #         The index or time value of when treatment begins
-    #     :param formula:
-    #         A statistical model formula
-    #     :param model:
-    #         An scikit-learn model object
+#     :param data:
+#         A pandas data frame
+#     :param treatment_time:
+#         The index or time value of when treatment begins
+#     :param formula:
+#         A statistical model formula
+#     :param model:
+#         An scikit-learn model object
 
-    #     Example
-    #     --------
-    #     >>> from sklearn.linear_model import LinearRegression
-    #     >>> import causalpy as cp
-    #     >>> df = cp.load_data("sc")
-    #     >>> treatment_time = 70
-    #     >>> result = cp.skl_experiments.PrePostFit(
-    #     ...     df,
-    #     ...     treatment_time,
-    #     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-    #     ...     model = cp.skl_models.WeightedProportion()
-    #     ... )
-    #     >>> result.get_coeffs()
-    #     array(...)
-    #     """
+#     Example
+#     --------
+#     >>> from sklearn.linear_model import LinearRegression
+#     >>> import causalpy as cp
+#     >>> df = cp.load_data("sc")
+#     >>> treatment_time = 70
+#     >>> result = cp.skl_experiments.PrePostFit(
+#     ...     df,
+#     ...     treatment_time,
+#     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+#     ...     model = cp.skl_models.WeightedProportion()
+#     ... )
+#     >>> result.get_coeffs()
+#     array(...)
+#     """
 
-    #     def __init__(
-    #         self,
-    #         data,
-    #         treatment_time,
-    #         formula,
-    #         model=None,
-    #         **kwargs,
-    #     ):
-    #         super().__init__(model=model, **kwargs)
-    #         self._input_validation(data, treatment_time)
-    #         self.treatment_time = treatment_time
-    #         # set experiment type - usually done in subclasses
-    #         self.expt_type = "Pre-Post Fit"
-    #         # split data in to pre and post intervention
-    #         self.datapre = data[data.index < self.treatment_time]
-    #         self.datapost = data[data.index >= self.treatment_time]
+#     def __init__(
+#         self,
+#         data,
+#         treatment_time,
+#         formula,
+#         model=None,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self._input_validation(data, treatment_time)
+#         self.treatment_time = treatment_time
+#         # set experiment type - usually done in subclasses
+#         self.expt_type = "Pre-Post Fit"
+#         # split data in to pre and post intervention
+#         self.datapre = data[data.index < self.treatment_time]
+#         self.datapost = data[data.index >= self.treatment_time]
 
-    #         self.formula = formula
+#         self.formula = formula
 
-    #         # set things up with pre-intervention data
-    #         y, X = dmatrices(formula, self.datapre)
-    #         self.outcome_variable_name = y.design_info.column_names[0]
-    #         self._y_design_info = y.design_info
-    #         self._x_design_info = X.design_info
-    #         self.labels = X.design_info.column_names
-    #         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-    #         # process post-intervention data
-    #         (new_y, new_x) = build_design_matrices(
-    #             [self._y_design_info, self._x_design_info], self.datapost
-    #         )
-    #         self.post_X = np.asarray(new_x)
-    #         self.post_y = np.asarray(new_y)
+#         # set things up with pre-intervention data
+#         y, X = dmatrices(formula, self.datapre)
+#         self.outcome_variable_name = y.design_info.column_names[0]
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+#         # process post-intervention data
+#         (new_y, new_x) = build_design_matrices(
+#             [self._y_design_info, self._x_design_info], self.datapost
+#         )
+#         self.post_X = np.asarray(new_x)
+#         self.post_y = np.asarray(new_y)
 
-    #         # fit the model to the observed (pre-intervention) data
-    #         self.model.fit(X=self.pre_X, y=self.pre_y)
+#         # fit the model to the observed (pre-intervention) data
+#         self.model.fit(X=self.pre_X, y=self.pre_y)
 
-    #         # score the goodness of fit to the pre-intervention data
-    #         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+#         # score the goodness of fit to the pre-intervention data
+#         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-    #         # get the model predictions of the observed (pre-intervention) data
-    #         self.pre_pred = self.model.predict(X=self.pre_X)
+#         # get the model predictions of the observed (pre-intervention) data
+#         self.pre_pred = self.model.predict(X=self.pre_X)
 
-    #         # calculate the counterfactual
-    #         self.post_pred = self.model.predict(X=self.post_X)
+#         # calculate the counterfactual
+#         self.post_pred = self.model.predict(X=self.post_X)
 
-    #         # causal impact pre (ie the residuals of the model fit to observed)
-    #         self.pre_impact = self.pre_y - self.pre_pred
-    #         # causal impact post (ie the impact of the intervention)
-    #         self.post_impact = self.post_y - self.post_pred
+#         # causal impact pre (ie the residuals of the model fit to observed)
+#         self.pre_impact = self.pre_y - self.pre_pred
+#         # causal impact post (ie the impact of the intervention)
+#         self.post_impact = self.post_y - self.post_pred
 
-    #         # cumulative impact post
-    #         self.post_impact_cumulative = np.cumsum(self.post_impact)
+#         # cumulative impact post
+#         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
-    def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
-        """Plot experiment results
+# def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
+#     """Plot experiment results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+#     :param round_to:
+#         Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#     """
+#     fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+#     ax[0].plot(self.datapre.index, self.pre_y, "k.")
+#     ax[0].plot(self.datapost.index, self.post_y, "k.")
 
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
-        ax[0].plot(
-            self.datapost.index,
-            self.post_pred,
-            label=counterfactual_label,
-            ls=":",
-            c="k",
-        )
-        ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
-        )
+#     ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+#     ax[0].plot(
+#         self.datapost.index,
+#         self.post_pred,
+#         label=counterfactual_label,
+#         ls=":",
+#         c="k",
+#     )
+#     ax[0].set(
+#         title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+#     )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
-        ax[1].plot(
-            self.datapost.index,
-            self.post_impact,
-            "k.",
-            label=counterfactual_label,
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
+#     ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+#     ax[1].plot(
+#         self.datapost.index,
+#         self.post_impact,
+#         "k.",
+#         label=counterfactual_label,
+#     )
+#     ax[1].axhline(y=0, c="k")
+#     ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
+#     ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+#     ax[2].axhline(y=0, c="k")
+#     ax[2].set(title="Cumulative Causal Impact")
 
-        # Shaded causal effect
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_y),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_impact),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
+#     # Shaded causal effect
+#     ax[0].fill_between(
+#         self.datapost.index,
+#         y1=np.squeeze(self.post_pred),
+#         y2=np.squeeze(self.post_y),
+#         color="C0",
+#         alpha=0.25,
+#         label="Causal impact",
+#     )
+#     ax[1].fill_between(
+#         self.datapost.index,
+#         y1=np.squeeze(self.post_impact),
+#         color="C0",
+#         alpha=0.25,
+#         label="Causal impact",
+#     )
 
-        # Intervention line
-        # TODO: make this work when self.treatment_time is a datetime
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-                label="Treatment time",
-            )
+#     # Intervention line
+#     # TODO: make this work when self.treatment_time is a datetime
+#     for i in [0, 1, 2]:
+#         ax[i].axvline(
+#             x=self.treatment_time,
+#             ls="-",
+#             lw=3,
+#             color="r",
+#             label="Treatment time",
+#         )
 
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+#     ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
-        return (fig, ax)
+#     return (fig, ax)
 
 
 #     def get_coeffs(self):
@@ -326,225 +325,225 @@ class ExperimentalDesign:
 #         return (fig, ax)
 
 
-class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
-    """
-    .. note::
+# class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
+#     """
+#     .. note::
 
-        There is no pre/post intervention data distinction for DiD, we fit all the data
-        available.
+#         There is no pre/post intervention data distinction for DiD, we fit all the data
+#         available.
 
-    :param data:
-        A pandas data frame
-    :param formula:
-        A statistical model formula
-    :param time_variable_name:
-        Name of the data column for the time variable
-    :param group_variable_name:
-        Name of the data column for the group variable
-    :param model:
-        An scikit-learn model for difference in differences
+#     :param data:
+#         A pandas data frame
+#     :param formula:
+#         A statistical model formula
+#     :param time_variable_name:
+#         Name of the data column for the time variable
+#     :param group_variable_name:
+#         Name of the data column for the group variable
+#     :param model:
+#         An scikit-learn model for difference in differences
 
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> from sklearn.linear_model import LinearRegression
-    >>> df = cp.load_data("did")
-    >>> result = cp.skl_experiments.DifferenceInDifferences(
-    ...     df,
-    ...     formula="y ~ 1 + group*post_treatment",
-    ...     time_variable_name="t",
-    ...     group_variable_name="group",
-    ...     treated=1,
-    ...     untreated=0,
-    ...     model=LinearRegression(),
-    ... )
-    """
+#     Example
+#     --------
+#     >>> import causalpy as cp
+#     >>> from sklearn.linear_model import LinearRegression
+#     >>> df = cp.load_data("did")
+#     >>> result = cp.skl_experiments.DifferenceInDifferences(
+#     ...     df,
+#     ...     formula="y ~ 1 + group*post_treatment",
+#     ...     time_variable_name="t",
+#     ...     group_variable_name="group",
+#     ...     treated=1,
+#     ...     untreated=0,
+#     ...     model=LinearRegression(),
+#     ... )
+#     """
 
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        formula: str,
-        time_variable_name: str,
-        group_variable_name: str,
-        treated: str,
-        untreated: str,
-        model=None,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.data = data
-        self.expt_type = "Difference in Differences"
-        self.formula = formula
-        self.time_variable_name = time_variable_name
-        self.group_variable_name = group_variable_name
-        self._input_validation()
-        self.treated = treated  # level of the group_variable_name that was treated
-        self.untreated = (
-            untreated  # level of the group_variable_name that was untreated
-        )
-        y, X = dmatrices(formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+#     def __init__(
+#         self,
+#         data: pd.DataFrame,
+#         formula: str,
+#         time_variable_name: str,
+#         group_variable_name: str,
+#         treated: str,
+#         untreated: str,
+#         model=None,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self.data = data
+#         self.expt_type = "Difference in Differences"
+#         self.formula = formula
+#         self.time_variable_name = time_variable_name
+#         self.group_variable_name = group_variable_name
+#         self._input_validation()
+#         self.treated = treated  # level of the group_variable_name that was treated
+#         self.untreated = (
+#             untreated  # level of the group_variable_name that was untreated
+#         )
+#         y, X = dmatrices(formula, self.data)
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.y, self.X = np.asarray(y), np.asarray(X)
+#         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # fit the model to all the data
-        self.model.fit(X=self.X, y=self.y)
+#         # fit the model to all the data
+#         self.model.fit(X=self.X, y=self.y)
 
-        # predicted outcome for control group
-        self.x_pred_control = (
-            self.data
-            # just the untreated group
-            .query(f"{self.group_variable_name} == @self.untreated")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
-            # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
-            .first()
-            .reset_index()
-        )
-        assert not self.x_pred_control.empty
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self.model.predict(np.asarray(new_x))
+#         # predicted outcome for control group
+#         self.x_pred_control = (
+#             self.data
+#             # just the untreated group
+#             .query(f"{self.group_variable_name} == @self.untreated")
+#             # drop the outcome variable
+#             .drop(self.outcome_variable_name, axis=1)
+#             # We may have multiple units per time point, we only want one time point
+#             .groupby(self.time_variable_name)
+#             .first()
+#             .reset_index()
+#         )
+#         assert not self.x_pred_control.empty
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
+#         self.y_pred_control = self.model.predict(np.asarray(new_x))
 
-        # predicted outcome for treatment group
-        self.x_pred_treatment = (
-            self.data
-            # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
-            # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
-            .first()
-            .reset_index()
-        )
-        assert not self.x_pred_treatment.empty
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self.model.predict(np.asarray(new_x))
+#         # predicted outcome for treatment group
+#         self.x_pred_treatment = (
+#             self.data
+#             # just the treated group
+#             .query(f"{self.group_variable_name} == @self.treated")
+#             # drop the outcome variable
+#             .drop(self.outcome_variable_name, axis=1)
+#             # We may have multiple units per time point, we only want one time point
+#             .groupby(self.time_variable_name)
+#             .first()
+#             .reset_index()
+#         )
+#         assert not self.x_pred_treatment.empty
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
+#         self.y_pred_treatment = self.model.predict(np.asarray(new_x))
 
-        # predicted outcome for counterfactual. This is given by removing the influence
-        # of the interaction term between the group and the post_treatment variable
-        self.x_pred_counterfactual = (
-            self.data
-            # just the treated group
-            .query(f"{self.group_variable_name} == @self.treated")
-            # just the treatment period(s)
-            .query("post_treatment == True")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
-            # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
-            .first()
-            .reset_index()
-        )
-        assert not self.x_pred_counterfactual.empty
-        (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
-        )
-        # INTERVENTION: set the interaction term between the group and the
-        # post_treatment variable to zero. This is the counterfactual.
-        for i, label in enumerate(self.labels):
-            if "post_treatment" in label and self.group_variable_name in label:
-                new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
+#         # predicted outcome for counterfactual. This is given by removing the influence
+#         # of the interaction term between the group and the post_treatment variable
+#         self.x_pred_counterfactual = (
+#             self.data
+#             # just the treated group
+#             .query(f"{self.group_variable_name} == @self.treated")
+#             # just the treatment period(s)
+#             .query("post_treatment == True")
+#             # drop the outcome variable
+#             .drop(self.outcome_variable_name, axis=1)
+#             # We may have multiple units per time point, we only want one time point
+#             .groupby(self.time_variable_name)
+#             .first()
+#             .reset_index()
+#         )
+#         assert not self.x_pred_counterfactual.empty
+#         (new_x,) = build_design_matrices(
+#             [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
+#         )
+#         # INTERVENTION: set the interaction term between the group and the
+#         # post_treatment variable to zero. This is the counterfactual.
+#         for i, label in enumerate(self.labels):
+#             if "post_treatment" in label and self.group_variable_name in label:
+#                 new_x.iloc[:, i] = 0
+#         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
-        # calculate causal impact
-        # This is the coefficient on the interaction term
-        # TODO: THIS IS NOT YET CORRECT
-        self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
+#         # calculate causal impact
+#         # This is the coefficient on the interaction term
+#         # TODO: THIS IS NOT YET CORRECT
+#         self.causal_impact = self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
 
-    def plot(self, round_to=None):
-        """Plot results
+#     def plot(self, round_to=None):
+#         """Plot results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots()
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots()
 
-        # Plot raw data
-        sns.lineplot(
-            self.data,
-            x=self.time_variable_name,
-            y=self.outcome_variable_name,
-            hue="group",
-            units="unit",
-            estimator=None,
-            alpha=0.25,
-            ax=ax,
-        )
-        # Plot model fit to control group
-        ax.plot(
-            self.x_pred_control[self.time_variable_name],
-            self.y_pred_control,
-            "o",
-            c="C0",
-            markersize=10,
-            label="model fit (control group)",
-        )
-        # Plot model fit to treatment group
-        ax.plot(
-            self.x_pred_treatment[self.time_variable_name],
-            self.y_pred_treatment,
-            "o",
-            c="C1",
-            markersize=10,
-            label="model fit (treament group)",
-        )
-        # Plot counterfactual - post-test for treatment group IF no treatment
-        # had occurred.
-        ax.plot(
-            self.x_pred_counterfactual[self.time_variable_name],
-            self.y_pred_counterfactual,
-            "go",
-            markersize=10,
-            label="counterfactual",
-        )
-        # arrow to label the causal impact
-        ax.annotate(
-            "",
-            xy=(1.05, self.y_pred_counterfactual),
-            xycoords="data",
-            xytext=(1.05, self.y_pred_treatment[1]),
-            textcoords="data",
-            arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
-        )
-        ax.annotate(
-            "causal\nimpact",
-            xy=(
-                1.05,
-                np.mean([self.y_pred_counterfactual[0], self.y_pred_treatment[1]]),
-            ),
-            xycoords="data",
-            xytext=(5, 0),
-            textcoords="offset points",
-            color="green",
-            va="center",
-        )
-        # formatting
-        ax.set(
-            xlim=[-0.05, 1.1],
-            xticks=[0, 1],
-            xticklabels=["pre", "post"],
-            title=f"Causal impact = {round_num(self.causal_impact[0], round_to)}",
-        )
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
+#         # Plot raw data
+#         sns.lineplot(
+#             self.data,
+#             x=self.time_variable_name,
+#             y=self.outcome_variable_name,
+#             hue="group",
+#             units="unit",
+#             estimator=None,
+#             alpha=0.25,
+#             ax=ax,
+#         )
+#         # Plot model fit to control group
+#         ax.plot(
+#             self.x_pred_control[self.time_variable_name],
+#             self.y_pred_control,
+#             "o",
+#             c="C0",
+#             markersize=10,
+#             label="model fit (control group)",
+#         )
+#         # Plot model fit to treatment group
+#         ax.plot(
+#             self.x_pred_treatment[self.time_variable_name],
+#             self.y_pred_treatment,
+#             "o",
+#             c="C1",
+#             markersize=10,
+#             label="model fit (treament group)",
+#         )
+#         # Plot counterfactual - post-test for treatment group IF no treatment
+#         # had occurred.
+#         ax.plot(
+#             self.x_pred_counterfactual[self.time_variable_name],
+#             self.y_pred_counterfactual,
+#             "go",
+#             markersize=10,
+#             label="counterfactual",
+#         )
+#         # arrow to label the causal impact
+#         ax.annotate(
+#             "",
+#             xy=(1.05, self.y_pred_counterfactual),
+#             xycoords="data",
+#             xytext=(1.05, self.y_pred_treatment[1]),
+#             textcoords="data",
+#             arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
+#         )
+#         ax.annotate(
+#             "causal\nimpact",
+#             xy=(
+#                 1.05,
+#                 np.mean([self.y_pred_counterfactual[0], self.y_pred_treatment[1]]),
+#             ),
+#             xycoords="data",
+#             xytext=(5, 0),
+#             textcoords="offset points",
+#             color="green",
+#             va="center",
+#         )
+#         # formatting
+#         ax.set(
+#             xlim=[-0.05, 1.1],
+#             xticks=[0, 1],
+#             xticklabels=["pre", "post"],
+#             title=f"Causal impact = {round_num(self.causal_impact[0], round_to)}",
+#         )
+#         ax.legend(fontsize=LEGEND_FONT_SIZE)
+#         return (fig, ax)
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results.
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        print("\nResults:")
-        print(f"Causal impact = {round_num(self.causal_impact[0], round_to)}")
-        self.print_coefficients(round_to)
+#         print(f"{self.expt_type:=^80}")
+#         print(f"Formula: {self.formula}")
+#         print("\nResults:")
+#         print(f"Causal impact = {round_num(self.causal_impact[0], round_to)}")
+#         self.print_coefficients(round_to)
 
 
 class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
