@@ -14,7 +14,6 @@
 """Quasi-Experiment classes for Bayesian causal inference"""
 
 import warnings  # noqa: I001
-from typing import Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -28,7 +27,6 @@ from matplotlib.lines import Line2D
 
 
 from causalpy.data_validation import (
-    PrePostFitDataValidator,
     DiDDataValidator,
     RDDataValidator,
     RegressionKinkDataValidator,
@@ -124,315 +122,185 @@ class ExperimentalDesign:
         print_row(max_label_length, name, coeff_samples, round_to)
 
 
-class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
-    """
-    A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data.
+# class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
+#     def __init__(
+#         self,
+#         data: pd.DataFrame,
+#         treatment_time: Union[int, float, pd.Timestamp],
+#         formula: str,
+#         model=None,
+#         **kwargs,
+#     ) -> None:
+#         super().__init__(model=model, **kwargs)
+#         self._input_validation(data, treatment_time)
+#         self.treatment_time = treatment_time
+#         # set experiment type - usually done in subclasses
+#         self.expt_type = "Pre-Post Fit"
+#         # split data in to pre and post intervention
+#         self.datapre = data[data.index < self.treatment_time]
+#         self.datapost = data[data.index >= self.treatment_time]
 
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> sc = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> seed = 42
-    >>> result = cp.pymc_experiments.PrePostFit(
-    ...     sc,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + g",
-    ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={
-    ...             "draws": 400,
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False
-    ...         }
-    ...     ),
-    ... )
-    >>> result.summary(round_to=1)
-    ==================================Pre-Post Fit==================================
-    Formula: actual ~ 0 + a + g
-    Model coefficients:
-        a      0.6, 94% HDI [0.6, 0.6]
-        g      0.4, 94% HDI [0.4, 0.4]
-        sigma  0.8, 94% HDI [0.6, 0.9]
-    """
+#         self.formula = formula
 
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
-        formula: str,
-        model=None,
-        **kwargs,
-    ) -> None:
-        super().__init__(model=model, **kwargs)
-        self._input_validation(data, treatment_time)
-        self.treatment_time = treatment_time
-        # set experiment type - usually done in subclasses
-        self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
+#         # set things up with pre-intervention data
+#         y, X = dmatrices(formula, self.datapre)
+#         self.outcome_variable_name = y.design_info.column_names[0]
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+#         # process post-intervention data
+#         (new_y, new_x) = build_design_matrices(
+#             [self._y_design_info, self._x_design_info], self.datapost
+#         )
+#         self.post_X = np.asarray(new_x)
+#         self.post_y = np.asarray(new_y)
 
-        self.formula = formula
+#         # fit the model to the observed (pre-intervention) data
+#         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
+#         self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
 
-        # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
+#         # score the goodness of fit to the pre-intervention data
+#         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        # fit the model to the observed (pre-intervention) data
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
-        self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+#         # get the model predictions of the observed (pre-intervention) data
+#         self.pre_pred = self.model.predict(X=self.pre_X)
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+#         # calculate the counterfactual
+#         self.post_pred = self.model.predict(X=self.post_X)
 
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
+#         # causal impact pre (ie the residuals of the model fit to observed)
+#         pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
+#         self.pre_impact = (
+#             pre_data - self.pre_pred["posterior_predictive"]["y_hat"]
+#         ).transpose(..., "obs_ind")
 
-        # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
+#         # causal impact post (ie the residuals of the model fit to observed)
+#         post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
+#         self.post_impact = (
+#             post_data - self.post_pred["posterior_predictive"]["y_hat"]
+#         ).transpose(..., "obs_ind")
 
-        # causal impact pre (ie the residuals of the model fit to observed)
-        pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
-        self.pre_impact = (
-            pre_data - self.pre_pred["posterior_predictive"]["y_hat"]
-        ).transpose(..., "obs_ind")
+#         # cumulative impact post
+#         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
-        # causal impact post (ie the residuals of the model fit to observed)
-        post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
-        self.post_impact = (
-            post_data - self.post_pred["posterior_predictive"]["y_hat"]
-        ).transpose(..., "obs_ind")
+#     def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
+#         """
+#         Plot the results
 
-        # cumulative impact post
-        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-    def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
-        """
-        Plot the results
+#         # TOP PLOT --------------------------------------------------
+#         # pre-intervention period
+#         h_line, h_patch = plot_xY(
+#             self.datapre.index,
+#             self.pre_pred["posterior_predictive"].mu,
+#             ax=ax[0],
+#             plot_hdi_kwargs={"color": "C0"},
+#         )
+#         handles = [(h_line, h_patch)]
+#         labels = ["Pre-intervention period"]
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+#         (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
+#         handles.append(h)
+#         labels.append("Observations")
 
-        # TOP PLOT --------------------------------------------------
-        # pre-intervention period
-        h_line, h_patch = plot_xY(
-            self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
+#         # post intervention period
+#         h_line, h_patch = plot_xY(
+#             self.datapost.index,
+#             self.post_pred["posterior_predictive"].mu,
+#             ax=ax[0],
+#             plot_hdi_kwargs={"color": "C1"},
+#         )
+#         handles.append((h_line, h_patch))
+#         labels.append(counterfactual_label)
 
-        (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
-        handles.append(h)
-        labels.append("Observations")
+#         ax[0].plot(self.datapost.index, self.post_y, "k.")
+#         # Shaded causal effect
+#         h = ax[0].fill_between(
+#             self.datapost.index,
+#             y1=az.extract(
+#                 self.post_pred, group="posterior_predictive", var_names="mu"
+#             ).mean("sample"),
+#             y2=np.squeeze(self.post_y),
+#             color="C0",
+#             alpha=0.25,
+#         )
+#         handles.append(h)
+#         labels.append("Causal impact")
 
-        # post intervention period
-        h_line, h_patch = plot_xY(
-            self.datapost.index,
-            self.post_pred["posterior_predictive"].mu,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
+#         ax[0].set(
+#             title=f"""
+#             Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
+#             (std = {round_num(self.score.r2_std, round_to)})
+#             """
+#         )
 
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
-        # Shaded causal effect
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=az.extract(
-                self.post_pred, group="posterior_predictive", var_names="mu"
-            ).mean("sample"),
-            y2=np.squeeze(self.post_y),
-            color="C0",
-            alpha=0.25,
-        )
-        handles.append(h)
-        labels.append("Causal impact")
+#         # MIDDLE PLOT -----------------------------------------------
+#         plot_xY(
+#             self.datapre.index,
+#             self.pre_impact,
+#             ax=ax[1],
+#             plot_hdi_kwargs={"color": "C0"},
+#         )
+#         plot_xY(
+#             self.datapost.index,
+#             self.post_impact,
+#             ax=ax[1],
+#             plot_hdi_kwargs={"color": "C1"},
+#         )
+#         ax[1].axhline(y=0, c="k")
+#         ax[1].fill_between(
+#             self.datapost.index,
+#             y1=self.post_impact.mean(["chain", "draw"]),
+#             color="C0",
+#             alpha=0.25,
+#             label="Causal impact",
+#         )
+#         ax[1].set(title="Causal Impact")
 
-        ax[0].set(
-            title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
-            (std = {round_num(self.score.r2_std, round_to)})
-            """
-        )
+#         # BOTTOM PLOT -----------------------------------------------
+#         ax[2].set(title="Cumulative Causal Impact")
+#         plot_xY(
+#             self.datapost.index,
+#             self.post_impact_cumulative,
+#             ax=ax[2],
+#             plot_hdi_kwargs={"color": "C1"},
+#         )
+#         ax[2].axhline(y=0, c="k")
 
-        # MIDDLE PLOT -----------------------------------------------
-        plot_xY(
-            self.datapre.index,
-            self.pre_impact,
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_xY(
-            self.datapost.index,
-            self.post_impact,
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].set(title="Causal Impact")
+#         # Intervention line
+#         for i in [0, 1, 2]:
+#             ax[i].axvline(
+#                 x=self.treatment_time,
+#                 ls="-",
+#                 lw=3,
+#                 color="r",
+#             )
 
-        # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(
-            self.datapost.index,
-            self.post_impact_cumulative,
-            ax=ax[2],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[2].axhline(y=0, c="k")
+#         ax[0].legend(
+#             handles=(h_tuple for h_tuple in handles),
+#             labels=labels,
+#             fontsize=LEGEND_FONT_SIZE,
+#         )
 
-        # Intervention line
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
+#         return fig, ax
 
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results
 
-        return fig, ax
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        self.print_coefficients(round_to)
-
-
-class InterruptedTimeSeries(PrePostFit):
-    """
-    A wrapper around PrePostFit class
-
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = (
-    ...     cp.load_data("its")
-    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
-    ...     .set_index("date")
-    ... )
-    >>> treatment_time = pd.to_datetime("2017-01-01")
-    >>> seed = 42
-    >>> result = cp.pymc_experiments.InterruptedTimeSeries(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="y ~ 1 + t + C(month)",
-    ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     )
-    ... )
-    """
-
-    expt_type = "Interrupted Time Series"
-
-
-class SyntheticControl(PrePostFit):
-    """A wrapper around the PrePostFit class
-
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> seed = 42
-    >>> result = cp.pymc_experiments.SyntheticControl(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-    ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... )
-    """
-
-    expt_type = "Synthetic Control"
-
-    def plot(self, plot_predictors=False, **kwargs):
-        """Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = super().plot(counterfactual_label="Synthetic control", **kwargs)
-        if plot_predictors:
-            # plot control units as well
-            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
-            ax[0].plot(
-                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
-            )
-        return fig, ax
+#         print(f"{self.expt_type:=^80}")
+#         print(f"Formula: {self.formula}")
+#         self.print_coefficients(round_to)
 
 
 class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):

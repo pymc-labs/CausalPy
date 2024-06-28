@@ -24,7 +24,6 @@ from patsy import build_design_matrices, dmatrices
 
 from causalpy.data_validation import (
     DiDDataValidator,
-    PrePostFitDataValidator,
     RDDataValidator,
 )
 from causalpy.utils import round_num
@@ -63,89 +62,88 @@ class ExperimentalDesign:
             formatted_val = f"{round_num(val, round_to):>10}"
             print(f"  {formatted_name}\t{formatted_val}")
 
+    # class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
+    #     """
+    #     A class to analyse quasi-experiments where parameter estimation is based on just
+    #     the pre-intervention data.
 
-class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
-    """
-    A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data.
+    #     :param data:
+    #         A pandas data frame
+    #     :param treatment_time:
+    #         The index or time value of when treatment begins
+    #     :param formula:
+    #         A statistical model formula
+    #     :param model:
+    #         An scikit-learn model object
 
-    :param data:
-        A pandas data frame
-    :param treatment_time:
-        The index or time value of when treatment begins
-    :param formula:
-        A statistical model formula
-    :param model:
-        An scikit-learn model object
+    #     Example
+    #     --------
+    #     >>> from sklearn.linear_model import LinearRegression
+    #     >>> import causalpy as cp
+    #     >>> df = cp.load_data("sc")
+    #     >>> treatment_time = 70
+    #     >>> result = cp.skl_experiments.PrePostFit(
+    #     ...     df,
+    #     ...     treatment_time,
+    #     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    #     ...     model = cp.skl_models.WeightedProportion()
+    #     ... )
+    #     >>> result.get_coeffs()
+    #     array(...)
+    #     """
 
-    Example
-    --------
-    >>> from sklearn.linear_model import LinearRegression
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> result = cp.skl_experiments.PrePostFit(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-    ...     model = cp.skl_models.WeightedProportion()
-    ... )
-    >>> result.get_coeffs()
-    array(...)
-    """
+    #     def __init__(
+    #         self,
+    #         data,
+    #         treatment_time,
+    #         formula,
+    #         model=None,
+    #         **kwargs,
+    #     ):
+    #         super().__init__(model=model, **kwargs)
+    #         self._input_validation(data, treatment_time)
+    #         self.treatment_time = treatment_time
+    #         # set experiment type - usually done in subclasses
+    #         self.expt_type = "Pre-Post Fit"
+    #         # split data in to pre and post intervention
+    #         self.datapre = data[data.index < self.treatment_time]
+    #         self.datapost = data[data.index >= self.treatment_time]
 
-    def __init__(
-        self,
-        data,
-        treatment_time,
-        formula,
-        model=None,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self._input_validation(data, treatment_time)
-        self.treatment_time = treatment_time
-        # set experiment type - usually done in subclasses
-        self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
+    #         self.formula = formula
 
-        self.formula = formula
+    #         # set things up with pre-intervention data
+    #         y, X = dmatrices(formula, self.datapre)
+    #         self.outcome_variable_name = y.design_info.column_names[0]
+    #         self._y_design_info = y.design_info
+    #         self._x_design_info = X.design_info
+    #         self.labels = X.design_info.column_names
+    #         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+    #         # process post-intervention data
+    #         (new_y, new_x) = build_design_matrices(
+    #             [self._y_design_info, self._x_design_info], self.datapost
+    #         )
+    #         self.post_X = np.asarray(new_x)
+    #         self.post_y = np.asarray(new_y)
 
-        # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
+    #         # fit the model to the observed (pre-intervention) data
+    #         self.model.fit(X=self.pre_X, y=self.pre_y)
 
-        # fit the model to the observed (pre-intervention) data
-        self.model.fit(X=self.pre_X, y=self.pre_y)
+    #         # score the goodness of fit to the pre-intervention data
+    #         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+    #         # get the model predictions of the observed (pre-intervention) data
+    #         self.pre_pred = self.model.predict(X=self.pre_X)
 
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
+    #         # calculate the counterfactual
+    #         self.post_pred = self.model.predict(X=self.post_X)
 
-        # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
+    #         # causal impact pre (ie the residuals of the model fit to observed)
+    #         self.pre_impact = self.pre_y - self.pre_pred
+    #         # causal impact post (ie the impact of the intervention)
+    #         self.post_impact = self.post_y - self.post_pred
 
-        # causal impact pre (ie the residuals of the model fit to observed)
-        self.pre_impact = self.pre_y - self.pre_pred
-        # causal impact post (ie the impact of the intervention)
-        self.post_impact = self.post_y - self.post_pred
-
-        # cumulative impact post
-        self.post_impact_cumulative = np.cumsum(self.post_impact)
+    #         # cumulative impact post
+    #         self.post_impact_cumulative = np.cumsum(self.post_impact)
 
     def plot(self, counterfactual_label="Counterfactual", round_to=None, **kwargs):
         """Plot experiment results
@@ -216,115 +214,116 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         return (fig, ax)
 
-    def get_coeffs(self):
-        """
-        Returns model coefficients
-        """
-        return np.squeeze(self.model.coef_)
 
-    def plot_coeffs(self):
-        """Plots coefficient bar plot"""
-        df = pd.DataFrame(
-            {"predictor variable": self.labels, "ols_coef": self.get_coeffs()}
-        )
-        sns.barplot(
-            data=df,
-            x="ols_coef",
-            y="predictor variable",
-            palette=sns.color_palette("husl"),
-        )
+#     def get_coeffs(self):
+#         """
+#         Returns model coefficients
+#         """
+#         return np.squeeze(self.model.coef_)
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
+#     def plot_coeffs(self):
+#         """Plots coefficient bar plot"""
+#         df = pd.DataFrame(
+#             {"predictor variable": self.labels, "ols_coef": self.get_coeffs()}
+#         )
+#         sns.barplot(
+#             data=df,
+#             x="ols_coef",
+#             y="predictor variable",
+#             palette=sns.color_palette("husl"),
+#         )
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        self.print_coefficients(round_to)
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
 
-
-class InterruptedTimeSeries(PrePostFit):
-    """
-    Interrupted time series analysis, a wrapper around the PrePostFit class
-
-    :param data:
-        A pandas data frame
-    :param treatment_time:
-        The index or time value of when treatment begins
-    :param formula:
-        A statistical model formula
-    :param model:
-        An sklearn model object
-
-    Example
-    --------
-    >>> from sklearn.linear_model import LinearRegression
-    >>> import pandas as pd
-    >>> import causalpy as cp
-    >>> df = (
-    ...     cp.load_data("its")
-    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
-    ...     .set_index("date")
-    ... )
-    >>> treatment_time = pd.to_datetime("2017-01-01")
-    >>> result = cp.skl_experiments.InterruptedTimeSeries(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="y ~ 1 + t + C(month)",
-    ...     model = LinearRegression()
-    ... )
-    """
-
-    expt_type = "Interrupted Time Series"
+#         print(f"{self.expt_type:=^80}")
+#         print(f"Formula: {self.formula}")
+#         self.print_coefficients(round_to)
 
 
-class SyntheticControl(PrePostFit):
-    """
-    A wrapper around the PrePostFit class
+# class InterruptedTimeSeries(PrePostFit):
+#     """
+#     Interrupted time series analysis, a wrapper around the PrePostFit class
 
-    :param data:
-        A pandas data frame
-    :param treatment_time:
-        The index or time value of when treatment begins
-    :param formula:
-        A statistical model formula
-    :param model:
-        An sklearn model object
+#     :param data:
+#         A pandas data frame
+#     :param treatment_time:
+#         The index or time value of when treatment begins
+#     :param formula:
+#         A statistical model formula
+#     :param model:
+#         An sklearn model object
 
-    Example
-    --------
-    >>> from sklearn.linear_model import LinearRegression
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> result = cp.skl_experiments.SyntheticControl(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-    ...     model = cp.skl_models.WeightedProportion()
-    ... )
-    """
+#     Example
+#     --------
+#     >>> from sklearn.linear_model import LinearRegression
+#     >>> import pandas as pd
+#     >>> import causalpy as cp
+#     >>> df = (
+#     ...     cp.load_data("its")
+#     ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+#     ...     .set_index("date")
+#     ... )
+#     >>> treatment_time = pd.to_datetime("2017-01-01")
+#     >>> result = cp.skl_experiments.InterruptedTimeSeries(
+#     ...     df,
+#     ...     treatment_time,
+#     ...     formula="y ~ 1 + t + C(month)",
+#     ...     model = LinearRegression()
+#     ... )
+#     """
 
-    def plot(self, plot_predictors=False, round_to=None, **kwargs):
-        """Plot the results
+#     expt_type = "Interrupted Time Series"
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = super().plot(
-            counterfactual_label="Synthetic control", round_to=round_to, **kwargs
-        )
-        if plot_predictors:
-            # plot control units as well
-            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
-            ax[0].plot(
-                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
-            )
-        return (fig, ax)
+
+# class SyntheticControl(PrePostFit):
+#     """
+#     A wrapper around the PrePostFit class
+
+#     :param data:
+#         A pandas data frame
+#     :param treatment_time:
+#         The index or time value of when treatment begins
+#     :param formula:
+#         A statistical model formula
+#     :param model:
+#         An sklearn model object
+
+#     Example
+#     --------
+#     >>> from sklearn.linear_model import LinearRegression
+#     >>> import causalpy as cp
+#     >>> df = cp.load_data("sc")
+#     >>> treatment_time = 70
+#     >>> result = cp.skl_experiments.SyntheticControl(
+#     ...     df,
+#     ...     treatment_time,
+#     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+#     ...     model = cp.skl_models.WeightedProportion()
+#     ... )
+#     """
+
+#     def plot(self, plot_predictors=False, round_to=None, **kwargs):
+#         """Plot the results
+
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = super().plot(
+#             counterfactual_label="Synthetic control", round_to=round_to, **kwargs
+#         )
+#         if plot_predictors:
+#             # plot control units as well
+#             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+#             ax[0].plot(
+#                 self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
+#             )
+#         return (fig, ax)
 
 
 class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
