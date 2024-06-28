@@ -30,18 +30,17 @@ class PlotComponent(ABC):
 
 class BayesianPlotComponent(PlotComponent):
     def plot_pre_post(self, results, round_to=None):
-        # unpack results dictionary
-        datapre = results["datapre"]
-        datapost = results["datapost"]
-        pre_y = results["pre_y"]
-        post_y = results["post_y"]
-        pre_pred = results["pre_pred"]
-        post_pred = results["post_pred"]
-        pre_impact = results["pre_impact"]
-        post_impact = results["post_impact"]
-        post_impact_cumulative = results["post_impact_cumulative"]
-        treatment_time = results["treatment_time"]
-        score = results["score"]
+        datapre = results.datapre
+        datapost = results.datapost
+        pre_y = results.pre_y
+        post_y = results.post_y
+        pre_pred = results.pre_pred
+        post_pred = results.post_pred
+        pre_impact = results.pre_impact
+        post_impact = results.post_impact
+        post_impact_cumulative = results.post_impact_cumulative
+        treatment_time = results.treatment_time
+        score = results.score
 
         counterfactual_label = "Counterfactual"
         # datapre, datapost, pre_y, post_y, pre_pred, treatment_time
@@ -153,18 +152,17 @@ class BayesianPlotComponent(PlotComponent):
 
 class OLSPlotComponent(PlotComponent):
     def plot_pre_post(self, results, round_to=None):
-        # unpack results dictionary
-        datapre = results["datapre"]
-        datapost = results["datapost"]
-        pre_y = results["pre_y"]
-        post_y = results["post_y"]
-        pre_pred = results["pre_pred"]
-        post_pred = results["post_pred"]
-        pre_impact = results["pre_impact"]
-        post_impact = results["post_impact"]
-        post_impact_cumulative = results["post_impact_cumulative"]
-        treatment_time = results["treatment_time"]
-        score = results["score"]
+        datapre = results.datapre
+        datapost = results.datapost
+        pre_y = results.pre_y
+        post_y = results.post_y
+        pre_pred = results.pre_pred
+        post_pred = results.post_pred
+        pre_impact = results.pre_impact
+        post_impact = results.post_impact
+        post_impact_cumulative = results.post_impact_cumulative
+        treatment_time = results.treatment_time
+        score = results.score
 
         counterfactual_label = "Counterfactual"
 

@@ -11,6 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+from dataclasses import dataclass
 from typing import Union
 
 import numpy as np
@@ -88,22 +89,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         # calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)
-
-        # # causal impact pre (ie the residuals of the model fit to observed)
-        # pre_data = xr.DataArray(self.pre_y[:, 0], dims=["obs_ind"])
-        # self.pre_impact = (
-        #     pre_data - self.pre_pred["posterior_predictive"]["y_hat"]
-        # ).transpose(..., "obs_ind")
-
-        # # causal impact post (ie the residuals of the model fit to observed)
-        # post_data = xr.DataArray(self.post_y[:, 0], dims=["obs_ind"])
-        # self.post_impact = (
-        #     post_data - self.post_pred["posterior_predictive"]["y_hat"]
-        # ).transpose(..., "obs_ind")
-
-        # cumulative impact post
-        # self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
-
         self.pre_impact = self.model.calculate_impact(self.pre_y[:, 0], self.pre_pred)
         self.post_impact = self.model.calculate_impact(
             self.post_y[:, 0], self.post_pred
@@ -112,20 +97,33 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             self.post_impact
         )
 
-        # package results for easy access
-        self.results = {
-            "datapre": self.datapre,
-            "datapost": self.datapost,
-            "pre_y": self.pre_y,
-            "post_y": self.post_y,
-            "pre_pred": self.pre_pred,
-            "post_pred": self.post_pred,
-            "pre_impact": self.pre_impact,
-            "post_impact": self.post_impact,
-            "post_impact_cumulative": self.post_impact_cumulative,
-            "treatment_time": self.treatment_time,
-            "score": self.score,
-        }
+        @dataclass
+        class PrePostFitResults:
+            datapre: pd.DataFrame
+            datapost: pd.DataFrame
+            pre_y: np.ndarray
+            post_y: np.ndarray
+            pre_pred: np.ndarray
+            post_pred: np.ndarray
+            pre_impact: np.ndarray
+            post_impact: np.ndarray
+            post_impact_cumulative: np.ndarray
+            treatment_time: Union[int, float, pd.Timestamp]
+            score: float
+
+        self.results = PrePostFitResults(
+            datapre=self.datapre,
+            datapost=self.datapost,
+            pre_y=self.pre_y,
+            post_y=self.post_y,
+            pre_pred=self.pre_pred,
+            post_pred=self.post_pred,
+            pre_impact=self.pre_impact,
+            post_impact=self.post_impact,
+            post_impact_cumulative=self.post_impact_cumulative,
+            treatment_time=self.treatment_time,
+            score=self.score,
+        )
 
     def plot(self):
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
