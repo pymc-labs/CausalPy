@@ -20,6 +20,7 @@ from causalpy.version import __version__
 from .data import load_data
 from .expt_diff_in_diff import DifferenceInDifferences
 from .expt_prepostfit import InterruptedTimeSeries, SyntheticControl
+from .expt_prepostnegd import PrePostNEGD
 
 az.style.use("arviz-darkgrid")
 
@@ -27,6 +28,7 @@ __all__ = [
     "InterruptedTimeSeries",
     "SyntheticControl",
     "DifferenceInDifferences",
+    "PrePostNEGD",
     "pymc_models",
     "skl_models",
     "load_data",

@@ -30,7 +30,8 @@ class PlotComponent(ABC):
 
 
 class BayesianPlotComponent(PlotComponent):
-    def plot_pre_post(self, results, round_to=None):
+    @staticmethod
+    def plot_pre_post(results, round_to=None):
         datapre = results.datapre
         datapost = results.datapost
         pre_y = results.pre_y
@@ -144,7 +145,8 @@ class BayesianPlotComponent(PlotComponent):
         )
         return fig, ax
 
-    def plot_difference_in_differences(self, results):
+    @staticmethod
+    def plot_difference_in_differences(results):
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name
@@ -241,9 +243,61 @@ class BayesianPlotComponent(PlotComponent):
     # def plot_synthetic_control(self, experiment, impact):
     #     pass
 
+    @staticmethod
+    def plot_pre_post_negd(results, round_to=None):
+        fig, ax = plt.subplots(
+            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+        )
+
+        # Plot raw data
+        sns.scatterplot(
+            x="pre",
+            y="post",
+            hue="group",
+            alpha=0.5,
+            data=results.data,
+            legend=True,
+            ax=ax[0],
+        )
+        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+
+        # plot posterior predictive of untreated
+        h_line, h_patch = plot_xY(
+            results.pred_xi,
+            results.pred_untreated["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C0"},
+            label="Control group",
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Control group"]
+
+        # plot posterior predictive of treated
+        h_line, h_patch = plot_xY(
+            results.pred_xi,
+            results.pred_treated["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C1"},
+            label="Treatment group",
+        )
+        handles.append((h_line, h_patch))
+        labels.append("Treatment group")
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        # Plot estimated caual impact / treatment effect
+        az.plot_posterior(results.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
+        ax[1].set(title="Estimated treatment effect")
+        return fig, ax
+
 
 class OLSPlotComponent(PlotComponent):
-    def plot_pre_post(self, results, round_to=None):
+    @staticmethod
+    def plot_pre_post(results, round_to=None):
         datapre = results.datapre
         datapost = results.datapost
         pre_y = results.pre_y
@@ -323,7 +377,8 @@ class OLSPlotComponent(PlotComponent):
 
         return (fig, ax)
 
-    def plot_difference_in_differences(self, results):
+    @staticmethod
+    def plot_difference_in_differences(results):
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name
