@@ -28,7 +28,6 @@ from matplotlib.lines import Line2D
 from causalpy.data_validation import (
     RDDataValidator,
     RegressionKinkDataValidator,
-    PrePostNEGDDataValidator,
     IVDataValidator,
     PropensityDataValidator,
 )
@@ -1003,207 +1002,207 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
         self.print_coefficients(round_to)
 
 
-class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
-    """
-    A class to analyse data from pretest/posttest designs
+# class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
+#     """
+#     A class to analyse data from pretest/posttest designs
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param group_variable_name:
-        Name of the column in data for the group variable, should be either
-        binary or boolean
-    :param pretreatment_variable_name:
-        Name of the column in data for the pretreatment variable
-    :param model:
-        A PyMC model
+#     :param data:
+#         A pandas dataframe
+#     :param formula:
+#         A statistical model formula
+#     :param group_variable_name:
+#         Name of the column in data for the group variable, should be either
+#         binary or boolean
+#     :param pretreatment_variable_name:
+#         Name of the column in data for the pretreatment variable
+#     :param model:
+#         A PyMC model
 
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("anova1")
-    >>> seed = 42
-    >>> result = cp.pymc_experiments.PrePostNEGD(
-    ...     df,
-    ...     formula="post ~ 1 + C(group) + pre",
-    ...     group_variable_name="group",
-    ...     pretreatment_variable_name="pre",
-    ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     )
-    ... )
-    >>> result.summary(round_to=1) # doctest: +NUMBER
-    ==================Pretest/posttest Nonequivalent Group Design===================
-    Formula: post ~ 1 + C(group) + pre
-    <BLANKLINE>
-    Results:
-    Causal impact = 2, $CI_{94%}$[2, 2]
-    Model coefficients:
-        Intercept      -0.5, 94% HDI [-1, 0.2]
-        C(group)[T.1]  2, 94% HDI [2, 2]
-        pre            1, 94% HDI [1, 1]
-        sigma          0.5, 94% HDI [0.5, 0.6]
-    """
+#     Example
+#     --------
+#     >>> import causalpy as cp
+#     >>> df = cp.load_data("anova1")
+#     >>> seed = 42
+#     >>> result = cp.pymc_experiments.PrePostNEGD(
+#     ...     df,
+#     ...     formula="post ~ 1 + C(group) + pre",
+#     ...     group_variable_name="group",
+#     ...     pretreatment_variable_name="pre",
+#     ...     model=cp.pymc_models.LinearRegression(
+#     ...         sample_kwargs={
+#     ...             "target_accept": 0.95,
+#     ...             "random_seed": seed,
+#     ...             "progressbar": False,
+#     ...         }
+#     ...     )
+#     ... )
+#     >>> result.summary(round_to=1) # doctest: +NUMBER
+#     ==================Pretest/posttest Nonequivalent Group Design===================
+#     Formula: post ~ 1 + C(group) + pre
+#     <BLANKLINE>
+#     Results:
+#     Causal impact = 2, $CI_{94%}$[2, 2]
+#     Model coefficients:
+#         Intercept      -0.5, 94% HDI [-1, 0.2]
+#         C(group)[T.1]  2, 94% HDI [2, 2]
+#         pre            1, 94% HDI [1, 1]
+#         sigma          0.5, 94% HDI [0.5, 0.6]
+#     """
 
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        formula: str,
-        group_variable_name: str,
-        pretreatment_variable_name: str,
-        model=None,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.data = data
-        self.expt_type = "Pretest/posttest Nonequivalent Group Design"
-        self.formula = formula
-        self.group_variable_name = group_variable_name
-        self.pretreatment_variable_name = pretreatment_variable_name
-        self._input_validation()
+#     def __init__(
+#         self,
+#         data: pd.DataFrame,
+#         formula: str,
+#         group_variable_name: str,
+#         pretreatment_variable_name: str,
+#         model=None,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self.data = data
+#         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
+#         self.formula = formula
+#         self.group_variable_name = group_variable_name
+#         self.pretreatment_variable_name = pretreatment_variable_name
+#         self._input_validation()
 
-        y, X = dmatrices(formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+#         y, X = dmatrices(formula, self.data)
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.y, self.X = np.asarray(y), np.asarray(X)
+#         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # fit the model to the observed (pre-intervention) data
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
+#         # fit the model to the observed (pre-intervention) data
+#         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+#         self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
-        # Calculate the posterior predictive for the treatment and control for an
-        # interpolated set of pretest values
-        # get the model predictions of the observed data
-        self.pred_xi = np.linspace(
-            np.min(self.data[self.pretreatment_variable_name]),
-            np.max(self.data[self.pretreatment_variable_name]),
-            200,
-        )
-        # untreated
-        x_pred_untreated = pd.DataFrame(
-            {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.zeros(self.pred_xi.shape),
-            }
-        )
-        (new_x_untreated,) = build_design_matrices(
-            [self._x_design_info], x_pred_untreated
-        )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
-        # treated
-        x_pred_treated = pd.DataFrame(
-            {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.ones(self.pred_xi.shape),
-            }
-        )
-        (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+#         # Calculate the posterior predictive for the treatment and control for an
+#         # interpolated set of pretest values
+#         # get the model predictions of the observed data
+#         self.pred_xi = np.linspace(
+#             np.min(self.data[self.pretreatment_variable_name]),
+#             np.max(self.data[self.pretreatment_variable_name]),
+#             200,
+#         )
+#         # untreated
+#         x_pred_untreated = pd.DataFrame(
+#             {
+#                 self.pretreatment_variable_name: self.pred_xi,
+#                 self.group_variable_name: np.zeros(self.pred_xi.shape),
+#             }
+#         )
+#         (new_x_untreated,) = build_design_matrices(
+#             [self._x_design_info], x_pred_untreated
+#         )
+#         self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+#         # treated
+#         x_pred_treated = pd.DataFrame(
+#             {
+#                 self.pretreatment_variable_name: self.pred_xi,
+#                 self.group_variable_name: np.ones(self.pred_xi.shape),
+#             }
+#         )
+#         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
+#         self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
 
-        # Evaluate causal impact as equal to the trestment effect
-        self.causal_impact = self.idata.posterior["beta"].sel(
-            {"coeffs": self._get_treatment_effect_coeff()}
-        )
+#         # Evaluate causal impact as equal to the trestment effect
+#         self.causal_impact = self.idata.posterior["beta"].sel(
+#             {"coeffs": self._get_treatment_effect_coeff()}
+#         )
 
-    def plot(self, round_to=None):
-        """Plot the results
+#     def plot(self, round_to=None):
+#         """Plot the results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots(
-            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
-        )
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots(
+#             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+#         )
 
-        # Plot raw data
-        sns.scatterplot(
-            x="pre",
-            y="post",
-            hue="group",
-            alpha=0.5,
-            data=self.data,
-            legend=True,
-            ax=ax[0],
-        )
-        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+#         # Plot raw data
+#         sns.scatterplot(
+#             x="pre",
+#             y="post",
+#             hue="group",
+#             alpha=0.5,
+#             data=self.data,
+#             legend=True,
+#             ax=ax[0],
+#         )
+#         ax[0].set(xlabel="Pretest", ylabel="Posttest")
 
-        # plot posterior predictive of untreated
-        h_line, h_patch = plot_xY(
-            self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C0"},
-            label="Control group",
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Control group"]
+#         # plot posterior predictive of untreated
+#         h_line, h_patch = plot_xY(
+#             self.pred_xi,
+#             self.pred_untreated["posterior_predictive"].mu,
+#             ax=ax[0],
+#             plot_hdi_kwargs={"color": "C0"},
+#             label="Control group",
+#         )
+#         handles = [(h_line, h_patch)]
+#         labels = ["Control group"]
 
-        # plot posterior predictive of treated
-        h_line, h_patch = plot_xY(
-            self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C1"},
-            label="Treatment group",
-        )
-        handles.append((h_line, h_patch))
-        labels.append("Treatment group")
+#         # plot posterior predictive of treated
+#         h_line, h_patch = plot_xY(
+#             self.pred_xi,
+#             self.pred_treated["posterior_predictive"].mu,
+#             ax=ax[0],
+#             plot_hdi_kwargs={"color": "C1"},
+#             label="Treatment group",
+#         )
+#         handles.append((h_line, h_patch))
+#         labels.append("Treatment group")
 
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+#         ax[0].legend(
+#             handles=(h_tuple for h_tuple in handles),
+#             labels=labels,
+#             fontsize=LEGEND_FONT_SIZE,
+#         )
 
-        # Plot estimated caual impact / treatment effect
-        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
-        ax[1].set(title="Estimated treatment effect")
-        return fig, ax
+#         # Plot estimated caual impact / treatment effect
+#         az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
+#         ax[1].set(title="Estimated treatment effect")
+#         return fig, ax
 
-    def _causal_impact_summary_stat(self, round_to) -> str:
-        """Computes the mean and 94% credible interval bounds for the causal impact."""
-        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = (
-            r"$CI_{94%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
-        return f"Causal impact = {causal_impact + ci}"
+#     def _causal_impact_summary_stat(self, round_to) -> str:
+#         """Computes the mean and 94% credible interval bounds for the causal impact."""
+#         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+#         ci = (
+#             r"$CI_{94%}$"
+#             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+#         )
+#         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
+#         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        print("\nResults:")
-        # TODO: extra experiment specific outputs here
-        print(self._causal_impact_summary_stat(round_to))
-        self.print_coefficients(round_to)
+#         print(f"{self.expt_type:=^80}")
+#         print(f"Formula: {self.formula}")
+#         print("\nResults:")
+#         # TODO: extra experiment specific outputs here
+#         print(self._causal_impact_summary_stat(round_to))
+#         self.print_coefficients(round_to)
 
-    def _get_treatment_effect_coeff(self) -> str:
-        """Find the beta regression coefficient corresponding to the
-        group (i.e. treatment) effect.
-        For example if self.group_variable_name is 'group' and
-        the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
-        then we want `C(group)[T.1]`.
-        """
-        for label in self.labels:
-            if (self.group_variable_name in label) & (":" not in label):
-                return label
+#     def _get_treatment_effect_coeff(self) -> str:
+#         """Find the beta regression coefficient corresponding to the
+#         group (i.e. treatment) effect.
+#         For example if self.group_variable_name is 'group' and
+#         the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
+#         then we want `C(group)[T.1]`.
+#         """
+#         for label in self.labels:
+#             if (self.group_variable_name in label) & (":" not in label):
+#                 return label
 
-        raise NameError("Unable to find coefficient name for the treatment effect")
+#         raise NameError("Unable to find coefficient name for the treatment effect")
 
 
 class InstrumentalVariable(ExperimentalDesign, IVDataValidator):

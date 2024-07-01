@@ -294,6 +294,57 @@ class BayesianPlotComponent(PlotComponent):
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
+    @staticmethod
+    def plot_regression_disctontinuity(results, round_to=None):
+        fig, ax = plt.subplots()
+        # Plot raw data
+        sns.scatterplot(
+            results.data,
+            x=results.running_variable_name,
+            y=results.outcome_variable_name,
+            c="k",
+            ax=ax,
+        )
+
+        # Plot model fit to data
+        h_line, h_patch = plot_xY(
+            results.x_pred[results.running_variable_name],
+            results.pred["posterior_predictive"].mu,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Posterior mean"]
+
+        # create strings to compose title
+        title_info = f"{round_num(results.score.r2, round_to)} (std = {round_num(results.score.r2_std, round_to)})"
+        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        percentiles = results.discontinuity_at_threshold.quantile(
+            [0.03, 1 - 0.03]
+        ).values
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        discon = f"""
+            Discontinuity at threshold = {round_num(results.discontinuity_at_threshold.mean(), round_to)},
+            """
+        ax.set(title=r2 + "\n" + discon + ci)
+        # Intervention line
+        ax.axvline(
+            x=results.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        return fig, ax
+
 
 class OLSPlotComponent(PlotComponent):
     @staticmethod
@@ -457,6 +508,40 @@ class OLSPlotComponent(PlotComponent):
             xticks=[0, 1],
             xticklabels=["pre", "post"],
             title=f"Causal impact = {round_num(causal_impact[0], round_to)}",
+        )
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        return (fig, ax)
+
+    @staticmethod
+    def plot_regression_disctontinuity(results, round_to=None):
+        fig, ax = plt.subplots()
+        # Plot raw data
+        sns.scatterplot(
+            results.data,
+            x=results.running_variable_name,
+            y=results.outcome_variable_name,
+            c="k",  # hue="treated",
+            ax=ax,
+        )
+        # Plot model fit to data
+        ax.plot(
+            results.x_pred[results.running_variable_name],
+            results.pred,
+            "k",
+            markersize=10,
+            label="model fit",
+        )
+        # create strings to compose title
+        r2 = f"$R^2$ on all data = {round_num(results.score, round_to)}"
+        discon = f"Discontinuity at threshold = {round_num(results.discontinuity_at_threshold, round_to)}"
+        ax.set(title=r2 + "\n" + discon)
+        # Intervention line
+        ax.axvline(
+            x=results.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)

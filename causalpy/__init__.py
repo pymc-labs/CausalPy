@@ -21,6 +21,7 @@ from .data import load_data
 from .expt_diff_in_diff import DifferenceInDifferences
 from .expt_prepostfit import InterruptedTimeSeries, SyntheticControl
 from .expt_prepostnegd import PrePostNEGD
+from .expt_regression_discontinuity import RegressionDiscontinuity
 
 az.style.use("arviz-darkgrid")
 
@@ -29,6 +30,7 @@ __all__ = [
     "SyntheticControl",
     "DifferenceInDifferences",
     "PrePostNEGD",
+    "RegressionDiscontinuity",
     "pymc_models",
     "skl_models",
     "load_data",
