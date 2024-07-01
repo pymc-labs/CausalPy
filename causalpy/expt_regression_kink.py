@@ -127,10 +127,16 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def plot(self):
+    def plot(self, round_to=None):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_regression_kink(self)
+        plot_component.plot_regression_kink(self, round_to=round_to)
 
     def summary(self, round_to=None) -> None:
         print(

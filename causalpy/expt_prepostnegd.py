@@ -23,6 +23,52 @@ from causalpy.utils import round_num
 
 
 class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
+    """
+    A class to analyse data from pretest/posttest designs
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param group_variable_name:
+        Name of the column in data for the group variable, should be either
+        binary or boolean
+    :param pretreatment_variable_name:
+        Name of the column in data for the pretreatment variable
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("anova1")
+    >>> seed = 42
+    >>> result = cp.PrePostNEGD(
+    ...     df,
+    ...     formula="post ~ 1 + C(group) + pre",
+    ...     group_variable_name="group",
+    ...     pretreatment_variable_name="pre",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ... )
+    >>> result.summary(round_to=1) # doctest: +NUMBER
+    ==================Pretest/posttest Nonequivalent Group Design===================
+    Formula: post ~ 1 + C(group) + pre
+    <BLANKLINE>
+    Results:
+    Causal impact = 2, $CI_{94%}$[2, 2]
+    Model coefficients:
+        Intercept      -0.5, 94% HDI [-1, 0.2]
+        C(group)[T.1]  2, 94% HDI [2, 2]
+        pre            1, 94% HDI [1, 1]
+        sigma          0.5, 94% HDI [0.5, 0.6]
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -114,6 +160,12 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
         return f"Causal impact = {causal_impact + ci}"
 
     def plot(self):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
         plot_component.plot_pre_post_negd(self)

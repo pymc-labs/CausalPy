@@ -22,6 +22,46 @@ from causalpy.pymc_models import PyMCModel
 
 
 class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
+    """
+    A class to analyse sharp regression discontinuity experiments.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param treatment_threshold:
+        A scalar threshold value at which the treatment is applied
+    :param model:
+        A PyMC model
+    :param running_variable_name:
+        The name of the predictor variable that the treatment threshold is based upon
+    :param epsilon:
+        A small scalar value which determines how far above and below the treatment
+        threshold to evaluate the causal impact.
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+        the model.
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("rd")
+    >>> seed = 42
+    >>> result = cp.RegressionDiscontinuity(
+    ...     df,
+    ...     formula="y ~ 1 + x + treated + x:treated",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "draws": 100,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         },
+    ...     ),
+    ...     treatment_threshold=0.5,
+    ... )
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -129,6 +169,12 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         return np.greater_equal(x, self.treatment_threshold)
 
     def plot(self):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
         plot_component.plot_regression_disctontinuity(self)

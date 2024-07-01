@@ -23,6 +23,47 @@ from causalpy.pymc_models import PyMCModel
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
+    """
+    A class to analyse quasi-experiments where parameter estimation is based on just
+    the pre-intervention data.
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> sc = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> seed = 42
+    >>> result = cp.PrePostFit(
+    ...     sc,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={
+    ...             "draws": 400,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False
+    ...         }
+    ...     ),
+    ... )
+    >>> result.summary(round_to=1)
+    ==================================Pre-Post Fit==================================
+    Formula: actual ~ 0 + a + g
+    Model coefficients:
+        a      0.6, 94% HDI [0.6, 0.6]
+        g      0.4, 94% HDI [0.4, 0.4]
+        sigma  0.8, 94% HDI [0.6, 0.9]
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -83,6 +124,12 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         )
 
     def plot(self):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
         plot_component.plot_pre_post(self)
@@ -94,8 +141,75 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
 
 class InterruptedTimeSeries(PrePostFit):
+    """
+    A wrapper around PrePostFit class
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = (
+    ...     cp.load_data("its")
+    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+    ...     .set_index("date")
+    ... )
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> seed = 42
+    >>> result = cp.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ... )
+    """
+
     expt_type = "Interrupted Time Series"
 
 
 class SyntheticControl(PrePostFit):
+    """A wrapper around the PrePostFit class
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occured, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> seed = 42
+    >>> result = cp.SyntheticControl(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     ),
+    ... )
+    """
+
     expt_type = "SyntheticControl"

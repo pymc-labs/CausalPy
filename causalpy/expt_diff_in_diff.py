@@ -23,6 +23,43 @@ from causalpy.utils import round_num
 
 
 class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
+    """A class to analyse data from Difference in Difference settings.
+
+    .. note::
+
+        There is no pre/post intervention data distinction for DiD, we fit all the
+        data available.
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param time_variable_name:
+        Name of the data column for the time variable
+    :param group_variable_name:
+        Name of the data column for the group variable
+    :param model:
+        A PyMC model for difference in differences
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("did")
+    >>> seed = 42
+    >>> result = cp.DifferenceInDifferences(
+    ...     df,
+    ...     formula="y ~ 1 + group*post_treatment",
+    ...     time_variable_name="t",
+    ...     group_variable_name="group",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     )
+    ...  )
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -134,10 +171,16 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
             )
         # ******************************************************************************
 
-    def plot(self):
+    def plot(self, round_to=None):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_difference_in_differences(self)
+        plot_component.plot_difference_in_differences(self, round_to=round_to)
 
     def summary(self, round_to=None) -> None:
         print(f"{self.expt_type:=^80}")

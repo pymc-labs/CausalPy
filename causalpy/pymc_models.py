@@ -234,7 +234,6 @@ class InstrumentalVariableRegression(PyMCModel):
                       sigmas of both regressions
                       :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
                       "eta": 2, "lkj_sd": 2}`
-
         """
 
         # --- Priors ---

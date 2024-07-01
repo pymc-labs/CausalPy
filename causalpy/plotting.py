@@ -146,7 +146,7 @@ class BayesianPlotComponent(PlotComponent):
         return fig, ax
 
     @staticmethod
-    def plot_difference_in_differences(results):
+    def plot_difference_in_differences(results, round_to=None):
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name
@@ -478,7 +478,7 @@ class OLSPlotComponent(PlotComponent):
         return (fig, ax)
 
     @staticmethod
-    def plot_difference_in_differences(results):
+    def plot_difference_in_differences(results, round_to=None):
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name

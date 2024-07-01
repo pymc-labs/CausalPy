@@ -26,6 +26,44 @@ from causalpy.experiments import ExperimentalDesign
 
 
 class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
+    """
+    A class to analyse inverse propensity weighting experiments.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula for the propensity model
+    :param outcome_variable
+        A string denoting the outcome variable in datq to be reweighted
+    :param weighting_scheme:
+        A string denoting which weighting scheme to use among: 'raw', 'robust',
+        'doubly robust' or 'overlap'. See Aronow and Miller "Foundations
+        of Agnostic Statistics" for discussion and computation of these
+        weighting schemes.
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("nhefs")
+    >>> seed = 42
+    >>> result = cp.InversePropensityWeighting(
+    ...     df,
+    ...     formula="trt ~ 1 + age + race",
+    ...     outcome_variable ="outcome",
+    ...     weighting_scheme="robust",
+    ...     model=cp.pymc_models.PropensityScore(
+    ...         sample_kwargs={
+    ...             "draws": 100,
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         },
+    ...     ),
+    ... )
+    """
+
     def __init__(
         self,
         data: pd.DataFrame,

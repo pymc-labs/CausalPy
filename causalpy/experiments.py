@@ -14,6 +14,8 @@
 
 
 class ExperimentalDesign:
+    """Base class for quasi experimental designs."""
+
     model = None
     expt_type = None
 
@@ -23,9 +25,11 @@ class ExperimentalDesign:
         if self.model is None:
             raise ValueError("fitting_model not set or passed.")
 
-    # @property
-    # def idata(self):
-    #     return self.model.idata
+    @property
+    def idata(self):
+        """Return the InferenceData object of the model. Only relevant for PyMC models."""
+        return self.model.idata
 
     def print_coefficients(self, round_to=None):
+        """Ask the model to print its coefficients."""
         self.model.print_coefficients(self.labels, round_to)
