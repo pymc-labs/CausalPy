@@ -24,44 +24,8 @@ from causalpy.pymc_models import PyMCModel
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     """
-    A class to analyse quasi-experiments where parameter estimation is based on just
-    the pre-intervention data.
-
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> sc = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> seed = 42
-    >>> result = cp.PrePostFit(
-    ...     sc,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + g",
-    ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={
-    ...             "draws": 400,
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False
-    ...         }
-    ...     ),
-    ... )
-    >>> result.summary(round_to=1)
-    ==================================Pre-Post Fit==================================
-    Formula: actual ~ 0 + a + g
-    Model coefficients:
-        a      0.6, 94% HDI [0.6, 0.6]
-        g      0.4, 94% HDI [0.4, 0.4]
-        sigma  0.8, 94% HDI [0.6, 0.9]
+    A base class for quasi-experimental designs where parameter estimation is based on
+    just pre-intervention data. This class is not directly invoked by the user.
     """
 
     def __init__(
