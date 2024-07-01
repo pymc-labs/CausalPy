@@ -294,7 +294,7 @@ class BayesianPlotComponent(PlotComponent):
         return fig, ax
 
     @staticmethod
-    def plot_regression_disctontinuity(results, round_to=None):
+    def plot_regression_discontinuity(results, round_to=None):
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -545,7 +545,7 @@ class OLSPlotComponent(PlotComponent):
         return (fig, ax)
 
     @staticmethod
-    def plot_regression_disctontinuity(results, round_to=None):
+    def plot_regression_discontinuity(results, round_to=None):
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data

@@ -15,8 +15,11 @@
 Utility functions
 """
 
+from typing import Union
+
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
@@ -62,3 +65,19 @@ def _format_sig_figs(value, default=None):
     if value == 0:
         return 1
     return max(int(np.log10(np.abs(value))) + 1, default)
+
+
+# function `convert_to_string` which accepts either a float or an xarray object. We want
+# to return a string. If the input is a float, we want to return a string with 2 decimal
+# places. If the input is an xarray object, we want to calculate the mean and return a
+# string with 2 decimal places.
+def convert_to_string(x: Union[float, xr.DataArray], round_to=2) -> str:
+    if isinstance(x, float):
+        return f"{x:.2f}"
+    else:
+        percentiles = x.quantile([0.03, 1 - 0.03]).values
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        return f"{x.mean().values:.2f}" + ci

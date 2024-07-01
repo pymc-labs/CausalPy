@@ -21,6 +21,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import RDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
+from causalpy.utils import convert_to_string
 
 
 class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
@@ -179,7 +180,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_regression_disctontinuity(self)
+        plot_component.plot_regression_discontinuity(self)
 
     def summary(self, round_to=None) -> None:
         """
@@ -193,6 +194,8 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
         print("\nResults:")
-        print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
+        print(
+            f"Discontinuity at threshold = {convert_to_string(self.discontinuity_at_threshold)}"
+        )
         print("\n")
         self.print_coefficients(round_to)
