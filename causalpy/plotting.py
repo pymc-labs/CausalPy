@@ -153,6 +153,53 @@ class BayesianPlotComponent(PlotComponent):
     def plot_difference_in_differences(results, round_to=None):
         """Generate plot for difference-in-differences"""
 
+        def _plot_causal_impact_arrow(results, ax):
+            """
+            draw a vertical arrow between `y_pred_counterfactual` and
+            `y_pred_counterfactual`
+            """
+            # Calculate y values to plot the arrow between
+            y_pred_treatment = (
+                results.y_pred_treatment["posterior_predictive"]
+                .mu.isel({"obs_ind": 1})
+                .mean()
+                .data
+            )
+            y_pred_counterfactual = (
+                results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+            )
+            # Calculate the x position to plot at
+            # Note that we force to be float to avoid a type error using np.ptp with boolean
+            # values
+            diff = np.ptp(
+                np.array(
+                    results.x_pred_treatment[results.time_variable_name].values
+                ).astype(float)
+            )
+            x = (
+                np.max(results.x_pred_treatment[results.time_variable_name].values)
+                + 0.1 * diff
+            )
+            # Plot the arrow
+            ax.annotate(
+                "",
+                xy=(x, y_pred_counterfactual),
+                xycoords="data",
+                xytext=(x, y_pred_treatment),
+                textcoords="data",
+                arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
+            )
+            # Plot text annotation next to arrow
+            ax.annotate(
+                "causal\nimpact",
+                xy=(x, np.mean([y_pred_counterfactual, y_pred_treatment])),
+                xycoords="data",
+                xytext=(5, 0),
+                textcoords="offset points",
+                color="green",
+                va="center",
+            )
+
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -224,7 +271,7 @@ class BayesianPlotComponent(PlotComponent):
             labels.append("Counterfactual")
 
         # arrow to label the causal impact
-        # _plot_causal_impact_arrow(ax)
+        _plot_causal_impact_arrow(results, ax)
 
         # formatting
         ax.set(
