@@ -15,6 +15,7 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
