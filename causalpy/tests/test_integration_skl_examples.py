@@ -15,9 +15,9 @@ import pandas as pd
 import pytest
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
-from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.skl_models import LinearRegression
 
 
 @pytest.mark.integration

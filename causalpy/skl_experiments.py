@@ -63,7 +63,7 @@ LEGEND_FONT_SIZE = 12
 
 #     Example
 #     --------
-#     >>> from sklearn.linear_model import LinearRegression
+#     >>> from causalpy.skl_models import LinearRegression
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("sc")
 #     >>> treatment_time = 70
@@ -246,7 +246,7 @@ LEGEND_FONT_SIZE = 12
 
 #     Example
 #     --------
-#     >>> from sklearn.linear_model import LinearRegression
+#     >>> from causalpy.skl_models import LinearRegression
 #     >>> import pandas as pd
 #     >>> import causalpy as cp
 #     >>> df = (
@@ -281,7 +281,7 @@ LEGEND_FONT_SIZE = 12
 
 #     Example
 #     --------
-#     >>> from sklearn.linear_model import LinearRegression
+#     >>> from causalpy.skl_models import LinearRegression
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("sc")
 #     >>> treatment_time = 70
@@ -332,7 +332,7 @@ LEGEND_FONT_SIZE = 12
 #     Example
 #     --------
 #     >>> import causalpy as cp
-#     >>> from sklearn.linear_model import LinearRegression
+#     >>> from causalpy.skl_models import LinearRegression
 #     >>> df = cp.load_data("did")
 #     >>> result = cp.DifferenceInDifferences(
 #     ...     df,
@@ -556,7 +556,7 @@ LEGEND_FONT_SIZE = 12
 #     Example
 #     --------
 #     >>> import causalpy as cp
-#     >>> from sklearn.linear_model import LinearRegression
+#     >>> from causalpy.skl_models import LinearRegression
 #     >>> data = cp.load_data("rd")
 #     >>> result = cp.RegressionDiscontinuity(
 #     ...     data,

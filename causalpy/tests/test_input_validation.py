@@ -255,7 +255,7 @@ def test_rd_validation_treated_in_formula():
         )
 
     with pytest.raises(FormulaException):
-        from sklearn.linear_model import LinearRegression
+        from causalpy.skl_models import LinearRegression
 
         _ = cp.RegressionDiscontinuity(
             df,
@@ -283,7 +283,7 @@ def test_rd_validation_treated_is_dummy():
             treatment_threshold=0.5,
         )
 
-    from sklearn.linear_model import LinearRegression
+    from causalpy.skl_models import LinearRegression
 
     with pytest.raises(DataException):
         _ = cp.RegressionDiscontinuity(

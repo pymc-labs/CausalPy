@@ -1217,7 +1217,7 @@ az.style.use("arviz-darkgrid")
 #     --------
 #     >>> import pandas as pd
 #     >>> import causalpy as cp
-#     >>> from causalpy.pymc_experiments import InstrumentalVariable
+#     >>> from causalpy.experiments import InstrumentalVariable
 #     >>> from causalpy.pymc_models import InstrumentalVariableRegression
 #     >>> import numpy as np
 #     >>> N = 100
