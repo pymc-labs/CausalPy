@@ -152,25 +152,15 @@ class BayesianPlotComponent(PlotComponent):
     @staticmethod
     def plot_difference_in_differences(results, round_to=None):
         """Generate plot for difference-in-differences"""
-        data = results.data
-        time_variable_name = results.time_variable_name
-        outcome_variable_name = results.outcome_variable_name
-        group_variable_name = results.group_variable_name
-        x_pred_control = results.x_pred_control
-        y_pred_control = results.y_pred_control
-        x_pred_treatment = results.x_pred_treatment
-        y_pred_treatment = results.y_pred_treatment
-        x_pred_counterfactual = results.x_pred_counterfactual
-        y_pred_counterfactual = results.y_pred_counterfactual
 
         fig, ax = plt.subplots()
 
         # Plot raw data
         sns.scatterplot(
-            data,
-            x=time_variable_name,
-            y=outcome_variable_name,
-            hue=group_variable_name,
+            results.data,
+            x=results.time_variable_name,
+            y=results.outcome_variable_name,
+            hue=results.group_variable_name,
             alpha=1,
             legend=False,
             markers=True,
@@ -178,10 +168,10 @@ class BayesianPlotComponent(PlotComponent):
         )
 
         # Plot model fit to control group
-        time_points = x_pred_control[time_variable_name].values
+        time_points = results.x_pred_control[results.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            y_pred_control.posterior_predictive.mu,
+            results.y_pred_control.posterior_predictive.mu,
             ax=ax,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
@@ -190,10 +180,10 @@ class BayesianPlotComponent(PlotComponent):
         labels = ["Control group"]
 
         # Plot model fit to treatment group
-        time_points = x_pred_control[time_variable_name].values
+        time_points = results.x_pred_control[results.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            y_pred_treatment.posterior_predictive.mu,
+            results.y_pred_treatment.posterior_predictive.mu,
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
@@ -203,15 +193,17 @@ class BayesianPlotComponent(PlotComponent):
 
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
-        time_points = x_pred_counterfactual[time_variable_name].values
+        time_points = results.x_pred_counterfactual[results.time_variable_name].values
         if len(time_points) == 1:
             parts = ax.violinplot(
                 az.extract(
-                    y_pred_counterfactual,
+                    results.y_pred_counterfactual,
                     group="posterior_predictive",
                     var_names="mu",
                 ).values.T,
-                positions=x_pred_counterfactual[time_variable_name].values,
+                positions=results.x_pred_counterfactual[
+                    results.time_variable_name
+                ].values,
                 showmeans=False,
                 showmedians=False,
                 widths=0.2,
@@ -223,7 +215,7 @@ class BayesianPlotComponent(PlotComponent):
         else:
             h_line, h_patch = plot_xY(
                 time_points,
-                y_pred_counterfactual.posterior_predictive.mu,
+                results.y_pred_counterfactual.posterior_predictive.mu,
                 ax=ax,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
@@ -236,7 +228,7 @@ class BayesianPlotComponent(PlotComponent):
 
         # formatting
         ax.set(
-            xticks=x_pred_treatment[time_variable_name].values,
+            xticks=results.x_pred_treatment[results.time_variable_name].values,
             title=results._causal_impact_summary_stat(round_to),
         )
         ax.legend(
@@ -411,29 +403,17 @@ class OLSPlotComponent(PlotComponent):
     def plot_pre_post(results, round_to=None):
         """Generate plot for pre-post experiment types, such as Interrupted Time Series
         and Synthetic Control."""
-        datapre = results.datapre
-        datapost = results.datapost
-        pre_y = results.pre_y
-        post_y = results.post_y
-        pre_pred = results.pre_pred
-        post_pred = results.post_pred
-        pre_impact = results.pre_impact
-        post_impact = results.post_impact
-        post_impact_cumulative = results.post_impact_cumulative
-        treatment_time = results.treatment_time
-        score = results.score
-
         counterfactual_label = "Counterfactual"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(datapre.index, pre_y, "k.")
-        ax[0].plot(datapost.index, post_y, "k.")
+        ax[0].plot(results.datapre.index, results.pre_y, "k.")
+        ax[0].plot(results.datapost.index, results.post_y, "k.")
 
-        ax[0].plot(datapre.index, pre_pred, c="k", label="model fit")
+        ax[0].plot(results.datapre.index, results.pre_pred, c="k", label="model fit")
         ax[0].plot(
-            datapost.index,
-            post_pred,
+            results.datapost.index,
+            results.post_pred,
             label=counterfactual_label,
             ls=":",
             c="k",
@@ -442,32 +422,32 @@ class OLSPlotComponent(PlotComponent):
             title=f"$R^2$ on pre-intervention data = {round_num(score, round_to)}"
         )
 
-        ax[1].plot(datapre.index, pre_impact, "k.")
+        ax[1].plot(results.datapre.index, results.pre_impact, "k.")
         ax[1].plot(
-            datapost.index,
-            post_impact,
+            results.datapost.index,
+            results.post_impact,
             "k.",
             label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(datapost.index, post_impact_cumulative, c="k")
+        ax[2].plot(results.datapost.index, results.post_impact_cumulative, c="k")
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[0].fill_between(
-            datapost.index,
-            y1=np.squeeze(post_pred),
-            y2=np.squeeze(post_y),
+            results.datapost.index,
+            y1=np.squeeze(results.post_pred),
+            y2=np.squeeze(results.post_y),
             color="C0",
             alpha=0.25,
             label="Causal impact",
         )
         ax[1].fill_between(
-            datapost.index,
-            y1=np.squeeze(post_impact),
+            results.datapost.index,
+            y1=np.squeeze(results.post_impact),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -477,7 +457,7 @@ class OLSPlotComponent(PlotComponent):
         # TODO: make this work when treatment_time is a datetime
         for i in [0, 1, 2]:
             ax[i].axvline(
-                x=treatment_time,
+                x=results.treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
@@ -491,24 +471,13 @@ class OLSPlotComponent(PlotComponent):
     @staticmethod
     def plot_difference_in_differences(results, round_to=None):
         """Generate plot for difference-in-differences"""
-        data = results.data
-        time_variable_name = results.time_variable_name
-        outcome_variable_name = results.outcome_variable_name
-        group_variable_name = results.group_variable_name
-        x_pred_control = results.x_pred_control
-        y_pred_control = results.y_pred_control
-        x_pred_treatment = results.x_pred_treatment
-        y_pred_treatment = results.y_pred_treatment
-        x_pred_counterfactual = results.x_pred_counterfactual
-        y_pred_counterfactual = results.y_pred_counterfactual
-
         fig, ax = plt.subplots()
 
         # Plot raw data
         sns.lineplot(
-            data,
-            x=time_variable_name,
-            y=outcome_variable_name,
+            results.data,
+            x=results.time_variable_name,
+            y=results.outcome_variable_name,
             hue="group",
             units="unit",
             estimator=None,
@@ -517,8 +486,8 @@ class OLSPlotComponent(PlotComponent):
         )
         # Plot model fit to control group
         ax.plot(
-            x_pred_control[time_variable_name],
-            y_pred_control,
+            results.x_pred_control[results.time_variable_name],
+            results.y_pred_control,
             "o",
             c="C0",
             markersize=10,
@@ -526,8 +495,8 @@ class OLSPlotComponent(PlotComponent):
         )
         # Plot model fit to treatment group
         ax.plot(
-            x_pred_treatment[time_variable_name],
-            y_pred_treatment,
+            results.x_pred_treatment[results.time_variable_name],
+            results.y_pred_treatment,
             "o",
             c="C1",
             markersize=10,
@@ -536,8 +505,8 @@ class OLSPlotComponent(PlotComponent):
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
         ax.plot(
-            x_pred_counterfactual[time_variable_name],
-            y_pred_counterfactual,
+            results.x_pred_counterfactual[results.time_variable_name],
+            results.y_pred_counterfactual,
             "go",
             markersize=10,
             label="counterfactual",
@@ -545,9 +514,9 @@ class OLSPlotComponent(PlotComponent):
         # arrow to label the causal impact
         ax.annotate(
             "",
-            xy=(1.05, y_pred_counterfactual),
+            xy=(1.05, results.y_pred_counterfactual),
             xycoords="data",
-            xytext=(1.05, y_pred_treatment[1]),
+            xytext=(1.05, results.y_pred_treatment[1]),
             textcoords="data",
             arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
         )
@@ -555,7 +524,9 @@ class OLSPlotComponent(PlotComponent):
             "causal\nimpact",
             xy=(
                 1.05,
-                np.mean([y_pred_counterfactual[0], y_pred_treatment[1]]),
+                np.mean(
+                    [results.y_pred_counterfactual[0], results.y_pred_treatment[1]]
+                ),
             ),
             xycoords="data",
             xytext=(5, 0),
@@ -568,7 +539,7 @@ class OLSPlotComponent(PlotComponent):
             xlim=[-0.05, 1.1],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {round_num(causal_impact[0], round_to)}",
+            title=f"Causal impact = {round_num(results.causal_impact[0], round_to)}",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
