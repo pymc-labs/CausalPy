@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import warnings  # noqa: I001
+
 import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
@@ -181,7 +183,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
 
     def summary(self, round_to=None) -> None:
         """
-        Print text output summarising the results
+        Print summary of main results and model coefficients
 
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.

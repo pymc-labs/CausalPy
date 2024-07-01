@@ -171,6 +171,7 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
         plot_component.plot_pre_post_negd(self)
 
     def summary(self, round_to=None) -> None:
+        """Print summary of main results and model coefficients."""
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")

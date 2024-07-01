@@ -26,16 +26,22 @@ from causalpy.utils import round_num
 
 
 class ScikitLearnModel:
+    """Base class for scikit-learn models that can be used for causal inference."""
+
     def calculate_impact(self, y_true, y_pred):
+        """Calculate the causal impact of the intervention."""
         return y_true - y_pred
 
     def calculate_cumulative_impact(self, impact):
+        """Calculate the cumulative impact intervention."""
         return np.cumsum(impact)
 
     def get_plot_component(self) -> PlotComponent:
+        """Get the plot component type for the model."""
         return OLSPlotComponent()
 
     def print_coefficients(self, labels, round_to=None) -> None:
+        """Print the coefficients of the model with the corresponding labels."""
         print("Model coefficients:")
         coef_ = self.get_coeffs()
         # Determine the width of the longest label
@@ -49,14 +55,20 @@ class ScikitLearnModel:
             print(f"  {formatted_name}\t{formatted_val}")
 
     def get_coeffs(self):
+        """Get the coefficients of the model as a numpy array."""
         return np.squeeze(self.coef_)
 
 
 class LinearRegression(ScikitLearnModel, LinearRegression):
+    """Linear regression model for causal inference"""
+
     pass
 
 
 class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
+    """Weighted proportion model for causal inference. Used for synthetic control
+    methods for example"""
+
     def loss(self, W, X, y):
         """Compute root mean squared loss with data X, weights W, and predictor y"""
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))

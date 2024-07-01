@@ -183,6 +183,11 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         plot_component.plot_difference_in_differences(self, round_to=round_to)
 
     def summary(self, round_to=None) -> None:
+        """Print summary of main results and model coefficients.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")

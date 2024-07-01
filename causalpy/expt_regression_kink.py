@@ -11,6 +11,8 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+import warnings  # noqa: I001
+
 import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
@@ -21,6 +23,8 @@ from causalpy.utils import round_num
 
 
 class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
+    """Regression Kink experiment class."""
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -101,6 +105,8 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
         return gradient_change
 
     def _probe_kink_point(self):
+        """Probe the kink point to evaluate the predicted outcome at the kink point and
+        either side."""
         # Create a dataframe to evaluate predicted outcome at the kink point and either
         # side
         x_predict = pd.DataFrame(
@@ -139,6 +145,11 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
         plot_component.plot_regression_kink(self, round_to=round_to)
 
     def summary(self, round_to=None) -> None:
+        """Print summary of main results and model coefficients.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        """
         print(
             f"""
         {self.expt_type:=^80}

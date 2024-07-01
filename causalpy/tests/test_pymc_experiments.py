@@ -60,6 +60,7 @@ def test_regression_kink_gradient_change():
 
 
 def test_inverse_prop():
+    """Test the InversePropensityWeighting class."""
     df = cp.load_data("nhefs")
     sample_kwargs = {
         "tune": 100,

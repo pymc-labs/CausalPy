@@ -26,12 +26,18 @@ az.style.use("arviz-darkgrid")
 
 
 class PlotComponent(ABC):
+    """Abstract Base Class for PlotComponent."""
+
     pass
 
 
 class BayesianPlotComponent(PlotComponent):
+    """Plotting component for Bayesian models."""
+
     @staticmethod
     def plot_pre_post(results, round_to=None):
+        """Generate plot for pre-post experiment types, such as Interrupted Time Series
+        and Synthetic Control."""
         datapre = results.datapre
         datapost = results.datapost
         pre_y = results.pre_y
@@ -45,8 +51,6 @@ class BayesianPlotComponent(PlotComponent):
         score = results.score
 
         counterfactual_label = "Counterfactual"
-        # datapre, datapost, pre_y, post_y, pre_pred, treatment_time
-        print("BayesianPlotComponent - plot_pre_post")
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -147,6 +151,7 @@ class BayesianPlotComponent(PlotComponent):
 
     @staticmethod
     def plot_difference_in_differences(results, round_to=None):
+        """Generate plot for difference-in-differences"""
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name
@@ -239,12 +244,14 @@ class BayesianPlotComponent(PlotComponent):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
+        return fig, ax
 
     # def plot_synthetic_control(self, experiment, impact):
     #     pass
 
     @staticmethod
     def plot_pre_post_negd(results, round_to=None):
+        """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -296,6 +303,7 @@ class BayesianPlotComponent(PlotComponent):
 
     @staticmethod
     def plot_regression_disctontinuity(results, round_to=None):
+        """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -347,6 +355,7 @@ class BayesianPlotComponent(PlotComponent):
 
     @staticmethod
     def plot_regression_kink(results, round_to=None):
+        """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -396,8 +405,12 @@ class BayesianPlotComponent(PlotComponent):
 
 
 class OLSPlotComponent(PlotComponent):
+    """Plotting component for OLS models."""
+
     @staticmethod
     def plot_pre_post(results, round_to=None):
+        """Generate plot for pre-post experiment types, such as Interrupted Time Series
+        and Synthetic Control."""
         datapre = results.datapre
         datapost = results.datapost
         pre_y = results.pre_y
@@ -411,8 +424,6 @@ class OLSPlotComponent(PlotComponent):
         score = results.score
 
         counterfactual_label = "Counterfactual"
-
-        print("OLSPlotComponent - plot_pre_post")
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
@@ -479,6 +490,7 @@ class OLSPlotComponent(PlotComponent):
 
     @staticmethod
     def plot_difference_in_differences(results, round_to=None):
+        """Generate plot for difference-in-differences"""
         data = results.data
         time_variable_name = results.time_variable_name
         outcome_variable_name = results.outcome_variable_name
@@ -563,6 +575,7 @@ class OLSPlotComponent(PlotComponent):
 
     @staticmethod
     def plot_regression_disctontinuity(results, round_to=None):
+        """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(

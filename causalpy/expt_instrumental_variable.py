@@ -180,4 +180,9 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
         raise NotImplementedError("Plot method not implemented.")
 
     def summary(self, round_to=None) -> None:
+        """Print summary of main results and model coefficients.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        """
         raise NotImplementedError("Summary method not implemented.")

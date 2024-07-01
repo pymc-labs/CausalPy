@@ -99,6 +99,11 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         plot_component.plot_pre_post(self)
 
     def summary(self, round_to=None) -> None:
+        """Print summary of main results and model coefficients.
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
