@@ -18,7 +18,9 @@ import causalpy.skl_models as skl_models
 from causalpy.version import __version__
 
 from .data import load_data
+from .exp_inverse_propensity_weighting import InversePropensityWeighting
 from .expt_diff_in_diff import DifferenceInDifferences
+from .expt_instrumental_variable import InstrumentalVariable
 from .expt_prepostfit import InterruptedTimeSeries, SyntheticControl
 from .expt_prepostnegd import PrePostNEGD
 from .expt_regression_discontinuity import RegressionDiscontinuity
@@ -33,6 +35,8 @@ __all__ = [
     "PrePostNEGD",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "InstrumentalVariable",
+    "InversePropensityWeighting",
     "pymc_models",
     "skl_models",
     "load_data",

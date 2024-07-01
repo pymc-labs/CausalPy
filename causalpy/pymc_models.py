@@ -19,6 +19,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
 
