@@ -31,7 +31,7 @@ def test_did():
     """
 
     data = cp.load_data("did")
-    result = cp.skl_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
@@ -41,7 +41,7 @@ def test_did():
         model=LinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     result.summary()
 
 
@@ -59,7 +59,7 @@ def test_rd_drinking():
         .rename(columns={"agecell": "age"})
         .assign(treated=lambda df_: df_.age > 21)
     )
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
@@ -68,7 +68,7 @@ def test_rd_drinking():
         epsilon=0.001,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
 
 
@@ -88,14 +88,14 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.skl_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     result.summary()
 
 
@@ -110,14 +110,14 @@ def test_sc():
     """
     df = cp.load_data("sc")
     treatment_time = 70
-    result = cp.skl_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
         model=cp.skl_models.WeightedProportion(),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     result.summary()
 
 
@@ -131,7 +131,7 @@ def test_rd_linear_main_effects():
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
     data = cp.load_data("rd")
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=LinearRegression(),
@@ -139,7 +139,7 @@ def test_rd_linear_main_effects():
         epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
 
 
@@ -154,7 +154,7 @@ def test_rd_linear_main_effects_bandwidth():
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
     data = cp.load_data("rd")
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=LinearRegression(),
@@ -163,7 +163,7 @@ def test_rd_linear_main_effects_bandwidth():
         bandwidth=0.3,
     )
     assert isinstance(data, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
 
 
@@ -177,7 +177,7 @@ def test_rd_linear_with_interaction():
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
     data = cp.load_data("rd")
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
         model=LinearRegression(),
@@ -185,7 +185,7 @@ def test_rd_linear_with_interaction():
         epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
 
 
@@ -200,7 +200,7 @@ def test_rd_linear_with_gaussian_process():
     """
     data = cp.load_data("rd")
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=GaussianProcessRegressor(kernel=kernel),
@@ -208,4 +208,4 @@ def test_rd_linear_with_gaussian_process():
         epsilon=0.001,
     )
     assert isinstance(data, pd.DataFrame)
-    assert isinstance(result, cp.skl_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)

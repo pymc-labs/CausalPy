@@ -32,7 +32,7 @@ def test_did():
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("did")
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
@@ -40,7 +40,7 @@ def test_did():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -87,7 +87,7 @@ def test_did_banks_simple():
     df_long["post_treatment"] = df_long.year >= treatment_time
     df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
 
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         # df_long[df_long.year.isin([1930, 1931])],
         df_long[df_long.year.isin([-0.5, 0.5])],
         formula="bib ~ 1 + district * post_treatment",
@@ -96,7 +96,7 @@ def test_did_banks_simple():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -140,7 +140,7 @@ def test_did_banks_multi():
     df_long["post_treatment"] = df_long.year >= treatment_time
     df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
 
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         df_long,
         formula="bib ~ 1 + year + district + post_treatment + district:post_treatment",
         time_variable_name="year",
@@ -148,7 +148,7 @@ def test_did_banks_multi():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -166,7 +166,7 @@ def test_rd():
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("rd")
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -174,7 +174,7 @@ def test_rd():
         epsilon=0.001,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -192,7 +192,7 @@ def test_rd_bandwidth():
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("rd")
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -201,7 +201,7 @@ def test_rd_bandwidth():
         bandwidth=0.3,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -223,7 +223,7 @@ def test_rd_drinking():
         .rename(columns={"agecell": "age"})
         .assign(treated=lambda df_: df_.age > 21)
     )
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
@@ -231,7 +231,7 @@ def test_rd_drinking():
         treatment_threshold=21,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -277,14 +277,14 @@ def test_rkink():
     """
     kink = 0.5
     df = setup_regression_kink_data(kink)
-    result = cp.pymc_experiments.RegressionKink(
+    result = cp.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionKink)
+    assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -303,7 +303,7 @@ def test_rkink_bandwidth():
     """
     kink = 0.5
     df = setup_regression_kink_data(kink)
-    result = cp.pymc_experiments.RegressionKink(
+    result = cp.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -311,7 +311,7 @@ def test_rkink_bandwidth():
         bandwidth=0.3,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionKink)
+    assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -334,14 +334,14 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -365,14 +365,14 @@ def test_its_covid():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2020-01-01")
-    result = cp.pymc_experiments.InterruptedTimeSeries(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.InterruptedTimeSeries)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -392,14 +392,14 @@ def test_sc():
 
     df = cp.load_data("sc")
     treatment_time = 70
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -431,14 +431,14 @@ def test_sc_brexit():
     all_countries = list(all_countries)
     other_countries = list(other_countries)
     formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula=formula,
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -456,7 +456,7 @@ def test_ancova():
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("anova1")
-    result = cp.pymc_experiments.PrePostNEGD(
+    result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
         group_variable_name="group",
@@ -464,7 +464,7 @@ def test_ancova():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
+    assert isinstance(result, cp.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -487,7 +487,7 @@ def test_geolift1():
         .set_index("time")
     )
     treatment_time = pd.to_datetime("2022-01-01")
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
@@ -495,7 +495,7 @@ def test_geolift1():
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -509,7 +509,7 @@ def test_iv_reg():
     instruments_data = df[["risk", "logmort0"]]
     data = df[["loggdp", "risk"]]
 
-    result = cp.pymc_experiments.InstrumentalVariable(
+    result = cp.InstrumentalVariable(
         instruments_data=instruments_data,
         data=data,
         instruments_formula=instruments_formula,
@@ -522,6 +522,6 @@ def test_iv_reg():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
     assert isinstance(instruments_data, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.InstrumentalVariable)
+    assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]

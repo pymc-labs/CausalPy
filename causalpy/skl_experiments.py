@@ -67,7 +67,7 @@ LEGEND_FONT_SIZE = 12
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("sc")
 #     >>> treatment_time = 70
-#     >>> result = cp.skl_experiments.PrePostFit(
+#     >>> result = cp.PrePostFit(
 #     ...     df,
 #     ...     treatment_time,
 #     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
@@ -255,7 +255,7 @@ LEGEND_FONT_SIZE = 12
 #     ...     .set_index("date")
 #     ... )
 #     >>> treatment_time = pd.to_datetime("2017-01-01")
-#     >>> result = cp.skl_experiments.InterruptedTimeSeries(
+#     >>> result = cp.InterruptedTimeSeries(
 #     ...     df,
 #     ...     treatment_time,
 #     ...     formula="y ~ 1 + t + C(month)",
@@ -285,7 +285,7 @@ LEGEND_FONT_SIZE = 12
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("sc")
 #     >>> treatment_time = 70
-#     >>> result = cp.skl_experiments.SyntheticControl(
+#     >>> result = cp.SyntheticControl(
 #     ...     df,
 #     ...     treatment_time,
 #     ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
@@ -334,7 +334,7 @@ LEGEND_FONT_SIZE = 12
 #     >>> import causalpy as cp
 #     >>> from sklearn.linear_model import LinearRegression
 #     >>> df = cp.load_data("did")
-#     >>> result = cp.skl_experiments.DifferenceInDifferences(
+#     >>> result = cp.DifferenceInDifferences(
 #     ...     df,
 #     ...     formula="y ~ 1 + group*post_treatment",
 #     ...     time_variable_name="t",
@@ -558,7 +558,7 @@ LEGEND_FONT_SIZE = 12
 #     >>> import causalpy as cp
 #     >>> from sklearn.linear_model import LinearRegression
 #     >>> data = cp.load_data("rd")
-#     >>> result = cp.skl_experiments.RegressionDiscontinuity(
+#     >>> result = cp.RegressionDiscontinuity(
 #     ...     data,
 #     ...     formula="y ~ 1 + x + treated",
 #     ...     model=LinearRegression(),

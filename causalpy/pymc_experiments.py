@@ -55,7 +55,7 @@ az.style.use("arviz-darkgrid")
 #         >>> import causalpy as cp
 #         >>> df = cp.load_data("did")
 #         >>> seed = 42
-#         >>> result = cp.pymc_experiments.DifferenceInDifferences(
+#         >>> result = cp.DifferenceInDifferences(
 #         ...     df,
 #         ...     formula="y ~ 1 + group*post_treatment",
 #         ...     time_variable_name="t",
@@ -304,7 +304,7 @@ az.style.use("arviz-darkgrid")
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("did")
 #     >>> seed = 42
-#     >>> result = cp.pymc_experiments.DifferenceInDifferences(
+#     >>> result = cp.DifferenceInDifferences(
 #     ...     df,
 #     ...     formula="y ~ 1 + group*post_treatment",
 #     ...     time_variable_name="t",
@@ -595,7 +595,7 @@ az.style.use("arviz-darkgrid")
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("rd")
 #     >>> seed = 42
-#     >>> result = cp.pymc_experiments.RegressionDiscontinuity(
+#     >>> result = cp.RegressionDiscontinuity(
 #     ...     df,
 #     ...     formula="y ~ 1 + x + treated + x:treated",
 #     ...     model=cp.pymc_models.LinearRegression(
@@ -1004,7 +1004,7 @@ az.style.use("arviz-darkgrid")
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("anova1")
 #     >>> seed = 42
-#     >>> result = cp.pymc_experiments.PrePostNEGD(
+#     >>> result = cp.PrePostNEGD(
 #     ...     df,
 #     ...     formula="post ~ 1 + C(group) + pre",
 #     ...     group_variable_name="group",
@@ -1358,7 +1358,7 @@ az.style.use("arviz-darkgrid")
 #     >>> import causalpy as cp
 #     >>> df = cp.load_data("nhefs")
 #     >>> seed = 42
-#     >>> result = cp.pymc_experiments.InversePropensityWeighting(
+#     >>> result = cp.InversePropensityWeighting(
 #     ...     df,
 #     ...     formula="trt ~ 1 + age + race",
 #     ...     outcome_variable ="outcome",
