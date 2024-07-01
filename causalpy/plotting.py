@@ -419,7 +419,7 @@ class OLSPlotComponent(PlotComponent):
             c="k",
         )
         ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(score, round_to)}"
+            title=f"$R^2$ on pre-intervention data = {round_num(results.score, round_to)}"
         )
 
         ax[1].plot(results.datapre.index, results.pre_impact, "k.")
