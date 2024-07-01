@@ -345,6 +345,55 @@ class BayesianPlotComponent(PlotComponent):
         )
         return fig, ax
 
+    @staticmethod
+    def plot_regression_kink(results, round_to=None):
+        fig, ax = plt.subplots()
+        # Plot raw data
+        sns.scatterplot(
+            results.data,
+            x=results.running_variable_name,
+            y=results.outcome_variable_name,
+            c="k",  # hue="treated",
+            ax=ax,
+        )
+
+        # Plot model fit to data
+        h_line, h_patch = plot_xY(
+            results.x_pred[results.running_variable_name],
+            results.pred["posterior_predictive"].mu,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Posterior mean"]
+
+        # create strings to compose title
+        title_info = f"{round_num(results.score.r2, round_to)} (std = {round_num(results.score.r2_std, round_to)})"
+        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        percentiles = results.gradient_change.quantile([0.03, 1 - 0.03]).values
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        grad_change = f"""
+            Change in gradient = {round_num(results.gradient_change.mean(), round_to)},
+            """
+        ax.set(title=r2 + "\n" + grad_change + ci)
+        # Intervention line
+        ax.axvline(
+            x=results.kink_point,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        return fig, ax
+
 
 class OLSPlotComponent(PlotComponent):
     @staticmethod

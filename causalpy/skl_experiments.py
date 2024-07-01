@@ -13,20 +13,6 @@
 #   limitations under the License.
 """Quasi-Experiment classes for OLS inference"""
 
-import warnings
-from typing import Optional
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from patsy import build_design_matrices, dmatrices
-
-from causalpy.data_validation import (
-    RDDataValidator,
-)
-from causalpy.utils import round_num
-
 LEGEND_FONT_SIZE = 12
 
 
@@ -546,184 +532,184 @@ LEGEND_FONT_SIZE = 12
 #         self.print_coefficients(round_to)
 
 
-class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
-    """
-    A class to analyse sharp regression discontinuity experiments.
+# class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
+#     """
+#     A class to analyse sharp regression discontinuity experiments.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param treatment_threshold:
-        A scalar threshold value at which the treatment is applied
-    :param model:
-        A sci-kit learn model object
-    :param running_variable_name:
-        The name of the predictor variable that the treatment threshold is based upon
-    :param epsilon:
-        A small scalar value which determines how far above and below the treatment
-        threshold to evaluate the causal impact.
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
-        the model.
+#     :param data:
+#         A pandas dataframe
+#     :param formula:
+#         A statistical model formula
+#     :param treatment_threshold:
+#         A scalar threshold value at which the treatment is applied
+#     :param model:
+#         A sci-kit learn model object
+#     :param running_variable_name:
+#         The name of the predictor variable that the treatment threshold is based upon
+#     :param epsilon:
+#         A small scalar value which determines how far above and below the treatment
+#         threshold to evaluate the causal impact.
+#     :param bandwidth:
+#         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+#         the model.
 
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> from sklearn.linear_model import LinearRegression
-    >>> data = cp.load_data("rd")
-    >>> result = cp.skl_experiments.RegressionDiscontinuity(
-    ...     data,
-    ...     formula="y ~ 1 + x + treated",
-    ...     model=LinearRegression(),
-    ...     treatment_threshold=0.5,
-    ... )
-    """
+#     Example
+#     --------
+#     >>> import causalpy as cp
+#     >>> from sklearn.linear_model import LinearRegression
+#     >>> data = cp.load_data("rd")
+#     >>> result = cp.skl_experiments.RegressionDiscontinuity(
+#     ...     data,
+#     ...     formula="y ~ 1 + x + treated",
+#     ...     model=LinearRegression(),
+#     ...     treatment_threshold=0.5,
+#     ... )
+#     """
 
-    def __init__(
-        self,
-        data,
-        formula,
-        treatment_threshold,
-        model=None,
-        running_variable_name="x",
-        epsilon: float = 0.001,
-        bandwidth: Optional[float] = None,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.treatment_threshold = treatment_threshold
-        self.bandwidth = bandwidth
-        self.epsilon = epsilon
-        self._input_validation()
+#     def __init__(
+#         self,
+#         data,
+#         formula,
+#         treatment_threshold,
+#         model=None,
+#         running_variable_name="x",
+#         epsilon: float = 0.001,
+#         bandwidth: Optional[float] = None,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self.data = data
+#         self.formula = formula
+#         self.running_variable_name = running_variable_name
+#         self.treatment_threshold = treatment_threshold
+#         self.bandwidth = bandwidth
+#         self.epsilon = epsilon
+#         self._input_validation()
 
-        if self.bandwidth is not None:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                )
-            y, X = dmatrices(formula, filtered_data)
-        else:
-            y, X = dmatrices(formula, self.data)
+#         if self.bandwidth is not None:
+#             fmin = self.treatment_threshold - self.bandwidth
+#             fmax = self.treatment_threshold + self.bandwidth
+#             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+#             if len(filtered_data) <= 10:
+#                 warnings.warn(
+#                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+#                     UserWarning,
+#                 )
+#             y, X = dmatrices(formula, filtered_data)
+#         else:
+#             y, X = dmatrices(formula, self.data)
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.y, self.X = np.asarray(y), np.asarray(X)
+#         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # TODO: `treated` is a deterministic function of x and treatment_threshold, so
-        # this could be a function rather than supplied data
+#         # TODO: `treated` is a deterministic function of x and treatment_threshold, so
+#         # this could be a function rather than supplied data
 
-        # fit the model to all the data
-        self.model.fit(X=self.X, y=self.y)
+#         # fit the model to all the data
+#         self.model.fit(X=self.X, y=self.y)
 
-        # score the goodness of fit to all data
-        self.score = self.model.score(X=self.X, y=self.y)
+#         # score the goodness of fit to all data
+#         self.score = self.model.score(X=self.X, y=self.y)
 
-        # get the model predictions of the observed data
-        if self.bandwidth is not None:
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
+#         # get the model predictions of the observed data
+#         if self.bandwidth is not None:
+#             xi = np.linspace(fmin, fmax, 200)
+#         else:
+#             xi = np.linspace(
+#                 np.min(self.data[self.running_variable_name]),
+#                 np.max(self.data[self.running_variable_name]),
+#                 200,
+#             )
+#         self.x_pred = pd.DataFrame(
+#             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+#         self.pred = self.model.predict(X=np.asarray(new_x))
 
-        # calculate discontinuity by evaluating the difference in model expectation on
-        # either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
-        # (not below) the threshold
-        self.x_discon = pd.DataFrame(
-            {
-                self.running_variable_name: np.array(
-                    [
-                        self.treatment_threshold - self.epsilon,
-                        self.treatment_threshold + self.epsilon,
-                    ]
-                ),
-                "treated": np.array([0, 1]),
-            }
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-        self.discontinuity_at_threshold = np.squeeze(self.pred_discon[1]) - np.squeeze(
-            self.pred_discon[0]
-        )
+#         # calculate discontinuity by evaluating the difference in model expectation on
+#         # either side of the discontinuity
+#         # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
+#         # (not below) the threshold
+#         self.x_discon = pd.DataFrame(
+#             {
+#                 self.running_variable_name: np.array(
+#                     [
+#                         self.treatment_threshold - self.epsilon,
+#                         self.treatment_threshold + self.epsilon,
+#                     ]
+#                 ),
+#                 "treated": np.array([0, 1]),
+#             }
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+#         self.pred_discon = self.model.predict(X=np.asarray(new_x))
+#         self.discontinuity_at_threshold = np.squeeze(self.pred_discon[1]) - np.squeeze(
+#             self.pred_discon[0]
+#         )
 
-    def _is_treated(self, x):
-        """Returns ``True`` if ``x`` is greater than or equal to the treatment
-        threshold.
+#     def _is_treated(self, x):
+#         """Returns ``True`` if ``x`` is greater than or equal to the treatment
+#         threshold.
 
-        .. warning::
+#         .. warning::
 
-            Assumes treatment is given to those ABOVE the treatment threshold.
-        """
-        return np.greater_equal(x, self.treatment_threshold)
+#             Assumes treatment is given to those ABOVE the treatment threshold.
+#         """
+#         return np.greater_equal(x, self.treatment_threshold)
 
-    def plot(self, round_to=None):
-        """Plot results
+#     def plot(self, round_to=None):
+#         """Plot results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots()
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            c="k",  # hue="treated",
-            ax=ax,
-        )
-        # Plot model fit to data
-        ax.plot(
-            self.x_pred[self.running_variable_name],
-            self.pred,
-            "k",
-            markersize=10,
-            label="model fit",
-        )
-        # create strings to compose title
-        r2 = f"$R^2$ on all data = {round_num(self.score, round_to)}"
-        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
-        ax.set(title=r2 + "\n" + discon)
-        # Intervention line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots()
+#         # Plot raw data
+#         sns.scatterplot(
+#             self.data,
+#             x=self.running_variable_name,
+#             y=self.outcome_variable_name,
+#             c="k",  # hue="treated",
+#             ax=ax,
+#         )
+#         # Plot model fit to data
+#         ax.plot(
+#             self.x_pred[self.running_variable_name],
+#             self.pred,
+#             "k",
+#             markersize=10,
+#             label="model fit",
+#         )
+#         # create strings to compose title
+#         r2 = f"$R^2$ on all data = {round_num(self.score, round_to)}"
+#         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
+#         ax.set(title=r2 + "\n" + discon)
+#         # Intervention line
+#         ax.axvline(
+#             x=self.treatment_threshold,
+#             ls="-",
+#             lw=3,
+#             color="r",
+#             label="treatment threshold",
+#         )
+#         ax.legend(fontsize=LEGEND_FONT_SIZE)
+#         return (fig, ax)
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        print("Difference in Differences experiment")
-        print(f"Formula: {self.formula}")
-        print(f"Running variable: {self.running_variable_name}")
-        print(f"Threshold on running variable: {self.treatment_threshold}")
-        print("\nResults:")
-        print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
-        print("\n")
-        self.print_coefficients(round_to)
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         print("Difference in Differences experiment")
+#         print(f"Formula: {self.formula}")
+#         print(f"Running variable: {self.running_variable_name}")
+#         print(f"Threshold on running variable: {self.treatment_threshold}")
+#         print("\nResults:")
+#         print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
+#         print("\n")
+#         self.print_coefficients(round_to)

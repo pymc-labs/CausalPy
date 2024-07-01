@@ -19,6 +19,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import DiDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import BayesianModel
+from causalpy.utils import round_num
 
 
 class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
@@ -137,3 +138,20 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
         plot_component.plot_difference_in_differences(self)
+
+    def summary(self, round_to=None) -> None:
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print("\nResults:")
+        print(self._causal_impact_summary_stat(round_to))
+        self.print_coefficients(round_to)
+
+    def _causal_impact_summary_stat(self, round_to=None) -> str:
+        """Computes the mean and 94% credible interval bounds for the causal impact."""
+        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        ci = (
+            "$CI_{94\\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
+        return f"Causal impact = {causal_impact + ci}"

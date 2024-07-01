@@ -87,8 +87,10 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         plot_component = self.model.get_plot_component()
         plot_component.plot_pre_post(self)
 
-    def print_coefficients(self):
-        self.model.print_coefficients(self.labels)
+    def summary(self, round_to=None) -> None:
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        self.print_coefficients(round_to)
 
 
 class InterruptedTimeSeries(PrePostFit):

@@ -13,26 +13,18 @@
 #   limitations under the License.
 """Quasi-Experiment classes for Bayesian causal inference"""
 
-import warnings  # noqa: I001
-
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from patsy import build_design_matrices, dmatrices
-from sklearn.linear_model import LinearRegression as sk_lin_reg
 from matplotlib.lines import Line2D
-
+from patsy import dmatrices
+from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.data_validation import (
-    RDDataValidator,
-    RegressionKinkDataValidator,
     IVDataValidator,
     PropensityDataValidator,
 )
-from causalpy.plot_utils import plot_xY
-from causalpy.utils import round_num
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
@@ -287,17 +279,17 @@ az.style.use("arviz-darkgrid")
 
 #     return fig, ax
 
-#     def summary(self, round_to=None) -> None:
-#         """
-#         Print text output summarising the results
+# def summary(self, round_to=None) -> None:
+#     """
+#     Print text output summarising the results
 
-#         :param round_to:
-#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-#         """
+#     :param round_to:
+#         Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#     """
 
-#         print(f"{self.expt_type:=^80}")
-#         print(f"Formula: {self.formula}")
-#         self.print_coefficients(round_to)
+#     print(f"{self.expt_type:=^80}")
+#     print(f"Formula: {self.formula}")
+#     self.print_coefficients(round_to)
 
 
 # class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
@@ -563,19 +555,224 @@ az.style.use("arviz-darkgrid")
 #             va="center",
 #         )
 
-#     def _causal_impact_summary_stat(self, round_to=None) -> str:
-#         """Computes the mean and 94% credible interval bounds for the causal impact."""
-#         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+# def _causal_impact_summary_stat(self, round_to=None) -> str:
+#     """Computes the mean and 94% credible interval bounds for the causal impact."""
+#     percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+#     ci = (
+#         "$CI_{94\\%}$"
+#         + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+#     )
+#     causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
+#     return f"Causal impact = {causal_impact + ci}"
+
+# def summary(self, round_to=None) -> None:
+#     """
+#     Print text output summarising the results.
+
+#     :param round_to:
+#         Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#     """
+
+#     print(f"{self.expt_type:=^80}")
+#     print(f"Formula: {self.formula}")
+#     print("\nResults:")
+#     print(self._causal_impact_summary_stat(round_to))
+#     self.print_coefficients(round_to)
+
+
+# class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
+#     """
+#     A class to analyse sharp regression discontinuity experiments.
+
+#     :param data:
+#         A pandas dataframe
+#     :param formula:
+#         A statistical model formula
+#     :param treatment_threshold:
+#         A scalar threshold value at which the treatment is applied
+#     :param model:
+#         A PyMC model
+#     :param running_variable_name:
+#         The name of the predictor variable that the treatment threshold is based upon
+#     :param epsilon:
+#         A small scalar value which determines how far above and below the treatment
+#         threshold to evaluate the causal impact.
+#     :param bandwidth:
+#         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+#         the model.
+
+#     Example
+#     --------
+#     >>> import causalpy as cp
+#     >>> df = cp.load_data("rd")
+#     >>> seed = 42
+#     >>> result = cp.pymc_experiments.RegressionDiscontinuity(
+#     ...     df,
+#     ...     formula="y ~ 1 + x + treated + x:treated",
+#     ...     model=cp.pymc_models.LinearRegression(
+#     ...         sample_kwargs={
+#     ...             "draws": 100,
+#     ...             "target_accept": 0.95,
+#     ...             "random_seed": seed,
+#     ...             "progressbar": False,
+#     ...         },
+#     ...     ),
+#     ...     treatment_threshold=0.5,
+#     ... )
+#     """
+
+#     def __init__(
+#         self,
+#         data: pd.DataFrame,
+#         formula: str,
+#         treatment_threshold: float,
+#         model=None,
+#         running_variable_name: str = "x",
+#         epsilon: float = 0.001,
+#         bandwidth: float = np.inf,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self.expt_type = "Regression Discontinuity"
+#         self.data = data
+#         self.formula = formula
+#         self.running_variable_name = running_variable_name
+#         self.treatment_threshold = treatment_threshold
+#         self.epsilon = epsilon
+#         self.bandwidth = bandwidth
+#         self._input_validation()
+
+#         if self.bandwidth is not np.inf:
+#             fmin = self.treatment_threshold - self.bandwidth
+#             fmax = self.treatment_threshold + self.bandwidth
+#             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+#             if len(filtered_data) <= 10:
+#                 warnings.warn(
+#                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+#                     UserWarning,
+#                 )
+#             y, X = dmatrices(formula, filtered_data)
+#         else:
+#             y, X = dmatrices(formula, self.data)
+
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.y, self.X = np.asarray(y), np.asarray(X)
+#         self.outcome_variable_name = y.design_info.column_names[0]
+
+#         # DEVIATION FROM SKL EXPERIMENT CODE =============================
+#         # fit the model to the observed (pre-intervention) data
+#         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+#         self.model.fit(X=self.X, y=self.y, coords=COORDS)
+#         # ================================================================
+
+#         # score the goodness of fit to all data
+#         self.score = self.model.score(X=self.X, y=self.y)
+
+#         # get the model predictions of the observed data
+#         if self.bandwidth is not np.inf:
+#             xi = np.linspace(fmin, fmax, 200)
+#         else:
+#             xi = np.linspace(
+#                 np.min(self.data[self.running_variable_name]),
+#                 np.max(self.data[self.running_variable_name]),
+#                 200,
+#             )
+#         self.x_pred = pd.DataFrame(
+#             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+#         self.pred = self.model.predict(X=np.asarray(new_x))
+
+#         # calculate discontinuity by evaluating the difference in model expectation on
+#         # either side of the discontinuity
+#         # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
+#         # (not below) the threshold
+#         self.x_discon = pd.DataFrame(
+#             {
+#                 self.running_variable_name: np.array(
+#                     [
+#                         self.treatment_threshold - self.epsilon,
+#                         self.treatment_threshold + self.epsilon,
+#                     ]
+#                 ),
+#                 "treated": np.array([0, 1]),
+#             }
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+#         self.pred_discon = self.model.predict(X=np.asarray(new_x))
+#         self.discontinuity_at_threshold = (
+#             self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
+#             - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
+#         )
+
+#     def _is_treated(self, x):
+#         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
+
+#         .. warning::
+
+#             Assumes treatment is given to those ABOVE the treatment threshold.
+#         """
+#         return np.greater_equal(x, self.treatment_threshold)
+
+#     def plot(self, round_to=None):
+#         """
+#         Plot the results
+
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots()
+#         # Plot raw data
+#         sns.scatterplot(
+#             self.data,
+#             x=self.running_variable_name,
+#             y=self.outcome_variable_name,
+#             c="k",
+#             ax=ax,
+#         )
+
+#         # Plot model fit to data
+#         h_line, h_patch = plot_xY(
+#             self.x_pred[self.running_variable_name],
+#             self.pred["posterior_predictive"].mu,
+#             ax=ax,
+#             plot_hdi_kwargs={"color": "C1"},
+#         )
+#         handles = [(h_line, h_patch)]
+#         labels = ["Posterior mean"]
+
+#         # create strings to compose title
+#         title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+#         r2 = f"Bayesian $R^2$ on all data = {title_info}"
+#         percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
 #         ci = (
-#             "$CI_{94\\%}$"
+#             r"$CI_{94\%}$"
 #             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
 #         )
-#         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
-#         return f"Causal impact = {causal_impact + ci}"
+#         discon = f"""
+#             Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
+#             """
+#         ax.set(title=r2 + "\n" + discon + ci)
+#         # Intervention line
+#         ax.axvline(
+#             x=self.treatment_threshold,
+#             ls="-",
+#             lw=3,
+#             color="r",
+#             label="treatment threshold",
+#         )
+#         ax.legend(
+#             handles=(h_tuple for h_tuple in handles),
+#             labels=labels,
+#             fontsize=LEGEND_FONT_SIZE,
+#         )
+#         return fig, ax
 
 #     def summary(self, round_to=None) -> None:
 #         """
-#         Print text output summarising the results.
+#         Print text output summarising the results
 
 #         :param round_to:
 #             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
@@ -583,423 +780,218 @@ az.style.use("arviz-darkgrid")
 
 #         print(f"{self.expt_type:=^80}")
 #         print(f"Formula: {self.formula}")
+#         print(f"Running variable: {self.running_variable_name}")
+#         print(f"Threshold on running variable: {self.treatment_threshold}")
 #         print("\nResults:")
-#         print(self._causal_impact_summary_stat(round_to))
+#         print(
+#             f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}"
+#         )
 #         self.print_coefficients(round_to)
 
 
-class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
-    """
-    A class to analyse sharp regression discontinuity experiments.
+# class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
+#     """
+#     A class to analyse sharp regression kink experiments.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param treatment_threshold:
-        A scalar threshold value at which the treatment is applied
-    :param model:
-        A PyMC model
-    :param running_variable_name:
-        The name of the predictor variable that the treatment threshold is based upon
-    :param epsilon:
-        A small scalar value which determines how far above and below the treatment
-        threshold to evaluate the causal impact.
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
-        the model.
+#     :param data:
+#         A pandas dataframe
+#     :param formula:
+#         A statistical model formula
+#     :param kink_point:
+#         A scalar threshold value at which there is a change in the first derivative of
+#         the assignment function
+#     :param model:
+#         A PyMC model
+#     :param running_variable_name:
+#         The name of the predictor variable that the kink_point is based upon
+#     :param epsilon:
+#         A small scalar value which determines how far above and below the kink point to
+#         evaluate the causal impact.
+#     :param bandwidth:
+#         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
+#         the model.
+#     """
 
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("rd")
-    >>> seed = 42
-    >>> result = cp.pymc_experiments.RegressionDiscontinuity(
-    ...     df,
-    ...     formula="y ~ 1 + x + treated + x:treated",
-    ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "draws": 100,
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         },
-    ...     ),
-    ...     treatment_threshold=0.5,
-    ... )
-    """
+#     def __init__(
+#         self,
+#         data: pd.DataFrame,
+#         formula: str,
+#         kink_point: float,
+#         model=None,
+#         running_variable_name: str = "x",
+#         epsilon: float = 0.001,
+#         bandwidth: float = np.inf,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+#         self.expt_type = "Regression Kink"
+#         self.data = data
+#         self.formula = formula
+#         self.running_variable_name = running_variable_name
+#         self.kink_point = kink_point
+#         self.epsilon = epsilon
+#         self.bandwidth = bandwidth
+#         self._input_validation()
 
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        formula: str,
-        treatment_threshold: float,
-        model=None,
-        running_variable_name: str = "x",
-        epsilon: float = 0.001,
-        bandwidth: float = np.inf,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.expt_type = "Regression Discontinuity"
-        self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.treatment_threshold = treatment_threshold
-        self.epsilon = epsilon
-        self.bandwidth = bandwidth
-        self._input_validation()
+#         if self.bandwidth is not np.inf:
+#             fmin = self.kink_point - self.bandwidth
+#             fmax = self.kink_point + self.bandwidth
+#             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+#             if len(filtered_data) <= 10:
+#                 warnings.warn(
+#                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+#                     UserWarning,
+#                 )
+#             y, X = dmatrices(formula, filtered_data)
+#         else:
+#             y, X = dmatrices(formula, self.data)
 
-        if self.bandwidth is not np.inf:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                )
-            y, X = dmatrices(formula, filtered_data)
-        else:
-            y, X = dmatrices(formula, self.data)
+#         self._y_design_info = y.design_info
+#         self._x_design_info = X.design_info
+#         self.labels = X.design_info.column_names
+#         self.y, self.X = np.asarray(y), np.asarray(X)
+#         self.outcome_variable_name = y.design_info.column_names[0]
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+#         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+#         self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
-        # DEVIATION FROM SKL EXPERIMENT CODE =============================
-        # fit the model to the observed (pre-intervention) data
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        # ================================================================
+#         # score the goodness of fit to all data
+#         self.score = self.model.score(X=self.X, y=self.y)
 
-        # score the goodness of fit to all data
-        self.score = self.model.score(X=self.X, y=self.y)
+#         # get the model predictions of the observed data
+#         if self.bandwidth is not np.inf:
+#             xi = np.linspace(fmin, fmax, 200)
+#         else:
+#             xi = np.linspace(
+#                 np.min(self.data[self.running_variable_name]),
+#                 np.max(self.data[self.running_variable_name]),
+#                 200,
+#             )
+#         self.x_pred = pd.DataFrame(
+#             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+#         self.pred = self.model.predict(X=np.asarray(new_x))
 
-        # get the model predictions of the observed data
-        if self.bandwidth is not np.inf:
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
+#         # evaluate gradient change around kink point
+#         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
+#         self.gradient_change = self._eval_gradient_change(
+#             mu_kink_left, mu_kink, mu_kink_right, epsilon
+#         )
 
-        # calculate discontinuity by evaluating the difference in model expectation on
-        # either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
-        # (not below) the threshold
-        self.x_discon = pd.DataFrame(
-            {
-                self.running_variable_name: np.array(
-                    [
-                        self.treatment_threshold - self.epsilon,
-                        self.treatment_threshold + self.epsilon,
-                    ]
-                ),
-                "treated": np.array([0, 1]),
-            }
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-        self.discontinuity_at_threshold = (
-            self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-            - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-        )
+#     @staticmethod
+#     def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
+#         """Evaluate the gradient change at the kink point.
+#         It works by evaluating the model below the kink point, at the kink point,
+#         and above the kink point.
+#         This is a static method for ease of testing.
+#         """
+#         gradient_left = (mu_kink - mu_kink_left) / epsilon
+#         gradient_right = (mu_kink_right - mu_kink) / epsilon
+#         gradient_change = gradient_right - gradient_left
+#         return gradient_change
 
-    def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
+#     def _probe_kink_point(self):
+#         # Create a dataframe to evaluate predicted outcome at the kink point and either
+#         # side
+#         x_predict = pd.DataFrame(
+#             {
+#                 self.running_variable_name: np.array(
+#                     [
+#                         self.kink_point - self.epsilon,
+#                         self.kink_point,
+#                         self.kink_point + self.epsilon,
+#                     ]
+#                 ),
+#                 "treated": np.array([0, 1, 1]),
+#             }
+#         )
+#         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
+#         predicted = self.model.predict(X=np.asarray(new_x))
+#         # extract predicted mu values
+#         mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
+#         mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
+#         mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+#         return mu_kink_left, mu_kink, mu_kink_right
 
-        .. warning::
+#     def _is_treated(self, x):
+#         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
+#         return np.greater_equal(x, self.kink_point)
 
-            Assumes treatment is given to those ABOVE the treatment threshold.
-        """
-        return np.greater_equal(x, self.treatment_threshold)
+#     def plot(self, round_to=None):
+#         """
+#         Plot the results
 
-    def plot(self, round_to=None):
-        """
-        Plot the results
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
+#         fig, ax = plt.subplots()
+#         # Plot raw data
+#         sns.scatterplot(
+#             self.data,
+#             x=self.running_variable_name,
+#             y=self.outcome_variable_name,
+#             c="k",  # hue="treated",
+#             ax=ax,
+#         )
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots()
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            c="k",
-            ax=ax,
-        )
+#         # Plot model fit to data
+#         h_line, h_patch = plot_xY(
+#             self.x_pred[self.running_variable_name],
+#             self.pred["posterior_predictive"].mu,
+#             ax=ax,
+#             plot_hdi_kwargs={"color": "C1"},
+#         )
+#         handles = [(h_line, h_patch)]
+#         labels = ["Posterior mean"]
 
-        # Plot model fit to data
-        h_line, h_patch = plot_xY(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu,
-            ax=ax,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Posterior mean"]
+#         # create strings to compose title
+#         title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+#         r2 = f"Bayesian $R^2$ on all data = {title_info}"
+#         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
+#         ci = (
+#             r"$CI_{94\%}$"
+#             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+#         )
+#         grad_change = f"""
+#             Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
+#             """
+#         ax.set(title=r2 + "\n" + grad_change + ci)
+#         # Intervention line
+#         ax.axvline(
+#             x=self.kink_point,
+#             ls="-",
+#             lw=3,
+#             color="r",
+#             label="treatment threshold",
+#         )
+#         ax.legend(
+#             handles=(h_tuple for h_tuple in handles),
+#             labels=labels,
+#             fontsize=LEGEND_FONT_SIZE,
+#         )
+#         return fig, ax
 
-        # create strings to compose title
-        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
-        ci = (
-            r"$CI_{94\%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        discon = f"""
-            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
-            """
-        ax.set(title=r2 + "\n" + discon + ci)
-        # Intervention line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-        return fig, ax
+#     def summary(self, round_to=None) -> None:
+#         """
+#         Print text output summarising the results
 
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
+#         :param round_to:
+#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#         """
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
+#         print(
+#             f"""
+#         {self.expt_type:=^80}
+#         Formula: {self.formula}
+#         Running variable: {self.running_variable_name}
+#         Kink point on running variable: {self.kink_point}
 
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        print(f"Running variable: {self.running_variable_name}")
-        print(f"Threshold on running variable: {self.treatment_threshold}")
-        print("\nResults:")
-        print(
-            f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}"
-        )
-        self.print_coefficients(round_to)
-
-
-class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
-    """
-    A class to analyse sharp regression kink experiments.
-
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param kink_point:
-        A scalar threshold value at which there is a change in the first derivative of
-        the assignment function
-    :param model:
-        A PyMC model
-    :param running_variable_name:
-        The name of the predictor variable that the kink_point is based upon
-    :param epsilon:
-        A small scalar value which determines how far above and below the kink point to
-        evaluate the causal impact.
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
-        the model.
-    """
-
-    def __init__(
-        self,
-        data: pd.DataFrame,
-        formula: str,
-        kink_point: float,
-        model=None,
-        running_variable_name: str = "x",
-        epsilon: float = 0.001,
-        bandwidth: float = np.inf,
-        **kwargs,
-    ):
-        super().__init__(model=model, **kwargs)
-        self.expt_type = "Regression Kink"
-        self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.kink_point = kink_point
-        self.epsilon = epsilon
-        self.bandwidth = bandwidth
-        self._input_validation()
-
-        if self.bandwidth is not np.inf:
-            fmin = self.kink_point - self.bandwidth
-            fmax = self.kink_point + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                )
-            y, X = dmatrices(formula, filtered_data)
-        else:
-            y, X = dmatrices(formula, self.data)
-
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
-
-        # score the goodness of fit to all data
-        self.score = self.model.score(X=self.X, y=self.y)
-
-        # get the model predictions of the observed data
-        if self.bandwidth is not np.inf:
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
-
-        # evaluate gradient change around kink point
-        mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
-        self.gradient_change = self._eval_gradient_change(
-            mu_kink_left, mu_kink, mu_kink_right, epsilon
-        )
-
-    @staticmethod
-    def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
-        """Evaluate the gradient change at the kink point.
-        It works by evaluating the model below the kink point, at the kink point,
-        and above the kink point.
-        This is a static method for ease of testing.
-        """
-        gradient_left = (mu_kink - mu_kink_left) / epsilon
-        gradient_right = (mu_kink_right - mu_kink) / epsilon
-        gradient_change = gradient_right - gradient_left
-        return gradient_change
-
-    def _probe_kink_point(self):
-        # Create a dataframe to evaluate predicted outcome at the kink point and either
-        # side
-        x_predict = pd.DataFrame(
-            {
-                self.running_variable_name: np.array(
-                    [
-                        self.kink_point - self.epsilon,
-                        self.kink_point,
-                        self.kink_point + self.epsilon,
-                    ]
-                ),
-                "treated": np.array([0, 1, 1]),
-            }
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
-        return mu_kink_left, mu_kink, mu_kink_right
-
-    def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
-        return np.greater_equal(x, self.kink_point)
-
-    def plot(self, round_to=None):
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        fig, ax = plt.subplots()
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            c="k",  # hue="treated",
-            ax=ax,
-        )
-
-        # Plot model fit to data
-        h_line, h_patch = plot_xY(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu,
-            ax=ax,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Posterior mean"]
-
-        # create strings to compose title
-        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
-        ci = (
-            r"$CI_{94\%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        grad_change = f"""
-            Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
-            """
-        ax.set(title=r2 + "\n" + grad_change + ci)
-        # Intervention line
-        ax.axvline(
-            x=self.kink_point,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-        return fig, ax
-
-    def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-
-        print(
-            f"""
-        {self.expt_type:=^80}
-        Formula: {self.formula}
-        Running variable: {self.running_variable_name}
-        Kink point on running variable: {self.kink_point}
-
-        Results:
-        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
-        """
-        )
-        self.print_coefficients(round_to)
+#         Results:
+#         Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
+#         """
+#         )
+#         self.print_coefficients(round_to)
 
 
 # class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
@@ -1166,30 +1158,30 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
 #         ax[1].set(title="Estimated treatment effect")
 #         return fig, ax
 
-#     def _causal_impact_summary_stat(self, round_to) -> str:
-#         """Computes the mean and 94% credible interval bounds for the causal impact."""
-#         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-#         ci = (
-#             r"$CI_{94%}$"
-#             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-#         )
-#         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
-#         return f"Causal impact = {causal_impact + ci}"
+# def _causal_impact_summary_stat(self, round_to) -> str:
+#     """Computes the mean and 94% credible interval bounds for the causal impact."""
+#     percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+#     ci = (
+#         r"$CI_{94%}$"
+#         + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+#     )
+#     causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
+#     return f"Causal impact = {causal_impact + ci}"
 
-#     def summary(self, round_to=None) -> None:
-#         """
-#         Print text output summarising the results
+# def summary(self, round_to=None) -> None:
+#     """
+#     Print text output summarising the results
 
-#         :param round_to:
-#             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-#         """
+#     :param round_to:
+#         Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+#     """
 
-#         print(f"{self.expt_type:=^80}")
-#         print(f"Formula: {self.formula}")
-#         print("\nResults:")
-#         # TODO: extra experiment specific outputs here
-#         print(self._causal_impact_summary_stat(round_to))
-#         self.print_coefficients(round_to)
+#     print(f"{self.expt_type:=^80}")
+#     print(f"Formula: {self.formula}")
+#     print("\nResults:")
+#     # TODO: extra experiment specific outputs here
+#     print(self._causal_impact_summary_stat(round_to))
+#     self.print_coefficients(round_to)
 
 #     def _get_treatment_effect_coeff(self) -> str:
 #         """Find the beta regression coefficient corresponding to the

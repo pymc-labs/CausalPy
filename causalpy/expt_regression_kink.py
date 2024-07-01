@@ -11,22 +11,21 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-
 import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import RDDataValidator
+from causalpy.data_validation import RegressionKinkDataValidator
 from causalpy.experiments import ExperimentalDesign
-from causalpy.pymc_models import BayesianModel
+from causalpy.utils import round_num
 
 
-class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
+class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
     def __init__(
         self,
         data: pd.DataFrame,
         formula: str,
-        treatment_threshold: float,
+        kink_point: float,
         model=None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
@@ -34,18 +33,18 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)
-        self.expt_type = "Regression Discontinuity"
+        self.expt_type = "Regression Kink"
         self.data = data
         self.formula = formula
         self.running_variable_name = running_variable_name
-        self.treatment_threshold = treatment_threshold
+        self.kink_point = kink_point
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self._input_validation()
 
         if self.bandwidth is not np.inf:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
             if len(filtered_data) <= 10:
                 warnings.warn(
@@ -62,14 +61,8 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
-            # fit the model to the observed (pre-intervention) data
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        else:
-            self.model.fit(X=self.X, y=self.y)
-        # ******************************************************************************
+        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
         # score the goodness of fit to all data
         self.score = self.model.score(X=self.X, y=self.y)
@@ -89,62 +82,66 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         self.pred = self.model.predict(X=np.asarray(new_x))
 
-        # calculate discontinuity by evaluating the difference in model expectation on
-        # either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
-        # (not below) the threshold
-        self.x_discon = pd.DataFrame(
+        # evaluate gradient change around kink point
+        mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
+        self.gradient_change = self._eval_gradient_change(
+            mu_kink_left, mu_kink, mu_kink_right, epsilon
+        )
+
+    @staticmethod
+    def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
+        """Evaluate the gradient change at the kink point.
+        It works by evaluating the model below the kink point, at the kink point,
+        and above the kink point.
+        This is a static method for ease of testing.
+        """
+        gradient_left = (mu_kink - mu_kink_left) / epsilon
+        gradient_right = (mu_kink_right - mu_kink) / epsilon
+        gradient_change = gradient_right - gradient_left
+        return gradient_change
+
+    def _probe_kink_point(self):
+        # Create a dataframe to evaluate predicted outcome at the kink point and either
+        # side
+        x_predict = pd.DataFrame(
             {
                 self.running_variable_name: np.array(
                     [
-                        self.treatment_threshold - self.epsilon,
-                        self.treatment_threshold + self.epsilon,
+                        self.kink_point - self.epsilon,
+                        self.kink_point,
+                        self.kink_point + self.epsilon,
                     ]
                 ),
-                "treated": np.array([0, 1]),
+                "treated": np.array([0, 1, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
-            self.discontinuity_at_threshold = (
-                self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-                - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-            )
-        else:
-            self.discontinuity_at_threshold = np.squeeze(
-                self.pred_discon[1]
-            ) - np.squeeze(self.pred_discon[0])
-        # ******************************************************************************
+        (new_x,) = build_design_matrices([self._x_design_info], x_predict)
+        predicted = self.model.predict(X=np.asarray(new_x))
+        # extract predicted mu values
+        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
+        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
+        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x):
-        """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
-
-        .. warning::
-
-            Assumes treatment is given to those ABOVE the treatment threshold.
-        """
-        return np.greater_equal(x, self.treatment_threshold)
+        """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
+        return np.greater_equal(x, self.kink_point)
 
     def plot(self):
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_regression_disctontinuity(self)
+        plot_component.plot_regression_kink(self)
 
     def summary(self, round_to=None) -> None:
-        """
-        Print text output summarising the results
+        print(
+            f"""
+        {self.expt_type:=^80}
+        Formula: {self.formula}
+        Running variable: {self.running_variable_name}
+        Kink point on running variable: {self.kink_point}
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Results:
+        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
         """
-        print("Difference in Differences experiment")
-        print(f"Formula: {self.formula}")
-        print(f"Running variable: {self.running_variable_name}")
-        print(f"Threshold on running variable: {self.treatment_threshold}")
-        print("\nResults:")
-        print(f"Discontinuity at threshold = {self.discontinuity_at_threshold:.2f}")
-        print("\n")
+        )
         self.print_coefficients(round_to)

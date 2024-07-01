@@ -27,5 +27,5 @@ class ExperimentalDesign:
     # def idata(self):
     #     return self.model.idata
 
-    def print_coefficients(self):
-        self.model.print_coefficients(self.labels)
+    def print_coefficients(self, round_to=None):
+        self.model.print_coefficients(self.labels, round_to)
