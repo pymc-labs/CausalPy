@@ -237,7 +237,7 @@ class BayesianPlotComponent(PlotComponent):
         # formatting
         ax.set(
             xticks=x_pred_treatment[time_variable_name].values,
-            title=_causal_impact_summary_stat(round_to),
+            title=results._causal_impact_summary_stat(round_to),
         )
         ax.legend(
             handles=(h_tuple for h_tuple in handles),
