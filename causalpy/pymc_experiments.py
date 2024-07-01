@@ -133,6 +133,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         A pandas dataframe
     :param treatment_time:
         The time when treatment occured, should be in reference to the data index
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param formula:
         A statistical model formula
     :param model:
@@ -160,6 +162,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
     >>> result.summary(round_to=1)
     ==================================Pre-Post Fit==================================
     Formula: actual ~ 0 + a + g
+    Pre-intervention Bayesian $R^2$: 0.9 (std = 0.01)
     Model coefficients:
         a      0.6, 94% HDI [0.6, 0.6]
         g      0.4, 94% HDI [0.4, 0.4]
@@ -171,17 +174,30 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         data: pd.DataFrame,
         treatment_time: Union[int, float, pd.Timestamp],
         formula: str,
+        validation_time=None,
         model=None,
         **kwargs,
     ) -> None:
         super().__init__(model=model, **kwargs)
         self._input_validation(data, treatment_time)
         self.treatment_time = treatment_time
+        self.validation_time = validation_time
+        # validate arguments
+        if self.validation_time is not None:
+            # check that validation time is less than treatment time
+            if self.validation_time >= self.treatment_time:
+                raise ValueError(
+                    "Validation time must be less than the treatment time."
+                )
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
+        if self.validation_time is None:
+            self.datapre = data[data.index < self.treatment_time]
+            self.datapost = data[data.index >= self.treatment_time]
+        else:
+            self.datapre = data[data.index < self.validation_time]
+            self.datapost = data[data.index >= self.validation_time]
 
         self.formula = formula
 
@@ -203,8 +219,22 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
         self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        if self.validation_time is None:
+            # We just have pre and post data, no validation data. So we can score the pre intervention data
+            self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        else:
+            # Score on the training data - before the validation time
+            self.datatrain = data[data.index < self.validation_time]
+            y, X = dmatrices(formula, self.datatrain)
+            self.score = self.model.score(X=X, y=y)
+            # Score on the validation data - after the validation time but
+            # before the treatment time
+            self.datavalidate = data[
+                (data.index >= self.validation_time)
+                & (data.index < self.treatment_time)
+            ]
+            y, X = dmatrices(formula, self.datavalidate)
+            self.score_validation = self.model.score(X=X, y=y)
 
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.pre_X)
@@ -275,13 +305,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(
-            title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
-            (std = {round_num(self.score.r2_std, round_to)})
-            """
-        )
-
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
@@ -303,10 +326,10 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
             alpha=0.25,
             label="Causal impact",
         )
-        ax[1].set(title="Causal Impact")
+        ax[1].set(ylabel="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
+        ax[2].set(ylabel="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
             self.post_impact_cumulative,
@@ -319,10 +342,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
+                ls="--",
+                # lw=3,
+                color="k",
             )
+            if self.validation_time is not None:
+                ax[i].axvline(
+                    x=self.validation_time,
+                    ls="--",
+                    # lw=3,
+                    color="k",
+                )
 
         ax[0].legend(
             handles=(h_tuple for h_tuple in handles),
@@ -342,6 +372,17 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
 
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
+        # print goodness of fit scores
+        if self.validation_time is None:
+            print(
+                f"Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+            )
+        else:
+            print(
+                f"Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})\n"
+                f"Validation Bayesian $R^2$: {round_num(self.score_validation.r2, round_to)} (std = {round_num(self.score_validation.r2_std, round_to)})"
+            )
+        # print coefficients
         self.print_coefficients(round_to)
 
 
@@ -355,6 +396,8 @@ class InterruptedTimeSeries(PrePostFit):
         The time when treatment occured, should be in reference to the data index
     :param formula:
         A statistical model formula
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param model:
         A PyMC model
 
@@ -394,6 +437,8 @@ class SyntheticControl(PrePostFit):
         The time when treatment occured, should be in reference to the data index
     :param formula:
         A statistical model formula
+    :param validation_time:
+        Optional time to split the data into training and validation data sets
     :param model:
         A PyMC model
 
