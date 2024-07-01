@@ -18,7 +18,7 @@ from patsy import build_design_matrices, dmatrices
 
 from causalpy.data_validation import DiDDataValidator
 from causalpy.experiments import ExperimentalDesign
-from causalpy.pymc_models import BayesianModel
+from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
 
@@ -49,7 +49,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         self.outcome_variable_name = y.design_info.column_names[0]
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
+        if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         else:
@@ -115,7 +115,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
+        if isinstance(self.model, PyMCModel):
             # calculate causal impact &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data

@@ -18,7 +18,7 @@ from patsy import build_design_matrices, dmatrices
 
 from causalpy.data_validation import RDDataValidator
 from causalpy.experiments import ExperimentalDesign
-from causalpy.pymc_models import BayesianModel
+from causalpy.pymc_models import PyMCModel
 
 
 class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
@@ -63,7 +63,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         self.outcome_variable_name = y.design_info.column_names[0]
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
+        if isinstance(self.model, PyMCModel):
             # fit the model to the observed (pre-intervention) data
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
@@ -108,7 +108,7 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         self.pred_discon = self.model.predict(X=np.asarray(new_x))
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
+        if isinstance(self.model, PyMCModel):
             self.discontinuity_at_threshold = (
                 self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
                 - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]

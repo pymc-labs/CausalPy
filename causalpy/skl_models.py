@@ -25,7 +25,7 @@ from causalpy.plotting import OLSPlotComponent, PlotComponent
 from causalpy.utils import round_num
 
 
-class OLSModel:
+class ScikitLearnModel:
     def calculate_impact(self, y_true, y_pred):
         return y_true - y_pred
 
@@ -52,11 +52,11 @@ class OLSModel:
         return np.squeeze(self.coef_)
 
 
-class OLSLinearRegression(OLSModel, LinearRegression):
+class LinearRegression(ScikitLearnModel, LinearRegression):
     pass
 
 
-class WeightedProportion(OLSModel, LinearModel, RegressorMixin):
+class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
     def loss(self, W, X, y):
         """Compute root mean squared loss with data X, weights W, and predictor y"""
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))

@@ -19,7 +19,7 @@ from patsy import build_design_matrices, dmatrices
 
 from causalpy.data_validation import PrePostFitDataValidator
 from causalpy.experiments import ExperimentalDesign
-from causalpy.pymc_models import BayesianModel
+from causalpy.pymc_models import PyMCModel
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
@@ -59,7 +59,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         # fit the model to the observed (pre-intervention) data
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, BayesianModel):
+        if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
             self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         else:
