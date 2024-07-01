@@ -180,7 +180,8 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
         """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_regression_discontinuity(self)
+        fig, ax = plot_component.plot_regression_discontinuity(self)
+        return fig, ax
 
     def summary(self, round_to=None) -> None:
         """

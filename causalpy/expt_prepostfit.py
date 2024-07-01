@@ -96,7 +96,8 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_pre_post(self)
+        fig, ax = plot_component.plot_pre_post(self)
+        return fig, ax
 
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.

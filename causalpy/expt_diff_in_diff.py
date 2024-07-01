@@ -180,7 +180,8 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_difference_in_differences(self, round_to=round_to)
+        fig, ax = plot_component.plot_difference_in_differences(self, round_to=round_to)
+        return fig, ax
 
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.

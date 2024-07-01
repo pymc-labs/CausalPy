@@ -168,7 +168,8 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
         """
         # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
         plot_component = self.model.get_plot_component()
-        plot_component.plot_pre_post_negd(self)
+        fig, ax = plot_component.plot_pre_post_negd(self)
+        return fig, ax
 
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.
