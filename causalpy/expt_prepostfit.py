@@ -62,7 +62,6 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self.post_y = np.asarray(new_y)
 
         # fit the model to the observed (pre-intervention) data
-
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
