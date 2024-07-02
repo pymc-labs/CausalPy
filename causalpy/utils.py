@@ -67,17 +67,20 @@ def _format_sig_figs(value, default=None):
     return max(int(np.log10(np.abs(value))) + 1, default)
 
 
-# function `convert_to_string` which accepts either a float or an xarray object. We want
-# to return a string. If the input is a float, we want to return a string with 2 decimal
-# places. If the input is an xarray object, we want to calculate the mean and return a
-# string with 2 decimal places.
 def convert_to_string(x: Union[float, xr.DataArray], round_to=2) -> str:
+    """Utility function which takes in nunmeric inputs and returns a string."""
     if isinstance(x, float):
+        # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
-    else:
+    elif isinstance(x, xr.DataArray):
+        # In the case of an xarray object, we return the mean and 94% CI
         percentiles = x.quantile([0.03, 1 - 0.03]).values
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         return f"{x.mean().values:.2f}" + ci
+    else:
+        raise ValueError(
+            "Type not supported. Please provide a float or an xarray object."
+        )

@@ -586,7 +586,7 @@ class OLSPlotComponent(PlotComponent):
             xlim=[-0.05, 1.1],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {round_num(results.causal_impact[0], round_to)}",
+            title=f"Causal impact = {round_num(results.causal_impact, round_to)}",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)

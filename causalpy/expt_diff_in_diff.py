@@ -19,7 +19,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import DiDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import round_num
+from causalpy.utils import convert_to_string
 
 
 class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
@@ -168,7 +168,7 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
             # TODO: THIS IS NOT YET CORRECT
             self.causal_impact = (
                 self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            )
+            )[0]
         # ******************************************************************************
 
     def plot(self, round_to=None):
@@ -197,10 +197,13 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
 
     def _causal_impact_summary_stat(self, round_to=None) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
-        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
-        ci = (
-            "$CI_{94\\%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
-        return f"Causal impact = {causal_impact + ci}"
+
+        return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
+
+        # percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        # ci = (
+        #     "$CI_{94\\%}$"
+        #     + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        # )
+        # causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
+        # return f"Causal impact = {causal_impact + ci}"
