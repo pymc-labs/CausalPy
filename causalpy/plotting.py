@@ -53,7 +53,6 @@ class BayesianPlotComponent(PlotComponent):
         counterfactual_label = "Counterfactual"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
-
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
         h_line, h_patch = plot_xY(
@@ -147,6 +146,7 @@ class BayesianPlotComponent(PlotComponent):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
+
         return fig, ax
 
     @staticmethod

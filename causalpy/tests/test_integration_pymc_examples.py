@@ -349,7 +349,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. pymc_experiments.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -359,20 +359,23 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.SyntheticControl(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.SyntheticControl)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -406,7 +409,10 @@ def test_its_covid():
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -436,7 +442,10 @@ def test_sc():
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -478,7 +487,10 @@ def test_sc_brexit():
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration

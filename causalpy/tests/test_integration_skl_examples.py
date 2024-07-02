@@ -11,6 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
@@ -86,7 +87,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. skl_experiements.SyntheticControl returns correct type
+    2. skl_experiements.InterruptedTimeSeries returns correct type
     """
 
     df = (
@@ -95,18 +96,21 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.SyntheticControl(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        model=LinearRegression(),
+        model=cp.skl_models.LinearRegression(),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.SyntheticControl)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -131,7 +135,10 @@ def test_sc():
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
