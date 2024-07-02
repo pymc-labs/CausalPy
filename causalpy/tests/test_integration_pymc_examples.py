@@ -171,7 +171,7 @@ def test_rd():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -200,7 +200,7 @@ def test_rd_bandwidth():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -230,7 +230,7 @@ def test_rd_drinking():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -290,7 +290,7 @@ def test_rkink():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionKink returns correct type
+    2. causalpy.RegressionKink returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -319,7 +319,7 @@ def test_rkink_bandwidth():
 
     Generates synthetic data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionKink returns correct type
+    2. causalpy.RegressionKink returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -349,7 +349,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.InterruptedTimeSeries returns correct type
+    2. causalpy.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -385,7 +385,7 @@ def test_its_covid():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.InterruptedtimeSeries returns correct type
+    2. causalpy.InterruptedtimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -422,7 +422,7 @@ def test_sc():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -463,7 +463,7 @@ def test_sc_brexit():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -509,7 +509,7 @@ def test_ancova():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.PrePostNEGD returns correct type
+    2. causalpy.PrePostNEGD returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -541,7 +541,7 @@ def test_geolift1():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
