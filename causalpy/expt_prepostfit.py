@@ -20,6 +20,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import PrePostFitDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
+from causalpy.skl_models import ScikitLearnModel
 
 
 class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
@@ -62,13 +63,13 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self.post_y = np.asarray(new_y)
 
         # fit the model to the observed (pre-intervention) data
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
             self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
-        else:
+        elif isinstance(self.model, ScikitLearnModel):
             self.model.fit(X=self.pre_X, y=self.pre_y)
-        # ******************************************************************************
+        else:
+            raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)

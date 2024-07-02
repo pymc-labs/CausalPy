@@ -19,6 +19,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import PrePostNEGDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
+from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import round_num
 
 
@@ -94,13 +95,13 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
         self.outcome_variable_name = y.design_info.column_names[0]
 
         # fit the model to the observed (pre-intervention) data
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        else:
+        elif isinstance(self.model, ScikitLearnModel):
             raise NotImplementedError("Not implemented for OLS model")
-        # ******************************************************************************
+        else:
+            raise ValueError("Model type not recognized")
 
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values

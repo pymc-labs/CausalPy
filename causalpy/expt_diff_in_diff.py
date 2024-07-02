@@ -19,6 +19,7 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.data_validation import DiDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
+from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import convert_to_string
 
 
@@ -85,13 +86,14 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
+        # fit model
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        else:
+        elif isinstance(self.model, ScikitLearnModel):
             self.model.fit(X=self.X, y=self.y)
-        # ******************************************************************************
+        else:
+            raise ValueError("Model type not recognized")
 
         # predicted outcome for control group
         self.x_pred_control = (
@@ -151,9 +153,8 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
+        # calculate causal impact
         if isinstance(self.model, PyMCModel):
-            # calculate causal impact &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
@@ -161,15 +162,14 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
-            # &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-        else:
-            # calculate causal impact
+        elif isinstance(self.model, ScikitLearnModel):
             # This is the coefficient on the interaction term
-            # TODO: THIS IS NOT YET CORRECT
+            # TODO: THIS IS NOT YET CORRECT ?????
             self.causal_impact = (
                 self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
             )[0]
-        # ******************************************************************************
+        else:
+            raise ValueError("Model type not recognized")
 
     def plot(self, round_to=None):
         """
