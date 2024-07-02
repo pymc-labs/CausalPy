@@ -67,8 +67,8 @@ def _format_sig_figs(value, default=None):
     return max(int(np.log10(np.abs(value))) + 1, default)
 
 
-def convert_to_string(x: Union[float, xr.DataArray], round_to=2) -> str:
-    """Utility function which takes in nunmeric inputs and returns a string."""
+def convert_to_string(x: Union[float, xr.DataArray], round_to: int = 2) -> str:
+    """Utility function which takes in numeric inputs and returns a string."""
     if isinstance(x, float):
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
