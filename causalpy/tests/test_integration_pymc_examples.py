@@ -519,7 +519,10 @@ def test_ancova():
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
