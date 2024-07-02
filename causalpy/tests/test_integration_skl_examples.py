@@ -19,7 +19,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 
 import causalpy as cp
-from causalpy.skl_models import LinearRegression
+from causalpy.skl_models import LinearRegression, ScikitLearnModel
 
 
 @pytest.mark.integration
@@ -227,12 +227,18 @@ def test_rd_linear_with_gaussian_process():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
+
+    # create a custom GaussianProcessRegressor class by subclassing
+    # GaussianProcessRegressor and adding the ScikitLearnModel mixin
+    class CustomGaussianProcessRegressor(GaussianProcessRegressor, ScikitLearnModel):
+        pass
+
     data = cp.load_data("rd")
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=GaussianProcessRegressor(kernel=kernel),
+        model=CustomGaussianProcessRegressor(kernel=kernel),
         treatment_threshold=0.5,
         epsilon=0.001,
     )
