@@ -182,3 +182,25 @@ class SyntheticControl(PrePostFit):
     """
 
     expt_type = "SyntheticControl"
+
+    def plot(self, round_to=None, plot_predictors: bool = False):
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to
+            return raw numbers.
+        :param plot_predictors:
+            Whether to plot the control units as well. Defaults to False.
+        """
+        # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
+        plot_component = self.model.get_plot_component()
+        fig, ax = plot_component.plot_pre_post(self)
+        if plot_predictors:
+            # plot control units as well
+            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
+            ax[0].plot(
+                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
+            )
+
+        return fig, ax

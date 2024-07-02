@@ -133,6 +133,14 @@ def test_sc():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     result.summary()
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes

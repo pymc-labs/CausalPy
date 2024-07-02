@@ -440,7 +440,15 @@ def test_sc():
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+
     fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+    fig, ax = result.plot(plot_predictors=True)
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes
     assert isinstance(ax, np.ndarray) and all(
@@ -485,6 +493,7 @@ def test_sc_brexit():
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes

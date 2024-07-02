@@ -35,7 +35,7 @@ class BayesianPlotComponent(PlotComponent):
     """Plotting component for Bayesian models."""
 
     @staticmethod
-    def plot_pre_post(results, round_to=None):
+    def plot_pre_post(results, round_to=None, counterfactual_label=None):
         """Generate plot for pre-post experiment types, such as Interrupted Time Series
         and Synthetic Control."""
         datapre = results.datapre
