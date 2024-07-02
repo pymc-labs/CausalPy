@@ -30,7 +30,7 @@ class ScikitLearnModel:
 
     def calculate_impact(self, y_true, y_pred):
         """Calculate the causal impact of the intervention."""
-        return y_true - y_pred
+        return y_true - np.squeeze(y_pred)
 
     def calculate_cumulative_impact(self, impact):
         """Calculate the cumulative impact intervention."""
