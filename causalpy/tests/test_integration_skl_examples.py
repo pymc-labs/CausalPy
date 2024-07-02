@@ -13,6 +13,7 @@
 #   limitations under the License.
 import pandas as pd
 import pytest
+from matplotlib import pyplot as plt
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 
@@ -43,6 +44,9 @@ def test_did():
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -70,6 +74,9 @@ def test_rd_drinking():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -97,6 +104,9 @@ def test_its():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -119,6 +129,9 @@ def test_sc():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -141,6 +154,9 @@ def test_rd_linear_main_effects():
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -165,6 +181,9 @@ def test_rd_linear_main_effects_bandwidth():
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -187,6 +206,9 @@ def test_rd_linear_with_interaction():
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -209,3 +231,6 @@ def test_rd_linear_with_gaussian_process():
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
