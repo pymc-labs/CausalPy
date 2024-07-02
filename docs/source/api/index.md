@@ -8,8 +8,13 @@
   :toctree: generated/
 
   data
-  pymc_experiments
   pymc_models
-  skl_experiments
   skl_models
+  experiments
+  expt_diff_in_diff
+  expt_instrumental_variable
+  expt_prepostfit
+  expt_prepostnegd
+  expt_regression_discontinuity
+  expt_regresion_kink
 ```

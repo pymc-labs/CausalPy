@@ -44,7 +44,7 @@ Alternatively, if you want the very latest version of the package you can instal
       )
 
    # Run the analysis
-   result = cp.pymc_experiments.RegressionDiscontinuity(
+   result = cp.RegressionDiscontinuity(
       df,
       formula="all ~ 1 + age + treated",
       running_variable_name="age",

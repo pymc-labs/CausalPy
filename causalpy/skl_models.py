@@ -18,35 +18,56 @@ from functools import partial
 import numpy as np
 from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
+from sklearn.linear_model import LinearRegression
 from sklearn.linear_model._base import LinearModel
 
+from causalpy.plotting import OLSPlotComponent, PlotComponent
+from causalpy.utils import round_num
 
-class WeightedProportion(LinearModel, RegressorMixin):
-    """
-    Model which minimises sum squared error subject to:
 
-    - All weights are bound between 0-1
-    - Weights sum to 1.
+class ScikitLearnModel:
+    """Base class for scikit-learn models that can be used for causal inference."""
 
-    Inspiration taken from this blog post
-    https://towardsdatascience.com/understanding-synthetic-control-methods-dd9a291885a1
+    def calculate_impact(self, y_true, y_pred):
+        """Calculate the causal impact of the intervention."""
+        return y_true - np.squeeze(y_pred)
 
-    Example
-    --------
-    >>> import numpy as np
-    >>> from causalpy.skl_models import WeightedProportion
-    >>> rng = np.random.default_rng(seed=42)
-    >>> X = rng.normal(loc=0, scale=1, size=(20,2))
-    >>> y = rng.normal(loc=0, scale=1, size=(20,))
-    >>> wp = WeightedProportion()
-    >>> wp.fit(X, y)
-    WeightedProportion()
-    >>> wp.coef_
-    array([[0.36719946, 0.63280054]])
-    >>> X_new = rng.normal(loc=0, scale=1, size=(10,2))
-    >>> wp.predict(X_new)
-    array(...)
-    """
+    def calculate_cumulative_impact(self, impact):
+        """Calculate the cumulative impact intervention."""
+        return np.cumsum(impact)
+
+    def get_plot_component(self) -> PlotComponent:
+        """Get the plot component type for the model."""
+        return OLSPlotComponent()
+
+    def print_coefficients(self, labels, round_to=None) -> None:
+        """Print the coefficients of the model with the corresponding labels."""
+        print("Model coefficients:")
+        coef_ = self.get_coeffs()
+        # Determine the width of the longest label
+        max_label_length = max(len(name) for name in labels)
+        # Print each coefficient with formatted alignment
+        for name, val in zip(labels, coef_):
+            # Left-align the name
+            formatted_name = f"{name:<{max_label_length}}"
+            # Right-align the value with width 10
+            formatted_val = f"{round_num(val, round_to):>10}"
+            print(f"  {formatted_name}\t{formatted_val}")
+
+    def get_coeffs(self):
+        """Get the coefficients of the model as a numpy array."""
+        return np.squeeze(self.coef_)
+
+
+class LinearRegression(ScikitLearnModel, LinearRegression):
+    """Linear regression model for causal inference"""
+
+    pass
+
+
+class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
+    """Weighted proportion model for causal inference. Used for synthetic control
+    methods for example"""
 
     def loss(self, W, X, y):
         """Compute root mean squared loss with data X, weights W, and predictor y"""
