@@ -28,6 +28,47 @@ from causalpy.utils import round_num
 
 
 class PyMCModel(pm.Model):
+    """A wraper class for PyMC models. This provides a scikit-learn like interface with
+    methods like `fit`, `predict`, and `score`. It also provides other methods which are
+    useful for causal inference.
+
+    Example
+    -------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> import pymc as pm
+    >>> from causalpy.pymc_models import ModelBuilder
+    >>> class MyToyModel(ModelBuilder):
+    ...     def build_model(self, X, y, coords):
+    ...         with self:
+    ...             X_ = pm.Data(name="X", value=X)
+    ...             y_ = pm.Data(name="y", value=y)
+    ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
+    ...             sigma = pm.HalfNormal("sigma", sigma=1)
+    ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+    ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+    >>> rng = np.random.default_rng(seed=42)
+    >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
+    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> model = MyToyModel(
+    ...             sample_kwargs={
+    ...                 "chains": 2,
+    ...                 "draws": 2000,
+    ...                 "progressbar": False,
+    ...                 "random_seed": rng,
+    ...             }
+    ... )
+    >>> model.fit(X, y)
+    Inference data...
+    >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
+    >>> model.predict(X_new)
+    Inference data...
+    >>> model.score(X, y)
+    r2        0.390344
+    r2_std    0.081135
+    dtype: float64
+    """
+
     def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
         """
         :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
@@ -147,6 +188,37 @@ class PyMCModel(pm.Model):
 
 
 class LinearRegression(PyMCModel):
+    """
+    Custom PyMC model for linear regression.
+
+    Defines the PyMC model
+
+    .. math::
+        \\beta &\sim \mathrm{Normal}(0, 50)
+
+        \sigma &\sim \mathrm{HalfNormal}(1)
+
+        \mu &= X * \\beta
+
+        y &\sim \mathrm{Normal}(\mu, \sigma)
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import LinearRegression
+    >>> rd = cp.load_data("rd")
+    >>> X = rd[["x", "treated"]]
+    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
+    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
+    >>> lr.fit(X, y, coords={
+    ...                 'coeffs': ['x', 'treated'],
+    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                },
+    ... )
+    Inference data...
+    """  # noqa: W605
+
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
@@ -162,6 +234,34 @@ class LinearRegression(PyMCModel):
 
 
 class WeightedSumFitter(PyMCModel):
+    """
+    Used for synthetic control experiments.
+
+    Defines the PyMC model:
+
+    .. math::
+
+        \sigma &\sim \mathrm{HalfNormal}(1)
+
+        \\beta &\sim \mathrm{Dirichlet}(1,...,1)
+
+        \mu &= X * \\beta
+
+        y &\sim \mathrm{Normal}(\mu, \sigma)
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import WeightedSumFitter
+    >>> sc = cp.load_data("sc")
+    >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
+    >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
+    >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
+    >>> wsf.fit(X,y)
+    Inference data...
+    """  # noqa: W605
+
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
