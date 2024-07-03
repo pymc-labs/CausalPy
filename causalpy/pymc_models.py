@@ -37,8 +37,8 @@ class PyMCModel(pm.Model):
     >>> import causalpy as cp
     >>> import numpy as np
     >>> import pymc as pm
-    >>> from causalpy.pymc_models import ModelBuilder
-    >>> class MyToyModel(ModelBuilder):
+    >>> from causalpy.pymc_models import PyMCModel
+    >>> class MyToyModel(PyMCModel):
     ...     def build_model(self, X, y, coords):
     ...         with self:
     ...             X_ = pm.Data(name="X", value=X)
