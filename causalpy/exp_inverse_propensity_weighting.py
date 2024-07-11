@@ -23,14 +23,14 @@ from matplotlib.lines import Line2D
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
-from causalpy.data_validation import PropensityDataValidator
+from causalpy.custom_exceptions import DataException
 from causalpy.experiments import ExperimentalDesign
 
 # from causalpy.pymc_models import PyMCModel
 # from causalpy.utils import round_num
 
 
-class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
+class InversePropensityWeighting(ExperimentalDesign):
     """
     A class to analyse inverse propensity weighting experiments.
 
@@ -96,6 +96,28 @@ class InversePropensityWeighting(ExperimentalDesign, PropensityDataValidator):
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
         self.coords = COORDS
         self.model.fit(X=self.X, t=self.t, coords=COORDS)
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        treatment = self.formula.split("~")[0]
+        test = treatment.strip() in self.data.columns
+        test = test & (self.outcome_variable in self.data.columns)
+        if not test:
+            raise DataException(
+                f"""
+                The treatment variable:
+                {treatment} must appear in the data to be used
+                as an outcome variable. And {self.outcome_variable}
+                must also be available in the data to be re-weighted
+                """
+            )
+        T = self.data[treatment.strip()]
+        check_binary = len(np.unique(T)) > 2
+        if check_binary:
+            raise DataException(
+                """Warning. The treatment variable is not 0-1 Binary.
+                """
+            )
 
     def make_robust_adjustments(self, ps):
         """This estimator is discussed in Aronow

@@ -19,14 +19,17 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import DiDDataValidator
+from causalpy.custom_exceptions import (
+    DataException,
+    FormulaException,
+)
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
-from causalpy.utils import convert_to_string
+from causalpy.utils import _is_variable_dummy_coded, convert_to_string
 
 
-class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
+class DifferenceInDifferences(ExperimentalDesign):
     """A class to analyse data from Difference in Difference settings.
 
     .. note::
@@ -173,6 +176,29 @@ class DifferenceInDifferences(ExperimentalDesign, DiDDataValidator):
             )[0]
         else:
             raise ValueError("Model type not recognized")
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        if "post_treatment" not in self.formula:
+            raise FormulaException(
+                "A predictor called `post_treatment` should be in the formula"
+            )
+
+        if "post_treatment" not in self.data.columns:
+            raise DataException(
+                "Require a boolean column labelling observations which are `treated`"
+            )
+
+        if "unit" not in self.data.columns:
+            raise DataException(
+                "Require a `unit` column to label unique units. This is used for plotting purposes"  # noqa: E501
+            )
+
+        if _is_variable_dummy_coded(self.data[self.group_variable_name]) is False:
+            raise DataException(
+                f"""The grouping variable {self.group_variable_name} should be dummy
+                coded. Consisting of 0's and 1's only."""
+            )
 
     def plot(self, round_to=None):
         """

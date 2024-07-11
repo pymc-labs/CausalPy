@@ -21,13 +21,13 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import PrePostFitDataValidator
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 
 
-class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
+class PrePostFit(ExperimentalDesign):
     """
     A base class for quasi-experimental designs where parameter estimation is based on
     just pre-intervention data. This class is not directly invoked by the user.
@@ -90,6 +90,21 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
+
+    def _input_validation(self, data, treatment_time):
+        """Validate the input data and model formula for correctness"""
+        if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
+            treatment_time, pd.Timestamp
+        ):
+            raise BadIndexException(
+                "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
+            )
+        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
+            treatment_time, pd.Timestamp
+        ):
+            raise BadIndexException(
+                "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
+            )
 
     def plot(self):
         """

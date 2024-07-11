@@ -22,12 +22,16 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import RegressionKinkDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.utils import round_num
+from causalpy.custom_exceptions import (
+    DataException,
+    FormulaException,
+)
+from causalpy.utils import _is_variable_dummy_coded
 
 
-class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
+class RegressionKink(ExperimentalDesign):
     """Regression Kink experiment class."""
 
     def __init__(
@@ -96,6 +100,24 @@ class RegressionKink(ExperimentalDesign, RegressionKinkDataValidator):
         self.gradient_change = self._eval_gradient_change(
             mu_kink_left, mu_kink, mu_kink_right, epsilon
         )
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        if "treated" not in self.formula:
+            raise FormulaException(
+                "A predictor called `treated` should be in the formula"
+            )
+
+        if _is_variable_dummy_coded(self.data["treated"]) is False:
+            raise DataException(
+                """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
+            )
+
+        if self.bandwidth <= 0:
+            raise ValueError("The bandwidth must be greater than zero.")
+
+        if self.epsilon <= 0:
+            raise ValueError("Epsilon must be greater than zero.")
 
     @staticmethod
     def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):

@@ -15,19 +15,21 @@
 Instrumental variable regression
 """
 
+import warnings  # noqa: I001
+
 import numpy as np
 import pandas as pd
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
-from causalpy.data_validation import IVDataValidator
+from causalpy.custom_exceptions import DataException
 from causalpy.experiments import ExperimentalDesign
 
 # from causalpy.pymc_models import PyMCModel
 # from causalpy.utils import round_num
 
 
-class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
+class InstrumentalVariable(ExperimentalDesign):
     """
     A class to analyse instrumental variable style experiments.
 
@@ -139,6 +141,29 @@ class InstrumentalVariable(ExperimentalDesign, IVDataValidator):
         self.model.fit(
             X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
         )
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        treatment = self.instruments_formula.split("~")[0]
+        test = treatment.strip() in self.instruments_data.columns
+        test = test & (treatment.strip() in self.data.columns)
+        if not test:
+            raise DataException(
+                f"""
+                The treatment variable:
+                {treatment} must appear in the instrument_data to be used
+                as an outcome variable and in the data object to be used as a covariate.
+                """
+            )
+        Z = self.data[treatment.strip()]
+        check_binary = len(np.unique(Z)) > 2
+        if check_binary:
+            warnings.warn(
+                """Warning. The treatment variable is not Binary.
+                This is not necessarily a problem but it violates
+                the assumption of a simple IV experiment.
+                The coefficients should be interpreted appropriately."""
+            )
 
     def get_2SLS_fit(self):
         """

@@ -21,14 +21,18 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import RDDataValidator
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import convert_to_string
+from causalpy.custom_exceptions import (
+    DataException,
+    FormulaException,
+)
+from causalpy.utils import _is_variable_dummy_coded
 
 
-class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
+class RegressionDiscontinuity(ExperimentalDesign):
     """
     A class to analyse sharp regression discontinuity experiments.
 
@@ -166,6 +170,18 @@ class RegressionDiscontinuity(ExperimentalDesign, RDDataValidator):
                 self.pred_discon[1]
             ) - np.squeeze(self.pred_discon[0])
         # ******************************************************************************
+
+    def _input_validation(self):
+        """Validate the input data and model formula for correctness"""
+        if "treated" not in self.formula:
+            raise FormulaException(
+                "A predictor called `treated` should be in the formula"
+            )
+
+        if _is_variable_dummy_coded(self.data["treated"]) is False:
+            raise DataException(
+                """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
+            )
 
     def _is_treated(self, x):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.

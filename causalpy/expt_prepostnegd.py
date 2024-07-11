@@ -19,14 +19,16 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.data_validation import PrePostNEGDDataValidator
+from causalpy.custom_exceptions import (
+    DataException,
+)
 from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
-from causalpy.utils import round_num
+from causalpy.utils import _is_variable_dummy_coded, round_num
 
 
-class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
+class PrePostNEGD(ExperimentalDesign):
     """
     A class to analyse data from pretest/posttest designs
 
@@ -139,6 +141,16 @@ class PrePostNEGD(ExperimentalDesign, PrePostNEGDDataValidator):
         self.causal_impact = self.model.idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )
+
+    def _input_validation(self) -> None:
+        """Validate the input data and model formula for correctness"""
+        if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
+            raise DataException(
+                f"""
+                There must be 2 levels of the grouping variable
+                {self.group_variable_name}. I.e. the treated and untreated.
+                """
+            )
 
     def _get_treatment_effect_coeff(self) -> str:
         """Find the beta regression coefficient corresponding to the
