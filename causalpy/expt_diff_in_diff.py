@@ -113,7 +113,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             .first()
             .reset_index()
         )
-        assert not self.x_pred_control.empty
+        if self.x_pred_control.empty:
+            raise ValueError("x_pred_control is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
         self.y_pred_control = self.model.predict(np.asarray(new_x))
 
@@ -129,7 +130,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             .first()
             .reset_index()
         )
-        assert not self.x_pred_treatment.empty
+        if self.x_pred_treatment.empty:
+            raise ValueError("x_pred_treatment is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
         self.y_pred_treatment = self.model.predict(np.asarray(new_x))
 
@@ -148,7 +150,8 @@ class DifferenceInDifferences(ExperimentalDesign):
             .first()
             .reset_index()
         )
-        assert not self.x_pred_counterfactual.empty
+        if self.x_pred_counterfactual.empty:
+            raise ValueError("x_pred_counterfactual is empty")
         (new_x,) = build_design_matrices(
             [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
         )
