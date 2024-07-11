@@ -17,6 +17,7 @@ Difference in differences
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.custom_exceptions import (
@@ -204,7 +205,7 @@ class DifferenceInDifferences(BaseExperiment):
                 coded. Consisting of 0's and 1's only."""
             )
 
-    def plot(self, round_to=None):
+    def plot(self, round_to=None) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 

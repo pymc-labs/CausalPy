@@ -16,8 +16,8 @@ Miscellaneous unit tests
 """
 
 import arviz as az
-import matplotlib as mpl
 import pandas as pd
+from matplotlib import pyplot as plt
 
 import causalpy as cp
 
@@ -82,7 +82,11 @@ def test_inverse_prop():
     assert isinstance(ate_list, list)
     ate_list = result.get_ate(0, result.idata, method="overlap")
     assert isinstance(ate_list, list)
-    fig = result.plot_ate(prop_draws=1, ate_draws=10)
-    assert isinstance(fig, mpl.figure.Figure)
-    fig = result.plot_balance_ecdf("age")
-    assert isinstance(fig, mpl.figure.Figure)
+    fig, axs = result.plot_ate(prop_draws=1, ate_draws=10)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(axs, list)
+    assert all(isinstance(ax, plt.Axes) for ax in axs)
+    fig, axs = result.plot_balance_ecdf("age")
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(axs, list)
+    assert all(isinstance(ax, plt.Axes) for ax in axs)

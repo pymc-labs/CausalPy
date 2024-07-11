@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+from typing import List
+
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,7 +30,9 @@ class BayesianPlotComponent:
     """Plotting component for Bayesian models."""
 
     @staticmethod
-    def plot_pre_post(results, round_to=None, counterfactual_label=None):
+    def plot_pre_post(
+        results, round_to=None, counterfactual_label=None
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for pre-post experiment types, such as Interrupted Time Series
         and Synthetic Control."""
         datapre = results.datapre
@@ -143,7 +147,9 @@ class BayesianPlotComponent:
         return fig, ax
 
     @staticmethod
-    def plot_difference_in_differences(results, round_to=None):
+    def plot_difference_in_differences(
+        results, round_to=None
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
 
         def _plot_causal_impact_arrow(results, ax):
@@ -282,7 +288,7 @@ class BayesianPlotComponent:
     #     pass
 
     @staticmethod
-    def plot_pre_post_negd(results, round_to=None):
+    def plot_pre_post_negd(results, round_to=None) -> tuple[plt.Figure, List[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
@@ -334,7 +340,9 @@ class BayesianPlotComponent:
         return fig, ax
 
     @staticmethod
-    def plot_regression_discontinuity(results, round_to=None):
+    def plot_regression_discontinuity(
+        results, round_to=None
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -386,7 +394,7 @@ class BayesianPlotComponent:
         return (fig, ax)
 
     @staticmethod
-    def plot_regression_kink(results, round_to=None):
+    def plot_regression_kink(results, round_to=None) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -440,7 +448,7 @@ class OLSPlotComponent:
     """Plotting component for OLS models."""
 
     @staticmethod
-    def plot_pre_post(results, round_to=None):
+    def plot_pre_post(results, round_to=None) -> tuple[plt.Figure, List[plt.Axes]]:
         """Generate plot for pre-post experiment types, such as Interrupted Time Series
         and Synthetic Control."""
         counterfactual_label = "Counterfactual"
@@ -509,7 +517,9 @@ class OLSPlotComponent:
         return (fig, ax)
 
     @staticmethod
-    def plot_difference_in_differences(results, round_to=None):
+    def plot_difference_in_differences(
+        results, round_to=None
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
         fig, ax = plt.subplots()
 
@@ -585,7 +595,9 @@ class OLSPlotComponent:
         return (fig, ax)
 
     @staticmethod
-    def plot_regression_discontinuity(results, round_to=None) -> tuple:
+    def plot_regression_discontinuity(
+        results, round_to=None
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data

@@ -17,6 +17,7 @@ Regression discontinuity design
 
 import warnings  # noqa: I001
 
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
@@ -192,7 +193,7 @@ class RegressionDiscontinuity(BaseExperiment):
         """
         return np.greater_equal(x, self.treatment_threshold)
 
-    def plot(self):
+    def plot(self) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 

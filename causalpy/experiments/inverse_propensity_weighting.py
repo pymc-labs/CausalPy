@@ -15,6 +15,8 @@
 Inverse propensity weighting
 """
 
+from typing import List
+
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -238,7 +240,9 @@ class InversePropensityWeighting(BaseExperiment):
         ate = trt - ntrt
         return [ate, trt, ntrt]
 
-    def plot_ate(self, idata=None, method=None, prop_draws=100, ate_draws=300):
+    def plot_ate(
+        self, idata=None, method=None, prop_draws=100, ate_draws=300
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
         if idata is None:
             idata = self.model.idata
         if method is None:
@@ -364,7 +368,7 @@ class InversePropensityWeighting(BaseExperiment):
         axs[2].legend()
         axs[2].set_title("Average Treatment Effect", fontsize=20)
 
-        return fig
+        return fig, axs
 
     def weighted_percentile(self, data, weights, perc):
         """
@@ -380,7 +384,9 @@ class InversePropensityWeighting(BaseExperiment):
         )  # 'like' a CDF function
         return np.interp(perc, cdf, data)
 
-    def plot_balance_ecdf(self, covariate, idata=None, weighting_scheme=None):
+    def plot_balance_ecdf(
+        self, covariate, idata=None, weighting_scheme=None
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plotting function takes a single covariate and shows the
         differences in the ECDF between the treatment and control
@@ -451,4 +457,5 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].set_xlabel("Quantiles")
         axs[1].legend()
         axs[0].legend()
-        return fig
+        # TODO: for some reason ax is type numpy.ndarray, so we need to convert this back to a list to conform to the expected return type.
+        return fig, list(axs)

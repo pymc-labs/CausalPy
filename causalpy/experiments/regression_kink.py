@@ -18,6 +18,7 @@ Regression kink design
 
 import warnings  # noqa: I001
 
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
@@ -160,7 +161,7 @@ class RegressionKink(BaseExperiment):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def plot(self, round_to=None):
+    def plot(self, round_to=None) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 

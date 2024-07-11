@@ -19,6 +19,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.custom_exceptions import BadIndexException
@@ -107,7 +108,7 @@ class PrePostFit(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def plot(self):
+    def plot(self) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 
@@ -204,7 +205,9 @@ class SyntheticControl(PrePostFit):
 
     expt_type = "SyntheticControl"
 
-    def plot(self, round_to=None, plot_predictors: bool = False):
+    def plot(
+        self, round_to=None, plot_predictors: bool = False
+    ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 

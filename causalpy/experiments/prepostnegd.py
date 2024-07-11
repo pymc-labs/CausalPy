@@ -17,6 +17,7 @@ Pretest/posttest nonequivalent group design
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.custom_exceptions import (
@@ -176,7 +177,7 @@ class PrePostNEGD(BaseExperiment):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def plot(self):
+    def plot(self) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 
