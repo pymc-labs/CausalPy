@@ -11,7 +11,6 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-from abc import ABC
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -25,13 +24,7 @@ LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
 
 
-class PlotComponent(ABC):
-    """Abstract Base Class for PlotComponent."""
-
-    pass
-
-
-class BayesianPlotComponent(PlotComponent):
+class BayesianPlotComponent:
     """Plotting component for Bayesian models."""
 
     @staticmethod
@@ -443,7 +436,7 @@ class BayesianPlotComponent(PlotComponent):
         return fig, ax
 
 
-class OLSPlotComponent(PlotComponent):
+class OLSPlotComponent:
     """Plotting component for OLS models."""
 
     @staticmethod

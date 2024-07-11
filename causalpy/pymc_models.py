@@ -23,7 +23,7 @@ import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
 
-from causalpy.plotting import BayesianPlotComponent, PlotComponent
+from causalpy.plotting import BayesianPlotComponent
 from causalpy.utils import round_num
 
 
@@ -159,7 +159,7 @@ class PyMCModel(pm.Model):
     def calculate_cumulative_impact(self, impact):
         return impact.cumsum(dim="obs_ind")
 
-    def get_plot_component(self) -> PlotComponent:
+    def get_plot_component(self) -> BayesianPlotComponent:
         return BayesianPlotComponent()
 
     def print_coefficients(self, labels, round_to=None) -> None:
