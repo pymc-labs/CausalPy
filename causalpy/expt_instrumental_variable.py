@@ -25,9 +25,6 @@ from sklearn.linear_model import LinearRegression as sk_lin_reg
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments import ExperimentalDesign
 
-# from causalpy.pymc_models import PyMCModel
-# from causalpy.utils import round_num
-
 
 class InstrumentalVariable(ExperimentalDesign):
     """
