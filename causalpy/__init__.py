@@ -18,27 +18,27 @@ import causalpy.skl_models as skl_models
 from causalpy.version import __version__
 
 from .data import load_data
-from .exp_inverse_propensity_weighting import InversePropensityWeighting
-from .expt_diff_in_diff import DifferenceInDifferences
-from .expt_instrumental_variable import InstrumentalVariable
-from .expt_prepostfit import InterruptedTimeSeries, SyntheticControl
-from .expt_prepostnegd import PrePostNEGD
-from .expt_regression_discontinuity import RegressionDiscontinuity
-from .expt_regression_kink import RegressionKink
+from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.instrumental_variable import InstrumentalVariable
+from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.prepostfit import InterruptedTimeSeries, SyntheticControl
+from .experiments.prepostnegd import PrePostNEGD
+from .experiments.regression_discontinuity import RegressionDiscontinuity
+from .experiments.regression_kink import RegressionKink
 
 az.style.use("arviz-darkgrid")
 
 __all__ = [
-    "InterruptedTimeSeries",
-    "SyntheticControl",
+    "__version__",
     "DifferenceInDifferences",
+    "InstrumentalVariable",
+    "InterruptedTimeSeries",
+    "InversePropensityWeighting",
+    "load_data",
     "PrePostNEGD",
+    "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
-    "InstrumentalVariable",
-    "InversePropensityWeighting",
-    "pymc_models",
     "skl_models",
-    "load_data",
-    "__version__",
+    "SyntheticControl",
 ]

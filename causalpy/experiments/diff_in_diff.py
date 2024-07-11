@@ -23,10 +23,11 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string
+
+from .experiments import ExperimentalDesign
 
 
 class DifferenceInDifferences(ExperimentalDesign):

@@ -22,10 +22,11 @@ from patsy import build_design_matrices, dmatrices
 from causalpy.custom_exceptions import (
     DataException,
 )
-from causalpy.experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, round_num
+
+from .experiments import ExperimentalDesign
 
 
 class PrePostNEGD(ExperimentalDesign):

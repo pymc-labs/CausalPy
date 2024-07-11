@@ -24,10 +24,8 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
-from causalpy.experiments import ExperimentalDesign
 
-# from causalpy.pymc_models import PyMCModel
-# from causalpy.utils import round_num
+from .experiments import ExperimentalDesign
 
 
 class InversePropensityWeighting(ExperimentalDesign):
@@ -372,7 +370,8 @@ class InversePropensityWeighting(ExperimentalDesign):
         """
         perc : percentile in [0-1]!
         """
-        assert 0 <= perc <= 1
+        if not (0 <= perc <= 1):
+            raise ValueError("Percentile must be between 0 and 1.")
         ix = np.argsort(data)
         data = data[ix]  # sort data
         weights = weights[ix]  # sort weights

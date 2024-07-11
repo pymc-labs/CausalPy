@@ -23,7 +23,7 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
-from causalpy.experiments import ExperimentalDesign
+from .experiments import ExperimentalDesign
 
 
 class InstrumentalVariable(ExperimentalDesign):

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.experiments import ExperimentalDesign
+from .experiments import ExperimentalDesign
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
     DataException,

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from causalpy.experiments import ExperimentalDesign
+from .experiments import ExperimentalDesign
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import convert_to_string
