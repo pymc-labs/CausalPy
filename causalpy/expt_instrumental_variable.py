@@ -105,7 +105,7 @@ class InstrumentalVariable(ExperimentalDesign):
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.model = model
-        self._input_validation()
+        self.input_validation()
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -139,7 +139,7 @@ class InstrumentalVariable(ExperimentalDesign):
             X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
         )
 
-    def _input_validation(self):
+    def input_validation(self):
         """Validate the input data and model formula for correctness"""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns

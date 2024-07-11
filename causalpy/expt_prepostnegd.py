@@ -90,7 +90,7 @@ class PrePostNEGD(ExperimentalDesign):
         self.formula = formula
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
-        self._input_validation()
+        self.input_validation()
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -142,7 +142,7 @@ class PrePostNEGD(ExperimentalDesign):
             {"coeffs": self._get_treatment_effect_coeff()}
         )
 
-    def _input_validation(self) -> None:
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(

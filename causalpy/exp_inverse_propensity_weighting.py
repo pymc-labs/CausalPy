@@ -84,7 +84,7 @@ class InversePropensityWeighting(ExperimentalDesign):
         self.formula = formula
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme
-        self._input_validation()
+        self.input_validation()
 
         t, X = dmatrices(formula, self.data)
         self._t_design_info = t.design_info
@@ -97,7 +97,7 @@ class InversePropensityWeighting(ExperimentalDesign):
         self.coords = COORDS
         self.model.fit(X=self.X, t=self.t, coords=COORDS)
 
-    def _input_validation(self):
+    def input_validation(self):
         """Validate the input data and model formula for correctness"""
         treatment = self.formula.split("~")[0]
         test = treatment.strip() in self.data.columns

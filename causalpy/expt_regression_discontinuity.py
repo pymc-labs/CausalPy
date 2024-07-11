@@ -92,7 +92,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
         self.treatment_threshold = treatment_threshold
         self.epsilon = epsilon
         self.bandwidth = bandwidth
-        self._input_validation()
+        self.input_validation()
 
         if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
@@ -171,7 +171,7 @@ class RegressionDiscontinuity(ExperimentalDesign):
             ) - np.squeeze(self.pred_discon[0])
         # ******************************************************************************
 
-    def _input_validation(self):
+    def input_validation(self):
         """Validate the input data and model formula for correctness"""
         if "treated" not in self.formula:
             raise FormulaException(

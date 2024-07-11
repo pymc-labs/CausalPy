@@ -83,7 +83,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
-        self._input_validation()
+        self.input_validation()
 
         y, X = dmatrices(formula, self.data)
         self._y_design_info = y.design_info
@@ -177,7 +177,7 @@ class DifferenceInDifferences(ExperimentalDesign):
         else:
             raise ValueError("Model type not recognized")
 
-    def _input_validation(self):
+    def input_validation(self):
         """Validate the input data and model formula for correctness"""
         if "post_treatment" not in self.formula:
             raise FormulaException(

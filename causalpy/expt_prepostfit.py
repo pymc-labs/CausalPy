@@ -42,7 +42,7 @@ class PrePostFit(ExperimentalDesign):
         **kwargs,
     ) -> None:
         super().__init__(model=model, **kwargs)
-        self._input_validation(data, treatment_time)
+        self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
@@ -91,7 +91,7 @@ class PrePostFit(ExperimentalDesign):
             self.post_impact
         )
 
-    def _input_validation(self, data, treatment_time):
+    def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp

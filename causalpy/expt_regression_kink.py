@@ -53,7 +53,7 @@ class RegressionKink(ExperimentalDesign):
         self.kink_point = kink_point
         self.epsilon = epsilon
         self.bandwidth = bandwidth
-        self._input_validation()
+        self.input_validation()
 
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
@@ -101,7 +101,7 @@ class RegressionKink(ExperimentalDesign):
             mu_kink_left, mu_kink, mu_kink_right, epsilon
         )
 
-    def _input_validation(self):
+    def input_validation(self):
         """Validate the input data and model formula for correctness"""
         if "treated" not in self.formula:
             raise FormulaException(
