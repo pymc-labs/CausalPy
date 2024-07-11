@@ -16,7 +16,7 @@ Base class for quasi experimental designs.
 """
 
 
-class ExperimentalDesign:
+class BaseExperiment:
     """Base class for quasi experimental designs."""
 
     def __init__(self, model=None, **kwargs):

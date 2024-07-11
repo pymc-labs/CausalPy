@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import convert_to_string
@@ -32,7 +32,7 @@ from causalpy.custom_exceptions import (
 from causalpy.utils import _is_variable_dummy_coded
 
 
-class RegressionDiscontinuity(ExperimentalDesign):
+class RegressionDiscontinuity(BaseExperiment):
     """
     A class to analyse sharp regression discontinuity experiments.
 

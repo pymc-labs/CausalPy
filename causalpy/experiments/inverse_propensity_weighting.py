@@ -25,10 +25,10 @@ from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 
 
-class InversePropensityWeighting(ExperimentalDesign):
+class InversePropensityWeighting(BaseExperiment):
     """
     A class to analyse inverse propensity weighting experiments.
 

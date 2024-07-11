@@ -23,10 +23,10 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 
 
-class InstrumentalVariable(ExperimentalDesign):
+class InstrumentalVariable(BaseExperiment):
     """
     A class to analyse instrumental variable style experiments.
 

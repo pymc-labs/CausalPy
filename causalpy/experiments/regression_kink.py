@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from patsy import build_design_matrices, dmatrices
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
     DataException,
@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
 from causalpy.utils import _is_variable_dummy_coded
 
 
-class RegressionKink(ExperimentalDesign):
+class RegressionKink(BaseExperiment):
     """Regression Kink experiment class."""
 
     def __init__(

@@ -25,10 +25,10 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 
 
-class PrePostFit(ExperimentalDesign):
+class PrePostFit(BaseExperiment):
     """
     A base class for quasi-experimental designs where parameter estimation is based on
     just pre-intervention data. This class is not directly invoked by the user.

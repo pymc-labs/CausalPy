@@ -26,10 +26,10 @@ from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 
 
-class PrePostNEGD(ExperimentalDesign):
+class PrePostNEGD(BaseExperiment):
     """
     A class to analyse data from pretest/posttest designs
 

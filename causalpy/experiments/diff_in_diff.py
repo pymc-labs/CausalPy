@@ -27,10 +27,10 @@ from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string
 
-from .experiments import ExperimentalDesign
+from .base import BaseExperiment
 
 
-class DifferenceInDifferences(ExperimentalDesign):
+class DifferenceInDifferences(BaseExperiment):
     """A class to analyse data from Difference in Difference settings.
 
     .. note::
