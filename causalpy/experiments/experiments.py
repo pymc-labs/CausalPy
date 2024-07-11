@@ -19,9 +19,6 @@ Base class for quasi experimental designs.
 class ExperimentalDesign:
     """Base class for quasi experimental designs."""
 
-    model = None
-    expt_type = None
-
     def __init__(self, model=None, **kwargs):
         if model is not None:
             self.model = model
