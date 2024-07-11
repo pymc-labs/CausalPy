@@ -238,7 +238,7 @@ class InversePropensityWeighting(ExperimentalDesign):
         ate = trt - ntrt
         return [ate, trt, ntrt]
 
-    def plot_ATE(self, idata=None, method=None, prop_draws=100, ate_draws=300):
+    def plot_ate(self, idata=None, method=None, prop_draws=100, ate_draws=300):
         if idata is None:
             idata = self.model.idata
         if method is None:
