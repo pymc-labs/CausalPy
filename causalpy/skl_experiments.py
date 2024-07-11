@@ -38,41 +38,37 @@ from .experiments.regression_discontinuity import (
 warnings.simplefilter("always", DeprecationWarning)
 
 
-class SyntheticControl(NewSyntheticControl):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.skl_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def SyntheticControl(*args, **kwargs):
+    warnings.warn(
+        """causalpy.skl_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewSyntheticControl(*args, **kwargs)
 
 
-class DifferenceInDifferences(NewDifferenceInDifferences):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.skl_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def DifferenceInDifferences(*args, **kwargs):
+    warnings.warn(
+        """causalpy.skl_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewDifferenceInDifferences(*args, **kwargs)
 
 
-class InterruptedTimeSeries(NewInterruptedTimeSeries):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.skl_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def InterruptedTimeSeries(*args, **kwargs):
+    warnings.warn(
+        """causalpy.skl_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewInterruptedTimeSeries(*args, **kwargs)
 
 
-class RegressionDiscontinuity(NewRegressionDiscontinuity):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.skl_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def RegressionDiscontinuity(*args, **kwargs):
+    warnings.warn(
+        """causalpy.skl_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewRegressionDiscontinuity(*args, **kwargs)

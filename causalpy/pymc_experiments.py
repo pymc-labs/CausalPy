@@ -46,81 +46,73 @@ from .experiments.regression_kink import RegressionKink as NewRegressionKink
 warnings.simplefilter("always", DeprecationWarning)
 
 
-class PrePostNEGD(NewPrePostNEGD):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.PrePostNEGD is deprecated and will be removed in a future release. Please use causalpy.experiments.PrePostNEGD instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def PrePostNEGD(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.PrePostNEGD is deprecated and will be removed in a future release. Please use causalpy.experiments.PrePostNEGD instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewPrePostNEGD(*args, **kwargs)
 
 
-class DifferenceInDifferences(NewDifferenceInDifferences):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def DifferenceInDifferences(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewDifferenceInDifferences(*args, **kwargs)
 
 
-class InterruptedTimeSeries(NewInterruptedTimeSeries):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def InterruptedTimeSeries(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewInterruptedTimeSeries(*args, **kwargs)
 
 
-class SyntheticControl(NewSyntheticControl):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def SyntheticControl(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewSyntheticControl(*args, **kwargs)
 
 
-class RegressionKink(NewRegressionKink):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.RegressionKink is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionKink instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def RegressionKink(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.RegressionKink is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionKink instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewRegressionKink(*args, **kwargs)
 
 
-class RegressionDiscontinuity(NewRegressionDiscontinuity):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def RegressionDiscontinuity(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewRegressionDiscontinuity(*args, **kwargs)
 
 
-class InversePropensityWeighting(NewInversePropensityWeighting):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.InversePropensityWeighting is deprecated and will be removed in a future release. Please use causalpy.experiments.InversePropensityWeighting instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def InversePropensityWeighting(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.InversePropensityWeighting is deprecated and will be removed in a future release. Please use causalpy.experiments.InversePropensityWeighting instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewInversePropensityWeighting(*args, **kwargs)
 
 
-class InstrumentalVariable(NewInstrumentalVariable):
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            """causalpy.pymc_experiments.InstrumentalVariable is deprecated and will be removed in a future release. Please use causalpy.experiments.InstrumentalVariable instead.""",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+def InstrumentalVariable(*args, **kwargs):
+    warnings.warn(
+        """causalpy.pymc_experiments.InstrumentalVariable is deprecated and will be removed in a future release. Please use causalpy.experiments.InstrumentalVariable instead.""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewInstrumentalVariable(*args, **kwargs)
