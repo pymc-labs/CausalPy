@@ -13,7 +13,9 @@
 #   limitations under the License.
 import arviz as az
 
+import causalpy.pymc_experiments as pymc_experiments  # to be depricated
 import causalpy.pymc_models as pymc_models
+import causalpy.skl_experiments as skl_experiments  # to be depricated
 import causalpy.skl_models as skl_models
 from causalpy.version import __version__
 
@@ -36,9 +38,11 @@ __all__ = [
     "InversePropensityWeighting",
     "load_data",
     "PrePostNEGD",
+    "pymc_experiments",  # to be depricated
     "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "skl_experiments",  # to be depricated
     "skl_models",
     "SyntheticControl",
 ]
