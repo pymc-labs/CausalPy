@@ -21,7 +21,6 @@ from sklearn.base import RegressorMixin
 from sklearn.linear_model import LinearRegression
 from sklearn.linear_model._base import LinearModel
 
-from causalpy.plotting import OLSPlotComponent
 from causalpy.utils import round_num
 
 
@@ -35,10 +34,6 @@ class ScikitLearnModel:
     def calculate_cumulative_impact(self, impact):
         """Calculate the cumulative impact intervention."""
         return np.cumsum(impact)
-
-    def get_plot_component(self) -> OLSPlotComponent:
-        """Get the plot component type for the model."""
-        return OLSPlotComponent()
 
     def print_coefficients(self, labels, round_to=None) -> None:
         """Print the coefficients of the model with the corresponding labels."""

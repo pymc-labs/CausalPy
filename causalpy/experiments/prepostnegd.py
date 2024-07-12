@@ -15,19 +15,26 @@
 Pretest/posttest nonequivalent group design
 """
 
+from typing import List
+
+import arviz as az
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
+
+LEGEND_FONT_SIZE = 12
 
 
 class PrePostNEGD(BaseExperiment):
@@ -177,18 +184,6 @@ class PrePostNEGD(BaseExperiment):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def plot(self) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
-        plot_component = self.model.get_plot_component()
-        fig, ax = plot_component.plot_pre_post_negd(self)
-        return fig, ax
-
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -201,3 +196,56 @@ class PrePostNEGD(BaseExperiment):
         # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
+
+    def bayesian_plot(
+        self, round_to=None, **kwargs
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
+        """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
+        fig, ax = plt.subplots(
+            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+        )
+
+        # Plot raw data
+        sns.scatterplot(
+            x="pre",
+            y="post",
+            hue="group",
+            alpha=0.5,
+            data=self.data,
+            legend=True,
+            ax=ax[0],
+        )
+        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+
+        # plot posterior predictive of untreated
+        h_line, h_patch = plot_xY(
+            self.pred_xi,
+            self.pred_untreated["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C0"},
+            label="Control group",
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Control group"]
+
+        # plot posterior predictive of treated
+        h_line, h_patch = plot_xY(
+            self.pred_xi,
+            self.pred_treated["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C1"},
+            label="Treatment group",
+        )
+        handles.append((h_line, h_patch))
+        labels.append("Treatment group")
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        # Plot estimated caual impact / treatment effect
+        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
+        ax[1].set(title="Estimated treatment effect")
+        return fig, ax

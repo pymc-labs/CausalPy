@@ -15,6 +15,11 @@
 Base class for quasi experimental designs.
 """
 
+from abc import abstractmethod
+
+from causalpy.pymc_models import PyMCModel
+from causalpy.skl_models import ScikitLearnModel
+
 
 class BaseExperiment:
     """Base class for quasi experimental designs."""
@@ -33,3 +38,26 @@ class BaseExperiment:
     def print_coefficients(self, round_to=None):
         """Ask the model to print its coefficients."""
         self.model.print_coefficients(self.labels, round_to)
+
+    def plot(self, *args, **kwargs) -> tuple:
+        """Plot the model.
+
+        Internally, this function dispatches to either `bayesian_plot` or `ols_plot`
+        depending on the model type.
+        """
+        if isinstance(self.model, PyMCModel):
+            return self.bayesian_plot(*args, **kwargs)
+        elif isinstance(self.model, ScikitLearnModel):
+            return self.ols_plot(*args, **kwargs)
+        else:
+            raise ValueError("Unsupported model type")
+
+    @abstractmethod
+    def bayesian_plot(self, *args, **kwargs):
+        """Abstract method for plotting the model."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def ols_plot(self, *args, **kwargs):
+        """Abstract method for plotting the model."""
+        raise NotImplementedError

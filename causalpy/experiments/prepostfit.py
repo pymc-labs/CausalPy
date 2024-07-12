@@ -15,18 +15,23 @@
 Pre/post intervention fit experiment designs
 """
 
-from typing import Union
+from typing import List, Union
 
+import arviz as az
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 
 from causalpy.custom_exceptions import BadIndexException
+from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import ScikitLearnModel
+from causalpy.utils import round_num
 
 from .base import BaseExperiment
+
+LEGEND_FONT_SIZE = 12
 
 
 class PrePostFit(BaseExperiment):
@@ -108,18 +113,6 @@ class PrePostFit(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def plot(self) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
-        plot_component = self.model.get_plot_component()
-        fig, ax = plot_component.plot_pre_post(self)
-        return fig, ax
-
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -129,6 +122,186 @@ class PrePostFit(BaseExperiment):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
+
+    def bayesian_plot(
+        self, round_to=None, **kwargs
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
+        counterfactual_label = "Counterfactual"
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        # TOP PLOT --------------------------------------------------
+        # pre-intervention period
+        h_line, h_patch = plot_xY(
+            self.datapre.index,
+            self.pre_pred["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C0"},
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Pre-intervention period"]
+
+        (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
+        handles.append(h)
+        labels.append("Observations")
+
+        # post intervention period
+        h_line, h_patch = plot_xY(
+            self.datapost.index,
+            self.post_pred["posterior_predictive"].mu,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        handles.append((h_line, h_patch))
+        labels.append(counterfactual_label)
+
+        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        # Shaded causal effect
+        h = ax[0].fill_between(
+            self.datapost.index,
+            y1=az.extract(
+                self.post_pred, group="posterior_predictive", var_names="mu"
+            ).mean("sample"),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+        )
+        handles.append(h)
+        labels.append("Causal impact")
+
+        ax[0].set(
+            title=f"""
+            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
+            (std = {round_num(self.score.r2_std, round_to)})
+            """
+        )
+
+        # MIDDLE PLOT -----------------------------------------------
+        plot_xY(
+            self.datapre.index,
+            self.pre_impact,
+            ax=ax[1],
+            plot_hdi_kwargs={"color": "C0"},
+        )
+        plot_xY(
+            self.datapost.index,
+            self.post_impact,
+            ax=ax[1],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax[1].axhline(y=0, c="k")
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=self.post_impact.mean(["chain", "draw"]),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].set(title="Causal Impact")
+
+        # BOTTOM PLOT -----------------------------------------------
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            self.datapost.index,
+            self.post_impact_cumulative,
+            ax=ax[2],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax[2].axhline(y=0, c="k")
+
+        # Intervention line
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=self.treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+            )
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        return fig, ax
+
+    def ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+        """
+        Plot the results
+
+        :param round_to:
+            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        """
+        counterfactual_label = "Counterfactual"
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+
+        ax[0].plot(self.datapre.index, self.pre_y, "k.")
+        ax[0].plot(self.datapost.index, self.post_y, "k.")
+
+        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(
+            self.datapost.index,
+            self.post_pred,
+            label=counterfactual_label,
+            ls=":",
+            c="k",
+        )
+        ax[0].set(
+            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+        )
+
+        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(
+            self.datapost.index,
+            self.post_impact,
+            "k.",
+            label=counterfactual_label,
+        )
+        ax[1].axhline(y=0, c="k")
+        ax[1].set(title="Causal Impact")
+
+        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].axhline(y=0, c="k")
+        ax[2].set(title="Cumulative Causal Impact")
+
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_pred),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_impact),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+
+        # Intervention line
+        # TODO: make this work when treatment_time is a datetime
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=self.treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+                label="Treatment time",
+            )
+
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        return (fig, ax)
 
 
 class InterruptedTimeSeries(PrePostFit):
@@ -205,9 +378,7 @@ class SyntheticControl(PrePostFit):
 
     expt_type = "SyntheticControl"
 
-    def plot(
-        self, round_to=None, plot_predictors: bool = False
-    ) -> tuple[plt.Figure, plt.Axes]:
+    def bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -217,9 +388,11 @@ class SyntheticControl(PrePostFit):
         :param plot_predictors:
             Whether to plot the control units as well. Defaults to False.
         """
-        # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
-        plot_component = self.model.get_plot_component()
-        fig, ax = plot_component.plot_pre_post(self)
+        # call the super class method
+        fig, ax = super().bayesian_plot(*args, **kwargs)
+
+        # additional plotting functionality for the synthetic control experiment
+        plot_predictors = kwargs.get("plot_predictors", False)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)

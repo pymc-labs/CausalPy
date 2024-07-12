@@ -21,7 +21,10 @@ import warnings  # noqa: I001
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from patsy import build_design_matrices, dmatrices
+
+from causalpy.plot_utils import plot_xY
 
 from .base import BaseExperiment
 from causalpy.utils import round_num
@@ -30,6 +33,9 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.utils import _is_variable_dummy_coded
+
+
+LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):
@@ -161,18 +167,6 @@ class RegressionKink(BaseExperiment):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def plot(self, round_to=None) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        # Get a BayesianPlotComponent or OLSPlotComponent depending on the model
-        plot_component = self.model.get_plot_component()
-        fig, ax = plot_component.plot_regression_kink(self, round_to=round_to)
-        return fig, ax
-
     def summary(self, round_to=None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -191,3 +185,52 @@ class RegressionKink(BaseExperiment):
         """
         )
         self.print_coefficients(round_to)
+
+    def bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+        """Generate plot for regression kink designs."""
+        fig, ax = plt.subplots()
+        # Plot raw data
+        sns.scatterplot(
+            self.data,
+            x=self.running_variable_name,
+            y=self.outcome_variable_name,
+            c="k",  # hue="treated",
+            ax=ax,
+        )
+
+        # Plot model fit to data
+        h_line, h_patch = plot_xY(
+            self.x_pred[self.running_variable_name],
+            self.pred["posterior_predictive"].mu,
+            ax=ax,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        handles = [(h_line, h_patch)]
+        labels = ["Posterior mean"]
+
+        # create strings to compose title
+        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
+        ci = (
+            r"$CI_{94\%}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        grad_change = f"""
+            Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
+            """
+        ax.set(title=r2 + "\n" + grad_change + ci)
+        # Intervention line
+        ax.axvline(
+            x=self.kink_point,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        return fig, ax
