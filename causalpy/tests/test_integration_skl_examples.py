@@ -17,9 +17,12 @@ import pytest
 from matplotlib import pyplot as plt
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
+from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-from causalpy.skl_models import LinearRegression, ScikitLearnModel
+from causalpy.skl_models import ScikitLearnModel
+
+CustomLinearRegression = cp.create_causalpy_compatible_class(LinearRegression)
 
 
 @pytest.mark.integration
@@ -31,7 +34,6 @@ def test_did():
     1. data is a dataframe
     2. skl_experiements.DifferenceInDifferences returns correct type
     """
-
     data = cp.load_data("did")
     result = cp.DifferenceInDifferences(
         data,
@@ -40,7 +42,7 @@ def test_did():
         group_variable_name="group",
         treated=1,
         untreated=0,
-        model=LinearRegression(),
+        model=CustomLinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
@@ -59,6 +61,7 @@ def test_rd_drinking():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
+
     df = (
         cp.load_data("drinking")
         .rename(columns={"agecell": "age"})
@@ -68,7 +71,7 @@ def test_rd_drinking():
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
-        model=LinearRegression(),
+        model=CustomLinearRegression(),
         treatment_threshold=21,
         epsilon=0.001,
     )
@@ -100,7 +103,7 @@ def test_its():
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        model=cp.skl_models.LinearRegression(),
+        model=CustomLinearRegression(),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.InterruptedTimeSeries)
@@ -162,7 +165,7 @@ def test_rd_linear_main_effects():
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=LinearRegression(),
+        model=CustomLinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
     )
@@ -188,7 +191,7 @@ def test_rd_linear_main_effects_bandwidth():
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=LinearRegression(),
+        model=CustomLinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
         bandwidth=0.3,
@@ -214,7 +217,7 @@ def test_rd_linear_with_interaction():
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
-        model=LinearRegression(),
+        model=CustomLinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
     )
@@ -272,7 +275,7 @@ def test_did_deprecation_warning():
             group_variable_name="group",
             treated=1,
             untreated=0,
-            model=LinearRegression(),
+            model=CustomLinearRegression(),
         )
         assert isinstance(result, cp.DifferenceInDifferences)
 
@@ -291,7 +294,7 @@ def test_its_deprecation_warning():
             df,
             treatment_time,
             formula="y ~ 1 + t + C(month)",
-            model=cp.skl_models.LinearRegression(),
+            model=CustomLinearRegression(),
         )
         assert isinstance(result, cp.InterruptedTimeSeries)
 
@@ -319,7 +322,7 @@ def test_rd_deprecation_warning():
         result = cp.skl_experiments.RegressionDiscontinuity(
             data,
             formula="y ~ 1 + x + treated",
-            model=LinearRegression(),
+            model=CustomLinearRegression(),
             treatment_threshold=0.5,
             epsilon=0.001,
         )

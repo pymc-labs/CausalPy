@@ -18,7 +18,6 @@ from functools import partial
 import numpy as np
 from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
-from sklearn.linear_model import LinearRegression
 from sklearn.linear_model._base import LinearModel
 
 from causalpy.utils import round_num
@@ -54,12 +53,6 @@ class ScikitLearnModel:
         return np.squeeze(self.coef_)
 
 
-class LinearRegression(ScikitLearnModel, LinearRegression):
-    """Linear regression model for causal inference"""
-
-    pass
-
-
 class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
     """Weighted proportion model for causal inference. Used for synthetic control
     methods for example"""
@@ -85,3 +78,15 @@ class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
     def predict(self, X):
         """Predict results for data X"""
         return np.dot(X, self.coef_.T)
+
+
+def create_causalpy_compatible_class(
+    estimator: type[RegressorMixin],
+) -> type[ScikitLearnModel]:
+    """This function takes a scikit-learn estimator and returns a new class that is
+    compatible with CausalPy."""
+
+    class Model(ScikitLearnModel, estimator):
+        pass
+
+    return Model
