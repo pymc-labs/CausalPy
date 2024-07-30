@@ -3,12 +3,12 @@ name: Update the UML Diagrams
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "causalpy/**"
+    # paths:
+    #   - "causalpy/**"
   push:
     branches: [main]
-    paths:
-      - "causalpy/**"
+    # paths:
+    #   - "causalpy/**"
 
 jobs:
   build:
