@@ -40,6 +40,8 @@ jobs:
           if git diff --staged --exit-code; then
             echo "No changes to commit"
           else
+            echo "Committing the changes"
+            echo ${GITHUB_HEAD_REF}
             git commit -m "Update UML Diagrams"
-            git push origin ${GITHUB_HEAD_REF}
+            git push origin HEAD:${GITHUB_HEAD_REF}
           fi
