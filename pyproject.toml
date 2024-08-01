@@ -67,6 +67,7 @@ docs = [
     "sphinx-notfound-page",
     "ipywidgets",
     "sphinx-design",
+    "pylint",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov"]
