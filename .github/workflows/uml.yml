@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+        with:
+          ref: ${{ github.head_ref || 'main' }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
