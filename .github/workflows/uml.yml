@@ -1,5 +1,7 @@
 name: Update the UML Diagrams
 
+permissions: write-all
+
 on:
   pull_request:
     branches: [main]
@@ -45,5 +47,5 @@ jobs:
             git commit -m "Update UML Diagrams"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
-        env: 
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
