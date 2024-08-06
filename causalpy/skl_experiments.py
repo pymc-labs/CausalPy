@@ -15,7 +15,7 @@
 This module exists to maintain the old API where experiment classes were defined in the
 `causalpy.skl_experiments` namespace. They have moved to `causalpy.experiments` and
 this module is a thin wrapper around the new classes to maintain backwards
-compatibility. A deprication warning is delivered to the user. This module may be
+compatibility. A deprecation warning is delivered to the user. This module may be
 removed in a future release.
 """
 
