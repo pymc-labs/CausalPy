@@ -58,8 +58,6 @@ def test_did_validation_post_treatment_formula():
             formula="y ~ 1 + group*post_SOMETHING",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -91,8 +89,6 @@ def test_did_validation_post_treatment_data():
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -124,8 +120,6 @@ def test_did_validation_unit_data():
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -157,8 +151,6 @@ def test_did_validation_group_dummy_coded():
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
