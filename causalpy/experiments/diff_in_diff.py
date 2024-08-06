@@ -233,7 +233,6 @@ class DifferenceInDifferences(BaseExperiment):
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
-        round_to = kwargs.get("round_to")
 
         def _plot_causal_impact_arrow(results, ax):
             """
