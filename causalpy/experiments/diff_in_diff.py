@@ -83,7 +83,7 @@ class DifferenceInDifferences(BaseExperiment):
         model=None,
         **kwargs,
     ) -> None:
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
 
         self.data = data
         self.expt_type = "Difference in Differences"

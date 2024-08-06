@@ -93,7 +93,7 @@ class PrePostNEGD(BaseExperiment):
         model=None,
         **kwargs,
     ):
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula

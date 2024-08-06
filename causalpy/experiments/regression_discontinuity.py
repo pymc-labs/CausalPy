@@ -89,7 +89,7 @@ class RegressionDiscontinuity(BaseExperiment):
         bandwidth: float = np.inf,
         **kwargs,
     ):
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
         self.data = data
         self.formula = formula

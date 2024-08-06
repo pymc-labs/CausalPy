@@ -78,7 +78,7 @@ class InversePropensityWeighting(BaseExperiment):
         model=None,
         **kwargs,
     ):
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
         self.expt_type = "Inverse Propensity Score Weighting"
         self.data = data
         self.formula = formula

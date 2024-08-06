@@ -24,7 +24,7 @@ from causalpy.skl_models import ScikitLearnModel
 class BaseExperiment:
     """Base class for quasi experimental designs."""
 
-    def __init__(self, model=None, **kwargs):
+    def __init__(self, model=None):
         if model is not None:
             self.model = model
         if self.model is None:

@@ -98,7 +98,7 @@ class InstrumentalVariable(BaseExperiment):
         priors=None,
         **kwargs,
     ):
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
         self.data = data
         self.instruments_data = instruments_data

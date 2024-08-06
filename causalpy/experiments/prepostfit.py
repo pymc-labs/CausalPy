@@ -48,7 +48,7 @@ class PrePostFit(BaseExperiment):
         model=None,
         **kwargs,
     ) -> None:
-        super().__init__(model=model, **kwargs)
+        super().__init__(model=model)
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
