@@ -1,7 +1,5 @@
 name: Update the UML Diagrams
 
-permissions: write-all
-
 on:
   pull_request:
     branches: [main]
@@ -15,7 +13,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    permissions: write-all
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,7 +45,7 @@ jobs:
             echo "Committing the changes"
             echo ${GITHUB_HEAD_REF}
             git commit -m "Update UML Diagrams"
-            git push origin HEAD:${GITHUB_HEAD_REF}
+            git push origin HEAD:${GITHUB_HEAD_REF:-main}
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
