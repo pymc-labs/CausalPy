@@ -65,9 +65,9 @@ class BaseExperiment:
     @abstractmethod
     def bayesian_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        raise NotImplementedError
+        raise NotImplementedError("bayesian_plot method not yet implemented")
 
     @abstractmethod
     def ols_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        raise NotImplementedError
+        raise NotImplementedError("ols_plot method not yet implemented")
