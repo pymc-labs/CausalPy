@@ -342,6 +342,8 @@ class InterruptedTimeSeries(PrePostFit):
     """
 
     expt_type = "Interrupted Time Series"
+    supports_ols = True
+    supports_bayes = True
 
 
 class SyntheticControl(PrePostFit):
@@ -377,6 +379,8 @@ class SyntheticControl(PrePostFit):
     """
 
     expt_type = "SyntheticControl"
+    supports_ols = True
+    supports_bayes = True
 
     def bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """

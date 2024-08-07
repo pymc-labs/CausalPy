@@ -88,6 +88,9 @@ class InstrumentalVariable(BaseExperiment):
     ... )
     """
 
+    supports_ols = False
+    supports_bayes = True
+
     def __init__(
         self,
         instruments_data: pd.DataFrame,

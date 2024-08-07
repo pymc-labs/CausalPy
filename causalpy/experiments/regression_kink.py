@@ -41,6 +41,9 @@ LEGEND_FONT_SIZE = 12
 class RegressionKink(BaseExperiment):
     """Regression Kink experiment class."""
 
+    supports_ols = False
+    supports_bayes = True
+
     def __init__(
         self,
         data: pd.DataFrame,

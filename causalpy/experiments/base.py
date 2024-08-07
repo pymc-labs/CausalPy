@@ -24,11 +24,21 @@ from causalpy.skl_models import ScikitLearnModel
 class BaseExperiment:
     """Base class for quasi experimental designs."""
 
+    supports_bayes: bool
+    supports_ols: bool
+
     def __init__(self, model=None):
         if model is not None:
             self.model = model
+
+        if isinstance(self.model, PyMCModel) and not self.supports_bayes:
+            raise ValueError("Bayesian models not supported.")
+
+        if isinstance(self.model, ScikitLearnModel) and not self.supports_ols:
+            raise ValueError("OLS models not supported.")
+
         if self.model is None:
-            raise ValueError("fitting_model not set or passed.")
+            raise ValueError("model not set or passed.")
 
     @property
     def idata(self):

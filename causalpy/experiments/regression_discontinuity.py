@@ -78,6 +78,9 @@ class RegressionDiscontinuity(BaseExperiment):
     ... )
     """
 
+    supports_ols = True
+    supports_bayes = True
+
     def __init__(
         self,
         data: pd.DataFrame,

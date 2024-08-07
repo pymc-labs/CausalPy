@@ -84,6 +84,9 @@ class PrePostNEGD(BaseExperiment):
         sigma          0.5, 94% HDI [0.5, 0.6]
     """
 
+    supports_ols = False
+    supports_bayes = True
+
     def __init__(
         self,
         data: pd.DataFrame,
