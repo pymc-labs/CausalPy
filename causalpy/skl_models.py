@@ -23,7 +23,7 @@ from sklearn.linear_model._base import LinearModel
 from causalpy.utils import round_num
 
 
-class ScikitLearnModel:
+class ScikitLearnAdaptor:
     """Base class for scikit-learn models that can be used for causal inference."""
 
     def calculate_impact(self, y_true, y_pred):
@@ -53,7 +53,7 @@ class ScikitLearnModel:
         return np.squeeze(self.coef_)
 
 
-class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
+class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
     """Weighted proportion model for causal inference. Used for synthetic control
     methods for example"""
 
@@ -82,11 +82,19 @@ class WeightedProportion(ScikitLearnModel, LinearModel, RegressorMixin):
 
 def create_causalpy_compatible_class(
     estimator: type[RegressorMixin],
-) -> type[ScikitLearnModel]:
+) -> type[RegressorMixin]:
     """This function takes a scikit-learn estimator and returns a new class that is
     compatible with CausalPy."""
+    _add_mixin_methods(estimator, ScikitLearnAdaptor)
+    return estimator
 
-    class Model(ScikitLearnModel, estimator):
-        pass
 
-    return Model
+def _add_mixin_methods(model_instance, mixin_class):
+    """Utility function to bind mixin methods to an existing model instance."""
+    for attr_name in dir(mixin_class):
+        attr = getattr(mixin_class, attr_name)
+        if callable(attr) and not attr_name.startswith("__"):
+            # Bind the method to the instance
+            method = attr.__get__(model_instance, model_instance.__class__)
+            setattr(model_instance, attr_name, method)
+    return model_instance

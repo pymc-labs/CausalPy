@@ -23,7 +23,6 @@ from causalpy.custom_exceptions import DataException, FormulaException
 
 from sklearn.linear_model import LinearRegression
 
-CustomLinearRegression = cp.create_causalpy_compatible_class(LinearRegression)
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -254,7 +253,7 @@ def test_rd_validation_treated_in_formula():
         _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
             treatment_threshold=0.5,
         )
 
@@ -281,7 +280,7 @@ def test_rd_validation_treated_is_dummy():
         _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
             treatment_threshold=0.5,
         )
 

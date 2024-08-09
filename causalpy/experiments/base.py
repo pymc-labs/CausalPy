@@ -17,8 +17,10 @@ Base class for quasi experimental designs.
 
 from abc import abstractmethod
 
+from sklearn.base import RegressorMixin
+
 from causalpy.pymc_models import PyMCModel
-from causalpy.skl_models import ScikitLearnModel
+from causalpy.skl_models import create_causalpy_compatible_class
 
 
 class BaseExperiment:
@@ -28,13 +30,18 @@ class BaseExperiment:
     supports_ols: bool
 
     def __init__(self, model=None):
+        # Ensure we've made any provided Scikit Learn model (as identified as being type
+        # RegressorMixin) compatible with CausalPy by appending our custom methods.
+        if isinstance(model, RegressorMixin):
+            model = create_causalpy_compatible_class(model)
+
         if model is not None:
             self.model = model
 
         if isinstance(self.model, PyMCModel) and not self.supports_bayes:
             raise ValueError("Bayesian models not supported.")
 
-        if isinstance(self.model, ScikitLearnModel) and not self.supports_ols:
+        if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
 
         if self.model is None:
@@ -57,7 +64,7 @@ class BaseExperiment:
         """
         if isinstance(self.model, PyMCModel):
             return self.bayesian_plot(*args, **kwargs)
-        elif isinstance(self.model, ScikitLearnModel):
+        elif isinstance(self.model, RegressorMixin):
             return self.ols_plot(*args, **kwargs)
         else:
             raise ValueError("Unsupported model type")

@@ -22,6 +22,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
+from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
     DataException,
@@ -29,7 +30,6 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
 from .base import BaseExperiment
@@ -126,7 +126,7 @@ class RegressionDiscontinuity(BaseExperiment):
             # fit the model to the observed (pre-intervention) data
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        elif isinstance(self.model, ScikitLearnModel):
+        elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")

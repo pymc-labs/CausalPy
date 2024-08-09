@@ -22,11 +22,11 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
+from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.skl_models import ScikitLearnModel
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -77,7 +77,7 @@ class PrePostFit(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
             self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
-        elif isinstance(self.model, ScikitLearnModel):
+        elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.pre_X, y=self.pre_y)
         else:
             raise ValueError("Model type not recognized")

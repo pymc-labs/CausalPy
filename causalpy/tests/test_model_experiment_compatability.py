@@ -13,7 +13,7 @@
 #   limitations under the License.
 """
 Test exceptions are raised when an experiment object is provided a model type (e.g.
-`PyMCModel` or `ScikitLearnModel`) that is not supported by the experiment object.
+`PyMCModel` or `ScikitLearnAdaptor`) that is not supported by the experiment object.
 """
 
 import numpy as np
@@ -22,9 +22,6 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-
-CustomLinearRegression = cp.create_causalpy_compatible_class(LinearRegression)
-
 
 # TODO: THE TWO FUNCTIONS BELOW ARE COPIED FROM causalpy/tests/test_regression_kink.py
 
@@ -56,7 +53,7 @@ def reg_kink_function(x, beta, kink):
     )
 
 
-# Test that a ValueError is raised when a ScikitLearnModel is provided to a RegressionKink object
+# Test that a ValueError is raised when a ScikitLearnAdaptor is provided to a RegressionKink object
 def test_olsmodel_and_regressionkink():
     """RegressionKink does not support OLS models, so a ValueError should be raised"""
 
@@ -66,12 +63,12 @@ def test_olsmodel_and_regressionkink():
         _ = cp.RegressionKink(
             df,
             formula=f"y ~ 1 + x + I((x-{kink})*treated)",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
             kink_point=kink,
         )
 
 
-# Test that a ValueError is raised when a ScikitLearnModel is provided to a InstrumentalVariable object
+# Test that a ValueError is raised when a ScikitLearnAdaptor is provided to a InstrumentalVariable object
 def test_olsmodel_and_iv():
     """InstrumentalVariable does not support OLS models, so a ValueError should be raised"""
 
@@ -86,11 +83,11 @@ def test_olsmodel_and_iv():
             data=data,
             instruments_formula=instruments_formula,
             formula=formula,
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
         )
 
 
-# Test that a ValueError is raised when a ScikitLearnModel is provided to a PrePostNEGD object
+# Test that a ValueError is raised when a ScikitLearnAdaptor is provided to a PrePostNEGD object
 def test_olsmodel_and_prepostnegd():
     """PrePostNEGD does not support OLS models, so a ValueError should be raised"""
 
@@ -101,11 +98,11 @@ def test_olsmodel_and_prepostnegd():
             formula="post ~ 1 + C(group) + pre",
             group_variable_name="group",
             pretreatment_variable_name="pre",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
         )
 
 
-# Test that a ValueError is raised when a ScikitLearnModel is provided to a InversePropensityWeighting object
+# Test that a ValueError is raised when a ScikitLearnAdaptor is provided to a InversePropensityWeighting object
 def test_olsmodel_and_ipw():
     """InversePropensityWeighting does not support OLS models, so a ValueError should be raised"""
 
@@ -116,5 +113,5 @@ def test_olsmodel_and_ipw():
             formula="trt ~ 1 + age + race",
             outcome_variable="outcome",
             weighting_scheme="robust",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
         )

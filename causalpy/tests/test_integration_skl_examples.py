@@ -20,9 +20,6 @@ from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-from causalpy.skl_models import ScikitLearnModel
-
-CustomLinearRegression = cp.create_causalpy_compatible_class(LinearRegression)
 
 
 @pytest.mark.integration
@@ -42,7 +39,7 @@ def test_did():
         group_variable_name="group",
         treated=1,
         untreated=0,
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
@@ -71,7 +68,7 @@ def test_rd_drinking():
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=21,
         epsilon=0.001,
     )
@@ -103,7 +100,7 @@ def test_its():
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.InterruptedTimeSeries)
@@ -165,7 +162,7 @@ def test_rd_linear_main_effects():
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
     )
@@ -191,7 +188,7 @@ def test_rd_linear_main_effects_bandwidth():
     result = cp.skl_experiments.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
         bandwidth=0.3,
@@ -217,7 +214,7 @@ def test_rd_linear_with_interaction():
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
-        model=CustomLinearRegression(),
+        model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
     )
@@ -238,18 +235,13 @@ def test_rd_linear_with_gaussian_process():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-
-    # create a custom GaussianProcessRegressor class by subclassing
-    # GaussianProcessRegressor and adding the ScikitLearnModel mixin
-    class CustomGaussianProcessRegressor(GaussianProcessRegressor, ScikitLearnModel):
-        pass
-
     data = cp.load_data("rd")
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
-        model=CustomGaussianProcessRegressor(kernel=kernel),
+        model=GaussianProcessRegressor(kernel=kernel),
+        model_kwargs={"kernel": kernel},
         treatment_threshold=0.5,
         epsilon=0.001,
     )
@@ -275,7 +267,7 @@ def test_did_deprecation_warning():
             group_variable_name="group",
             treated=1,
             untreated=0,
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
         )
         assert isinstance(result, cp.DifferenceInDifferences)
 
@@ -294,7 +286,7 @@ def test_its_deprecation_warning():
             df,
             treatment_time,
             formula="y ~ 1 + t + C(month)",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
         )
         assert isinstance(result, cp.InterruptedTimeSeries)
 
@@ -322,7 +314,7 @@ def test_rd_deprecation_warning():
         result = cp.skl_experiments.RegressionDiscontinuity(
             data,
             formula="y ~ 1 + x + treated",
-            model=CustomLinearRegression(),
+            model=LinearRegression(),
             treatment_threshold=0.5,
             epsilon=0.001,
         )
