@@ -185,7 +185,7 @@ def test_rd_linear_main_effects_bandwidth():
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
     data = cp.load_data("rd")
-    result = cp.skl_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=LinearRegression(),
