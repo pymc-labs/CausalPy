@@ -44,11 +44,15 @@ from .experiments.regression_kink import RegressionKink as NewRegressionKink
 
 # Ensure deprecation warnings are always shown in Jupyter Notebooks
 warnings.simplefilter("always", DeprecationWarning)
+RED = "\033[91m"
+RESET = "\033[0m"
 
 
 def PrePostNEGD(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.PrePostNEGD is deprecated and will be removed in a future release. Please use causalpy.experiments.PrePostNEGD instead.""",
+        f"""{RED}cp.pymc_experiments.PrePostNEGD is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.PrePostNEGD(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -57,7 +61,9 @@ def PrePostNEGD(*args, **kwargs):
 
 def DifferenceInDifferences(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
+        f"""{RED}cp.pymc_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.DifferenceInDifferences(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -66,7 +72,9 @@ def DifferenceInDifferences(*args, **kwargs):
 
 def InterruptedTimeSeries(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
+        f"""{RED}cp.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.InterruptedTimeSeries(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -75,7 +83,9 @@ def InterruptedTimeSeries(*args, **kwargs):
 
 def SyntheticControl(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
+        f"""{RED}cp.pymc_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.SyntheticControl(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -84,7 +94,9 @@ def SyntheticControl(*args, **kwargs):
 
 def RegressionKink(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.RegressionKink is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionKink instead.""",
+        f"""{RED}cp.pymc_experiments.RegressionKink is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.RegressionKink(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -93,7 +105,9 @@ def RegressionKink(*args, **kwargs):
 
 def RegressionDiscontinuity(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
+        f"""{RED}cp.pymc_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.RegressionDiscontinuity(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -102,7 +116,9 @@ def RegressionDiscontinuity(*args, **kwargs):
 
 def InversePropensityWeighting(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.InversePropensityWeighting is deprecated and will be removed in a future release. Please use causalpy.experiments.InversePropensityWeighting instead.""",
+        f"""{RED}cp.pymc_experiments.InversePropensityWeighting is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.InversePropensityWeighting(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -111,7 +127,9 @@ def InversePropensityWeighting(*args, **kwargs):
 
 def InstrumentalVariable(*args, **kwargs):
     warnings.warn(
-        """causalpy.pymc_experiments.InstrumentalVariable is deprecated and will be removed in a future release. Please use causalpy.experiments.InstrumentalVariable instead.""",
+        f"""{RED}cp.pymc_experiments.InstrumentalVariable is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.InstrumentalVariable(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
