@@ -40,6 +40,7 @@ copyright = f"2024, {author}"
 
 
 release = __version__
+version = release
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -132,49 +133,18 @@ myst_enable_extensions = [
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "pydata_sphinx_theme"
+html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
     "logo": {
-        "image_light": "_static/logo.png",
-        "image_dark": "_static/logo.png",
+        "image_light": "_static/flat_logo.png",
+        "image_dark": "_static/flat_logo_darkmode.png",
     },
-    "navbar_align": "right",
-    "navbar_start": ["navbar-logo", "navbar-name"],
-    "navbar_end": ["theme-switcher"],
-    "footer_start": ["copyright", "footer-links"],
-    "footer_end": ["sphinx-version", "theme-version"],
-    "github_url": "https://github.com/pymc-labs/CausalPy",
-    "twitter_url": "https://twitter.com/pymc_labs",
-    "icon_links": [
-        {
-            "name": "LinkedIn",
-            "url": "https://www.linkedin.com/company/pymc-labs/",
-            "icon": "fa-brands fa-linkedin",
-            "type": "fontawesome",
-        },
-        {
-            "name": "MeetUp",
-            "url": "https://www.meetup.com/pymc-labs-online-meetup/",
-            "icon": "fa-brands fa-meetup",
-            "type": "fontawesome",
-        },
-        {
-            "name": "YouTube",
-            "url": "https://www.youtube.com/c/PyMCLabs",
-            "icon": "fa-brands fa-youtube",
-            "type": "fontawesome",
-        },
-    ],
-    "use_edit_page_button": True,
-    "external_links": [
-        {"name": "About PyMC Labs", "url": "https://pymc-labs.io"},
-    ],
+    "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
 }
 html_context = {
     "github_user": "pymc-labs",
