@@ -36,11 +36,15 @@ from .experiments.regression_discontinuity import (
 
 # Ensure deprecation warnings are always shown in Jupyter Notebooks
 warnings.simplefilter("always", DeprecationWarning)
+RED = "\033[91m"
+RESET = "\033[0m"
 
 
 def SyntheticControl(*args, **kwargs):
     warnings.warn(
-        """causalpy.skl_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use causalpy.experiments.SyntheticControl instead.""",
+        f"""{RED}cp.pymc_experiments.SyntheticControl is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.SyntheticControl(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -49,7 +53,9 @@ def SyntheticControl(*args, **kwargs):
 
 def DifferenceInDifferences(*args, **kwargs):
     warnings.warn(
-        """causalpy.skl_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use causalpy.experiments.DifferenceInDifferences instead.""",
+        f"""{RED}cp.pymc_experiments.DifferenceInDifferences is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.DifferenceInDifferences(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -58,7 +64,9 @@ def DifferenceInDifferences(*args, **kwargs):
 
 def InterruptedTimeSeries(*args, **kwargs):
     warnings.warn(
-        """causalpy.skl_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use causalpy.experiments.InterruptedTimeSeries instead.""",
+        f"""{RED}cp.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.InterruptedTimeSeries(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -67,7 +75,9 @@ def InterruptedTimeSeries(*args, **kwargs):
 
 def RegressionDiscontinuity(*args, **kwargs):
     warnings.warn(
-        """causalpy.skl_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use causalpy.experiments.RegressionDiscontinuity instead.""",
+        f"""{RED}cp.pymc_experiments.RegressionDiscontinuity is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.RegressionDiscontinuity(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
