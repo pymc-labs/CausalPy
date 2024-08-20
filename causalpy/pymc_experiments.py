@@ -38,6 +38,7 @@ from causalpy.data_validation import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.utils import round_num
+from causalpy.pymc_rope import ROPE
 
 LEGEND_FONT_SIZE = 12
 az.style.use("arviz-darkgrid")
@@ -345,7 +346,7 @@ class PrePostFit(ExperimentalDesign, PrePostFitDataValidator):
         self.print_coefficients(round_to)
 
 
-class InterruptedTimeSeries(PrePostFit):
+class InterruptedTimeSeries(PrePostFit, ROPE):
     """
     A wrapper around PrePostFit class
 
@@ -385,7 +386,7 @@ class InterruptedTimeSeries(PrePostFit):
     expt_type = "Interrupted Time Series"
 
 
-class SyntheticControl(PrePostFit):
+class SyntheticControl(PrePostFit, ROPE):
     """A wrapper around the PrePostFit class
 
     :param data:
