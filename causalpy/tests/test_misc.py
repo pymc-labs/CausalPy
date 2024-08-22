@@ -17,8 +17,6 @@ Miscellaneous unit tests
 
 import causalpy as cp
 
-sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
-
 
 def test_regression_kink_gradient_change():
     """Test function to numerically calculate the change in gradient around the kink
