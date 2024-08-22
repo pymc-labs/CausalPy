@@ -21,6 +21,9 @@ import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
 
+from sklearn.linear_model import LinearRegression
+
+
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # DiD
@@ -40,7 +43,7 @@ def test_did_validation_post_treatment_formula():
     )
 
     with pytest.raises(FormulaException):
-        _ = cp.pymc_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_SOMETHING",
             time_variable_name="t",
@@ -49,13 +52,11 @@ def test_did_validation_post_treatment_formula():
         )
 
     with pytest.raises(FormulaException):
-        _ = cp.skl_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_SOMETHING",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -73,7 +74,7 @@ def test_did_validation_post_treatment_data():
     )
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
@@ -82,13 +83,11 @@ def test_did_validation_post_treatment_data():
         )
 
     with pytest.raises(DataException):
-        _ = cp.skl_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -106,7 +105,7 @@ def test_did_validation_unit_data():
     )
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
@@ -115,13 +114,11 @@ def test_did_validation_unit_data():
         )
 
     with pytest.raises(DataException):
-        _ = cp.skl_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -139,7 +136,7 @@ def test_did_validation_group_dummy_coded():
     )
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
@@ -148,13 +145,11 @@ def test_did_validation_group_dummy_coded():
         )
 
     with pytest.raises(DataException):
-        _ = cp.skl_experiments.DifferenceInDifferences(
+        _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
-            treated=1,
-            untreated=0,
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
@@ -168,7 +163,7 @@ def test_sc_input_error():
     with pytest.raises(BadIndexException):
         df = cp.load_data("sc")
         treatment_time = pd.to_datetime("2016 June 24")
-        _ = cp.pymc_experiments.SyntheticControl(
+        _ = cp.SyntheticControl(
             df,
             treatment_time,
             formula="actual ~ 0 + a + b + c + d + e + f + g",
@@ -178,7 +173,7 @@ def test_sc_input_error():
     with pytest.raises(BadIndexException):
         df = cp.load_data("sc")
         treatment_time = pd.to_datetime("2016 June 24")
-        _ = cp.skl_experiments.SyntheticControl(
+        _ = cp.SyntheticControl(
             df,
             treatment_time,
             formula="actual ~ 0 + a + b + c + d + e + f + g",
@@ -202,7 +197,7 @@ def test_sc_brexit_input_error():
         all_countries = list(all_countries)
         other_countries = list(other_countries)
         formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
-        _ = cp.pymc_experiments.SyntheticControl(
+        _ = cp.SyntheticControl(
             df,
             treatment_time,
             formula=formula,
@@ -224,7 +219,7 @@ def test_ancova_validation_2_levels():
     )
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.PrePostNEGD(
+        _ = cp.PrePostNEGD(
             df,
             formula="post ~ 1 + C(group) + pre",
             group_variable_name="group",
@@ -247,7 +242,7 @@ def test_rd_validation_treated_in_formula():
     )
 
     with pytest.raises(FormulaException):
-        _ = cp.pymc_experiments.RegressionDiscontinuity(
+        _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -255,9 +250,7 @@ def test_rd_validation_treated_in_formula():
         )
 
     with pytest.raises(FormulaException):
-        from sklearn.linear_model import LinearRegression
-
-        _ = cp.skl_experiments.RegressionDiscontinuity(
+        _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x",
             model=LinearRegression(),
@@ -276,17 +269,15 @@ def test_rd_validation_treated_is_dummy():
     )
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.RegressionDiscontinuity(
+        _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
             treatment_threshold=0.5,
         )
 
-    from sklearn.linear_model import LinearRegression
-
     with pytest.raises(DataException):
-        _ = cp.skl_experiments.RegressionDiscontinuity(
+        _ = cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated",
             model=LinearRegression(),
@@ -302,7 +293,7 @@ def test_iv_treatment_var_is_present():
     instruments_data = pd.DataFrame({"z": [1, 3, 4], "w": [2, 3, 4]})
 
     with pytest.raises(DataException):
-        _ = cp.pymc_experiments.InstrumentalVariable(
+        _ = cp.InstrumentalVariable(
             instruments_data=instruments_data,
             data=data,
             instruments_formula=instruments_formula,
@@ -347,7 +338,7 @@ def test_rkink_bandwidth_check():
     with pytest.raises(ValueError):
         kink = 0.5
         df = setup_regression_kink_data(kink)
-        _ = cp.pymc_experiments.RegressionKink(
+        _ = cp.RegressionKink(
             df,
             formula=f"y ~ 1 + x + I((x-{kink})*treated)",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -358,7 +349,7 @@ def test_rkink_bandwidth_check():
     with pytest.raises(ValueError):
         kink = 0.5
         df = setup_regression_kink_data(kink)
-        _ = cp.pymc_experiments.RegressionKink(
+        _ = cp.RegressionKink(
             df,
             formula=f"y ~ 1 + x + I((x-{kink})*treated)",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -372,7 +363,7 @@ def test_rkink_epsilon_check():
     with pytest.raises(ValueError):
         kink = 0.5
         df = setup_regression_kink_data(kink)
-        _ = cp.pymc_experiments.RegressionKink(
+        _ = cp.RegressionKink(
             df,
             formula=f"y ~ 1 + x + I((x-{kink})*treated)",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -383,7 +374,7 @@ def test_rkink_epsilon_check():
     with pytest.raises(ValueError):
         kink = 0.5
         df = setup_regression_kink_data(kink)
-        _ = cp.pymc_experiments.RegressionKink(
+        _ = cp.RegressionKink(
             df,
             formula=f"y ~ 1 + x + I((x-{kink})*treated)",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),

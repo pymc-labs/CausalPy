@@ -11,9 +11,11 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+import arviz as az
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib import pyplot as plt
 
 import causalpy as cp
 
@@ -32,7 +34,7 @@ def test_did():
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("did")
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
@@ -40,10 +42,13 @@ def test_did():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 # TODO: set up fixture for the banks dataset
@@ -87,7 +92,7 @@ def test_did_banks_simple():
     df_long["post_treatment"] = df_long.year >= treatment_time
     df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
 
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         # df_long[df_long.year.isin([1930, 1931])],
         df_long[df_long.year.isin([-0.5, 0.5])],
         formula="bib ~ 1 + district * post_treatment",
@@ -96,10 +101,13 @@ def test_did_banks_simple():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -140,7 +148,7 @@ def test_did_banks_multi():
     df_long["post_treatment"] = df_long.year >= treatment_time
     df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
 
-    result = cp.pymc_experiments.DifferenceInDifferences(
+    result = cp.DifferenceInDifferences(
         df_long,
         formula="bib ~ 1 + year + district + post_treatment + district:post_treatment",
         time_variable_name="year",
@@ -148,10 +156,13 @@ def test_did_banks_multi():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.DifferenceInDifferences)
+    assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -161,12 +172,12 @@ def test_rd():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("rd")
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -174,10 +185,13 @@ def test_rd():
         epsilon=0.001,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -187,12 +201,12 @@ def test_rd_bandwidth():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("rd")
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -201,10 +215,13 @@ def test_rd_bandwidth():
         bandwidth=0.3,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -214,7 +231,7 @@ def test_rd_drinking():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionDiscontinuity returns correct type
+    2. causalpy.RegressionDiscontinuity returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -223,7 +240,7 @@ def test_rd_drinking():
         .rename(columns={"agecell": "age"})
         .assign(treated=lambda df_: df_.age > 21)
     )
-    result = cp.pymc_experiments.RegressionDiscontinuity(
+    result = cp.RegressionDiscontinuity(
         df,
         formula="all ~ 1 + age + treated",
         running_variable_name="age",
@@ -231,10 +248,13 @@ def test_rd_drinking():
         treatment_threshold=21,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionDiscontinuity)
+    assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 def setup_regression_kink_data(kink):
@@ -271,23 +291,26 @@ def test_rkink():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionKink returns correct type
+    2. causalpy.RegressionKink returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     kink = 0.5
     df = setup_regression_kink_data(kink)
-    result = cp.pymc_experiments.RegressionKink(
+    result = cp.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionKink)
+    assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -297,13 +320,13 @@ def test_rkink_bandwidth():
 
     Generates synthetic data and checks:
     1. data is a dataframe
-    2. pymc_experiments.RegressionKink returns correct type
+    2. causalpy.RegressionKink returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     kink = 0.5
     df = setup_regression_kink_data(kink)
-    result = cp.pymc_experiments.RegressionKink(
+    result = cp.RegressionKink(
         df,
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -311,10 +334,13 @@ def test_rkink_bandwidth():
         bandwidth=0.3,
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.RegressionKink)
+    assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -324,7 +350,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -334,17 +360,23 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -354,7 +386,7 @@ def test_its_covid():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.InterruptedtimeSeries returns correct type
+    2. causalpy.InterruptedtimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -365,17 +397,23 @@ def test_its_covid():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2020-01-01")
-    result = cp.pymc_experiments.InterruptedTimeSeries(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.InterruptedTimeSeries)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -385,24 +423,38 @@ def test_sc():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
 
     df = cp.load_data("sc")
     treatment_time = 70
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="actual ~ 0 + a + b + c + d + e + f + g",
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+    fig, ax = result.plot(plot_predictors=True)
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -412,7 +464,7 @@ def test_sc_brexit():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -431,17 +483,24 @@ def test_sc_brexit():
     all_countries = list(all_countries)
     other_countries = list(other_countries)
     formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula=formula,
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -451,12 +510,12 @@ def test_ancova():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.PrePostNEGD returns correct type
+    2. causalpy.PrePostNEGD returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
     df = cp.load_data("anova1")
-    result = cp.pymc_experiments.PrePostNEGD(
+    result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
         group_variable_name="group",
@@ -464,10 +523,16 @@ def test_ancova():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.PrePostNEGD)
+    assert isinstance(result, cp.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -477,7 +542,7 @@ def test_geolift1():
 
     Loads data and checks:
     1. data is a dataframe
-    2. pymc_experiments.SyntheticControl returns correct type
+    2. causalpy.SyntheticControl returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
@@ -487,7 +552,7 @@ def test_geolift1():
         .set_index("time")
     )
     treatment_time = pd.to_datetime("2022-01-01")
-    result = cp.pymc_experiments.SyntheticControl(
+    result = cp.SyntheticControl(
         df,
         treatment_time,
         formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
@@ -495,10 +560,16 @@ def test_geolift1():
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.SyntheticControl)
+    assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
 
 
 @pytest.mark.integration
@@ -509,7 +580,7 @@ def test_iv_reg():
     instruments_data = df[["risk", "logmort0"]]
     data = df[["loggdp", "risk"]]
 
-    result = cp.pymc_experiments.InstrumentalVariable(
+    result = cp.InstrumentalVariable(
         instruments_data=instruments_data,
         data=data,
         instruments_formula=instruments_formula,
@@ -522,6 +593,174 @@ def test_iv_reg():
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
     assert isinstance(instruments_data, pd.DataFrame)
-    assert isinstance(result, cp.pymc_experiments.InstrumentalVariable)
+    assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+
+@pytest.mark.integration
+def test_inverse_prop():
+    """Test the InversePropensityWeighting class."""
+    df = cp.load_data("nhefs")
+    sample_kwargs = {
+        "tune": 100,
+        "draws": 500,
+        "chains": 2,
+        "cores": 2,
+        "random_seed": 100,
+    }
+    result = cp.InversePropensityWeighting(
+        df,
+        formula="trt ~ 1 + age + race",
+        outcome_variable="outcome",
+        weighting_scheme="robust",
+        model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
+    )
+    assert isinstance(result.idata, az.InferenceData)
+    ps = result.idata.posterior["p"].mean(dim=("chain", "draw"))
+    w1, w2, _, _ = result.make_doubly_robust_adjustment(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, nw = result.make_raw_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, n2 = result.make_robust_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    w1, w2, n1, n2 = result.make_overlap_adjustments(ps)
+    assert isinstance(w1, pd.Series)
+    assert isinstance(w2, pd.Series)
+    ate_list = result.get_ate(0, result.idata)
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="raw")
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="robust")
+    assert isinstance(ate_list, list)
+    ate_list = result.get_ate(0, result.idata, method="overlap")
+    assert isinstance(ate_list, list)
+    fig, axs = result.plot_ate(prop_draws=1, ate_draws=10)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(axs, list)
+    assert all(isinstance(ax, plt.Axes) for ax in axs)
+    fig, axs = result.plot_balance_ecdf("age")
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(axs, list)
+    assert all(isinstance(ax, plt.Axes) for ax in axs)
+
+
+# DEPRECATION WARNING TESTS ============================================================
+
+
+def test_did_deprecation_warning():
+    """Test that the old DifferenceInDifferences class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = cp.load_data("did")
+        result = cp.pymc_experiments.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+        assert isinstance(result, cp.DifferenceInDifferences)
+
+
+def test_rd_deprecation_warning():
+    """Test that the old RegressionDiscontinuity class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = cp.load_data("rd")
+        result = cp.pymc_experiments.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + bs(x, df=6) + treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=0.5,
+            epsilon=0.001,
+        )
+        assert isinstance(result, cp.RegressionDiscontinuity)
+
+
+def test_rk_deprecation_warning():
+    """Test that the old RegressionKink class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        kink = 0.5
+        df = setup_regression_kink_data(kink)
+        result = cp.pymc_experiments.RegressionKink(
+            df,
+            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            kink_point=kink,
+        )
+        assert isinstance(result, cp.RegressionKink)
+
+
+def test_its_deprecation_warning():
+    """Test that the old InterruptedTimeSeries class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = (
+            cp.load_data("its")
+            .assign(date=lambda x: pd.to_datetime(x["date"]))
+            .set_index("date")
+        )
+        treatment_time = pd.to_datetime("2017-01-01")
+        result = cp.pymc_experiments.InterruptedTimeSeries(
+            df,
+            treatment_time,
+            formula="y ~ 1 + t + C(month)",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+        assert isinstance(result, cp.InterruptedTimeSeries)
+
+
+def test_sc_deprecation_warning():
+    """Test that the old SyntheticControl class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = cp.load_data("sc")
+        treatment_time = 70
+        result = cp.pymc_experiments.SyntheticControl(
+            df,
+            treatment_time,
+            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+        )
+        assert isinstance(result, cp.SyntheticControl)
+
+
+def test_ancova_deprecation_warning():
+    """Test that the old PrePostNEGD class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = cp.load_data("anova1")
+        result = cp.pymc_experiments.PrePostNEGD(
+            df,
+            formula="post ~ 1 + C(group) + pre",
+            group_variable_name="group",
+            pretreatment_variable_name="pre",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+        assert isinstance(result, cp.PrePostNEGD)
+
+
+def test_iv_deprecation_warning():
+    """Test that the old InstrumentalVariable class raises a deprecation warning."""
+
+    with pytest.warns(DeprecationWarning):
+        df = cp.load_data("risk")
+        instruments_formula = "risk  ~ 1 + logmort0"
+        formula = "loggdp ~  1 + risk"
+        instruments_data = df[["risk", "logmort0"]]
+        data = df[["loggdp", "risk"]]
+        result = cp.pymc_experiments.InstrumentalVariable(
+            instruments_data=instruments_data,
+            data=data,
+            instruments_formula=instruments_formula,
+            formula=formula,
+            model=cp.pymc_models.InstrumentalVariableRegression(
+                sample_kwargs=sample_kwargs
+            ),
+        )
+        assert isinstance(result, cp.InstrumentalVariable)
