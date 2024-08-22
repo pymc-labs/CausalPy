@@ -17,6 +17,14 @@ sc_pymc_brexit.ipynb
 :::
 
 :::{toctree}
+:caption: Geographical lift testing
+:maxdepth: 1
+
+geolift1.ipynb
+multi_cell_geolift.ipynb
+:::
+
+:::{toctree}
 :caption: Difference in Differences
 :maxdepth: 1
 
