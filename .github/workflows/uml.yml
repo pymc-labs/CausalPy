@@ -27,6 +27,14 @@ jobs:
         with:
           python-version: "3.10"
 
+      - name: Echo the git status
+        run: |
+          git status
+
+      - name: Echo remotes
+        run: |
+          git remote -v
+
       - name: Configure Git Identity
         run: |
           git config user.name "$(git log -n 1 --pretty=format:%an)"
