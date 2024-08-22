@@ -2,16 +2,14 @@ name: Update the UML Diagrams
 
 on:
   pull_request:
+    types: [closed]
     branches: [main]
-    # paths:
-    #   - "causalpy/**"
-  push:
-    branches: [main]
-    # paths:
-    #   - "causalpy/**"
+    paths:
+      - "causalpy/**"
 
 jobs:
   build:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
@@ -21,19 +19,10 @@ jobs:
           ref: ${{ github.head_ref || 'main' }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: "3.10"
-
-      - name: Echo the git status
-        run: |
-          git status
-
-      - name: Echo remotes
-        run: |
-          git remote -v
 
       - name: Configure Git Identity
         run: |
