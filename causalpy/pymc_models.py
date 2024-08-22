@@ -20,27 +20,24 @@ import numpy as np
 import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
+import xarray as xr
 from arviz import r2_score
 
+from causalpy.utils import round_num
 
-class ModelBuilder(pm.Model):
-    """
-    This is a wrapper around pm.Model to give scikit-learn like API.
 
-    Public Methods
-    ---------------
-    - build_model: must be implemented by subclasses
-    - fit: populates idata attribute
-    - predict: returns predictions on new data
-    - score: returns Bayesian :math:`R^2`
+class PyMCModel(pm.Model):
+    """A wraper class for PyMC models. This provides a scikit-learn like interface with
+    methods like `fit`, `predict`, and `score`. It also provides other methods which are
+    useful for causal inference.
 
     Example
     -------
     >>> import causalpy as cp
     >>> import numpy as np
     >>> import pymc as pm
-    >>> from causalpy.pymc_models import ModelBuilder
-    >>> class MyToyModel(ModelBuilder):
+    >>> from causalpy.pymc_models import PyMCModel
+    >>> class MyToyModel(PyMCModel):
     ...     def build_model(self, X, y, coords):
     ...         with self:
     ...             X_ = pm.Data(name="X", value=X)
@@ -153,16 +150,88 @@ class ModelBuilder(pm.Model):
         # Note: First argument must be a 1D array
         return r2_score(y.flatten(), yhat)
 
-    # .stack(sample=("chain", "draw")
+    def calculate_impact(self, y_true, y_pred):
+        pre_data = xr.DataArray(y_true, dims=["obs_ind"])
+        impact = pre_data - y_pred["posterior_predictive"]["y_hat"]
+        return impact.transpose(..., "obs_ind")
+
+    def calculate_cumulative_impact(self, impact):
+        return impact.cumsum(dim="obs_ind")
+
+    def print_coefficients(self, labels, round_to=None) -> None:
+        def print_row(
+            max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
+        ) -> None:
+            """Print one row of the coefficient table"""
+            formatted_name = f"  {name: <{max_label_length}}"
+            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1-0.03).data, round_to)}]"  # noqa: E501
+            print(f"  {formatted_name}  {formatted_val}")
+
+        print("Model coefficients:")
+        coeffs = az.extract(self.idata.posterior, var_names="beta")
+
+        # Determine the width of the longest label
+        max_label_length = max(len(name) for name in labels + ["sigma"])
+
+        for name in labels:
+            coeff_samples = coeffs.sel(coeffs=name)
+            print_row(max_label_length, name, coeff_samples, round_to)
+
+        # Add coefficient for measurement std
+        coeff_samples = az.extract(self.idata.posterior, var_names="sigma")
+        name = "sigma"
+        print_row(max_label_length, name, coeff_samples, round_to)
 
 
-class WeightedSumFitter(ModelBuilder):
+class LinearRegression(PyMCModel):
     """
-    Used for synthetic control experiments
+    Custom PyMC model for linear regression.
 
-    .. note::
-        Generally, the `.fit()` method should be used rather than
-        calling `.build_model()` directly.
+    Defines the PyMC model
+
+    .. math::
+        \\beta &\sim \mathrm{Normal}(0, 50)
+
+        \sigma &\sim \mathrm{HalfNormal}(1)
+
+        \mu &= X * \\beta
+
+        y &\sim \mathrm{Normal}(\mu, \sigma)
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> from causalpy.pymc_models import LinearRegression
+    >>> rd = cp.load_data("rd")
+    >>> X = rd[["x", "treated"]]
+    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
+    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
+    >>> lr.fit(X, y, coords={
+    ...                 'coeffs': ['x', 'treated'],
+    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                },
+    ... )
+    Inference data...
+    """  # noqa: W605
+
+    def build_model(self, X, y, coords):
+        """
+        Defines the PyMC model
+        """
+        with self:
+            self.add_coords(coords)
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
+            beta = pm.Normal("beta", 0, 50, dims="coeffs")
+            sigma = pm.HalfNormal("sigma", 1)
+            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
+            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+
+
+class WeightedSumFitter(PyMCModel):
+    """
+    Used for synthetic control experiments.
 
     Defines the PyMC model:
 
@@ -209,57 +278,7 @@ class WeightedSumFitter(ModelBuilder):
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
 
 
-class LinearRegression(ModelBuilder):
-    """
-    Custom PyMC model for linear regression
-
-    .. note:
-        Generally, the `.fit()` method should be used rather than
-        calling `.build_model()` directly.
-
-    Defines the PyMC model
-
-    .. math::
-        \\beta &\sim \mathrm{Normal}(0, 50)
-
-        \sigma &\sim \mathrm{HalfNormal}(1)
-
-        \mu &= X * \\beta
-
-        y &\sim \mathrm{Normal}(\mu, \sigma)
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> import numpy as np
-    >>> from causalpy.pymc_models import LinearRegression
-    >>> rd = cp.load_data("rd")
-    >>> X = rd[["x", "treated"]]
-    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
-    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> lr.fit(X, y, coords={
-    ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_indx': np.arange(rd.shape[0])
-    ...                },
-    ... )
-    Inference data...
-    """  # noqa: W605
-
-    def build_model(self, X, y, coords):
-        """
-        Defines the PyMC model
-        """
-        with self:
-            self.add_coords(coords)
-            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y[:, 0], dims="obs_ind")
-            beta = pm.Normal("beta", 0, 50, dims="coeffs")
-            sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
-
-
-class InstrumentalVariableRegression(ModelBuilder):
+class InstrumentalVariableRegression(PyMCModel):
     """Custom PyMC model for instrumental linear regression
 
     Example
@@ -311,7 +330,6 @@ class InstrumentalVariableRegression(ModelBuilder):
                       sigmas of both regressions
                       :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
                       "eta": 2, "lkj_sd": 2}`
-
         """
 
         # --- Priors ---
@@ -404,7 +422,7 @@ class InstrumentalVariableRegression(ModelBuilder):
         return self.idata
 
 
-class PropensityScore(ModelBuilder):
+class PropensityScore(PyMCModel):
     """
     Custom PyMC model for inverse propensity score models
 
