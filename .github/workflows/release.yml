@@ -46,6 +46,8 @@ jobs:
           path: dist/*
   test:
     name: Upload to Test PyPI
+    permissions: 
+      id-token: write
     needs: [build]
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
@@ -57,8 +59,6 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip_existing: true
-          user: __token__
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository_url: https://test.pypi.org/legacy/
       - uses: actions/setup-python@v5
         with:
@@ -74,6 +74,9 @@ jobs:
           venv-test-pypi/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}'"
 
   publish:
+    environment: release
+    permissions: 
+      id-token: write
     name: Upload release to PyPI
     needs: [build, test]
     runs-on: ubuntu-latest
@@ -84,6 +87,3 @@ jobs:
           name: artifact
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
