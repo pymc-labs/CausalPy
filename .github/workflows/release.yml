@@ -47,7 +47,7 @@ jobs:
           path: dist/*
   test:
     name: Upload to Test PyPI
-    permissions: 
+    permissions:
       id-token: write
     needs: [build]
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
 
   publish:
     environment: release
-    permissions: 
+    permissions:
       id-token: write
     name: Upload release to PyPI
     needs: [build, test]
