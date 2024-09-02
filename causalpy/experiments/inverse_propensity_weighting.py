@@ -195,7 +195,7 @@ class InversePropensityWeighting(BaseExperiment):
         m1 = sk_lin_reg().fit(X[t == 1].astype(float), self.y[t == 1])
         m0_pred = m0.predict(X)
         m1_pred = m1.predict(X)
-        ## Compromise between outcome and treatement assignment model
+        ## Compromise between outcome and treatment assignment model
         weighted_outcome0 = (1 - t) * (self.y - m0_pred) / (1 - X["ps"]) + m0_pred
         weighted_outcome1 = t * (self.y - m1_pred) / X["ps"] + m1_pred
         return weighted_outcome0, weighted_outcome1, None, None
