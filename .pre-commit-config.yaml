@@ -46,6 +46,14 @@ repos:
     hooks:
       - id: codespell
         args: [
+            "-S",
+            "*.csv",
+            "-S",
+            "*.ipynb",
+            "-S",
+            "pyproject.toml",
+            "--ignore-words-list",
+            "\"nD,CACE\"",
             # Write changes in place
             "-w",
           ]

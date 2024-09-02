@@ -122,7 +122,3 @@ badge-format = "svg"
 extend-select = [
     "I", # isort
 ]
-
-[tool.codespell]
-skip = "*.csv,*.ipynb"
-ignore-words-list = "nD,CACE"
