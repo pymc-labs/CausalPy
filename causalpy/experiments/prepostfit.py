@@ -311,7 +311,7 @@ class InterruptedTimeSeries(PrePostFit):
     :param data:
         A pandas dataframe
     :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
+        The time when treatment occurred, should be in reference to the data index
     :param formula:
         A statistical model formula
     :param model:
@@ -352,7 +352,7 @@ class SyntheticControl(PrePostFit):
     :param data:
         A pandas dataframe
     :param treatment_time:
-        The time when treatment occured, should be in reference to the data index
+        The time when treatment occurred, should be in reference to the data index
     :param formula:
         A statistical model formula
     :param model:

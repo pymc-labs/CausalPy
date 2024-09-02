@@ -9,11 +9,11 @@ Glossary
 
    Average treatment effect
    ATE
-      The average treatement effect across all units.
+      The average treatment effect across all units.
 
    Average treatment effect on the treated
    ATT
-      The average effect of the treatment on the units that recieved it. Also called Treatment on the treated.
+      The average effect of the treatment on the units that received it. Also called Treatment on the treated.
 
    Change score analysis
       A statistical procedure where the outcome variable is the difference between the posttest and protest scores.
@@ -48,7 +48,7 @@ Glossary
 
    Local Average Treatment effect
    LATE
-      Also known asthe complier average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
+      Also known asthe compiler average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
 
    Non-equivalent group designs
    NEGD
@@ -76,7 +76,7 @@ Glossary
       Where units are assigned to conditions at random.
 
    Randomized experiment
-      An emprical comparison used to estimate the effects of treatments where units are assigned to treatment conditions randomly.
+      An empirical comparison used to estimate the effects of treatments where units are assigned to treatment conditions randomly.
 
    Regression discontinuity design
    RDD
@@ -96,7 +96,7 @@ Glossary
 
    Treatment on the treated effect
    TOT
-      The average effect of the treatment on the units that recieved it. Also called the average treatment effect on the treated (ATT).
+      The average effect of the treatment on the units that received it. Also called the average treatment effect on the treated (ATT).
 
    Treatment effect
       The difference in outcomes between what happened after a treatment is implemented and what would have happened (see Counterfactual) if the treatment had not been implemented, assuming everything else had been the same.

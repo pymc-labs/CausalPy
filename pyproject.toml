@@ -122,3 +122,6 @@ badge-format = "svg"
 extend-select = [
     "I", # isort
 ]
+
+[tools.codespell]
+ignore-words = ".codespell/ignore_words.txt"
