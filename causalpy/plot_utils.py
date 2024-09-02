@@ -73,7 +73,7 @@ def plot_xY(
         ax=ax,
         **plot_hdi_kwargs,
     )
-    # Return handle to patch. We get a list of the childen of the axis. Filter for just
+    # Return handle to patch. We get a list of the children of the axis. Filter for just
     # the PolyCollection objects. Take the last one.
     h_patch = list(
         filter(lambda x: isinstance(x, PolyCollection), ax_hdi.get_children())

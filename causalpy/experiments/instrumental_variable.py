@@ -44,7 +44,7 @@ class InstrumentalVariable(BaseExperiment):
     :param model: A PyMC model
     :param priors: An optional dictionary of priors for the
                    mus and sigmas of both regressions. If priors are not
-                   specified we will substitue MLE estimates for the beta
+                   specified we will substitute MLE estimates for the beta
                    coefficients. Greater control can be achieved
                    by specifying the priors directly e.g. priors = {
                                     "mus": [0, 0],

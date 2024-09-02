@@ -142,7 +142,7 @@ seeds = [1234, 42, 123456789]
 @pytest.mark.parametrize("seed", seeds)
 def test_result_reproducibility(seed):
     """Test that we can reproduce the results from the model. We could in theory test
-    this with all the model and experiment types, but what is being targetted is
+    this with all the model and experiment types, but what is being targeted is
     the PyMCModel.fit method, so we should be safe testing with just one model. Here
     we use the DifferenceInDifferences experiment class."""
     # Load the data

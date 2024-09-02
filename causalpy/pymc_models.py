@@ -27,7 +27,7 @@ from causalpy.utils import round_num
 
 
 class PyMCModel(pm.Model):
-    """A wraper class for PyMC models. This provides a scikit-learn like interface with
+    """A wrapper class for PyMC models. This provides a scikit-learn like interface with
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
     useful for causal inference.
 

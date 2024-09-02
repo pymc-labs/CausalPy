@@ -41,3 +41,14 @@ repos:
         # needed to make excludes in pyproject.toml work
         # see here https://github.com/econchick/interrogate/issues/60#issuecomment-735436566
         pass_filenames: false
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.5
+    hooks:
+      - id: codespell
+        args: [
+            # Write changes in place
+            "-w",
+          ]
+        additional_dependencies:
+          # Support pyproject.toml configuration
+          - tomli
