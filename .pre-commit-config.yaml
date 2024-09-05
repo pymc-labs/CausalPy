@@ -25,7 +25,7 @@ repos:
         exclude: &exclude_pattern 'iv_weak_instruments.ipynb'
         args: ["--maxkb=1500"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.2
+    rev: v0.6.3
     hooks:
       # Run the linter
       - id: ruff
@@ -41,6 +41,16 @@ repos:
         # needed to make excludes in pyproject.toml work
         # see here https://github.com/econchick/interrogate/issues/60#issuecomment-735436566
         pass_filenames: false
+  - repo: local
+    hooks:
+      - id: convert-notebooks
+        name: Convert Notebooks to Markdown
+        entry: python ./.codespell/notebook_to_markdown.py
+        language: python
+        pass_filenames: false
+        always_run: false
+        additional_dependencies: ["nbconvert", "nbformat"]
+        args: ["--tempdir", "tmp_markdown"]
   - repo: https://github.com/codespell-project/codespell
     rev: v2.3.0
     hooks:
@@ -49,13 +59,21 @@ repos:
             "-S",
             "*.csv",
             "-S",
-            "*.ipynb",
-            "-S",
             "pyproject.toml",
-            "--ignore-words=.codespell-whitelist.txt",
-            # Write changes in place
-            "-w",
+            "-S",
+            "*.svg",
+            "-S",
+            "*.ipynb",
+            "--ignore-words=./.codespell/codespell-whitelist.txt",
           ]
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  - repo: local
+    hooks:
+      - id: remove-temp-directory-notebooks
+        name: Remove temporary directory for codespell
+        entry: bash -c 'rm -rf tmp_markdown && exit 0'
+        language: system
+        always_run: true
+        pass_filenames: false
