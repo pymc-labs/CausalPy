@@ -45,7 +45,7 @@ repos:
     hooks:
       - id: convert-notebooks
         name: Convert Notebooks to Markdown
-        entry: python ./.codespell/notebook_to_markdown.py
+        entry: python ./docs/source/.codespell/notebook_to_markdown.py
         language: python
         pass_filenames: false
         always_run: false
@@ -64,7 +64,7 @@ repos:
             "*.svg",
             "-S",
             "*.ipynb",
-            "--ignore-words=./.codespell/codespell-whitelist.txt",
+            "--ignore-words=./docs/source/.codespell/codespell-whitelist.txt",
           ]
         additional_dependencies:
           # Support pyproject.toml configuration
