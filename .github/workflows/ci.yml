@@ -25,6 +25,8 @@ jobs:
         run: pip install -e .[test]
       - name: Run doctests
         run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
+      - name: Run extra tests
+        run: pytest docs/source/.codespell/test_notebook_to_markdown.py
       - name: Run tests
         run: pytest --cov-report=xml --no-cov-on-fail
       - name: Upload coverage to Codecov
