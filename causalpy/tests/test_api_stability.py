@@ -22,6 +22,8 @@ import causalpy as cp
 from causalpy.experiments.prepostfit import SyntheticControl
 from causalpy.pymc_models import WeightedSumFitter
 
+sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
+
 
 def test_causal_inference_and_discovery_with_python_example():
     """Test example used in Alexander Molak's book 'Causal Inference and Discovery in Python'
@@ -33,7 +35,7 @@ def test_causal_inference_and_discovery_with_python_example():
     treatment_index = pd.to_datetime("2022-10-28")
 
     # Build the model
-    model = cp.pymc_models.WeightedSumFitter()
+    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
     assert isinstance(
         model, WeightedSumFitter
     ), "model is not an instance of WeightedSumFitter"
