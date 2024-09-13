@@ -29,6 +29,10 @@ jobs:
         run: pytest docs/source/.codespell/test_notebook_to_markdown.py
       - name: Run tests
         run: pytest --cov-report=xml --no-cov-on-fail
+      - name: Check codespell for notebooks
+        run: |
+          python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
+          codespell
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:

@@ -49,7 +49,7 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell"]
+dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell", "nbformat", "nbconvert"]
 docs = [
     "ipykernel",
     "daft",
@@ -69,7 +69,7 @@ docs = [
     "sphinx-design",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
 
 [metadata]
 description-file = 'README.md'
