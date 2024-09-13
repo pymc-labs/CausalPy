@@ -45,17 +45,6 @@ repos:
     rev: v2.3.0
     hooks:
       - id: codespell
-        args: [
-            "-S",
-            "*.csv",
-            "-S",
-            "*.ipynb",
-            "-S",
-            "pyproject.toml",
-            "--ignore-words=.codespell-whitelist.txt",
-            # Write changes in place
-            "-w",
-          ]
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli

@@ -48,7 +48,7 @@ Glossary
 
    Local Average Treatment effect
    LATE
-      Also known asthe compiler average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
+      Also known as the complier average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
 
    Non-equivalent group designs
    NEGD

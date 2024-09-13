@@ -49,7 +49,7 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = ["pathlib", "pre-commit", "twine", "interrogate"]
+dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell"]
 docs = [
     "ipykernel",
     "daft",
@@ -123,5 +123,6 @@ extend-select = [
     "I", # isort
 ]
 
-[tools.codespell]
-ignore-words = ".codespell/ignore_words.txt"
+[tool.codespell]
+ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
+skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
