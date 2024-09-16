@@ -34,12 +34,10 @@ twine = "*"
 daft = "*"
 ipykernel = "*"
 ipywidgets = "*"
-labs-sphinx-theme = "*"
 linkify-it-py = "*"
 myst-nb = "!=1.1.0"
 pathlib = "*"
 sphinx = "*"
-sphinx-autodoc-defaultargs = "*"
 sphinx-autodoc-typehints = "*"
 sphinx-copybutton = "*"
 sphinx-design = "*"
@@ -47,6 +45,10 @@ sphinx-notfound-page = "*"
 sphinx-rtd-theme = "*"
 sphinxcontrib-bibtex = "*"
 statsmodels = "*"
+
+[feature.docs.pypi-dependencies]
+labs-sphinx-theme = "*"
+sphinx-autodoc-defaultargs = "*"
 
 [feature.lint.dependencies]
 interrogate = "*"
