@@ -55,9 +55,15 @@ interrogate = "*"
 pre-commit = "*"
 ruff = "*"
 
+[feature.jupyter.dependencies]
+jupyterlab = "*"
+
+[tasks]
+init-jupyter-kernel = "python -m ipykernel install --user --name causalpy --display-name 'CausalPy (pixi)'"
+
 [environments]
 # Redefine the default environment to include all categories.
-default = ["dev", "docs", "lint"]
+default = ["dev", "docs", "lint", "jupyter"]
 # Define a minimal environment with only the default feature.
 minimal = []
 # Create an environment for each feature.
