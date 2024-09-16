@@ -291,7 +291,7 @@ def generate_ancova_data(
     N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
 ):
     """
-    Generate ANCOVA eample data
+    Generate ANCOVA example data
 
     Example
     --------
@@ -440,7 +440,7 @@ def generate_seasonality(n=12, amplitude=1, length_scale=0.5):
 
 
 def periodic_kernel(x1, x2, period=1, length_scale=1, amplitude=1):
-    """Generate a periodic kernal for gaussian process"""
+    """Generate a periodic kernel for gaussian process"""
     return amplitude**2 * np.exp(
         -2 * np.sin(np.pi * np.abs(x1 - x2) / period) ** 2 / length_scale**2
     )
