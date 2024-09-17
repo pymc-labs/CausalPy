@@ -184,7 +184,7 @@ class PyMCModel(pm.Model):
 
 
 class LinearRegression(PyMCModel):
-    """
+    r"""
     Custom PyMC model for linear regression.
 
     Defines the PyMC model
@@ -230,7 +230,7 @@ class LinearRegression(PyMCModel):
 
 
 class WeightedSumFitter(PyMCModel):
-    """
+    r"""
     Used for synthetic control experiments.
 
     Defines the PyMC model:
@@ -423,7 +423,7 @@ class InstrumentalVariableRegression(PyMCModel):
 
 
 class PropensityScore(PyMCModel):
-    """
+    r"""
     Custom PyMC model for inverse propensity score models
 
     .. note:
