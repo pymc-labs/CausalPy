@@ -190,11 +190,11 @@ class LinearRegression(PyMCModel):
     Defines the PyMC model
 
     .. math::
-        \\beta &\sim \mathrm{Normal}(0, 50)
+        \beta &\sim \mathrm{Normal}(0, 50)
 
         \sigma &\sim \mathrm{HalfNormal}(1)
 
-        \mu &= X * \\beta
+        \mu &= X * \beta
 
         y &\sim \mathrm{Normal}(\mu, \sigma)
 
@@ -239,9 +239,9 @@ class WeightedSumFitter(PyMCModel):
 
         \sigma &\sim \mathrm{HalfNormal}(1)
 
-        \\beta &\sim \mathrm{Dirichlet}(1,...,1)
+        \beta &\sim \mathrm{Dirichlet}(1,...,1)
 
-        \mu &= X * \\beta
+        \mu &= X * \beta
 
         y &\sim \mathrm{Normal}(\mu, \sigma)
 
@@ -433,11 +433,11 @@ class PropensityScore(PyMCModel):
     Defines the PyMC model
 
     .. math::
-        \\beta &\sim \mathrm{Normal}(0, 1)
+        \beta &\sim \mathrm{Normal}(0, 1)
 
         \sigma &\sim \mathrm{HalfNormal}(1)
 
-        \mu &= X * \\beta
+        \mu &= X * \beta
 
         p &= logit^{-1}(mu)
 
