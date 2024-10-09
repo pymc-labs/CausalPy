@@ -184,19 +184,16 @@ class PyMCModel(pm.Model):
 
 
 class LinearRegression(PyMCModel):
-    """
+    r"""
     Custom PyMC model for linear regression.
 
     Defines the PyMC model
 
     .. math::
-        \\beta &\sim \mathrm{Normal}(0, 50)
-
-        \sigma &\sim \mathrm{HalfNormal}(1)
-
-        \mu &= X * \\beta
-
-        y &\sim \mathrm{Normal}(\mu, \sigma)
+        \beta &\sim \mathrm{Normal}(0, 50) \\
+        \sigma &\sim \mathrm{HalfNormal}(1) \\
+        \mu &= X \cdot \beta \\
+        y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
     Example
     --------
@@ -230,20 +227,16 @@ class LinearRegression(PyMCModel):
 
 
 class WeightedSumFitter(PyMCModel):
-    """
+    r"""
     Used for synthetic control experiments.
 
     Defines the PyMC model:
 
     .. math::
-
-        \sigma &\sim \mathrm{HalfNormal}(1)
-
-        \\beta &\sim \mathrm{Dirichlet}(1,...,1)
-
-        \mu &= X * \\beta
-
-        y &\sim \mathrm{Normal}(\mu, \sigma)
+        \sigma &\sim \mathrm{HalfNormal}(1) \\
+        \beta &\sim \mathrm{Dirichlet}(1,...,1) \\
+        \mu &= X \cdot \beta \\
+        y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
     Example
     --------
@@ -423,7 +416,7 @@ class InstrumentalVariableRegression(PyMCModel):
 
 
 class PropensityScore(PyMCModel):
-    """
+    r"""
     Custom PyMC model for inverse propensity score models
 
     .. note:
@@ -433,14 +426,10 @@ class PropensityScore(PyMCModel):
     Defines the PyMC model
 
     .. math::
-        \\beta &\sim \mathrm{Normal}(0, 1)
-
-        \sigma &\sim \mathrm{HalfNormal}(1)
-
-        \mu &= X * \\beta
-
-        p &= logit^{-1}(mu)
-
+        \beta &\sim \mathrm{Normal}(0, 1) \\
+        \sigma &\sim \mathrm{HalfNormal}(1) \\
+        \mu &= X \cdot \beta \\
+        p &= \text{logit}^{-1}(\mu) \\
         t &\sim \mathrm{Bernoulli}(p)
 
     Example
