@@ -88,56 +88,19 @@ Alternatively, if you want the very latest version of the package you can instal
 </div>
 
 ## Features
+CausalPy has a broad range of quasi-experimental methods for causal inference:
 
-Rather than focussing on one particular quasi-experimental setting, this package aims to have broad applicability. We can analyse data from the following quasi-experimental methods:
-
-### Synthetic control
-
-This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
-
-![Synthetic Control](./_static/synthetic_control_pymc.svg)
-
-### Geographical Lift / Geolift
-We can also use synthetic control methods to analyse data from geographical lift studies. For example, we can try to evaluate the causal impact of an intervention (e.g. a marketing campaign) run in one geographical area by using control geographical areas which are similar to the intervention area but which did not receive the specific marketing intervention.
-
-### ANCOVA
-
-This is appropriate when you have a single pre and post intervention measurement and have a treament and a control group.
-
-![Synthetic Control](./_static/anova_pymc.svg)
-
-### Difference in differences
-
-This is appropriate when you have pre and post intervention measurement(s) and have a treament and a control group.
-
-![Synthetic Control](./_static/difference_in_differences_pymc.svg)
-
-### Regression discontinuity
-
-Regression discontinuity designs are used when treatment is applied to units according to a cutoff on a running variable, which is typically not time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
-
-![Synthetic Control](./_static/regression_discontinuity_pymc.svg)
-
-### Regression kink designs
-
-Regression kink designs are used when there is a change in the level of treatment at a "kink point" on a running variable, which is typically not time. By looking for the presence of a discontinuity in the gradient at the kink point then we can make causal claims about the potential impact of changes in the treatment.
-
-![Synthetic Control](./_static/regression_kink_pymc.svg)
-
-### Interrupted time series
-Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time.
-
-![Synthetic Control](./_static/interrupted_time_series_pymc.svg)
-
-### Instrumental Variable Regression
-Instrumental Variable regression is an appropriate technique when you wish to estimate the treatment effect of some variable on another, but are concerned that the treatment variable is endogenous in the system of interest i.e. correlated with the errors. In this case an "instrument" variable can be used in a regression context to disentangle treatment effect due to the threat of confounding due to endogeneity.
-
-![Synthetic Control](./_static/iv_reg2.png)
-
-### Inverse Propensity Score Weighting
-Inverse Propensity Score Weighting is a technique used to correct selection effects in observational data by re-weighting observations to better reflect an as-if random allocation to treatment status. This helps recover unbiased causal effect estimates.
-
-![Synthetic Control](./_static/propensity_weight.png)
+| Method	| Description |
+|-|-|
+| Synthetic control | Constructs a synthetic version of the treatment group from a weighted combination of control units. Used for causal inference in comparative case studies when a single unit is treated, and there are multiple control units.|
+| Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
+| ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
+| Differences in Differences | Compares the changes in outcomes over time between a treatment group and a control group. Used in observational studies to estimate causal effects by accounting for time trends. |
+| Regression discontinuity | Identifies causal effects by exploiting a cutoff or threshold in an assignment variable. Used when treatment is assigned based on a threshold value of an observed variable, allowing comparison just above and below the cutoff. |
+| Regression kink designs | Focuses on changes in the slope (kinks) of the relationship between variables rather than jumps at cutoff points. Used to identify causal effects when treatment intensity changes at a threshold. |
+| Interrupted time series | Analyzes the effect of an intervention by comparing time series data before and after the intervention. Used when data is collected over time and an intervention occurs at a known point, allowing assessment of changes in level or trend. |
+| Instrumental variable regression | Addresses endogeneity by using an instrument variable that is correlated with the endogenous explanatory variable but uncorrelated with the error term. Used when explanatory variables are correlated with the error term, providing consistent estimates of causal effects. |
+| Inverse Propensity Score Weighting | Weights observations by the inverse of the probability of receiving the treatment. Used in causal inference to create a synthetic sample where the treatment assignment is independent of measured covariates, helping to adjust for confounding variables in observational studies. |
 
 ## Support
 
