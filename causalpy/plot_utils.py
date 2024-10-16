@@ -24,6 +24,7 @@ import pandas as pd
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
+from sklearn.base import RegressorMixin
 
 
 def plot_xY(
@@ -79,3 +80,53 @@ def plot_xY(
         filter(lambda x: isinstance(x, PolyCollection), ax_hdi.get_children())
     )[-1]
     return (h_line, h_patch)
+
+
+def export_prepostfit_data(result):
+    """
+    Utility function to recover the data of a PrePostFit experiment along with prediction and causal impact information.
+
+    :param result:
+        The result of a PrePostFit experiment
+    """
+
+    from causalpy.experiments.prepostfit import PrePostFit
+    from causalpy.pymc_models import PyMCModel
+
+    if isinstance(result, PrePostFit):
+        pre_data = result.datapre.copy()
+        post_data = result.datapost.copy()
+
+        if isinstance(result.model, PyMCModel):
+            pre_data["prediction"] = (
+                az.extract(
+                    result.pre_pred, group="posterior_predictive", var_names="mu"
+                )
+                .mean("sample")
+                .values
+            )
+            post_data["prediction"] = (
+                az.extract(
+                    result.post_pred, group="posterior_predictive", var_names="mu"
+                )
+                .mean("sample")
+                .values
+            )
+            pre_data["impact"] = result.pre_impact.mean(dim=["chain", "draw"]).values
+            post_data["impact"] = result.post_impact.mean(dim=["chain", "draw"]).values
+
+        elif isinstance(result.model, RegressorMixin):
+            pre_data["prediction"] = result.pre_pred
+            post_data["prediction"] = result.post_pred
+            pre_data["impact"] = result.pre_impact
+            post_data["impact"] = result.post_impact
+
+        else:
+            raise ValueError("Other model types are not supported")
+
+        ppf_data = pd.concat([pre_data, post_data])
+
+    else:
+        raise ValueError("Other experiments are not supported")
+
+    return ppf_data
