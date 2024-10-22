@@ -303,6 +303,63 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
+    def get_plot_data(self) -> pd.DataFrame:
+        """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+
+        Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
+        depending on the model type.
+        """
+        if isinstance(self.model, PyMCModel):
+            return self.get_plot_data_bayesian()
+        elif isinstance(self.model, RegressorMixin):
+            return self.get_plot_data_ols()
+        else:
+            raise ValueError("Unsupported model type")
+
+    def get_plot_data_bayesian(self) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """
+        if isinstance(self.model, PyMCModel):
+            pre_data = self.datapre.copy()
+            post_data = self.datapost.copy()
+            pre_data["prediction"] = (
+                az.extract(
+                    self.pre_pred, group="posterior_predictive", var_names="mu"
+                )
+                .mean("sample")
+                .values
+            )
+            post_data["prediction"] = (
+                az.extract(
+                    self.post_pred, group="posterior_predictive", var_names="mu"
+                )
+                .mean("sample")
+                .values
+            )
+            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
+            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
+            
+            self.data_plot = pd.concat([pre_data, post_data])
+
+            return self.data_plot
+        else:
+            raise ValueError("Unsupported model type")
+    
+    def get_plot_data_ols(self) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+        pre_data["prediction"] = self.pre_pred
+        post_data["prediction"] = self.post_pred
+        pre_data["impact"] = self.pre_impact
+        post_data["impact"] = self.post_impact
+        self.data_plot = pd.concat([pre_data, post_data])
+
+        return self.data_plot
+
 
 class InterruptedTimeSeries(PrePostFit):
     """
