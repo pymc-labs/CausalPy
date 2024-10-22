@@ -82,9 +82,9 @@ def plot_xY(
     return (h_line, h_patch)
 
 
-def export_prepostfit_data(result):
+def get_prepostfit_data(result) -> pd.DataFrame:
     """
-    Utility function to recover the data of a PrePostFit experiment along with prediction and causal impact information.
+    Utility function to recover the data of a PrePostFit experiment along with the prediction and causal impact information.
 
     :param result:
         The result of a PrePostFit experiment
