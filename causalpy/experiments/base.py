@@ -17,6 +17,7 @@ Base class for quasi experimental designs.
 
 from abc import abstractmethod
 
+import pandas as pd
 from sklearn.base import RegressorMixin
 
 from causalpy.pymc_models import PyMCModel
@@ -78,3 +79,26 @@ class BaseExperiment:
     def ols_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
         raise NotImplementedError("ols_plot method not yet implemented")
+
+    def get_plot_data(self) -> pd.DataFrame:
+        """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+
+        Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
+        depending on the model type.
+        """
+        if isinstance(self.model, PyMCModel):
+            return self.get_plot_data_bayesian()
+        elif isinstance(self.model, RegressorMixin):
+            return self.get_plot_data_ols()
+        else:
+            raise ValueError("Unsupported model type")
+
+    @abstractmethod
+    def get_plot_data_bayesian(self):
+        """Abstract method for recovering plot data."""
+        raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
+
+    @abstractmethod
+    def get_plot_data_ols(self):
+        """Abstract method for recovering plot data."""
+        raise NotImplementedError("get_plot_data_ols method not yet implemented")
