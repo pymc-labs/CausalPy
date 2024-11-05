@@ -303,18 +303,18 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data(self) -> pd.DataFrame:
-        """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+    # def get_plot_data(self) -> pd.DataFrame:
+    #     """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
 
-        Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
-        depending on the model type.
-        """
-        if isinstance(self.model, PyMCModel):
-            return self.get_plot_data_bayesian()
-        elif isinstance(self.model, RegressorMixin):
-            return self.get_plot_data_ols()
-        else:
-            raise ValueError("Unsupported model type")
+    #     Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
+    #     depending on the model type.
+    #     """
+    #     if isinstance(self.model, PyMCModel):
+    #         return self.get_plot_data_bayesian()
+    #     elif isinstance(self.model, RegressorMixin):
+    #         return self.get_plot_data_ols()
+    #     else:
+    #         raise ValueError("Unsupported model type")
 
     def get_plot_data_bayesian(self) -> pd.DataFrame:
         """
@@ -323,29 +323,42 @@ class PrePostFit(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
+            # PREDICTIONS
             pre_data["prediction"] = (
-                az.extract(
-                    self.pre_pred, group="posterior_predictive", var_names="mu"
-                )
+                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
                 .values
             )
             post_data["prediction"] = (
-                az.extract(
-                    self.post_pred, group="posterior_predictive", var_names="mu"
-                )
+                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
                 .values
             )
+            # HDI
+            pre_hdi = (
+                az.hdi(self.pre_pred["posterior_predictive"].mu, hdi_prob=0.94)
+                .to_dataframe()
+                .unstack(level="hdi")
+                .droplevel(0, axis=1)
+            )
+            post_hdi = (
+                az.hdi(self.post_pred["posterior_predictive"].mu, hdi_prob=0.94)
+                .to_dataframe()
+                .unstack(level="hdi")
+                .droplevel(0, axis=1)
+            )
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = pre_hdi
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = post_hdi
+            # IMPACT
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            
+
             self.data_plot = pd.concat([pre_data, post_data])
 
             return self.data_plot
         else:
             raise ValueError("Unsupported model type")
-    
+
     def get_plot_data_ols(self) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
