@@ -310,6 +310,7 @@ class PrePostFit(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
+            # PREDICTIONS
             pre_data["prediction"] = (
                 az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
