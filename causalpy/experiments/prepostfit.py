@@ -25,7 +25,7 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import plot_xY, get_hdi_to_df
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -303,19 +303,6 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    # def get_plot_data(self) -> pd.DataFrame:
-    #     """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
-
-    #     Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
-    #     depending on the model type.
-    #     """
-    #     if isinstance(self.model, PyMCModel):
-    #         return self.get_plot_data_bayesian()
-    #     elif isinstance(self.model, RegressorMixin):
-    #         return self.get_plot_data_ols()
-    #     else:
-    #         raise ValueError("Unsupported model type")
-
     def get_plot_data_bayesian(self) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
@@ -335,23 +322,14 @@ class PrePostFit(BaseExperiment):
                 .values
             )
             # HDI
-            pre_hdi = (
-                az.hdi(self.pre_pred["posterior_predictive"].mu, hdi_prob=0.94)
-                .to_dataframe()
-                .unstack(level="hdi")
-                .droplevel(0, axis=1)
-            )
-            post_hdi = (
-                az.hdi(self.post_pred["posterior_predictive"].mu, hdi_prob=0.94)
-                .to_dataframe()
-                .unstack(level="hdi")
-                .droplevel(0, axis=1)
-            )
-            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = pre_hdi
-            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = post_hdi
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu)
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu)
             # IMPACT
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
+            # HDI IMPACT
+            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact)
+            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact)
 
             self.data_plot = pd.concat([pre_data, post_data])
 
