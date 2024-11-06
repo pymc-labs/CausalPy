@@ -82,51 +82,22 @@ def plot_xY(
     return (h_line, h_patch)
 
 
-def get_prepostfit_data(result) -> pd.DataFrame:
+def get_hdi_to_df(
+    x: xr.DataArray,
+    hdi_prob: float = 0.94,
+) -> pd.DataFrame:
     """
-    Utility function to recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+    Utility function to calculate and recover HDI intervals.
 
-    :param result:
-        The result of a PrePostFit experiment
+    :param x:
+        Xarray data array
+    :param hdi_prob:
+        The size of the HDI, default is 0.94
     """
-
-    from causalpy.experiments.prepostfit import PrePostFit
-    from causalpy.pymc_models import PyMCModel
-
-    if isinstance(result, PrePostFit):
-        pre_data = result.datapre.copy()
-        post_data = result.datapost.copy()
-
-        if isinstance(result.model, PyMCModel):
-            pre_data["prediction"] = (
-                az.extract(
-                    result.pre_pred, group="posterior_predictive", var_names="mu"
-                )
-                .mean("sample")
-                .values
+    hdi = (
+            az.hdi(x, hdi_prob=hdi_prob)
+            .to_dataframe()
+            .unstack(level="hdi")
+            .droplevel(0, axis=1)
             )
-            post_data["prediction"] = (
-                az.extract(
-                    result.post_pred, group="posterior_predictive", var_names="mu"
-                )
-                .mean("sample")
-                .values
-            )
-            pre_data["impact"] = result.pre_impact.mean(dim=["chain", "draw"]).values
-            post_data["impact"] = result.post_impact.mean(dim=["chain", "draw"]).values
-
-        elif isinstance(result.model, RegressorMixin):
-            pre_data["prediction"] = result.pre_pred
-            post_data["prediction"] = result.post_pred
-            pre_data["impact"] = result.pre_impact
-            post_data["impact"] = result.post_impact
-
-        else:
-            raise ValueError("Other model types are not supported")
-
-        ppf_data = pd.concat([pre_data, post_data])
-
-    else:
-        raise ValueError("Other experiments are not supported")
-
-    return ppf_data
+    return hdi
