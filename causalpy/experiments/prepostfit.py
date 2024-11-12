@@ -303,14 +303,14 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob=0.94) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
         if isinstance(self.model, PyMCModel):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
-            # PREDICTIONS
+
             pre_data["prediction"] = (
                 az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
@@ -321,15 +321,13 @@ class PrePostFit(BaseExperiment):
                 .mean("sample")
                 .values
             )
-            # HDI
-            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu)
-            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu)
-            # IMPACT
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob)
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob)
+
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            # HDI IMPACT
-            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact)
-            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact)
+            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
+            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
 
             self.data_plot = pd.concat([pre_data, post_data])
 
