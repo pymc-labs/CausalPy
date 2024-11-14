@@ -303,21 +303,13 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-<<<<<<< HEAD
     def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
-=======
-    def get_plot_data_bayesian(self, hdi_prob=0.94) -> pd.DataFrame:
->>>>>>> 1734486 (hdi_prob specification in get_plot_data_bayesian)
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
         if isinstance(self.model, PyMCModel):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
-<<<<<<< HEAD
-=======
-
->>>>>>> 1734486 (hdi_prob specification in get_plot_data_bayesian)
             pre_data["prediction"] = (
                 az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
