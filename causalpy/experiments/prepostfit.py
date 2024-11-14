@@ -303,7 +303,7 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self, hdi_prob=0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
@@ -321,17 +321,17 @@ class PrePostFit(BaseExperiment):
                 .mean("sample")
                 .values
             )
-            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob)
-            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob)
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob).set_index(pre_data.index)
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob).set_index(post_data.index)
 
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
-            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
+            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob).set_index(pre_data.index)
+            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob).set_index(post_data.index)
 
-            self.data_plot = pd.concat([pre_data, post_data])
+            self.plot_data = pd.concat([pre_data, post_data])
 
-            return self.data_plot
+            return self.plot_data
         else:
             raise ValueError("Unsupported model type")
 
@@ -345,9 +345,9 @@ class PrePostFit(BaseExperiment):
         post_data["prediction"] = self.post_pred
         pre_data["impact"] = self.pre_impact
         post_data["impact"] = self.post_impact
-        self.data_plot = pd.concat([pre_data, post_data])
+        self.plot_data = pd.concat([pre_data, post_data])
 
-        return self.data_plot
+        return self.plot_data
 
 
 class InterruptedTimeSeries(PrePostFit):
