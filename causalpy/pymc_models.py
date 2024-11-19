@@ -54,7 +54,7 @@ class PyMCModel(pm.Model):
     ...                 "chains": 2,
     ...                 "draws": 2000,
     ...                 "progressbar": False,
-    ...                 "random_seed": rng,
+    ...                 "random_seed": 42,
     ...             }
     ... )
     >>> model.fit(X, y)
@@ -63,8 +63,8 @@ class PyMCModel(pm.Model):
     >>> model.predict(X_new)
     Inference data...
     >>> model.score(X, y)
-    r2        0.390344
-    r2_std    0.081135
+    r2        0.19157
+    r2_std    0.11238
     dtype: float64
     """
 
@@ -123,7 +123,6 @@ class PyMCModel(pm.Model):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
-
         self._data_setter(X)
         with self:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
@@ -137,18 +136,19 @@ class PyMCModel(pm.Model):
     def score(self, X, y) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
+        Note that the score is based on a comparison of the observed data ``y`` and the
+        model's expected value of the data, `mu`.
+
         .. caution::
 
             The Bayesian :math:`R^2` is not the same as the traditional coefficient of
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
         """
-        yhat = self.predict(X)
-        yhat = az.extract(
-            yhat, group="posterior_predictive", var_names="y_hat"
-        ).T.values
+        mu = self.predict(X)
+        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T.values
         # Note: First argument must be a 1D array
-        return r2_score(y.flatten(), yhat)
+        return r2_score(y.flatten(), mu)
 
     def calculate_impact(self, y_true, y_pred):
         pre_data = xr.DataArray(y_true, dims=["obs_ind"])
