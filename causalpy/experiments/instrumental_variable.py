@@ -74,17 +74,17 @@ class InstrumentalVariable(BaseExperiment):
     ...     "cores": 4,
     ...     "target_accept": 0.95,
     ...     "progressbar": False,
-    ...     }
+    ... }
     >>> instruments_formula = "X  ~ 1 + Z"
     >>> formula = "y ~  1 + X"
     >>> instruments_data = test_data[["X", "Z"]]
     >>> data = test_data[["y", "X"]]
     >>> iv = cp.InstrumentalVariable(
-    ...         instruments_data=instruments_data,
-    ...         data=data,
-    ...         instruments_formula=instruments_formula,
-    ...         formula=formula,
-    ...         model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ...     instruments_data=instruments_data,
+    ...     data=data,
+    ...     instruments_formula=instruments_formula,
+    ...     formula=formula,
+    ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
     """
 

@@ -69,9 +69,9 @@ class PrePostNEGD(BaseExperiment):
     ...             "random_seed": seed,
     ...             "progressbar": False,
     ...         }
-    ...     )
+    ...     ),
     ... )
-    >>> result.summary(round_to=1) # doctest: +NUMBER
+    >>> result.summary(round_to=1)  # doctest: +NUMBER
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>

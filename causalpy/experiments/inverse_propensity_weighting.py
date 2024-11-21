@@ -56,7 +56,7 @@ class InversePropensityWeighting(BaseExperiment):
     >>> result = cp.InversePropensityWeighting(
     ...     df,
     ...     formula="trt ~ 1 + age + race",
-    ...     outcome_variable ="outcome",
+    ...     outcome_variable="outcome",
     ...     weighting_scheme="robust",
     ...     model=cp.pymc_models.PropensityScore(
     ...         sample_kwargs={
