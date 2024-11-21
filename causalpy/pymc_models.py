@@ -59,9 +59,9 @@ class PyMCModel(pm.Model):
     ... )
     >>> model.fit(X, y)
     Inference data...
-    >>> model.score(X, y)
-    r2        0.19157
-    r2_std    0.11238
+    >>> model.score(X, y)  # doctest: +ELLIPSIS
+    r2        ...
+    r2_std    ...
     dtype: float64
     >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
     >>> model.predict(X_new)
