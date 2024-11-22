@@ -337,7 +337,7 @@ class InterruptedTimeSeries(PrePostFit):
     ...             "random_seed": seed,
     ...             "progressbar": False,
     ...         }
-    ...     )
+    ...     ),
     ... )
     """
 

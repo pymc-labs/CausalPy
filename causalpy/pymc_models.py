@@ -50,12 +50,12 @@ class PyMCModel(pm.Model):
     >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
     >>> y = rng.normal(loc=0, scale=1, size=(20,))
     >>> model = MyToyModel(
-    ...             sample_kwargs={
-    ...                 "chains": 2,
-    ...                 "draws": 2000,
-    ...                 "progressbar": False,
-    ...                 "random_seed": 42,
-    ...             }
+    ...     sample_kwargs={
+    ...         "chains": 2,
+    ...         "draws": 2000,
+    ...         "progressbar": False,
+    ...         "random_seed": 42,
+    ...     }
     ... )
     >>> model.fit(X, y)
     Inference data...
@@ -63,7 +63,7 @@ class PyMCModel(pm.Model):
     r2        ...
     r2_std    ...
     dtype: float64
-    >>> X_new = rng.normal(loc=0, scale=1, size=(20,2))
+    >>> X_new = rng.normal(loc=0, scale=1, size=(20, 2))
     >>> model.predict(X_new)
     Inference data...
     """
@@ -286,11 +286,11 @@ class InstrumentalVariableRegression(PyMCModel):
     >>> ## Ensure the endogeneity of the the treatment variable
     >>> X = -1 + 4 * Z + e2 + 2 * e1
     >>> y = 2 + 3 * X + 3 * e1
-    >>> t = X.reshape(10,1)
-    >>> y = y.reshape(10,1)
-    >>> Z = np.asarray([[1, Z[i]] for i in range(0,10)])
-    >>> X = np.asarray([[1, X[i]] for i in range(0,10)])
-    >>> COORDS = {'instruments': ['Intercept', 'Z'], 'covariates': ['Intercept', 'X']}
+    >>> t = X.reshape(10, 1)
+    >>> y = y.reshape(10, 1)
+    >>> Z = np.asarray([[1, Z[i]] for i in range(0, 10)])
+    >>> X = np.asarray([[1, X[i]] for i in range(0, 10)])
+    >>> COORDS = {"instruments": ["Intercept", "Z"], "covariates": ["Intercept", "X"]}
     >>> sample_kwargs = {
     ...     "tune": 5,
     ...     "draws": 10,
@@ -300,12 +300,20 @@ class InstrumentalVariableRegression(PyMCModel):
     ...     "progressbar": False,
     ... }
     >>> iv_reg = InstrumentalVariableRegression(sample_kwargs=sample_kwargs)
-    >>> iv_reg.fit(X, Z,y, t, COORDS, {
-    ...                  "mus": [[-2,4], [0.5, 3]],
-    ...                  "sigmas": [1, 1],
-    ...                  "eta": 2,
-    ...                  "lkj_sd": 1,
-    ...              }, None)
+    >>> iv_reg.fit(
+    ...     X,
+    ...     Z,
+    ...     y,
+    ...     t,
+    ...     COORDS,
+    ...     {
+    ...         "mus": [[-2, 4], [0.5, 3]],
+    ...         "sigmas": [1, 1],
+    ...         "eta": 2,
+    ...         "lkj_sd": 1,
+    ...     },
+    ...     None,
+    ... )
     Inference data...
     """
 

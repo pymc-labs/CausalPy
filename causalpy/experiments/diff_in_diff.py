@@ -70,8 +70,8 @@ class DifferenceInDifferences(BaseExperiment):
     ...             "random_seed": seed,
     ...             "progressbar": False,
     ...         }
-    ...     )
-    ...  )
+    ...     ),
+    ... )
     """
 
     supports_ols = True

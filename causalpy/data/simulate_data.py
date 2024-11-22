@@ -71,9 +71,7 @@ def generate_synthetic_control_data(
     Example
     --------
     >>> from causalpy.data.simulate_data import generate_synthetic_control_data
-    >>> df, weightings_true = generate_synthetic_control_data(
-    ...                             treatment_time=70
-    ... )
+    >>> df, weightings_true = generate_synthetic_control_data(treatment_time=70)
     """
 
     # 1. Generate non-treated variables
@@ -267,8 +265,9 @@ def generate_regression_discontinuity_data(
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_regression_discontinuity_data
     >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
-    >>> df.to_csv(pathlib.Path.cwd() / 'regression_discontinuity.csv',
-    ...     index=False) # doctest: +SKIP
+    >>> df.to_csv(
+    ...     pathlib.Path.cwd() / "regression_discontinuity.csv", index=False
+    ... )  # doctest: +SKIP
     """
 
     def is_treated(x):
@@ -298,13 +297,9 @@ def generate_ancova_data(
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_ancova_data
     >>> df = generate_ancova_data(
-    ...     N=200,
-    ...     pre_treatment_means=np.array([10, 12]),
-    ...     treatment_effect=2,
-    ...     sigma=1
+    ...     N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
     ... )
-    >>> df.to_csv(pathlib.Path.cwd() / 'ancova_data.csv',
-    ...     index=False) # doctest: +SKIP
+    >>> df.to_csv(pathlib.Path.cwd() / "ancova_data.csv", index=False)  # doctest: +SKIP
     """
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
