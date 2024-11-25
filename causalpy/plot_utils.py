@@ -24,7 +24,6 @@ import pandas as pd
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
-from sklearn.base import RegressorMixin
 
 
 def plot_xY(
