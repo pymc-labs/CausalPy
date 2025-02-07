@@ -1,4 +1,4 @@
-#   Copyright 2024 The PyMC Labs Developers
+#   Copyright 2025 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -302,6 +302,60 @@ class PrePostFit(BaseExperiment):
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         return (fig, ax)
+
+    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """
+        if isinstance(self.model, PyMCModel):
+            pre_data = self.datapre.copy()
+            post_data = self.datapost.copy()
+
+            pre_data["prediction"] = (
+                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
+                .mean("sample")
+                .values
+            )
+            post_data["prediction"] = (
+                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+                .mean("sample")
+                .values
+            )
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
+
+            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
+            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
+            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+                self.pre_impact, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+                self.post_impact, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
+
+            self.plot_data = pd.concat([pre_data, post_data])
+
+            return self.plot_data
+        else:
+            raise ValueError("Unsupported model type")
+
+    def get_plot_data_ols(self) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+        pre_data["prediction"] = self.pre_pred
+        post_data["prediction"] = self.post_pred
+        pre_data["impact"] = self.pre_impact
+        post_data["impact"] = self.post_impact
+        self.plot_data = pd.concat([pre_data, post_data])
+
+        return self.plot_data
 
 
 class InterruptedTimeSeries(PrePostFit):
