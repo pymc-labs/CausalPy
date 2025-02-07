@@ -1,4 +1,4 @@
-#   Copyright 2024 The PyMC Labs Developers
+#   Copyright 2025 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import plot_xY, get_hdi_to_df
+from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -320,13 +320,21 @@ class PrePostFit(BaseExperiment):
                 .mean("sample")
                 .values
             )
-            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob).set_index(pre_data.index)
-            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob).set_index(post_data.index)
+            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
 
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob).set_index(pre_data.index)
-            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob).set_index(post_data.index)
+            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+                self.pre_impact, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+                self.post_impact, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
 
             self.plot_data = pd.concat([pre_data, post_data])
 
