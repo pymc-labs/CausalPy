@@ -41,7 +41,7 @@ jobs:
           echo "Checking import and version number (on release)"
           venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{  github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
           cd ..
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: artifact
           path: dist/*
