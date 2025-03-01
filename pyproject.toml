@@ -54,7 +54,7 @@ docs = [
     "ipykernel",
     "daft",
     "linkify-it-py",
-    "myst-nb!=1.1.0",
+    "myst-nb<=1.0.0",
     "pathlib",
     "sphinx",
     "sphinx-autodoc-typehints",
