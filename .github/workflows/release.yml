@@ -39,7 +39,7 @@ jobs:
           mkdir -p test-bdist
           cd test-bdist
           python -m venv venv-bdist
-          venv-bdist/bin/python -m pip install ../dist/CausalPy*.whl
+          venv-bdist/bin/python -m pip install ../dist/causalpy*.whl
           echo "Checking import and version number (on release)"
           venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{ github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
           cd ..
