@@ -1,4 +1,4 @@
-#   Copyright 2024 The PyMC Labs Developers
+#   Copyright 2022 - 2025 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -36,9 +36,9 @@ def test_causal_inference_and_discovery_with_python_example():
 
     # Build the model
     model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
-    assert isinstance(
-        model, WeightedSumFitter
-    ), "model is not an instance of WeightedSumFitter"
+    assert isinstance(model, WeightedSumFitter), (
+        "model is not an instance of WeightedSumFitter"
+    )
 
     formula = "twitter ~ 0 + tiktok + linkedin + instagram"
 
@@ -49,9 +49,9 @@ def test_causal_inference_and_discovery_with_python_example():
         formula=formula,
         model=model,
     )
-    assert isinstance(
-        results, SyntheticControl
-    ), "results is not an instance of SyntheticControl"
+    assert isinstance(results, SyntheticControl), (
+        "results is not an instance of SyntheticControl"
+    )
 
     fig, ax = results.plot()
     assert isinstance(fig, plt.Figure)
