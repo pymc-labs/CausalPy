@@ -94,9 +94,9 @@ def get_hdi_to_df(
         The size of the HDI, default is 0.94
     """
     hdi = (
-            az.hdi(x, hdi_prob=hdi_prob)
-            .to_dataframe()
-            .unstack(level="hdi")
-            .droplevel(0, axis=1)
-            )
+        az.hdi(x, hdi_prob=hdi_prob)
+        .to_dataframe()
+        .unstack(level="hdi")
+        .droplevel(0, axis=1)
+    )
     return hdi
