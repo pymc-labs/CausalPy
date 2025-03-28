@@ -4,7 +4,7 @@
 
 A fantastic one stop shop on resources on a range causal of topics can be found at *Matt Courthoud* [Awesome Causal Inference](https://github.com/matteocourthoud/awesome-causal-inference) github repo.
 
-Covering the essential from:
+Covering the essentials from:
 
 - Academia
 - Industry
@@ -16,6 +16,6 @@ Covering the essential from:
 
 ## CausalPy focused written resources
 
-The CausalPy package is built around the allowing the analyst the ease to analyse quasi-experiments. As such key resources include:
+The CausalPy package is designed to allow analysts to easily analyse quasi-experiments. As such, key resources include:
 
-- Charles Reichardts - Quasi-Experimentation: A Guide to Design and Analysis
+- Charles Reichardts - Quasi-Experimentation: A Guide to Design and Analysis.
