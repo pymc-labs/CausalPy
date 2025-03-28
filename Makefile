@@ -19,4 +19,5 @@ test:
 	pytest
 
 uml:
+	pip install .[docs]
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests

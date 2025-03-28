@@ -56,6 +56,7 @@ docs = [
     "linkify-it-py",
     "myst-nb<=1.0.0",
     "pathlib",
+    "pylint",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
