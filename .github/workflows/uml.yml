@@ -9,23 +9,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: main
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'causalpy[docs]'
+          sudo apt-get update && sudo apt-get install -y graphviz
+
       - name: Configure Git Identity
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+
       - name: Update the UML Diagrams
         run: |
-          sudo apt-get update && sudo apt-get install -y graphviz
           make uml
+
       - name: Detect UML changes
         id: changes
         run: |
@@ -36,6 +45,7 @@ jobs:
           else
             echo "changes_exist=true" >> $GITHUB_OUTPUT
           fi
+
       - name: Create PR for changes
         if: steps.changes.outputs.changes_exist == 'true'
         run: |
