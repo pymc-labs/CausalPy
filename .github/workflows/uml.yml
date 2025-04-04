@@ -26,16 +26,19 @@ jobs:
           pip install 'causalpy[docs]'
           sudo apt-get update && sudo apt-get install -y graphviz
 
+      - name: Install pylint explicitly
+        run: python -m pip install pylint
+
+      - name: Verify pylint and pyreverse
+        run: |
+          python -m pip show pylint
+          which pyreverse
+          pyreverse --version
+
       - name: Configure Git Identity
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-
-      - name: Debug pyreverse installation
-        run: |
-          python -m pip show pylint
-          which pyreverse
-          pyreverse --version || echo "pyreverse not found"
 
       - name: Update the UML Diagrams
         run: |
