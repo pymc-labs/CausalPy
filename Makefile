@@ -19,5 +19,6 @@ test:
 	pytest
 
 uml:
-	pip install pylint
+	conda install pylint
+	pip install 'causalpy[docs]'
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
