@@ -29,7 +29,7 @@ jobs:
       - name: Detect UML changes
         id: changes
         run: |
-          git add docs/source/uml/*.png
+          git add docs/source/_static/*.png
           if git diff --staged --exit-code; then
             echo "No changes to commit"
             echo "changes_exist=false" >> $GITHUB_OUTPUT
