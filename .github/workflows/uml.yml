@@ -31,6 +31,12 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
+      - name: Debug pyreverse installation
+        run: |
+          python -m pip show pylint
+          which pyreverse
+          pyreverse --version || echo "pyreverse not found"
+
       - name: Update the UML Diagrams
         run: |
           make uml
