@@ -123,7 +123,7 @@ class PrePostFit(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
-    def bayesian_plot(
+    def _bayesian_plot(
         self, round_to=None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
@@ -231,7 +231,7 @@ class PrePostFit(BaseExperiment):
 
         return fig, ax
 
-    def ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -303,7 +303,7 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def _get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
@@ -343,7 +343,7 @@ class PrePostFit(BaseExperiment):
         else:
             raise ValueError("Unsupported model type")
 
-    def get_plot_data_ols(self) -> pd.DataFrame:
+    def _get_plot_data_ols(self) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
@@ -436,7 +436,7 @@ class SyntheticControl(PrePostFit):
     supports_ols = True
     supports_bayes = True
 
-    def bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -447,7 +447,7 @@ class SyntheticControl(PrePostFit):
             Whether to plot the control units as well. Defaults to False.
         """
         # call the super class method
-        fig, ax = super().bayesian_plot(*args, **kwargs)
+        fig, ax = super()._bayesian_plot(*args, **kwargs)
 
         # additional plotting functionality for the synthetic control experiment
         plot_predictors = kwargs.get("plot_predictors", False)

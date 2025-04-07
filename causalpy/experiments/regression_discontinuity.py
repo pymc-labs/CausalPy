@@ -218,7 +218,7 @@ class RegressionDiscontinuity(BaseExperiment):
         print("\n")
         self.print_coefficients(round_to)
 
-    def bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -267,7 +267,7 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         return (fig, ax)
 
-    def ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data

@@ -60,45 +60,45 @@ class BaseExperiment:
     def plot(self, *args, **kwargs) -> tuple:
         """Plot the model.
 
-        Internally, this function dispatches to either `bayesian_plot` or `ols_plot`
+        Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
         depending on the model type.
         """
         if isinstance(self.model, PyMCModel):
-            return self.bayesian_plot(*args, **kwargs)
+            return self._bayesian_plot(*args, **kwargs)
         elif isinstance(self.model, RegressorMixin):
-            return self.ols_plot(*args, **kwargs)
+            return self._ols_plot(*args, **kwargs)
         else:
             raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def bayesian_plot(self, *args, **kwargs):
+    def _bayesian_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        raise NotImplementedError("bayesian_plot method not yet implemented")
+        raise NotImplementedError("_bayesian_plot method not yet implemented")
 
     @abstractmethod
-    def ols_plot(self, *args, **kwargs):
+    def _ols_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        raise NotImplementedError("ols_plot method not yet implemented")
+        raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
         """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
 
-        Internally, this function dispatches to either `get_plot_data_bayesian` or `get_plot_data_ols`
+        Internally, this function dispatches to either `_get_plot_data_bayesian` or `_get_plot_data_ols`
         depending on the model type.
         """
         if isinstance(self.model, PyMCModel):
-            return self.get_plot_data_bayesian(*args, **kwargs)
+            return self._get_plot_data_bayesian(*args, **kwargs)
         elif isinstance(self.model, RegressorMixin):
-            return self.get_plot_data_ols(*args, **kwargs)
+            return self._get_plot_data_ols(*args, **kwargs)
         else:
             raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def get_plot_data_bayesian(self, *args, **kwargs):
+    def _get_plot_data_bayesian(self, *args, **kwargs):
         """Abstract method for recovering plot data."""
-        raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
+        raise NotImplementedError("_get_plot_data_bayesian method not yet implemented")
 
     @abstractmethod
-    def get_plot_data_ols(self, *args, **kwargs):
+    def _get_plot_data_ols(self, *args, **kwargs):
         """Abstract method for recovering plot data."""
-        raise NotImplementedError("get_plot_data_ols method not yet implemented")
+        raise NotImplementedError("_get_plot_data_ols method not yet implemented")

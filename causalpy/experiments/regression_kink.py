@@ -189,7 +189,7 @@ class RegressionKink(BaseExperiment):
         )
         self.print_coefficients(round_to)
 
-    def bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
         # Plot raw data
