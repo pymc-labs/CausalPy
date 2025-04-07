@@ -111,6 +111,10 @@ def test_its():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), "The returned object is not a pandas DataFrame"
+    expected_columns = ['prediction', 'impact']
+    assert set(expected_columns).issubset(set(plot_data.columns)), f"DataFrame is missing expected columns {expected_columns}"
 
 
 @pytest.mark.integration
@@ -147,6 +151,10 @@ def test_sc():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), "The returned object is not a pandas DataFrame"
+    expected_columns = ['prediction', 'impact']
+    assert set(expected_columns).issubset(set(plot_data.columns)), f"DataFrame is missing expected columns {expected_columns}"
 
 
 @pytest.mark.integration
