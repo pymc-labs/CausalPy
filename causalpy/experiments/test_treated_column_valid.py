@@ -17,3 +17,4 @@ def test_treated_column_with_booleans():
         _check_treated_column_validity(df, "treated")
     except ValueError:
         pytest.fail("Unexpected ValueError raised")
+
