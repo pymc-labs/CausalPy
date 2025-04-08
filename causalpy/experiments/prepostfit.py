@@ -308,6 +308,13 @@ class PrePostFit(BaseExperiment):
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """
         if isinstance(self.model, PyMCModel):
+            hdi_pct = int(round(hdi_prob * 100))
+
+            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
 
@@ -321,19 +328,19 @@ class PrePostFit(BaseExperiment):
                 .mean("sample")
                 .values
             )
-            pre_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+            pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
                 self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
             ).set_index(pre_data.index)
-            post_data[["pred_hdi_lower", "pred_hdi_upper"]] = get_hdi_to_df(
+            post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
                 self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
             ).set_index(post_data.index)
 
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
             post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+            pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
                 self.pre_impact, hdi_prob=hdi_prob
             ).set_index(pre_data.index)
-            post_data[["impact_hdi_lower", "impact_hdi_upper"]] = get_hdi_to_df(
+            post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
                 self.post_impact, hdi_prob=hdi_prob
             ).set_index(post_data.index)
 
