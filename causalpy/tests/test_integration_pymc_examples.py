@@ -378,6 +378,7 @@ def test_its():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame), (
         "The returned object is not a pandas DataFrame"
@@ -431,6 +432,7 @@ def test_its_covid():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame), (
         "The returned object is not a pandas DataFrame"
@@ -488,6 +490,7 @@ def test_sc():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame), (
         "The returned object is not a pandas DataFrame"
@@ -550,6 +553,7 @@ def test_sc_brexit():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame), (
         "The returned object is not a pandas DataFrame"
