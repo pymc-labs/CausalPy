@@ -83,22 +83,22 @@ class BaseExperiment:
     def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
         """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
 
-        Internally, this function dispatches to either `_get_plot_data_bayesian` or `_get_plot_data_ols`
+        Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
         depending on the model type.
         """
         if isinstance(self.model, PyMCModel):
-            return self._get_plot_data_bayesian(*args, **kwargs)
+            return self.get_plot_data_bayesian(*args, **kwargs)
         elif isinstance(self.model, RegressorMixin):
-            return self._get_plot_data_ols(*args, **kwargs)
+            return self.get_plot_data_ols(*args, **kwargs)
         else:
             raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def _get_plot_data_bayesian(self, *args, **kwargs):
+    def get_plot_data_bayesian(self, *args, **kwargs):
         """Abstract method for recovering plot data."""
-        raise NotImplementedError("_get_plot_data_bayesian method not yet implemented")
+        raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     @abstractmethod
-    def _get_plot_data_ols(self, *args, **kwargs):
+    def get_plot_data_ols(self, *args, **kwargs):
         """Abstract method for recovering plot data."""
-        raise NotImplementedError("_get_plot_data_ols method not yet implemented")
+        raise NotImplementedError("get_plot_data_ols method not yet implemented")

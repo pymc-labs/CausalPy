@@ -303,9 +303,12 @@ class PrePostFit(BaseExperiment):
 
         return (fig, ax)
 
-    def _get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+
+        :param hdi_prob:
+            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
         """
         if isinstance(self.model, PyMCModel):
             hdi_pct = int(round(hdi_prob * 100))
@@ -350,7 +353,7 @@ class PrePostFit(BaseExperiment):
         else:
             raise ValueError("Unsupported model type")
 
-    def _get_plot_data_ols(self) -> pd.DataFrame:
+    def get_plot_data_ols(self) -> pd.DataFrame:
         """
         Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
         """

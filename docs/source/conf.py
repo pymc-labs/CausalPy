@@ -109,6 +109,7 @@ typehints_document_rtype = False
 
 # -- intersphinx config -------------------------------------------------------
 intersphinx_mapping = {
+    "arviz": ("https://python.arviz.org/en/stable/", None),
     "examples": ("https://www.pymc.io/projects/examples/en/latest/", None),
     "mpl": ("https://matplotlib.org/stable", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
