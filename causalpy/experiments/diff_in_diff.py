@@ -229,7 +229,7 @@ class DifferenceInDifferences(BaseExperiment):
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
-    def bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 
@@ -367,7 +367,7 @@ class DifferenceInDifferences(BaseExperiment):
         )
         return fig, ax
 
-    def ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
         round_to = kwargs.get("round_to")
         fig, ax = plt.subplots()

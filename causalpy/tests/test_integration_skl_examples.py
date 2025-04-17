@@ -47,6 +47,8 @@ def test_did():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -78,6 +80,8 @@ def test_rd_drinking():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -88,6 +92,7 @@ def test_its():
     Loads data and checks:
     1. data is a dataframe
     2. skl_experiements.InterruptedTimeSeries returns correct type
+    3. the method get_plot_data returns a DataFrame with expected columns
     """
 
     df = (
@@ -111,6 +116,15 @@ def test_its():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), (
+        "The returned object is not a pandas DataFrame"
+    )
+    expected_columns = ["prediction", "impact"]
+    assert set(expected_columns).issubset(set(plot_data.columns)), (
+        f"DataFrame is missing expected columns {expected_columns}"
+    )
 
 
 @pytest.mark.integration
@@ -121,6 +135,7 @@ def test_sc():
     Loads data and checks:
     1. data is a dataframe
     2. skl_experiements.SyntheticControl returns correct type
+    3. the method get_plot_data returns a DataFrame with expected columns
     """
     df = cp.load_data("sc")
     treatment_time = 70
@@ -147,6 +162,15 @@ def test_sc():
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), (
+        "The returned object is not a pandas DataFrame"
+    )
+    expected_columns = ["prediction", "impact"]
+    assert set(expected_columns).issubset(set(plot_data.columns)), (
+        f"DataFrame is missing expected columns {expected_columns}"
+    )
 
 
 @pytest.mark.integration

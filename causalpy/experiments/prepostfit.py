@@ -25,7 +25,7 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -123,7 +123,7 @@ class PrePostFit(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
-    def bayesian_plot(
+    def _bayesian_plot(
         self, round_to=None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
@@ -231,7 +231,7 @@ class PrePostFit(BaseExperiment):
 
         return fig, ax
 
-    def ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -302,6 +302,70 @@ class PrePostFit(BaseExperiment):
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         return (fig, ax)
+
+    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+
+        :param hdi_prob:
+            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
+        """
+        if isinstance(self.model, PyMCModel):
+            hdi_pct = int(round(hdi_prob * 100))
+
+            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+
+            pre_data = self.datapre.copy()
+            post_data = self.datapost.copy()
+
+            pre_data["prediction"] = (
+                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
+                .mean("sample")
+                .values
+            )
+            post_data["prediction"] = (
+                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+                .mean("sample")
+                .values
+            )
+            pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
+
+            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
+            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
+            pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+                self.pre_impact, hdi_prob=hdi_prob
+            ).set_index(pre_data.index)
+            post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+                self.post_impact, hdi_prob=hdi_prob
+            ).set_index(post_data.index)
+
+            self.plot_data = pd.concat([pre_data, post_data])
+
+            return self.plot_data
+        else:
+            raise ValueError("Unsupported model type")
+
+    def get_plot_data_ols(self) -> pd.DataFrame:
+        """
+        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+        pre_data["prediction"] = self.pre_pred
+        post_data["prediction"] = self.post_pred
+        pre_data["impact"] = self.pre_impact
+        post_data["impact"] = self.post_impact
+        self.plot_data = pd.concat([pre_data, post_data])
+
+        return self.plot_data
 
 
 class InterruptedTimeSeries(PrePostFit):
@@ -382,7 +446,7 @@ class SyntheticControl(PrePostFit):
     supports_ols = True
     supports_bayes = True
 
-    def bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -393,7 +457,7 @@ class SyntheticControl(PrePostFit):
             Whether to plot the control units as well. Defaults to False.
         """
         # call the super class method
-        fig, ax = super().bayesian_plot(*args, **kwargs)
+        fig, ax = super()._bayesian_plot(*args, **kwargs)
 
         # additional plotting functionality for the synthetic control experiment
         plot_predictors = kwargs.get("plot_predictors", False)

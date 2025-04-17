@@ -79,3 +79,24 @@ def plot_xY(
         filter(lambda x: isinstance(x, PolyCollection), ax_hdi.get_children())
     )[-1]
     return (h_line, h_patch)
+
+
+def get_hdi_to_df(
+    x: xr.DataArray,
+    hdi_prob: float = 0.94,
+) -> pd.DataFrame:
+    """
+    Utility function to calculate and recover HDI intervals.
+
+    :param x:
+        Xarray data array
+    :param hdi_prob:
+        The size of the HDI, default is 0.94
+    """
+    hdi = (
+        az.hdi(x, hdi_prob=hdi_prob)
+        .to_dataframe()
+        .unstack(level="hdi")
+        .droplevel(0, axis=1)
+    )
+    return hdi

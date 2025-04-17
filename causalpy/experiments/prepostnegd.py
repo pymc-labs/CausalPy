@@ -200,7 +200,7 @@ class PrePostNEGD(BaseExperiment):
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
-    def bayesian_plot(
+    def _bayesian_plot(
         self, round_to=None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
