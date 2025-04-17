@@ -73,12 +73,12 @@ class BaseExperiment:
     @abstractmethod
     def _bayesian_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        pass
+        raise NotImplementedError("_bayesian_plot method not yet implemented")
 
     @abstractmethod
     def _ols_plot(self, *args, **kwargs):
         """Abstract method for plotting the model."""
-        pass
+        raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
         """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
