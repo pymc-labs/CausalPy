@@ -47,6 +47,8 @@ def test_did():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -78,6 +80,8 @@ def test_rd_drinking():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration

@@ -49,6 +49,8 @@ def test_did():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 # TODO: set up fixture for the banks dataset
@@ -192,6 +194,8 @@ def test_rd():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -311,6 +315,8 @@ def test_rkink():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -664,6 +670,8 @@ def test_iv_reg():
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration
@@ -714,6 +722,8 @@ def test_inverse_prop():
     assert isinstance(fig, plt.Figure)
     assert isinstance(axs, list)
     assert all(isinstance(ax, plt.Axes) for ax in axs)
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 # DEPRECATION WARNING TESTS ============================================================
