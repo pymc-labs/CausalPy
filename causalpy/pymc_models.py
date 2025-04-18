@@ -461,8 +461,8 @@ class PropensityScore(PyMCModel):
         "Defines the PyMC propensity model"
         with self:
             self.add_coords(coords)
-            X_data = pm.MutableData("X", X, dims=["obs_ind", "coeffs"])
-            t_data = pm.MutableData("t", t.flatten(), dims="obs_ind")
+            X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            t_data = pm.Data("t", t.flatten(), dims="obs_ind")
             b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
             mu = pm.math.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
