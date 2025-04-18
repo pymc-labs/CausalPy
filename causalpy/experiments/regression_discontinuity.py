@@ -190,6 +190,8 @@ class RegressionDiscontinuity(BaseExperiment):
             raise DataException(
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
+        if not self.data['treated'].dtype == 'bool':
+            raise ValueError("The 'treated' column must be of type bool.Please convert your data accordingly.")
 
     def _is_treated(self, x):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
