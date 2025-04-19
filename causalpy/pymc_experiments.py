@@ -27,20 +27,20 @@ from .experiments.diff_in_diff import (
 from .experiments.instrumental_variable import (
     InstrumentalVariable as NewInstrumentalVariable,
 )
-from .experiments.inverse_propensity_weighting import (
-    InversePropensityWeighting as NewInversePropensityWeighting,
-)
-from .experiments.prepostfit import (
+from .experiments.interrupted_time_series import (
     InterruptedTimeSeries as NewInterruptedTimeSeries,
 )
-from .experiments.prepostfit import (
-    SyntheticControl as NewSyntheticControl,
+from .experiments.inverse_propensity_weighting import (
+    InversePropensityWeighting as NewInversePropensityWeighting,
 )
 from .experiments.prepostnegd import PrePostNEGD as NewPrePostNEGD
 from .experiments.regression_discontinuity import (
     RegressionDiscontinuity as NewRegressionDiscontinuity,
 )
 from .experiments.regression_kink import RegressionKink as NewRegressionKink
+from .experiments.synthetic_control import (
+    SyntheticControl as NewSyntheticControl,
+)
 
 # Ensure deprecation warnings are always shown in Jupyter Notebooks
 warnings.simplefilter("always", DeprecationWarning)

@@ -81,7 +81,7 @@ class BaseExperiment:
         raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
-        """Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        """Recover the data of an experiment along with the prediction and causal impact information.
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
         depending on the model type.

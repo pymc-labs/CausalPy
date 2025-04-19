@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Pre/post intervention fit experiment designs
+Interrupted Time Series Analysis
 """
 
 from typing import List, Union
@@ -34,11 +34,46 @@ from .base import BaseExperiment
 LEGEND_FONT_SIZE = 12
 
 
-class PrePostFit(BaseExperiment):
+class InterruptedTimeSeries(BaseExperiment):
     """
-    A base class for quasi-experimental designs where parameter estimation is based on
-    just pre-intervention data. This class is not directly invoked by the user.
+    The class for interrupted time series analysis.
+
+    :param data:
+        A pandas dataframe
+    :param treatment_time:
+        The time when treatment occurred, should be in reference to the data index
+    :param formula:
+        A statistical model formula
+    :param model:
+        A PyMC model
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> df = (
+    ...     cp.load_data("its")
+    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+    ...     .set_index("date")
+    ... )
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> seed = 42
+    >>> result = cp.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={
+    ...             "target_accept": 0.95,
+    ...             "random_seed": seed,
+    ...             "progressbar": False,
+    ...         }
+    ...     ),
+    ... )
     """
+
+    expt_type = "Interrupted Time Series"
+    supports_ols = True
+    supports_bayes = True
 
     def __init__(
         self,
@@ -305,7 +340,7 @@ class PrePostFit(BaseExperiment):
 
     def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
-        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        Recover the data of the experiment along with the prediction and causal impact information.
 
         :param hdi_prob:
             Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
@@ -355,7 +390,7 @@ class PrePostFit(BaseExperiment):
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """
-        Recover the data of a PrePostFit experiment along with the prediction and causal impact information.
+        Recover the data of the experiment along with the prediction and causal impact information.
         """
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
@@ -366,106 +401,3 @@ class PrePostFit(BaseExperiment):
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
-
-
-class InterruptedTimeSeries(PrePostFit):
-    """
-    A wrapper around PrePostFit class
-
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = (
-    ...     cp.load_data("its")
-    ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
-    ...     .set_index("date")
-    ... )
-    >>> treatment_time = pd.to_datetime("2017-01-01")
-    >>> seed = 42
-    >>> result = cp.InterruptedTimeSeries(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="y ~ 1 + t + C(month)",
-    ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... )
-    """
-
-    expt_type = "Interrupted Time Series"
-    supports_ols = True
-    supports_bayes = True
-
-
-class SyntheticControl(PrePostFit):
-    """A wrapper around the PrePostFit class
-
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
-
-    Example
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> seed = 42
-    >>> result = cp.SyntheticControl(
-    ...     df,
-    ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
-    ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... )
-    """
-
-    expt_type = "SyntheticControl"
-    supports_ols = True
-    supports_bayes = True
-
-    def _bayesian_plot(self, *args, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to
-            return raw numbers.
-        :param plot_predictors:
-            Whether to plot the control units as well. Defaults to False.
-        """
-        # call the super class method
-        fig, ax = super()._bayesian_plot(*args, **kwargs)
-
-        # additional plotting functionality for the synthetic control experiment
-        plot_predictors = kwargs.get("plot_predictors", False)
-        if plot_predictors:
-            # plot control units as well
-            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
-            ax[0].plot(
-                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
-            )
-
-        return fig, ax
