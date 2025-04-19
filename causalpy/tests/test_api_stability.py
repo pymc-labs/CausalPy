@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import causalpy as cp
-from causalpy.experiments.prepostfit import SyntheticControl
+from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pymc_models import WeightedSumFitter
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}

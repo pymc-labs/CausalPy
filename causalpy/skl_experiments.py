@@ -24,14 +24,14 @@ import warnings
 from .experiments.diff_in_diff import (
     DifferenceInDifferences as NewDifferenceInDifferences,
 )
-from .experiments.prepostfit import (
+from .experiments.interrupted_time_series import (
     InterruptedTimeSeries as NewInterruptedTimeSeries,
-)
-from .experiments.prepostfit import (
-    SyntheticControl as NewSyntheticControl,
 )
 from .experiments.regression_discontinuity import (
     RegressionDiscontinuity as NewRegressionDiscontinuity,
+)
+from .experiments.synthetic_control import (
+    SyntheticControl as NewSyntheticControl,
 )
 
 # Ensure deprecation warnings are always shown in Jupyter Notebooks
