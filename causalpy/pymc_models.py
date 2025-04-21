@@ -208,7 +208,7 @@ class LinearRegression(PyMCModel):
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
     >>> lr.fit(X, y, coords={
     ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                 'obs_ind': np.arange(rd.shape[0])
     ...                },
     ... )
     Inference data...
@@ -448,7 +448,7 @@ class PropensityScore(PyMCModel):
     >>> ps = PropensityScore(sample_kwargs={"progressbar": False})
     >>> ps.fit(X, t, coords={
     ...                 'coeffs': ['age', 'race'],
-    ...                 'obs_indx': np.arange(df.shape[0])
+    ...                 'obs_ind': np.arange(df.shape[0])
     ...                },
     ... )
     Inference...

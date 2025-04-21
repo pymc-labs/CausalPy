@@ -113,7 +113,7 @@ class PrePostNEGD(BaseExperiment):
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             raise NotImplementedError("Not implemented for OLS model")

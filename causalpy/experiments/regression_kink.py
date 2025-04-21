@@ -84,7 +84,7 @@ class RegressionKink(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+        COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
         self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
         # score the goodness of fit to all data

@@ -134,7 +134,7 @@ class SyntheticControl(BaseExperiment):
             COORDS = {
                 "control_units": self.control_units,
                 "treated_units": self.treated_units,
-                "obs_indx": np.arange(self.datapre.shape[0]),
+                "obs_ind": np.arange(self.datapre.shape[0]),
             }
             self.model.fit(
                 X=self.datapre_control.to_numpy(),
