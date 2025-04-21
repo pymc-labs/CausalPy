@@ -135,13 +135,20 @@ class PyMCModel(pm.Model):
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
         with self:  # sample with new input data
-            post_pred = pm.sample_posterior_predictive(
+            pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
                 progressbar=False,
                 random_seed=random_seed,
             )
-        return post_pred
+
+        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
+        if isinstance(X, xr.DataArray):
+            pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
+                obs_ind=X.obs_ind
+            )
+
+        return pp
 
     def score(self, X, y) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
@@ -161,10 +168,13 @@ class PyMCModel(pm.Model):
         return r2_score(y.flatten(), mu)
 
     def calculate_impact(
-        self, y_true: xr.DataArray, y_pred: az.InferenceData
+        self, y_true: xr.DataArray | np.ndarray, y_pred: az.InferenceData
     ) -> xr.DataArray:
+        if isinstance(y_true, np.ndarray):
+            y_true = xr.DataArray(y_true, dims=["obs_ind"])
+
         impact = y_true - y_pred["posterior_predictive"]["y_hat"]
-        return impact.transpose(..., "treated_units", "obs_ind")
+        return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact):
         return impact.cumsum(dim="obs_ind")
@@ -269,9 +279,9 @@ class WeightedSumFitter(PyMCModel):
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
-            X = pm.Data("X", X, dims=["obs_ind", "control_units"])
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="control_units")
+            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")

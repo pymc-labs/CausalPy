@@ -85,17 +85,15 @@ class SyntheticControl(BaseExperiment):
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
+        self.labels = control_units
         self.treated_units = treated_units
         self.expt_type = "SyntheticControl"
         # split data in to pre and post intervention
         self.datapre = data[data.index < self.treatment_time]
         self.datapost = data[data.index >= self.treatment_time]
 
-        # split data into the 4 quadrants (pre/post, control/treated) and store as xarray dataarray
-        # self.datapre_control = self.datapre[self.control_units]
-        # self.datapre_treated = self.datapre[self.treated_units]
-        # self.datapost_control = self.datapost[self.control_units]
-        # self.datapost_treated = self.datapost[self.treated_units]
+        # split data into the 4 quadrants (pre/post, control/treated) and store as
+        # xarray DataArray objects
         self.datapre_control = xr.DataArray(
             self.datapre[self.control_units],
             dims=["obs_ind", "control_units"],
@@ -137,14 +135,12 @@ class SyntheticControl(BaseExperiment):
                 "obs_ind": np.arange(self.datapre.shape[0]),
             }
             self.model.fit(
-                X=self.datapre_control.to_numpy(),
-                y=self.datapre_treated.to_numpy(),
+                X=self.datapre_control,
+                y=self.datapre_treated,
                 coords=COORDS,
             )
         elif isinstance(self.model, RegressorMixin):
-            self.model.fit(
-                X=self.datapre_control.to_numpy(), y=self.datapre_treated.to_numpy()
-            )
+            self.model.fit(X=self.datapre_control, y=self.datapre_treated)
         else:
             raise ValueError("Model type not recognized")
 
@@ -154,20 +150,10 @@ class SyntheticControl(BaseExperiment):
         )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.datapre_control.to_numpy())
+        self.pre_pred = self.model.predict(X=self.datapre_control)
 
         # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.datapost_control.to_numpy())
-        # TODO: Remove the need for this 'hack' by properly updating the coords when we
-        # run model.predict
-        # TEMPORARY HACK: --------------------------------------------------------------
-        # : set the coords (obs_ind) for self.post_pred to be the same as the datapost
-        # index. This is needed for xarray to properly do the comparison (-) between
-        # datapre_treated and self.post_pred
-        # self.post_pred["posterior_predictive"] = self.post_pred[
-        #     "posterior_predictive"
-        # ].assign_coords(obs_ind=self.datapost.index)
-        # ------------------------------------------------------------------------------
+        self.post_pred = self.model.predict(X=self.datapost_control)
         self.pre_impact = self.model.calculate_impact(
             self.datapre_treated, self.pre_pred
         )
