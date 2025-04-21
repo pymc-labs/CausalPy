@@ -104,7 +104,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         # fit model
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.X, y=self.y)

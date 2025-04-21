@@ -87,9 +87,20 @@ class PyMCModel(pm.Model):
 
         This method is used internally to register new data for the model for
         prediction.
+
+        NOTE: We are actively changing the `X`. Often, this matrix will have a different
+        number of rows than the original data. So to make the shapes work, we need to
+        update all data nodes in the model to have the correct shape. The values are not
+        used, so we set them to 0. In our case, we just have data nodes X and y, but if
+        in the future we get more complex models with more data nodes, then we'll need
+        to update all of them - ideally programmatically.
         """
+        new_no_of_observations = X.shape[0]
         with self:
-            pm.set_data({"X": X})
+            pm.set_data(
+                {"X": X, "y": np.zeros(new_no_of_observations)},
+                coords={"obs_ind": np.arange(new_no_of_observations)},
+            )
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
         """Draw samples from posterior, prior predictive, and posterior predictive
@@ -117,7 +128,6 @@ class PyMCModel(pm.Model):
 
         .. caution::
             Results in KeyError if model hasn't been fit.
-
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -206,7 +216,7 @@ class LinearRegression(PyMCModel):
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
     >>> lr.fit(X, y, coords={
     ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_indx': np.arange(rd.shape[0])
+    ...                 'obs_ind': np.arange(rd.shape[0])
     ...                },
     ... )
     Inference data...
@@ -451,7 +461,7 @@ class PropensityScore(PyMCModel):
     >>> ps = PropensityScore(sample_kwargs={"progressbar": False})
     >>> ps.fit(X, t, coords={
     ...                 'coeffs': ['age', 'race'],
-    ...                 'obs_indx': np.arange(df.shape[0])
+    ...                 'obs_ind': np.arange(df.shape[0])
     ...                },
     ... )
     Inference...
