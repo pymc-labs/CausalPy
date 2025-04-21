@@ -89,6 +89,7 @@ class PyMCModel(pm.Model):
         prediction.
         """
         with self:
+            # TODO: update coords
             pm.set_data({"X": X})
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
@@ -150,10 +151,11 @@ class PyMCModel(pm.Model):
         # Note: First argument must be a 1D array
         return r2_score(y.flatten(), mu)
 
-    def calculate_impact(self, y_true, y_pred):
-        pre_data = xr.DataArray(y_true, dims=["obs_ind"])
-        impact = pre_data - y_pred["posterior_predictive"]["y_hat"]
-        return impact.transpose(..., "obs_ind")
+    def calculate_impact(
+        self, y_true: xr.DataArray, y_pred: az.InferenceData
+    ) -> xr.DataArray:
+        impact = y_true - y_pred["posterior_predictive"]["y_hat"]
+        return impact.transpose(..., "treated_units", "obs_ind")
 
     def calculate_cumulative_impact(self, impact):
         return impact.cumsum(dim="obs_ind")
@@ -255,17 +257,13 @@ class WeightedSumFitter(PyMCModel):
         """
         Defines the PyMC model
         """
+        print(coords)
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
-            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            X = pm.Data("X", X, dims=["obs_ind", "control_units"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
-            # TODO: There we should allow user-specified priors here
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-            # beta = pm.Dirichlet(
-            #     name="beta", a=(1 / n_predictors) * np.ones(n_predictors),
-            #     dims="coeffs"
-            # )
+            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="control_units")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
