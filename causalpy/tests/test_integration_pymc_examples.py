@@ -803,7 +803,8 @@ def test_sc_deprecation_warning():
         result = cp.pymc_experiments.SyntheticControl(
             df,
             treatment_time,
-            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            control_units=["a", "b", "c", "d", "e", "f", "g"],
+            treated_units=["actual"],
             model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
         )
         assert isinstance(result, cp.SyntheticControl)
