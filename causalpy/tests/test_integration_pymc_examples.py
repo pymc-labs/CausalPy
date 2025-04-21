@@ -474,7 +474,8 @@ def test_sc():
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula="actual ~ 0 + a + b + c + d + e + f + g",
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -540,11 +541,11 @@ def test_sc_brexit():
     other_countries = all_countries.difference({target_country})
     all_countries = list(all_countries)
     other_countries = list(other_countries)
-    formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula=formula,
+        control_units=other_countries,
+        treated_units=[target_country],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -629,8 +630,8 @@ def test_geolift1():
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
-        + Czech_Republic""",
+        control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
+        treated_units=["Denmark"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
