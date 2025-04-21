@@ -257,7 +257,6 @@ class WeightedSumFitter(PyMCModel):
         """
         Defines the PyMC model
         """
-        print(coords)
         with self:
             self.add_coords(coords)
             n_predictors = X.shape[1]
