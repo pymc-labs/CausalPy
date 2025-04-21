@@ -122,13 +122,12 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X: np.ndarray):
+    def predict(self, X):
         """
         Predict data given input data `X`
 
         .. caution::
             Results in KeyError if model hasn't been fit.
-
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
