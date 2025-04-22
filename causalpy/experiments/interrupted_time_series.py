@@ -125,10 +125,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)
-        self.pre_impact = self.model.calculate_impact(self.pre_y[:, 0], self.pre_pred)
-        self.post_impact = self.model.calculate_impact(
-            self.post_y[:, 0], self.post_pred
-        )
+        self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
+        self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
