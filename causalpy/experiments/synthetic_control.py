@@ -82,6 +82,8 @@ class SyntheticControl(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        # rename the index to "obs_ind"
+        data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
@@ -93,7 +95,9 @@ class SyntheticControl(BaseExperiment):
         self.datapost = data[data.index >= self.treatment_time]
 
         # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray DataArray objects
+        # xarray DataArray objects.
+        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
+        # make constructing the xarray DataArray objects easier.
         self.datapre_control = xr.DataArray(
             self.datapre[self.control_units],
             dims=["obs_ind", "control_units"],
@@ -130,7 +134,9 @@ class SyntheticControl(BaseExperiment):
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
-                "control_units": self.control_units,
+                # key must stay as "coeffs" unless we can find a way to auto identify
+                # the predictor dimension name
+                "coeffs": self.control_units,
                 "treated_units": self.treated_units,
                 "obs_ind": np.arange(self.datapre.shape[0]),
             }
@@ -257,20 +263,22 @@ class SyntheticControl(BaseExperiment):
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
-            self.pre_impact.sel(treated_units="actual"),
+            self.pre_impact.sel(treated_units=self.treated_units[0]),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact.sel(treated_units="actual"),
+            self.post_impact.sel(treated_units=self.treated_units[0]),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units="actual"),
+            y1=self.post_impact.mean(["chain", "draw"]).sel(
+                treated_units=self.treated_units[0]
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -281,7 +289,7 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units="actual"),
+            self.post_impact_cumulative.sel(treated_units=self.treated_units[0]),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
