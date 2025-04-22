@@ -116,9 +116,7 @@ class DifferenceInDifferences(BaseExperiment):
         self.y = xr.DataArray(
             self.y[:, 0],
             dims=["obs_ind"],
-            coords={
-                "obs_ind": self.data.index,
-            },
+            coords={"obs_ind": self.data.index},
         )
 
         # fit model

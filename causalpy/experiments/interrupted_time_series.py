@@ -122,9 +122,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.pre_y = xr.DataArray(
             self.pre_y[:, 0],
             dims=["obs_ind"],
-            coords={
-                "obs_ind": self.datapre.index,
-            },
+            coords={"obs_ind": self.datapre.index},
         )
         self.post_X = xr.DataArray(
             self.post_X,
@@ -137,9 +135,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.post_y = xr.DataArray(
             self.post_y[:, 0],
             dims=["obs_ind"],
-            coords={
-                "obs_ind": self.datapost.index,
-            },
+            coords={"obs_ind": self.datapost.index},
         )
 
         # fit the model to the observed (pre-intervention) data
