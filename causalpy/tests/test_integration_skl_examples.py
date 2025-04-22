@@ -142,7 +142,8 @@ def test_sc():
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula="actual ~ 0 + a + b + c + d + e + f + g",
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
     )
     assert isinstance(df, pd.DataFrame)
