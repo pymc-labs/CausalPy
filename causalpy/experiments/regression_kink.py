@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
-
+import xarray as xr
 from causalpy.plot_utils import plot_xY
 
 from .base import BaseExperiment
@@ -83,6 +83,21 @@ class RegressionKink(BaseExperiment):
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
+
+        # turn into xarray.DataArray's
+        self.X = xr.DataArray(
+            self.X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(self.X.shape[0]),
+                "coeffs": self.labels,
+            },
+        )
+        self.y = xr.DataArray(
+            self.y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": self.data.index},
+        )
 
         COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
         self.model.fit(X=self.X, y=self.y, coords=COORDS)
