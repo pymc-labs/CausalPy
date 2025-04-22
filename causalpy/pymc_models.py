@@ -163,16 +163,12 @@ class PyMCModel(pm.Model):
 
         """
         mu = self.predict(X)
-        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T.values
-        # Note: First argument must be a 1D array
-        return r2_score(y.flatten(), mu)
+        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T
+        return r2_score(y.data, mu.data)
 
     def calculate_impact(
-        self, y_true: xr.DataArray | np.ndarray, y_pred: az.InferenceData
+        self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
-        if isinstance(y_true, np.ndarray):
-            y_true = xr.DataArray(y_true, dims=["obs_ind"])
-
         impact = y_true - y_pred["posterior_predictive"]["y_hat"]
         return impact.transpose(..., "obs_ind")
 
@@ -240,7 +236,7 @@ class LinearRegression(PyMCModel):
         with self:
             self.add_coords(coords)
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y[:, 0], dims="obs_ind")
+            y = pm.Data("y", y, dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")

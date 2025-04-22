@@ -20,6 +20,7 @@ from typing import List, Union
 import arviz as az
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
@@ -84,6 +85,8 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        # rename the index to "obs_ind"
+        data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
@@ -107,6 +110,37 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
+        # turn into xarray.DataArray's
+        self.pre_X = xr.DataArray(
+            self.pre_X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapre.index,
+                "coeffs": self.labels,
+            },
+        )
+        self.pre_y = xr.DataArray(
+            self.pre_y[:, 0],
+            dims=["obs_ind"],
+            coords={
+                "obs_ind": self.datapre.index,
+            },
+        )
+        self.post_X = xr.DataArray(
+            self.post_X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapost.index,
+                "coeffs": self.labels,
+            },
+        )
+        self.post_y = xr.DataArray(
+            self.post_y[:, 0],
+            dims=["obs_ind"],
+            coords={
+                "obs_ind": self.datapost.index,
+            },
+        )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):

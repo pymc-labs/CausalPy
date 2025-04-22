@@ -95,7 +95,7 @@ class SyntheticControl(BaseExperiment):
         self.datapost = data[data.index >= self.treatment_time]
 
         # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray DataArray objects.
+        # xarray.DataArray objects.
         # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
         # make constructing the xarray DataArray objects easier.
         self.datapre_control = xr.DataArray(
