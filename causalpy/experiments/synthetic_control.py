@@ -135,7 +135,8 @@ class SyntheticControl(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             COORDS = {
                 # key must stay as "coeffs" unless we can find a way to auto identify
-                # the predictor dimension name
+                # the predictor dimension name. "coeffs" is assumed by
+                # PyMCModel.print_coefficients for example.
                 "coeffs": self.control_units,
                 "treated_units": self.treated_units,
                 "obs_ind": np.arange(self.datapre.shape[0]),
@@ -423,45 +424,49 @@ class SyntheticControl(BaseExperiment):
         :param hdi_prob:
             Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
         """
-        if isinstance(self.model, PyMCModel):
-            hdi_pct = int(round(hdi_prob * 100))
-
-            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-
-            pre_data = self.datapre.copy()
-            post_data = self.datapost.copy()
-
-            pre_data["prediction"] = (
-                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .values
-            )
-            post_data["prediction"] = (
-                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .values
-            )
-            pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            ).set_index(pre_data.index)
-            post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            ).set_index(post_data.index)
-
-            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
-            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.pre_impact, hdi_prob=hdi_prob
-            ).set_index(pre_data.index)
-            post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.post_impact, hdi_prob=hdi_prob
-            ).set_index(post_data.index)
-
-            self.plot_data = pd.concat([pre_data, post_data])
-
-            return self.plot_data
-        else:
+        if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
+
+        hdi_pct = int(round(hdi_prob * 100))
+
+        pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+        pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+        impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+        impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+
+        pre_data["prediction"] = (
+            az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
+            .mean("sample")
+            .values
+        )
+        post_data["prediction"] = (
+            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+            .mean("sample")
+            .values
+        )
+        pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+        ).set_index(pre_data.index)
+        post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+        ).set_index(post_data.index)
+
+        pre_data["impact"] = (
+            self.pre_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
+        post_data["impact"] = (
+            self.post_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
+        pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+            self.pre_impact, hdi_prob=hdi_prob
+        ).set_index(pre_data.index)
+        post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+            self.post_impact, hdi_prob=hdi_prob
+        ).set_index(post_data.index)
+
+        self.plot_data = pd.concat([pre_data, post_data])
+
+        return self.plot_data
