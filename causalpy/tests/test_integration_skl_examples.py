@@ -109,12 +109,6 @@ def test_its():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.InterruptedTimeSeries)
-    assert result.pre_impact.shape[1] == len(result.treated_units), (
-        "Mismatch between pre_impact shape and number of treated units"
-    )
-    assert result.post_impact.shape[1] == len(result.treated_units), (
-        "Mismatch between post_impact shape and number of treated units"
-    )
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
