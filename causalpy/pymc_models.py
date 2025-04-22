@@ -216,16 +216,28 @@ class LinearRegression(PyMCModel):
     --------
     >>> import causalpy as cp
     >>> import numpy as np
+    >>> import xarray as xr
     >>> from causalpy.pymc_models import LinearRegression
     >>> rd = cp.load_data("rd")
-    >>> X = rd[["x", "treated"]]
-    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
+    >>> X = xr.DataArray(
+    >>>     rd[["x", "treated"]],
+    >>>     dims=["obs_ind", "coeffs"],
+    >>>     coords={
+    >>>         "obs_ind": rd.index,
+    >>>         "coeffs":coeffs,
+    >>>     },
+    >>> )
+    >>> y = xr.DataArray(
+    >>>     np.asarray(rd["y"]),
+    >>>     dims=["obs_ind"],
+    >>>     coords={"obs_ind": rd.index},
+    >>>     )
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> lr.fit(X, y, coords={
-    ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_ind': np.arange(rd.shape[0])
-    ...                },
-    ... )
+    >>> coords={
+    >>>     "coeffs": coeffs,
+    >>>     "obs_ind": np.arange(rd.shape[0]),
+    >>>     }
+    >>> lr.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 
@@ -264,7 +276,7 @@ class WeightedSumFitter(PyMCModel):
     >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> wsf.fit(X,y)
+    >>> wsf.fit(X, y)
     Inference data...
     """  # noqa: W605
 
