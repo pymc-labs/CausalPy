@@ -147,13 +147,17 @@ class SyntheticControl(BaseExperiment):
                 coords=COORDS,
             )
         elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.datapre_control, y=self.datapre_treated)
+            self.model.fit(
+                X=self.datapre_control.data,
+                y=self.datapre_treated.isel(treated_units=0).data,
+            )
         else:
             raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(
-            X=self.datapre_control.to_numpy(), y=self.datapre_treated.to_numpy()
+            X=self.datapre_control.to_numpy(),
+            y=self.datapre_treated.isel(treated_units=0).to_numpy(),
         )
 
         # get the model predictions of the observed (pre-intervention) data
@@ -168,6 +172,7 @@ class SyntheticControl(BaseExperiment):
         self.post_impact = self.model.calculate_impact(
             self.datapost_treated, self.post_pred
         )
+
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
@@ -342,8 +347,16 @@ class SyntheticControl(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(
+            self.datapre_treated["obs_ind"],
+            self.datapre_treated.isel(treated_units=0),
+            "k.",
+        )
+        ax[0].plot(
+            self.datapost_treated["obs_ind"],
+            self.datapost_treated.isel(treated_units=0),
+            "k.",
+        )
 
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
         ax[0].plot(
@@ -356,8 +369,17 @@ class SyntheticControl(BaseExperiment):
         ax[0].set(
             title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
         )
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_pred),
+            y2=np.squeeze(self.datapost_treated.isel(treated_units=0).data),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(self.datapre.index, self.pre_impact, "r.")
         ax[1].plot(
             self.datapost.index,
             self.post_impact,
@@ -372,14 +394,6 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_y),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
         ax[1].fill_between(
             self.datapost.index,
             y1=np.squeeze(self.post_impact),
