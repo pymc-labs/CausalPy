@@ -16,7 +16,6 @@
 from functools import partial
 
 import numpy as np
-import xarray as xr
 from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
 from sklearn.linear_model._base import LinearModel
@@ -29,9 +28,6 @@ class ScikitLearnAdaptor:
 
     def calculate_impact(self, y_true, y_pred):
         """Calculate the causal impact of the intervention."""
-        if isinstance(y_true, np.ndarray):
-            y_true = xr.DataArray(y_true, dims=["obs_ind"])
-
         return y_true - y_pred
 
     def calculate_cumulative_impact(self, impact):
