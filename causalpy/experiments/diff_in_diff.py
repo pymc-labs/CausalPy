@@ -116,7 +116,7 @@ class DifferenceInDifferences(BaseExperiment):
         self.y = xr.DataArray(
             self.y[:, 0],
             dims=["obs_ind"],
-            coords={"obs_ind": self.data.index},
+            coords={"obs_ind": np.arange(self.y.shape[0])},
         )
 
         # fit model
@@ -200,10 +200,10 @@ class DifferenceInDifferences(BaseExperiment):
                     )
         elif isinstance(self.model, RegressorMixin):
             # This is the coefficient on the interaction term
-            # TODO: THIS IS NOT YET CORRECT ?????
+            # TODO: CHECK FOR CORRECTNESS
             self.causal_impact = (
                 self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            )[0]
+            )
         else:
             raise ValueError("Model type not recognized")
 
