@@ -379,7 +379,7 @@ class SyntheticControl(BaseExperiment):
             label="Causal impact",
         )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "r.")
+        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
         ax[1].plot(
             self.datapost.index,
             self.post_impact,
