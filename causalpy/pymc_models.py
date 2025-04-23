@@ -219,24 +219,20 @@ class LinearRegression(PyMCModel):
     >>> import xarray as xr
     >>> from causalpy.pymc_models import LinearRegression
     >>> rd = cp.load_data("rd")
+    >>> rd["treated"] = rd["treated"].astype(int)
+    >>> coeffs = ["x", "treated"]
     >>> X = xr.DataArray(
-    >>>     rd[["x", "treated"]],
-    >>>     dims=["obs_ind", "coeffs"],
-    >>>     coords={
-    >>>         "obs_ind": rd.index,
-    >>>         "coeffs":coeffs,
-    >>>     },
-    >>> )
+    ...     rd[coeffs].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": rd.index, "coeffs": coeffs},
+    ... )
     >>> y = xr.DataArray(
-    >>>     np.asarray(rd["y"]),
-    >>>     dims=["obs_ind"],
-    >>>     coords={"obs_ind": rd.index},
-    >>>     )
+    ...     rd["y"].values,
+    ...     dims=["obs_ind"],
+    ...     coords={"obs_ind": rd.index},
+    ... )
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> coords={
-    >>>     "coeffs": coeffs,
-    >>>     "obs_ind": np.arange(rd.shape[0]),
-    >>>     }
+    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0])}
     >>> lr.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
