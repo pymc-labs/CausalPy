@@ -96,7 +96,7 @@ class RegressionKink(BaseExperiment):
         self.y = xr.DataArray(
             self.y[:, 0],
             dims=["obs_ind"],
-            coords={"obs_ind": self.data.index},
+            coords={"obs_ind": np.arange(self.y.shape[0])},
         )
 
         COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}

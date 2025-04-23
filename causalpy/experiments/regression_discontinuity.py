@@ -133,7 +133,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self.y = xr.DataArray(
             self.y[:, 0],
             dims=["obs_ind"],
-            coords={"obs_ind": self.data.index},
+            coords={"obs_ind": np.arange(self.y.shape[0])},
         )
 
         # fit model
