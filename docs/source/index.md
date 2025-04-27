@@ -6,7 +6,7 @@
 
 # CausalPy - causal inference for quasi-experiments
 
-A Python package focussing on causal inference for quasi-experiments. The package allows users to use different model types. Sophisticated Bayesian methods can be used, harnessing the power of [PyMC](https://www.pymc.io/>) and [ArviZ](https://python.arviz.org). But users can also use more traditional [Ordinary Least Squares](https://en.wikipedia.org/wiki/Ordinary_least_squares) estimation methods via [scikit-learn](https://scikit-learn.org) models.
+A Python package focussing on causal inference for quasi-experiments. The package allows users to use different model types. Sophisticated Bayesian methods can be used, harnessing the power of [PyMC](https://www.pymc.io/) and [ArviZ](https://python.arviz.org). But users can also use more traditional [Ordinary Least Squares](https://en.wikipedia.org/wiki/Ordinary_least_squares) estimation methods via [scikit-learn](https://scikit-learn.org) models.
 
 ## Installation
 
