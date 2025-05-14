@@ -1,21 +1,18 @@
-# Causal written resources
+# Written resources on causal inference
 
-## Awesome Causal Inference
+Below is a list of written resources (books, blog posts, etc.) that are useful for learning about causal inference.
 
-A fantastic one-stop shop for resources on a range of causal topics can be found in *Matt Courthoud* [Awesome Causal Inference](https://github.com/matteocourthoud/awesome-causal-inference) GitHub repo.
+## Quasi-experiment resources
 
-Covering the essentials from:
+* Angrist, J. D., & Pischke, J. S. (2009). [Mostly harmless econometrics: An empiricist's companion](https://www.mostlyharmlesseconometrics.com). Princeton university press.
+* Angrist, J. D., & Pischke, J. S. (2014). [Mastering'metrics: The path from cause to effect](https://www.masteringmetrics.com). Princeton University Press.
+* Cunningham, S. (2021). [Causal inference: The Mixtape](https://mixtape.scunning.com). Yale University Press.
+* Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
+* Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.
 
-- Academia
-- Industry
-- Books
-- Blogs
-- Code implementations
-- Talks
-- Tutorials
+## Bayesian causal inference resources
+* The official [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) has a set of examples specifically relating to causal inference.
 
-## CausalPy focused written resources
+## General causal inference resources
 
-The CausalPy package is designed to allow analysts to easily analyse quasi-experiments. As such, key resources include:
-
-- Charles Reichardts - Quasi-Experimentation: A Guide to Design and Analysis.
+* [Awesome Causal Inference](https://github.com/matteocourthoud/awesome-causal-inference), a curated list of resources on causal inference, including books, blogs, and tutorials.
