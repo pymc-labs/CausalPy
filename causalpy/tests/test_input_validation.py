@@ -166,7 +166,8 @@ def test_sc_input_error():
         _ = cp.SyntheticControl(
             df,
             treatment_time,
-            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            control_units=["a", "b", "c", "d", "e", "f", "g"],
+            treated_units=["actual"],
             model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
         )
 
@@ -176,7 +177,8 @@ def test_sc_input_error():
         _ = cp.SyntheticControl(
             df,
             treatment_time,
-            formula="actual ~ 0 + a + b + c + d + e + f + g",
+            control_units=["a", "b", "c", "d", "e", "f", "g"],
+            treated_units=["actual"],
             model=cp.skl_models.WeightedProportion(),
         )
 
@@ -196,11 +198,11 @@ def test_sc_brexit_input_error():
         other_countries = all_countries.difference({target_country})
         all_countries = list(all_countries)
         other_countries = list(other_countries)
-        formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
         _ = cp.SyntheticControl(
             df,
             treatment_time,
-            formula=formula,
+            control_units=other_countries,
+            treated_units=[target_country],
             model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
         )
 

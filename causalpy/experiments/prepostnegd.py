@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
@@ -110,6 +111,21 @@ class PrePostNEGD(BaseExperiment):
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
+
+        # turn into xarray.DataArray's
+        self.X = xr.DataArray(
+            self.X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(self.X.shape[0]),
+                "coeffs": self.labels,
+            },
+        )
+        self.y = xr.DataArray(
+            self.y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": self.data.index},
+        )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):

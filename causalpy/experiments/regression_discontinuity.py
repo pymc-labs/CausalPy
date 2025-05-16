@@ -23,7 +23,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
-
+import xarray as xr
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -120,6 +120,21 @@ class RegressionDiscontinuity(BaseExperiment):
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
+
+        # turn into xarray.DataArray's
+        self.X = xr.DataArray(
+            self.X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(self.X.shape[0]),
+                "coeffs": self.labels,
+            },
+        )
+        self.y = xr.DataArray(
+            self.y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": np.arange(self.y.shape[0])},
+        )
 
         # fit model
         if isinstance(self.model, PyMCModel):
