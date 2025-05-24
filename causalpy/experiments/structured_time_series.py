@@ -92,10 +92,14 @@ class StructuredTimeSeries(BaseExperiment):
     ...     model=bsts_model,
     ... )
     >>> result.summary()  # doctest: +ELLIPSIS
-    =========================Structured Time Series Fit=========================
+    ===========================Structured Time Series Fit===========================
     Formula: y ~ x1
+    <BLANKLINE>
+    Model coefficients (Exogenous Regressors and Error Sigma):
     Model coefficients:
-    ...
+        Intercept  0.0058, 94% HDI [-0.1, 0.099]
+        x1         1.5, 94% HDI [1.5, 1.5]
+        sigma      0.31, 94% HDI [0.29, 0.32]
     >>> fig, ax = result.plot()
     """
 
@@ -260,6 +264,16 @@ class StructuredTimeSeries(BaseExperiment):
 
         print("\nModel coefficients (Exogenous Regressors and Error Sigma):")
         if self.labels:  # If there were exogenous regressors
+            # Correctly extract intercept and beta for printing
+            if "Intercept" in self.model.idata.posterior.coords:
+                # This branch is unlikely to be hit if patsy handles Intercept
+                # and we remove it before passing to model, but good for robustness
+                intercept_samples = az.extract(
+                    self.model.idata.posterior, var_names="Intercept"
+                )
+                print(
+                    f"  Intercept: {round_num(intercept_samples.mean().data, round_to)}, 94% HDI [{round_num(intercept_samples.quantile(0.03).data, round_to)}, {round_num(intercept_samples.quantile(1 - 0.03).data, round_to)}]"
+                )
             self.model.print_coefficients(labels=self.labels, round_to=round_to)
         else:
             print("  No exogenous regressors in the model.")
