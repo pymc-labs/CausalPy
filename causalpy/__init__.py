@@ -28,6 +28,7 @@ from .experiments.inverse_propensity_weighting import InversePropensityWeighting
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
+from .experiments.structured_time_series import StructuredTimeSeries
 from .experiments.synthetic_control import SyntheticControl
 
 az.style.use("arviz-darkgrid")
@@ -48,4 +49,5 @@ __all__ = [
     "skl_experiments",  # to be deprecated
     "skl_models",
     "SyntheticControl",
+    "StructuredTimeSeries",
 ]

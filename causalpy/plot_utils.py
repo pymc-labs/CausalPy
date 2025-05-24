@@ -54,23 +54,25 @@ def plot_xY(
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
 
+    # Separate fill_kwargs for az.plot_hdi, as ax.plot doesn't accept them
+    line_kwargs = plot_hdi_kwargs.copy()
+    if "fill_kwargs" in line_kwargs:
+        del line_kwargs["fill_kwargs"]
+
     (h_line,) = ax.plot(
         x,
         Y.mean(dim=["chain", "draw"]),
         ls="-",
-        **plot_hdi_kwargs,
-        label=f"{label}",
+        **line_kwargs,  # Use kwargs without fill_kwargs
+        label=label,  # Use the provided label for the mean line
     )
     ax_hdi = az.plot_hdi(
         x,
         Y,
         hdi_prob=hdi_prob,
-        fill_kwargs={
-            "alpha": 0.25,
-            "label": " ",
-        },
-        smooth=False,
         ax=ax,
+        smooth=False,  # To prevent warning about resolution with few data points
+        # Pass original plot_hdi_kwargs which might include fill_kwargs for fill_between
         **plot_hdi_kwargs,
     )
     # Return handle to patch. We get a list of the children of the axis. Filter for just

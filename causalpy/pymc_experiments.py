@@ -38,6 +38,9 @@ from .experiments.regression_discontinuity import (
     RegressionDiscontinuity as NewRegressionDiscontinuity,
 )
 from .experiments.regression_kink import RegressionKink as NewRegressionKink
+from .experiments.structured_time_series import (
+    StructuredTimeSeries as NewStructuredTimeSeries,
+)
 from .experiments.synthetic_control import (
     SyntheticControl as NewSyntheticControl,
 )
@@ -134,3 +137,14 @@ def InstrumentalVariable(*args, **kwargs):
         stacklevel=2,
     )
     return NewInstrumentalVariable(*args, **kwargs)
+
+
+def StructuredTimeSeries(*args, **kwargs):
+    warnings.warn(
+        f"""{RED}cp.pymc_experiments.StructuredTimeSeries is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.StructuredTimeSeries(...){RESET}""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewStructuredTimeSeries(*args, **kwargs)

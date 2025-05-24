@@ -497,3 +497,307 @@ class PropensityScore(PyMCModel):
                 )
             )
         return self.idata
+
+
+class BayesianStructuralTimeSeries(PyMCModel):
+    r"""
+    Bayesian Structural Time Series Model.
+
+    This model allows for the inclusion of trend, seasonality (via Fourier series),
+    and optional exogenous regressors.
+
+    .. math::
+        \text{trend} &\sim \text{LinearTrend}(...) \\
+        \text{seasonality} &\sim \text{YearlyFourier}(...) \\
+        \beta &\sim \mathrm{Normal}(0, \sigma_{\beta}) \quad \text{(if X is provided)} \\
+        \sigma &\sim \mathrm{HalfNormal}(\sigma_{err}) \\
+        \mu &= \text{trend_component} + \text{seasonality_component} [+ X \cdot \beta] \\
+        y &\sim \mathrm{Normal}(\mu, \sigma)
+
+    Parameters
+    ----------
+    n_order : int, optional
+        The number of Fourier components for the yearly seasonality. Defaults to 3.
+    n_changepoints_trend : int, optional
+        The number of changepoints for the linear trend component. Defaults to 10.
+    sample_kwargs : dict, optional
+        A dictionary of kwargs that get unpacked and passed to the
+        :func:`pymc.sample` function. Defaults to an empty dictionary.
+    trend_component : Optional[Any], optional
+        A custom trend component model. If None, the default pymc-marketing trend component is used.
+    seasonality_component : Optional[Any], optional
+        A custom seasonality component model. If None, the default pymc-marketing seasonality `YearlyFourier` component is used.
+    """  # noqa: W605
+
+    def __init__(
+        self,
+        n_order: int = 3,
+        n_changepoints_trend: int = 10,
+        prior_sigma: float = 5,
+        trend_component: Optional[Any] = None,
+        seasonality_component: Optional[Any] = None,
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(sample_kwargs=sample_kwargs)
+
+        # Store original configuration parameters
+        self.n_order = n_order
+        self.n_changepoints_trend = n_changepoints_trend
+        self.prior_sigma = prior_sigma
+
+        # Attempt to import pymc_marketing components
+        _PymcMarketingLinearTrend = None
+        _PymcMarketingYearlyFourier = None
+        pymc_marketing_available = False
+        try:
+            from pymc_marketing.mmm import LinearTrend as PymcMLinearTrend
+            from pymc_marketing.mmm import YearlyFourier as PymcMYearlyFourier
+
+            _PymcMarketingLinearTrend = PymcMLinearTrend
+            _PymcMarketingYearlyFourier = PymcMYearlyFourier
+            pymc_marketing_available = True
+        except ImportError:
+            # pymc-marketing is not available. This is handled conditionally below.
+            pass
+
+        if seasonality_component is not None:
+            self._yearly_fourier = seasonality_component
+        else:
+            if not pymc_marketing_available:
+                raise ImportError(
+                    "pymc-marketing is required for the default yearly seasonality component. "
+                    "Please install it with `pip install pymc-marketing` or "
+                    "provide a custom 'seasonality_component'."
+                )
+            self._yearly_fourier = _PymcMarketingYearlyFourier(n_order=self.n_order)
+
+        if trend_component is not None:
+            self._linear_trend = trend_component
+        else:
+            if not pymc_marketing_available:
+                raise ImportError(
+                    "pymc-marketing is required for the default linear trend component. "
+                    "Please install it with `pip install pymc-marketing` or "
+                    "provide a custom 'trend_component'."
+                )
+            self._linear_trend = _PymcMarketingLinearTrend(
+                n_changepoints=self.n_changepoints_trend
+            )
+
+    def build_model(self, X, y, coords):
+        """
+        Defines the PyMC model.
+
+        Parameters
+        ----------
+        X : array-like or None
+            Exogenous variables. If None, the model only includes trend and
+            seasonality.
+        y : array-like
+            The target variable.
+        coords : dict
+            Coordinates for PyMC model. Must include 'time_for_trend' and
+            'time_for_seasonality'. If X is provided, 'coeffs' must also be
+            included.
+        """
+        with self:
+            self.add_coords(coords)
+
+            # Time data for trend and seasonality
+            # These are expected to be passed in via coords by the experiment class
+            # or user.
+            time_for_trend = coords.get("time_for_trend")
+            time_for_seasonality = coords.get("time_for_seasonality")
+
+            if time_for_trend is None:
+                raise ValueError(
+                    "'time_for_trend' must be provided in coords for the trend component."  # noqa E501
+                )
+            if time_for_seasonality is None:
+                raise ValueError(
+                    "'time_for_seasonality' must be provided in coords for the seasonality component."  # noqa E501
+                )
+
+            t_trend_data = pm.Data(
+                "t_trend_data", time_for_trend, dims="obs_ind", mutable=True
+            )  # noqa E501
+            t_season_data = pm.Data(
+                "t_season_data", time_for_seasonality, dims="obs_ind", mutable=True
+            )  # noqa E501
+
+            # Seasonal component
+            season_component = pm.Deterministic(
+                "season_component",
+                self._yearly_fourier.apply(t_season_data),
+                dims="obs_ind",
+            )
+
+            # Trend component
+            trend_component = pm.Deterministic(
+                "trend_component",
+                self._linear_trend.apply(t_trend_data),
+                dims="obs_ind",
+            )
+
+            # Initialize mu with trend and seasonality
+            mu_ = trend_component + season_component
+
+            # Exogenous regressors (optional)
+            if X is not None and X.shape[1] > 0:
+                if "coeffs" not in coords:
+                    raise ValueError(
+                        "'coeffs' must be provided in coords when X is not None."
+                    )
+                X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"], mutable=True)
+                # Priors for beta coefficients
+                # TODO: Allow user-specified priors for beta
+                beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
+                mu_ = mu_ + pm.math.dot(X_data, beta)
+            # If X is None, mu_ remains as trend + season
+
+            # Make mu_ an explicit deterministic variable named "mu"
+            mu = pm.Deterministic("mu", mu_, dims="obs_ind")
+
+            # Likelihood
+            sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma)
+            y_data = pm.Data("y", y.flatten(), dims="obs_ind", mutable=True)
+            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_data, dims="obs_ind")
+
+    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
+        """Draw samples from posterior, prior predictive, and posterior predictive
+        distributions, placing them in the model's idata attribute.
+        This overrides the base PyMCModel.fit() to ensure 'mu' is included in
+        posterior predictive sampling for BSTS.
+        """
+
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        self.build_model(X, y, coords)
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata,
+                    var_names=["y_hat", "mu"],  # Ensure mu is sampled
+                    progressbar=self.sample_kwargs.get("progressbar", True),
+                    random_seed=random_seed,
+                )
+            )
+        return self.idata
+
+    def _data_setter(
+        self,
+        X_pred,
+        time_for_trend_pred: Optional[np.ndarray] = None,
+        time_for_seasonality_pred: Optional[np.ndarray] = None,
+    ) -> None:
+        """
+        Set data for the model for prediction.
+
+        For BayesianStructuralTimeSeries, this method updates exogenous variables X_pred
+        and, crucially, the time features for trend (time_for_trend_pred) and
+        seasonality (time_for_seasonality_pred).
+        """
+        if time_for_trend_pred is None:
+            raise ValueError(
+                "time_for_trend_pred must be provided for prediction with BSTS."
+            )
+        if time_for_seasonality_pred is None:
+            raise ValueError(
+                "time_for_seasonality_pred must be provided for prediction with BSTS."
+            )
+
+        new_no_of_observations = len(time_for_trend_pred)
+
+        if len(time_for_seasonality_pred) != new_no_of_observations:
+            raise ValueError(
+                "Shape mismatch: time_for_seasonality_pred length "
+                f"({len(time_for_seasonality_pred)}) "
+                "does not match time_for_trend_pred length "
+                f"({new_no_of_observations})."
+            )
+
+        new_obs_inds = np.arange(new_no_of_observations)
+        data_to_set = {
+            "y": np.zeros(new_no_of_observations),  # For prediction, y is dummy
+            "t_trend_data": time_for_trend_pred,
+            "t_season_data": time_for_seasonality_pred,
+        }
+        coords_to_set = {"obs_ind": new_obs_inds}
+
+        if "X" in self.named_vars:  # Model was built with exogenous variable X
+            if X_pred is None:
+                raise ValueError(
+                    "Model was built with exogenous variable X. "
+                    "New X data (X_pred) must be provided for prediction, not None."
+                )
+            if X_pred.shape[0] != new_no_of_observations:
+                raise ValueError(
+                    "Shape mismatch: X_pred number of rows "
+                    f"({X_pred.shape[0]}) "
+                    "does not match time_for_trend_pred length "
+                    f"({new_no_of_observations})."
+                )
+            data_to_set["X"] = X_pred
+        elif X_pred is not None:
+            # Model does not have 'X' pm.Data, but X_pred was provided.
+            print(
+                "Warning: X_pred provided, but the model was not built with exogenous variables X. "
+                "X_pred will be ignored."
+            )
+
+        # If model was built without X, and X_pred is None, this is fine.
+
+        with self:
+            pm.set_data(data_to_set, coords=coords_to_set)
+
+    def predict(
+        self,
+        X,
+        time_for_trend_pred: Optional[np.ndarray] = None,
+        time_for_seasonality_pred: Optional[np.ndarray] = None,
+    ):
+        """
+        Predict data given input data X and new time features.
+        Overrides PyMCModel.predict to handle specific time features for BSTS.
+        """
+        random_seed = self.sample_kwargs.get("random_seed", None)
+        self._data_setter(
+            X,
+            time_for_trend_pred=time_for_trend_pred,
+            time_for_seasonality_pred=time_for_seasonality_pred,
+        )
+        with self:  # sample with new input data
+            post_pred = pm.sample_posterior_predictive(
+                self.idata,
+                var_names=["y_hat", "mu"],
+                progressbar=self.sample_kwargs.get(
+                    "progressbar", False
+                ),  # Consistent with base
+                random_seed=random_seed,
+            )
+        return post_pred
+
+    def score(
+        self,
+        X,
+        y,
+        time_for_trend_pred: Optional[np.ndarray] = None,
+        time_for_seasonality_pred: Optional[np.ndarray] = None,
+    ) -> pd.Series:
+        """Score the Bayesian R2 given inputs X, y and new time features.
+        Overrides PyMCModel.score to handle specific time features for BSTS.
+        """
+        # Predict with new data (X and time features)
+        pred_output = self.predict(
+            X,
+            time_for_trend_pred=time_for_trend_pred,
+            time_for_seasonality_pred=time_for_seasonality_pred,
+        )
+        # Extract mu for R2 calculation
+        mu_pred = az.extract(
+            pred_output, group="posterior_predictive", var_names="mu"
+        ).T.values
+        # Note: First argument must be a 1D array
+        return r2_score(y.flatten(), mu_pred)
