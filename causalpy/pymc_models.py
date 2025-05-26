@@ -13,7 +13,7 @@
 #   limitations under the License.
 """Custom PyMC models for causal inference"""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import arviz as az
 import numpy as np
@@ -122,7 +122,7 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X):
+    def predict(self, X, coords: Optional[Dict[str, Any]] = None, **kwargs):
         """
         Predict data given input data `X`
 
@@ -133,6 +133,8 @@ class PyMCModel(pm.Model):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
+        # Base _data_setter doesn't use coords, but subclasses might override _data_setter to use it.
+        # If a subclass needs coords in _data_setter, it should handle it.
         self._data_setter(X)
         with self:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
@@ -143,7 +145,9 @@ class PyMCModel(pm.Model):
             )
         return post_pred
 
-    def score(self, X, y) -> pd.Series:
+    def score(
+        self, X, y, coords: Optional[Dict[str, Any]] = None, **kwargs
+    ) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         Note that the score is based on a comparison of the observed data ``y`` and the
@@ -155,7 +159,8 @@ class PyMCModel(pm.Model):
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
         """
-        mu = self.predict(X)
+        # Pass coords (and kwargs) to predict, in case a subclass's predict uses them
+        mu = self.predict(X, coords=coords, **kwargs)
         mu = az.extract(mu, group="posterior_predictive", var_names="mu").T.values
         # Note: First argument must be a 1D array
         return r2_score(y.flatten(), mu)
@@ -499,7 +504,7 @@ class PropensityScore(PyMCModel):
         return self.idata
 
 
-class BayesianStructuralTimeSeries(PyMCModel):
+class BayesianBasisExpansionTimeSeries(PyMCModel):
     r"""
     Bayesian Structural Time Series Model.
 
@@ -534,8 +539,8 @@ class BayesianStructuralTimeSeries(PyMCModel):
         n_order: int = 3,
         n_changepoints_trend: int = 10,
         prior_sigma: float = 5,
-        trend_component: Optional[Any] = None,
-        seasonality_component: Optional[Any] = None,
+        # Removed trend_component and seasonality_component for now to simplify
+        # They can be added back if pymc-marketing is a hard dependency or via other logic
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs)
@@ -544,98 +549,236 @@ class BayesianStructuralTimeSeries(PyMCModel):
         self.n_order = n_order
         self.n_changepoints_trend = n_changepoints_trend
         self.prior_sigma = prior_sigma
+        self._first_fit_timestamp: Optional[pd.Timestamp] = None
+        self._exog_var_names: Optional[List[str]] = None
 
-        # Attempt to import pymc_marketing components
-        _PymcMarketingLinearTrend = None
-        _PymcMarketingYearlyFourier = None
-        pymc_marketing_available = False
-        try:
-            from pymc_marketing.mmm import LinearTrend as PymcMLinearTrend
-            from pymc_marketing.mmm import YearlyFourier as PymcMYearlyFourier
+        # pymc-marketing components will be initialized in build_model
+        # self._yearly_fourier = None
+        # self._linear_trend = None
 
-            _PymcMarketingLinearTrend = PymcMLinearTrend
-            _PymcMarketingYearlyFourier = PymcMYearlyFourier
-            pymc_marketing_available = True
-        except ImportError:
-            # pymc-marketing is not available. This is handled conditionally below.
-            pass
+    def _prepare_time_and_exog_features(
+        self,
+        X_exog_array: Optional[np.ndarray],
+        datetime_index: pd.DatetimeIndex,
+        exog_names_from_coords: Optional[List[str]] = None,
+    ):
+        """
+        Prepares time features from datetime_index and processes exogenous variables from X_exog_array.
+        Exogenous variable names are taken from exog_names_from_coords (expected to be a list).
+        """
+        if not isinstance(datetime_index, pd.DatetimeIndex):
+            raise ValueError("`datetime_index` must be a pandas DatetimeIndex.")
 
-        if seasonality_component is not None:
-            self._yearly_fourier = seasonality_component
-        else:
-            if not pymc_marketing_available:
-                raise ImportError(
-                    "pymc-marketing is required for the default yearly seasonality component. "
-                    "Please install it with `pip install pymc-marketing` or "
-                    "provide a custom 'seasonality_component'."
+        num_obs = len(datetime_index)
+
+        if X_exog_array is not None:
+            if not isinstance(X_exog_array, np.ndarray):
+                raise TypeError("X_exog_array must be a NumPy array or None.")
+            if X_exog_array.ndim == 1:
+                X_exog_array = X_exog_array.reshape(-1, 1)
+            if X_exog_array.shape[0] != num_obs:
+                raise ValueError(
+                    f"Shape mismatch: X_exog_array rows ({X_exog_array.shape[0]}) and length of `datetime_index` ({num_obs}) must be equal."
                 )
-            self._yearly_fourier = _PymcMarketingYearlyFourier(n_order=self.n_order)
-
-        if trend_component is not None:
-            self._linear_trend = trend_component
-        else:
-            if not pymc_marketing_available:
-                raise ImportError(
-                    "pymc-marketing is required for the default linear trend component. "
-                    "Please install it with `pip install pymc-marketing` or "
-                    "provide a custom 'trend_component'."
+            if exog_names_from_coords and X_exog_array.shape[1] != len(
+                exog_names_from_coords
+            ):
+                raise ValueError(
+                    f"Mismatch: X_exog_array has {X_exog_array.shape[1]} columns, but {len(exog_names_from_coords)} names provided."
                 )
-            self._linear_trend = _PymcMarketingLinearTrend(
-                n_changepoints=self.n_changepoints_trend
+        else:  # No exogenous variables passed as array
+            if exog_names_from_coords:
+                # This implies exog_names were given, but no array. Could mean an empty array for 0 columns was intended.
+                if X_exog_array is None:
+                    X_exog_array = np.empty((num_obs, 0))
+
+        # Ensure exog_names_from_coords is a list for internal processing
+        processed_exog_names = []
+        if exog_names_from_coords is not None:
+            if isinstance(exog_names_from_coords, str):
+                processed_exog_names = [exog_names_from_coords]
+            elif isinstance(exog_names_from_coords, (list, tuple)):
+                processed_exog_names = list(exog_names_from_coords)
+            else:
+                raise TypeError(
+                    f"exog_names_from_coords should be a list, tuple, or string, not {type(exog_names_from_coords)}"
+                )
+
+        # Set or validate self._exog_var_names (must be a list)
+        if X_exog_array is not None and X_exog_array.shape[1] > 0:
+            if not processed_exog_names:
+                raise ValueError(
+                    "Logic error: processed_exog_names should be set if X_exog_array has columns."
+                )
+            if self._exog_var_names is None:
+                self._exog_var_names = processed_exog_names  # Ensures it's a list
+            elif (
+                self._exog_var_names != processed_exog_names
+            ):  # List-to-list comparison
+                raise ValueError(
+                    f"Exogenous variable names mismatch. Model fit with {self._exog_var_names}, "
+                    f"but current call provides {processed_exog_names}."
+                )
+        elif (
+            self._exog_var_names is None
+        ):  # No exog vars in this call, and none set before
+            self._exog_var_names = []  # Explicitly an empty list
+
+        if self._first_fit_timestamp is None:
+            self._first_fit_timestamp = datetime_index[0]
+
+        time_for_trend = (
+            (datetime_index - self._first_fit_timestamp).days / 365.25
+        ).values
+        time_for_seasonality = datetime_index.dayofyear.values
+
+        # X_values to be used by PyMC; None if no exog vars
+        X_values_for_pymc = X_exog_array if self._exog_var_names else None
+        if X_values_for_pymc is not None and X_values_for_pymc.shape[1] == 0:
+            X_values_for_pymc = (
+                None  # Treat 0-column array as no exog vars for PyMC part
             )
 
-    def build_model(self, X, y, coords):
+        return time_for_trend, time_for_seasonality, X_values_for_pymc, num_obs
+
+    def build_model(
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+    ):
         """
         Defines the PyMC model.
 
         Parameters
         ----------
-        X : array-like or None
-            Exogenous variables. If None, the model only includes trend and
-            seasonality.
-        y : array-like
+        X : np.ndarray or None
+            NumPy array of exogenous regressors. Can be None if no exogenous variables.
+        y : np.ndarray
             The target variable.
         coords : dict
-            Coordinates for PyMC model. Must include 'time_for_trend' and
-            'time_for_seasonality'. If X is provided, 'coeffs' must also be
-            included.
+            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+            If X is provided and has columns, coords must also contain "coeffs" (List[str]).
         """
+        datetime_index = coords.pop("datetime_index", None)
+        if not isinstance(datetime_index, pd.DatetimeIndex):
+            raise ValueError(
+                "`coords` must contain 'datetime_index' of type pd.DatetimeIndex."
+            )
+
+        # Get exog_names from coords["coeffs"] if X_exog_array is present
+        exog_names_from_coords = coords.get("coeffs")
+        # This will be further processed into a list by _prepare_time_and_exog_features
+        # if isinstance(exog_names_from_coords, str): # Handle single coeff name
+        #     exog_names_from_coords = [exog_names_from_coords]
+
+        (
+            time_for_trend,
+            time_for_seasonality,
+            X_values_for_pymc,  # NumPy array for PyMC or None
+            num_obs,
+        ) = self._prepare_time_and_exog_features(
+            X, datetime_index, exog_names_from_coords
+        )
+
+        model_coords = {
+            "obs_ind": np.arange(num_obs),
+        }
+
+        # Start with a copy of the input coords (datetime_index was already popped)
+        if coords:
+            model_coords.update(coords)
+
+        # Ensure "coeffs" in model_coords (if present from input) is a list
+        if "coeffs" in model_coords:
+            current_coeffs = model_coords["coeffs"]
+            if isinstance(current_coeffs, str):
+                model_coords["coeffs"] = [current_coeffs]
+            elif isinstance(current_coeffs, tuple):
+                model_coords["coeffs"] = list(current_coeffs)
+            elif not isinstance(current_coeffs, list):
+                # If it's something else weird, raise error or clear it
+                # so self._exog_var_names can take precedence if needed.
+                raise TypeError(
+                    f"Unexpected type for 'coeffs' in input coords: {type(current_coeffs)}"
+                )
+
+        # self._exog_var_names is the source of truth for coefficient names, ensure it's a list (done in _prepare)
+        # Override or set "coeffs" in model_coords based on self._exog_var_names
+        if self._exog_var_names:
+            if (
+                "coeffs" in model_coords
+                and model_coords["coeffs"] != self._exog_var_names
+            ):
+                # This implies a mismatch between what user provided in coords["coeffs"]
+                # and what _prepare_time_and_exog_features decided based on X and coords["coeffs"]
+                # This should ideally be caught earlier or be consistent.
+                # For now, let's assume _prepare_time_and_exog_features's derivation (self._exog_var_names) is correct.
+                print(
+                    f"Warning: Discrepancy in 'coeffs'. Using derived: {self._exog_var_names} over input: {model_coords['coeffs']}"
+                )
+            model_coords["coeffs"] = self._exog_var_names
+        elif "coeffs" in model_coords and model_coords["coeffs"]:
+            # No exog vars determined by _prepare..., but coords has non-empty coeffs
+            raise ValueError(
+                f"Model determined no exogenous variables (self._exog_var_names is {self._exog_var_names}), "
+                f"but input coords provided 'coeffs': {model_coords['coeffs']}. "
+                f"If no exog vars, provide empty list or omit 'coeffs'."
+            )
+        elif (
+            "coeffs" not in model_coords and self._exog_var_names
+        ):  # Should not happen if logic is right
+            model_coords["coeffs"] = self._exog_var_names
+
         with self:
-            self.add_coords(coords)
+            self.add_coords(model_coords)
 
             # Time data for trend and seasonality
-            # These are expected to be passed in via coords by the experiment class
-            # or user.
-            time_for_trend = coords.get("time_for_trend")
-            time_for_seasonality = coords.get("time_for_seasonality")
-
-            if time_for_trend is None:
-                raise ValueError(
-                    "'time_for_trend' must be provided in coords for the trend component."  # noqa E501
-                )
-            if time_for_seasonality is None:
-                raise ValueError(
-                    "'time_for_seasonality' must be provided in coords for the seasonality component."  # noqa E501
-                )
-
             t_trend_data = pm.Data(
                 "t_trend_data", time_for_trend, dims="obs_ind", mutable=True
-            )  # noqa E501
+            )
             t_season_data = pm.Data(
                 "t_season_data", time_for_seasonality, dims="obs_ind", mutable=True
-            )  # noqa E501
+            )
+
+            # Attempt to import and instantiate pymc_marketing components here
+            _PymcMarketingLinearTrend = None
+            _PymcMarketingYearlyFourier = None
+            pymc_marketing_available = False
+            try:
+                from pymc_marketing.mmm import LinearTrend as PymcMLinearTrend
+                from pymc_marketing.mmm import YearlyFourier as PymcMYearlyFourier
+
+                _PymcMarketingLinearTrend = PymcMLinearTrend
+                _PymcMarketingYearlyFourier = PymcMYearlyFourier
+                pymc_marketing_available = True
+            except ImportError:
+                # pymc-marketing is not available. This is handled conditionally below.
+                pass
+
+            if not pymc_marketing_available:
+                raise ImportError(
+                    "pymc-marketing is required. "
+                    "Please install it with `pip install pymc-marketing`."
+                )
+
+            # Instantiate components for this specific build_model call
+            local_yearly_fourier = _PymcMarketingYearlyFourier(n_order=self.n_order)
+            local_linear_trend = _PymcMarketingLinearTrend(
+                n_changepoints=self.n_changepoints_trend
+            )
 
             # Seasonal component
             season_component = pm.Deterministic(
                 "season_component",
-                self._yearly_fourier.apply(t_season_data),
+                local_yearly_fourier.apply(t_season_data),  # Use local instance
                 dims="obs_ind",
             )
 
             # Trend component
+            trend_component_values = local_linear_trend.apply(
+                t_trend_data
+            )  # Use local instance
             trend_component = pm.Deterministic(
                 "trend_component",
-                self._linear_trend.apply(t_trend_data),
+                trend_component_values,
                 dims="obs_ind",
             )
 
@@ -643,17 +786,32 @@ class BayesianStructuralTimeSeries(PyMCModel):
             mu_ = trend_component + season_component
 
             # Exogenous regressors (optional)
-            if X is not None and X.shape[1] > 0:
-                if "coeffs" not in coords:
+            if (
+                X_values_for_pymc is not None and self._exog_var_names
+            ):  # self._exog_var_names is guaranteed list
+                # self.coords["coeffs"] should be an xarray.Coordinate object here.
+                # Its .values attribute is a numpy array. So list(self.coords["coeffs"].values) is a list.
+                model_coord_coeffs_list = (
+                    list(self.coords["coeffs"]) if "coeffs" in self.coords else []
+                )
+                if (
+                    "coeffs" not in self.coords
+                    or model_coord_coeffs_list != self._exog_var_names
+                ):
                     raise ValueError(
-                        "'coeffs' must be provided in coords when X is not None."
+                        f"Mismatch between internal exogenous variable names ('{self._exog_var_names}') "
+                        f"and model coordinates for 'coeffs' ({model_coord_coeffs_list})."
                     )
-                X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"], mutable=True)
-                # Priors for beta coefficients
-                # TODO: Allow user-specified priors for beta
+                if X_values_for_pymc.shape[1] != len(self._exog_var_names):
+                    raise ValueError(
+                        f"Shape mismatch: X_values_for_pymc has {X_values_for_pymc.shape[1]} columns, but "
+                        f"{len(self._exog_var_names)} names in self._exog_var_names ({self._exog_var_names})."
+                    )
+                X_data = pm.Data(
+                    "X", X_values_for_pymc, dims=["obs_ind", "coeffs"], mutable=True
+                )
                 beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
                 mu_ = mu_ + pm.math.dot(X_data, beta)
-            # If X is None, mu_ remains as trend + season
 
             # Make mu_ an explicit deterministic variable named "mu"
             mu = pm.Deterministic("mu", mu_, dims="obs_ind")
@@ -663,16 +821,26 @@ class BayesianStructuralTimeSeries(PyMCModel):
             y_data = pm.Data("y", y.flatten(), dims="obs_ind", mutable=True)
             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_data, dims="obs_ind")
 
-    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
+    def fit(
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+    ) -> None:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
-        This overrides the base PyMCModel.fit() to ensure 'mu' is included in
-        posterior predictive sampling for BSTS.
+        Parameters
+        ----------
+        X : np.ndarray or None
+            NumPy array of exogenous regressors. Can be None or an array with 0 columns
+            if no exogenous variables.
+        y : np.ndarray
+            The target variable.
+        coords : dict
+            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+            If X is provided and has columns, coords must also contain "coeffs" (List[str]).
         """
 
         random_seed = self.sample_kwargs.get("random_seed", None)
-
-        self.build_model(X, y, coords)
+        # X can be None if no exog vars, _prepare_... handles it.
+        self.build_model(X, y, coords=coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
@@ -688,87 +856,99 @@ class BayesianStructuralTimeSeries(PyMCModel):
 
     def _data_setter(
         self,
-        X_pred,
-        time_for_trend_pred: Optional[np.ndarray] = None,
-        time_for_seasonality_pred: Optional[np.ndarray] = None,
+        X_pred: Optional[np.ndarray],
+        coords_pred: Dict[
+            str, Any
+        ],  # Must contain "datetime_index" for prediction period
     ) -> None:
         """
         Set data for the model for prediction.
-
-        For BayesianStructuralTimeSeries, this method updates exogenous variables X_pred
-        and, crucially, the time features for trend (time_for_trend_pred) and
-        seasonality (time_for_seasonality_pred).
+        X_pred contains exogenous variables for the prediction period.
+        coords_pred must contain "datetime_index" for the prediction period.
         """
-        if time_for_trend_pred is None:
+        datetime_index_pred = coords_pred.get("datetime_index")
+        if not isinstance(datetime_index_pred, pd.DatetimeIndex):
             raise ValueError(
-                "time_for_trend_pred must be provided for prediction with BSTS."
-            )
-        if time_for_seasonality_pred is None:
-            raise ValueError(
-                "time_for_seasonality_pred must be provided for prediction with BSTS."
+                "`coords_pred` must contain 'datetime_index' for prediction."
             )
 
-        new_no_of_observations = len(time_for_trend_pred)
+        # For _data_setter, exog_names are already known (self._exog_var_names from fit)
+        # We pass self._exog_var_names so _prepare_time_and_exog_features can validate
+        # the shape of X_pred_numpy if it's provided.
+        (
+            time_for_trend_pred_vals,
+            time_for_seasonality_pred_vals,
+            X_exog_pred_vals,  # NumPy array for PyMC or None
+            num_obs_pred,
+        ) = self._prepare_time_and_exog_features(
+            X_pred, datetime_index_pred, self._exog_var_names
+        )
 
-        if len(time_for_seasonality_pred) != new_no_of_observations:
-            raise ValueError(
-                "Shape mismatch: time_for_seasonality_pred length "
-                f"({len(time_for_seasonality_pred)}) "
-                "does not match time_for_trend_pred length "
-                f"({new_no_of_observations})."
-            )
+        new_obs_inds = np.arange(num_obs_pred)
 
-        new_obs_inds = np.arange(new_no_of_observations)
         data_to_set = {
-            "y": np.zeros(new_no_of_observations),  # For prediction, y is dummy
-            "t_trend_data": time_for_trend_pred,
-            "t_season_data": time_for_seasonality_pred,
+            "y": np.zeros(num_obs_pred),
+            "t_trend_data": time_for_trend_pred_vals,
+            "t_season_data": time_for_seasonality_pred_vals,
         }
         coords_to_set = {"obs_ind": new_obs_inds}
 
-        if "X" in self.named_vars:  # Model was built with exogenous variable X
-            if X_pred is None:
+        if (
+            "X" in self.named_vars
+        ):  # Model was built with exogenous variable X (i.e. self._exog_var_names is not empty)
+            if (
+                X_exog_pred_vals is None and self._exog_var_names
+            ):  # Check if exog_var_names expects something
                 raise ValueError(
-                    "Model was built with exogenous variable X. "
-                    "New X data (X_pred) must be provided for prediction, not None."
+                    "Model was built with exogenous variables. "
+                    "New X data (X_pred) must provide these (or index_for_time_pred if X_pred is array)."
                 )
-            if X_pred.shape[0] != new_no_of_observations:
+            if (
+                self._exog_var_names
+                and X_exog_pred_vals is not None
+                and X_exog_pred_vals.shape[1] != len(self._exog_var_names)
+            ):
                 raise ValueError(
-                    "Shape mismatch: X_pred number of rows "
-                    f"({X_pred.shape[0]}) "
-                    "does not match time_for_trend_pred length "
-                    f"({new_no_of_observations})."
+                    f"Shape mismatch for exogenous prediction variables. Expected {len(self._exog_var_names)} columns, "
+                    f"got {X_exog_pred_vals.shape[1]}."
                 )
-            data_to_set["X"] = X_pred
-        elif X_pred is not None:
-            # Model does not have 'X' pm.Data, but X_pred was provided.
+            data_to_set["X"] = X_exog_pred_vals  # Can be None if no exog vars
+        elif X_exog_pred_vals is not None:
             print(
-                "Warning: X_pred provided, but the model was not built with exogenous variables X. "
-                "X_pred will be ignored."
+                "Warning: X_pred provided exogenous variables, but the model was not "
+                "built with exogenous variables. These will be ignored."
             )
 
-        # If model was built without X, and X_pred is None, this is fine.
+        # Ensure "X" is set to None if no exog vars, even if "X" data var exists but model has no coeffs
+        if not self._exog_var_names and "X" in self.named_vars:
+            # Pass an array with 0 columns for the X data variable if no exog vars expected
+            if X_exog_pred_vals is not None and X_exog_pred_vals.shape[1] > 0:
+                # This should not happen if self._exog_var_names is empty
+                print(
+                    "Warning: Model expects no exog vars, but X_exog_pred_vals has columns. Forcing to 0 columns."
+                )
+                data_to_set["X"] = np.empty((num_obs_pred, 0))
+            elif X_exog_pred_vals is None:
+                data_to_set["X"] = np.empty((num_obs_pred, 0))
+            else:  # X_exog_pred_vals has 0 columns already
+                data_to_set["X"] = X_exog_pred_vals
 
         with self:
             pm.set_data(data_to_set, coords=coords_to_set)
 
     def predict(
         self,
-        X,
-        time_for_trend_pred: Optional[np.ndarray] = None,
-        time_for_seasonality_pred: Optional[np.ndarray] = None,
+        X: Optional[np.ndarray],
+        coords: Dict[str, Any],  # Must contain "datetime_index" for prediction period
     ):
         """
-        Predict data given input data X and new time features.
-        Overrides PyMCModel.predict to handle specific time features for BSTS.
+        Predict data given input X and coords for prediction period.
+        coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
+        However, for prediction, exog var names are already known by the model.
         """
         random_seed = self.sample_kwargs.get("random_seed", None)
-        self._data_setter(
-            X,
-            time_for_trend_pred=time_for_trend_pred,
-            time_for_seasonality_pred=time_for_seasonality_pred,
-        )
-        with self:  # sample with new input data
+        self._data_setter(X, coords_pred=coords)
+        with self:
             post_pred = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
@@ -781,21 +961,15 @@ class BayesianStructuralTimeSeries(PyMCModel):
 
     def score(
         self,
-        X,
-        y,
-        time_for_trend_pred: Optional[np.ndarray] = None,
-        time_for_seasonality_pred: Optional[np.ndarray] = None,
+        X: Optional[np.ndarray],
+        y: np.ndarray,
+        coords: Dict[str, Any],  # Must contain "datetime_index" for score period
     ) -> pd.Series:
-        """Score the Bayesian R2 given inputs X, y and new time features.
-        Overrides PyMCModel.score to handle specific time features for BSTS.
+        """Score the Bayesian R2.
+        coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
+        However, for scoring, exog var names are already known by the model.
         """
-        # Predict with new data (X and time features)
-        pred_output = self.predict(
-            X,
-            time_for_trend_pred=time_for_trend_pred,
-            time_for_seasonality_pred=time_for_seasonality_pred,
-        )
-        # Extract mu for R2 calculation
+        pred_output = self.predict(X, coords=coords)
         mu_pred = az.extract(
             pred_output, group="posterior_predictive", var_names="mu"
         ).T.values

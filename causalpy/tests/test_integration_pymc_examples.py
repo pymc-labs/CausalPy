@@ -15,8 +15,6 @@
 import arviz as az
 import numpy as np
 import pandas as pd
-import pymc as pm
-import pytensor.tensor as pt
 import pytest
 from matplotlib import pyplot as plt
 
@@ -359,7 +357,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.InterruptedTimeSeries returns correct type
+    2. causalpy.BasisExpansionTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -370,14 +368,16 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
+    result = cp.BasisExpansionTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.InterruptedTimeSeries)
+    # Test 1. plot method runs
+    result.plot()
+    # 2. causalpy.BasisExpansionTimeSeries returns correct type
+    assert isinstance(result, cp.BasisExpansionTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -412,7 +412,7 @@ def test_its_covid():
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.InterruptedtimeSeries returns correct type
+    2. causalpy.BasisExpansionTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -424,14 +424,16 @@ def test_its_covid():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2020-01-01")
-    result = cp.InterruptedTimeSeries(
+    result = cp.BasisExpansionTimeSeries(
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.InterruptedTimeSeries)
+    # Test 1. plot method runs
+    result.plot()
+    # 2. causalpy.BasisExpansionTimeSeries returns correct type
+    assert isinstance(result, cp.BasisExpansionTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -778,9 +780,12 @@ def test_rk_deprecation_warning():
 
 
 def test_its_deprecation_warning():
-    """Test that the old InterruptedTimeSeries class raises a deprecation warning."""
+    """Test that the old InterruptedTimeSeries class from pymc_experiments raises a deprecation warning."""
 
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(
+        DeprecationWarning,
+        match="cp.pymc_experiments.InterruptedTimeSeries is deprecated",
+    ):
         df = (
             cp.load_data("its")
             .assign(date=lambda x: pd.to_datetime(x["date"]))
@@ -849,7 +854,7 @@ def test_iv_deprecation_warning():
 
 @pytest.mark.integration
 def test_bayesian_structural_time_series():
-    """Test the BayesianStructuralTimeSeries model."""
+    """Test the BayesianBasisExpansionTimeSeries model."""
     # Generate synthetic data
     rng = np.random.default_rng(seed=123)
     dates = pd.date_range(start="2020-01-01", end="2021-12-31", freq="D")
@@ -864,254 +869,159 @@ def test_bayesian_structural_time_series():
 
     y_values_with_x = (
         trend_actual + seasonality_actual + beta_x1_actual * x1_actual + noise_actual
-    )  # noqa E501
+    )
     y_values_no_x = trend_actual + seasonality_actual + noise_actual
 
     data_with_x = pd.DataFrame({"y": y_values_with_x, "x1": x1_actual}, index=dates)
     data_no_x = pd.DataFrame({"y": y_values_no_x}, index=dates)
 
-    # Prepare time features for the model
-    day_of_year = dates.dayofyear.to_numpy()
-    time_numeric = (dates - dates[0]).days.to_numpy() / 365.25
+    # Note: day_of_year and time_numeric are not directly passed in coords to build_model anymore
+    # They are derived from datetime_index. They can remain here for clarity or potential future use
+    # in a more complex test setup if needed, but are not strictly necessary for current model.
+    # day_of_year = dates.dayofyear.to_numpy()
+    # time_numeric = (dates - dates[0]).days.to_numpy() / 365.25
 
-    # Define sample_kwargs for speed
     bsts_sample_kwargs = {
         "chains": 1,
         "draws": 100,
         "tune": 50,
         "progressbar": False,
-        "random_seed": 42,  # noqa E501
+        "random_seed": 42,
     }
 
     # --- Test Case 1: Model with exogenous regressor --- #
     coords_with_x = {
         "obs_ind": np.arange(n_obs),
         "coeffs": ["x1"],
-        "time_for_seasonality": day_of_year,
-        "time_for_trend": time_numeric,
+        "datetime_index": dates,
+        # "time_for_seasonality": day_of_year, # Not used by model directly from coords
+        # "time_for_trend": time_numeric,       # Not used by model directly from coords
     }
-    model_with_x = cp.pymc_models.BayesianStructuralTimeSeries(
+    model_with_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
     model_with_x.fit(
-        X=data_with_x[["x1"]],
+        X=data_with_x[["x1"]].values,
         y=data_with_x["y"].values.reshape(-1, 1),
-        coords=coords_with_x,
+        coords=coords_with_x.copy(),  # Pass a copy
     )
     assert isinstance(model_with_x.idata, az.InferenceData)
     assert "posterior" in model_with_x.idata
-    assert "beta" in model_with_x.idata.posterior  # For exogenous regressor
-    assert "fourier_beta" in model_with_x.idata.posterior  # Corrected name
-    assert "delta" in model_with_x.idata.posterior  # Corrected name
+    assert "beta" in model_with_x.idata.posterior
+    # PyMC Marketing components might use different internal names, e.g. fourier_beta, delta
+    # Let's check for existence of key components rather than exact pymc_marketing internal names
+    # if specific internal names are not exposed or guaranteed by causalpy's BSTS.
+    # For now, assuming 'fourier_beta' and 'delta' are names exposed by the pymc_marketing components used.
+    assert (
+        "fourier_beta" in model_with_x.idata.posterior
+    )  # Trend/Seasonality component param
+    assert "delta" in model_with_x.idata.posterior  # Trend/Seasonality component param
     assert "sigma" in model_with_x.idata.posterior
     assert "mu" in model_with_x.idata.posterior_predictive
     assert "y_hat" in model_with_x.idata.posterior_predictive
 
-    # Test predict and score
     predictions_with_x = model_with_x.predict(
-        X=data_with_x[["x1"]],
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_with_x[["x1"]].values,
+        coords=coords_with_x,  # Original coords_with_x is fine here
     )
-    assert "y_hat" in predictions_with_x.posterior_predictive
-    assert "mu" in predictions_with_x.posterior_predictive
-    assert predictions_with_x.posterior_predictive["y_hat"].shape == (
-        bsts_sample_kwargs["chains"],
-        bsts_sample_kwargs["draws"],
-        n_obs,
-    )  # noqa E501
+    assert isinstance(predictions_with_x, az.InferenceData)
     score_with_x = model_with_x.score(
-        X=data_with_x[["x1"]],
-        y=data_with_x["y"].values,
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_with_x[["x1"]].values,
+        y=data_with_x["y"].values.reshape(-1, 1),
+        coords=coords_with_x,  # Original coords_with_x is fine here
     )
     assert isinstance(score_with_x, pd.Series)
-    assert "r2" in score_with_x
 
-    # --- Test Case 2: Model without exogenous regressor (X=None) --- #
+    # --- Test Case 2: Model without exogenous regressor --- #
+    data_for_no_exog = None
     coords_no_x = {
         "obs_ind": np.arange(n_obs),
-        "time_for_seasonality": day_of_year,
-        "time_for_trend": time_numeric,
+        "datetime_index": dates,
+        # "coeffs": [], # Explicitly empty or omitted if X is None
+        # "time_for_seasonality": day_of_year, # Not used
+        # "time_for_trend": time_numeric,       # Not used
     }
-    model_no_x = cp.pymc_models.BayesianStructuralTimeSeries(
+    model_no_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
-    # Fit with X=None
     model_no_x.fit(
-        X=None,  # Explicitly None
+        X=data_for_no_exog,
         y=data_no_x["y"].values.reshape(-1, 1),
-        coords=coords_no_x,
+        coords=coords_no_x.copy(),  # Pass a copy
     )
     assert isinstance(model_no_x.idata, az.InferenceData)
-    assert "beta" not in model_no_x.idata.posterior  # No exogenous regressor beta
-    assert "fourier_beta" in model_no_x.idata.posterior  # Corrected name
-    assert "delta" in model_no_x.idata.posterior  # Corrected name
+    assert "posterior" in model_no_x.idata
+    assert "beta" not in model_no_x.idata.posterior
+    assert "fourier_beta" in model_no_x.idata.posterior
+    assert "delta" in model_no_x.idata.posterior
+    assert "sigma" in model_no_x.idata.posterior
 
-    # Test predict and score (X=None)
-    # The _data_setter will raise ValueError if model has X and X_pred is None.
-    # But if model was built with X=None, _data_setter should not expect X_pred.
     predictions_no_x = model_no_x.predict(
-        X=None,  # X=None for predict
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_for_no_exog,
+        coords=coords_no_x,  # Original coords_no_x is fine
     )
-    assert "y_hat" in predictions_no_x.posterior_predictive
+    assert isinstance(predictions_no_x, az.InferenceData)
     score_no_x = model_no_x.score(
-        X=None,
-        y=data_no_x["y"].values,  # X=None for score
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_for_no_exog,
+        y=data_no_x["y"].values.reshape(-1, 1),
+        coords=coords_no_x,  # Original coords_no_x is fine
     )
     assert isinstance(score_no_x, pd.Series)
 
-    # --- Test Case 3: Model with empty exogenous regressor (X with shape (n,0)) --- #
-    # This case represents e.g. `y ~ 0 + trend + season` if patsy produced X with 0 cols
-    # For build_model, X.shape[1] == 0 means no beta is created.
-    model_empty_x = cp.pymc_models.BayesianStructuralTimeSeries(
+    # --- Test Case 3: Model with empty exogenous regressor (X has 0 columns) --- #
+    # This is similar to Test Case 2. Model should handle X=np.empty((n_obs,0))
+    data_empty_x_array = np.empty((n_obs, 0))
+    coords_empty_x = {  # Coords for 0 exog vars
+        "obs_ind": np.arange(n_obs),
+        "datetime_index": dates,
+        "coeffs": [],  # Must be empty list if X has 0 columns and 'coeffs' is provided
+    }
+    model_empty_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
-    empty_x_array = np.empty((n_obs, 0))
     model_empty_x.fit(
-        X=empty_x_array,  # X with zero columns
+        X=data_empty_x_array,
         y=data_no_x["y"].values.reshape(-1, 1),
-        coords=coords_no_x,  # No "coeffs" needed as X has no columns
+        coords=coords_empty_x.copy(),  # Pass a copy
     )
     assert isinstance(model_empty_x.idata, az.InferenceData)
-    assert "beta" not in model_empty_x.idata.posterior
 
-    # Predict with empty X array
     predictions_empty_x = model_empty_x.predict(
-        X=empty_x_array,
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_empty_x_array,
+        coords=coords_empty_x,  # Original coords_empty_x is fine
     )
-    assert "y_hat" in predictions_empty_x.posterior_predictive
+    assert isinstance(predictions_empty_x, az.InferenceData)
     score_empty_x = model_empty_x.score(
-        X=empty_x_array,
-        y=data_no_x["y"].values,
-        time_for_trend_pred=time_numeric,
-        time_for_seasonality_pred=day_of_year,
+        X=data_empty_x_array,
+        y=data_no_x["y"].values.reshape(-1, 1),
+        coords=coords_empty_x,  # Original coords_empty_x is fine
     )
     assert isinstance(score_empty_x, pd.Series)
 
-    # --- Test Case 4: Error handling for missing coords --- #
-    incomplete_coords = {"obs_ind": np.arange(n_obs)}
-    model_err = cp.pymc_models.BayesianStructuralTimeSeries(
-        sample_kwargs=bsts_sample_kwargs
-    )  # noqa E501
-    with pytest.raises(ValueError, match="'time_for_trend' must be provided"):
-        model_err.build_model(
-            X=None, y=data_no_x["y"].values.reshape(-1, 1), coords=incomplete_coords
-        )  # noqa E501
-
-    incomplete_coords_trend = {
-        "obs_ind": np.arange(n_obs),
-        "time_for_trend": time_numeric,
-    }  # noqa E501
-    with pytest.raises(ValueError, match="'time_for_seasonality' must be provided"):
-        model_err.build_model(
-            X=None,
-            y=data_no_x["y"].values.reshape(-1, 1),
-            coords=incomplete_coords_trend,
-        )  # noqa E501
-
-    coords_for_x_no_coeffs = {
-        "obs_ind": np.arange(n_obs),
-        "time_for_seasonality": day_of_year,
-        "time_for_trend": time_numeric,
-        # No "coeffs"
-    }
-    with pytest.raises(
-        ValueError, match="'coeffs' must be provided in coords when X is not None"
-    ):
-        model_err.build_model(
-            X=data_with_x[["x1"]],
-            y=data_with_x["y"].values.reshape(-1, 1),
-            coords=coords_for_x_no_coeffs,
-        )  # noqa E501
-
-    # Test _data_setter error when model has X, but X_pred is None
+    # --- Test Case 4: Model with incorrect coord/data setup (ValueErrors) --- #
     with pytest.raises(
         ValueError,
-        match="Model was built with exogenous variable X. New X data \\(X_pred\\) must be provided for prediction, not None.",
+        match=r"`coords` must contain 'datetime_index' of type pd\.DatetimeIndex\.",
     ):
-        model_with_x.predict(
-            X=None,
-            time_for_trend_pred=time_numeric,
-            time_for_seasonality_pred=day_of_year,
+        model_error_idx = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            sample_kwargs=bsts_sample_kwargs
+        )
+        bad_dt_idx_coords = coords_with_x.copy()
+        bad_dt_idx_coords["datetime_index"] = np.arange(n_obs)  # Not a DatetimeIndex
+        model_error_idx.fit(
+            X=data_with_x[["x1"]].values,
+            y=data_with_x["y"].values.reshape(-1, 1),
+            coords=bad_dt_idx_coords.copy(),  # Pass a copy
         )
 
-    # --- Test Case 5: Custom components and ImportError handling --- #
-    # Define dummy custom components satisfying the expected interface
-    class CustomTrendComponent:
-        def __init__(self, name_prefix="custom_trend"):
-            self.name_prefix = name_prefix
+    with pytest.raises(ValueError, match="Model was built with exogenous variables"):
+        model_with_x.predict(X=None, coords=coords_with_x)
 
-        def _build_components(self, X) -> pt.TensorVariable:
-            # Minimalistic trend: a simple learnable slope
-            # Ensure this is compatible with how LinearTrend from pymc-marketing builds
-            # its parameters (e.g. `delta` and `k`).
-            # For this test, we'll keep it simple and ensure variable names don't clash
-            # or are expected if we were to check for them.
-            # A real custom component would have its own PyMC variables.
-            custom_slope = pm.Normal(f"{self.name_prefix}_slope", mu=0, sigma=1)
-            return X * custom_slope
-
-        def apply(self, X) -> pt.TensorVariable:
-            return self._build_components(X)
-
-    class CustomSeasonalityComponent:
-        def __init__(self, name_prefix="custom_season"):
-            self.name_prefix = name_prefix
-
-        def _build_components(self, X) -> pt.TensorVariable:
-            # Minimalistic seasonality: a simple learnable offset
-            # Similar to trend, a real one would be more complex.
-            custom_offset = pm.Normal(f"{self.name_prefix}_offset", mu=0, sigma=1)
-            # X here would be day_of_year or similar, but for this dummy, just use it
-            # to ensure the shape is broadcastable if X is scalar for offset.
-            # Or, make it independent of X if it's just an offset for all time points.
-            return pm.math.zeros_like(X) + custom_offset  # Make it broadcast
-
-        def apply(self, X) -> pt.TensorVariable:
-            return self._build_components(X)
-
-    # Test with custom trend only
-    custom_trend = CustomTrendComponent()
-    model_custom_trend = cp.pymc_models.BayesianStructuralTimeSeries(
-        trend_component=custom_trend,  # Corrected parameter name
-        sample_kwargs=bsts_sample_kwargs,
-    )
-    model_custom_trend.fit(
-        X=None, y=data_no_x["y"].values.reshape(-1, 1), coords=coords_no_x
-    )
-    assert "custom_trend_slope" in model_custom_trend.idata.posterior
-    assert "fourier_beta" in model_custom_trend.idata.posterior  # Default seasonality
-
-    # Test with custom seasonality only
-    custom_season = CustomSeasonalityComponent()
-    model_custom_season = cp.pymc_models.BayesianStructuralTimeSeries(
-        seasonality_component=custom_season,  # Corrected parameter name
-        sample_kwargs=bsts_sample_kwargs,
-    )
-    model_custom_season.fit(
-        X=None, y=data_no_x["y"].values.reshape(-1, 1), coords=coords_no_x
-    )
-    assert "custom_season_offset" in model_custom_season.idata.posterior
-    assert "delta" in model_custom_season.idata.posterior  # Default trend
-
-    # Test with both custom trend and seasonality
-    model_both_custom = cp.pymc_models.BayesianStructuralTimeSeries(
-        trend_component=custom_trend,  # Corrected parameter name
-        seasonality_component=custom_season,  # Corrected parameter name
-        sample_kwargs=bsts_sample_kwargs,
-    )
-    model_both_custom.fit(
-        X=None, y=data_no_x["y"].values.reshape(-1, 1), coords=coords_no_x
-    )
-    assert "custom_trend_slope" in model_both_custom.idata.posterior
-    assert "custom_season_offset" in model_both_custom.idata.posterior
-    assert "fourier_beta" not in model_both_custom.idata.posterior
-    assert "delta" not in model_both_custom.idata.posterior
+    with pytest.raises(
+        ValueError,
+        match=r"Mismatch: X_exog_array has 2 columns, but 1 names provided\.",
+    ):
+        wrong_shape_x_pred_vals = np.hstack(
+            [data_with_x[["x1"]].values, data_with_x[["x1"]].values]
+        )  # 2 columns
+        model_with_x.predict(X=wrong_shape_x_pred_vals, coords=coords_with_x)

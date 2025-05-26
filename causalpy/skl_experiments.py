@@ -25,7 +25,7 @@ from .experiments.diff_in_diff import (
     DifferenceInDifferences as NewDifferenceInDifferences,
 )
 from .experiments.interrupted_time_series import (
-    InterruptedTimeSeries as NewInterruptedTimeSeries,
+    InterruptedTimeSeries as DeprecatedInterruptedTimeSeriesFromExperiments,
 )
 from .experiments.regression_discontinuity import (
     RegressionDiscontinuity as NewRegressionDiscontinuity,
@@ -38,6 +38,7 @@ from .experiments.synthetic_control import (
 warnings.simplefilter("always", DeprecationWarning)
 RED = "\033[91m"
 RESET = "\033[0m"
+BLUE = "\033[1m"
 
 
 def SyntheticControl(*args, **kwargs):
@@ -63,14 +64,14 @@ def DifferenceInDifferences(*args, **kwargs):
 
 
 def InterruptedTimeSeries(*args, **kwargs):
+    """DEPRECATED: Please use cp.BasisExpansionTimeSeries(...)"""
     warnings.warn(
-        f"""{RED}cp.pymc_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use:
-        import causalpy as cp
-        cp.InterruptedTimeSeries(...){RESET}""",
+        f"""{RED}cp.skl_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use:
+        {BLUE}cp.InterruptedTimeSeries(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
-    return NewInterruptedTimeSeries(*args, **kwargs)
+    return DeprecatedInterruptedTimeSeriesFromExperiments(*args, **kwargs)
 
 
 def RegressionDiscontinuity(*args, **kwargs):
