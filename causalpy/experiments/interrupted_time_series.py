@@ -17,19 +17,19 @@ Interrupted Time Series Analysis (DEPRECATED)
 
 import warnings
 
-from .structural_time_series import BasisExpansionTimeSeries
+from .structural_time_series import StructuralTimeSeries
 
 
-class InterruptedTimeSeries(BasisExpansionTimeSeries):
+class InterruptedTimeSeries(StructuralTimeSeries):
     """
     DEPRECATED: This class is deprecated and will be removed in a future version.
-    Please use BasisExpansionTimeSeries instead.
+    Please use StructuralTimeSeries instead.
     """
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
             "The InterruptedTimeSeries class is deprecated and will be removed in a "
-            "future version. Please use BasisExpansionTimeSeries instead.",
+            "future version. Please use StructuralTimeSeries instead.",
             FutureWarning,
         )
         super().__init__(*args, **kwargs)

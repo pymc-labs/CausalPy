@@ -64,7 +64,7 @@ def DifferenceInDifferences(*args, **kwargs):
 
 
 def InterruptedTimeSeries(*args, **kwargs):
-    """DEPRECATED: Please use cp.BasisExpansionTimeSeries(...)"""
+    """DEPRECATED: Please use cp.StructuralTimeSeries(...)"""
     warnings.warn(
         f"""{RED}cp.skl_experiments.InterruptedTimeSeries is deprecated and will be removed in a future release. Please use:
         {BLUE}cp.InterruptedTimeSeries(...){RESET}""",

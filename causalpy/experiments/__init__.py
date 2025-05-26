@@ -20,7 +20,7 @@ from .inverse_propensity_weighting import InversePropensityWeighting
 from .prepostnegd import PrePostNEGD
 from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
-from .structural_time_series import BasisExpansionTimeSeries
+from .structural_time_series import StructuralTimeSeries
 from .synthetic_control import SyntheticControl
 
 __all__ = [
@@ -31,7 +31,7 @@ __all__ = [
     "RegressionDiscontinuity",
     "RegressionKink",
     "SyntheticControl",
-    "BasisExpansionTimeSeries",
+    "StructuralTimeSeries",
     "InterruptedTimeSeries",  # For backward compatibility
     "IVRegression",
 ]

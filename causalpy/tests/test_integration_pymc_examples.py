@@ -357,7 +357,7 @@ def test_its():
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.BasisExpansionTimeSeries returns correct type
+    2. causalpy.StructuralTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -368,7 +368,7 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.BasisExpansionTimeSeries(
+    result = cp.StructuralTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
@@ -376,8 +376,8 @@ def test_its():
     )
     # Test 1. plot method runs
     result.plot()
-    # 2. causalpy.BasisExpansionTimeSeries returns correct type
-    assert isinstance(result, cp.BasisExpansionTimeSeries)
+    # 2. causalpy.StructuralTimeSeries returns correct type
+    assert isinstance(result, cp.StructuralTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -412,7 +412,7 @@ def test_its_covid():
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.BasisExpansionTimeSeries returns correct type
+    2. causalpy.StructuralTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -424,7 +424,7 @@ def test_its_covid():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2020-01-01")
-    result = cp.BasisExpansionTimeSeries(
+    result = cp.StructuralTimeSeries(
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
@@ -432,8 +432,8 @@ def test_its_covid():
     )
     # Test 1. plot method runs
     result.plot()
-    # 2. causalpy.BasisExpansionTimeSeries returns correct type
-    assert isinstance(result, cp.BasisExpansionTimeSeries)
+    # 2. causalpy.StructuralTimeSeries returns correct type
+    assert isinstance(result, cp.StructuralTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()

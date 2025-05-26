@@ -34,7 +34,7 @@ from .base import BaseExperiment
 LEGEND_FONT_SIZE = 12
 
 
-class BasisExpansionTimeSeries(BaseExperiment):
+class StructuralTimeSeries(BaseExperiment):
     """
     The class for basis expansion time series analysis.
 
@@ -60,7 +60,7 @@ class BasisExpansionTimeSeries(BaseExperiment):
     ... )
     >>> treatment_time = pd.to_datetime("2017-01-01")
     >>> seed = 42
-    >>> result = cp.BasisExpansionTimeSeries(
+    >>> result = cp.StructuralTimeSeries(
     ...     df,
     ...     treatment_time,
     ...     formula="y ~ 1 + t + C(month)",

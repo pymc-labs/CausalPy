@@ -39,7 +39,7 @@ from .experiments.regression_discontinuity import (
 )
 from .experiments.regression_kink import RegressionKink as NewRegressionKink
 from .experiments.structural_time_series import (
-    BasisExpansionTimeSeries as NewBasisExpansionTimeSeries,
+    StructuralTimeSeries as NewBasisExpansionTimeSeries,
 )
 from .experiments.synthetic_control import (
     SyntheticControl as NewSyntheticControl,
@@ -140,11 +140,11 @@ def InstrumentalVariable(*args, **kwargs):
     return NewInstrumentalVariable(*args, **kwargs)
 
 
-def BasisExpansionTimeSeries(*args, **kwargs):
+def StructuralTimeSeries(*args, **kwargs):
     warnings.warn(
-        f"""{RED}cp.pymc_experiments.BasisExpansionTimeSeries is deprecated and will be removed in a future release. Please use:
+        f"""{RED}cp.pymc_experiments.StructuralTimeSeries is deprecated and will be removed in a future release. Please use:
         import causalpy as cp
-        cp.BasisExpansionTimeSeries(...){RESET}""",
+        cp.StructuralTimeSeries(...){RESET}""",
         DeprecationWarning,
         stacklevel=2,
     )
