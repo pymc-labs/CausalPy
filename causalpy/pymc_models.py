@@ -523,15 +523,21 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     ----------
     n_order : int, optional
         The number of Fourier components for the yearly seasonality. Defaults to 3.
+        Only used if seasonality_component is None.
     n_changepoints_trend : int, optional
         The number of changepoints for the linear trend component. Defaults to 10.
+        Only used if trend_component is None.
+    prior_sigma : float, optional
+        Prior standard deviation for the observation noise. Defaults to 5.
+    trend_component : Optional[Any], optional
+        A custom trend component model. If None, the default pymc-marketing LinearTrend component is used.
+        Must have an `apply(time_data)` method that returns a PyMC tensor.
+    seasonality_component : Optional[Any], optional
+        A custom seasonality component model. If None, the default pymc-marketing YearlyFourier component is used.
+        Must have an `apply(time_data)` method that returns a PyMC tensor.
     sample_kwargs : dict, optional
         A dictionary of kwargs that get unpacked and passed to the
         :func:`pymc.sample` function. Defaults to an empty dictionary.
-    trend_component : Optional[Any], optional
-        A custom trend component model. If None, the default pymc-marketing trend component is used.
-    seasonality_component : Optional[Any], optional
-        A custom seasonality component model. If None, the default pymc-marketing seasonality `YearlyFourier` component is used.
     """  # noqa: W605
 
     def __init__(
@@ -539,8 +545,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         n_order: int = 3,
         n_changepoints_trend: int = 10,
         prior_sigma: float = 5,
-        # Removed trend_component and seasonality_component for now to simplify
-        # They can be added back if pymc-marketing is a hard dependency or via other logic
+        trend_component: Optional[Any] = None,
+        seasonality_component: Optional[Any] = None,
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs)
@@ -552,9 +558,74 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._first_fit_timestamp: Optional[pd.Timestamp] = None
         self._exog_var_names: Optional[List[str]] = None
 
-        # pymc-marketing components will be initialized in build_model
-        # self._yearly_fourier = None
-        # self._linear_trend = None
+        # Store custom components (fix the bug where they were swapped)
+        self._custom_trend_component = trend_component
+        self._custom_seasonality_component = seasonality_component
+
+        # Initialize and validate components
+        self._trend_component = None
+        self._seasonality_component = None
+        self._validate_and_initialize_components()
+
+    def _validate_and_initialize_components(self):
+        """
+        Validate and initialize trend and seasonality components.
+        This separates validation from model building for cleaner code.
+        """
+        # Validate pymc-marketing availability if using default components
+        if (
+            self._custom_trend_component is None
+            or self._custom_seasonality_component is None
+        ):
+            try:
+                from pymc_marketing.mmm import LinearTrend, YearlyFourier
+
+                self._PymcMarketingLinearTrend = LinearTrend
+                self._PymcMarketingYearlyFourier = YearlyFourier
+            except ImportError:
+                raise ImportError(
+                    "pymc-marketing is required when using default trend or seasonality components. "
+                    "Please install it with `pip install pymc-marketing` or provide custom components."
+                )
+
+        # Validate custom components have required methods
+        if self._custom_trend_component is not None:
+            if not hasattr(self._custom_trend_component, "apply"):
+                raise ValueError(
+                    "Custom trend_component must have an 'apply' method that accepts time data "
+                    "and returns a PyMC tensor."
+                )
+
+        if self._custom_seasonality_component is not None:
+            if not hasattr(self._custom_seasonality_component, "apply"):
+                raise ValueError(
+                    "Custom seasonality_component must have an 'apply' method that accepts time data "
+                    "and returns a PyMC tensor."
+                )
+
+    def _get_trend_component(self):
+        """Get the trend component, creating default if needed."""
+        if self._custom_trend_component is not None:
+            return self._custom_trend_component
+
+        # Create default trend component
+        if self._trend_component is None:
+            self._trend_component = self._PymcMarketingLinearTrend(
+                n_changepoints=self.n_changepoints_trend
+            )
+        return self._trend_component
+
+    def _get_seasonality_component(self):
+        """Get the seasonality component, creating default if needed."""
+        if self._custom_seasonality_component is not None:
+            return self._custom_seasonality_component
+
+        # Create default seasonality component
+        if self._seasonality_component is None:
+            self._seasonality_component = self._PymcMarketingYearlyFourier(
+                n_order=self.n_order
+            )
+        return self._seasonality_component
 
     def _prepare_time_and_exog_features(
         self,
@@ -665,9 +736,6 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         # Get exog_names from coords["coeffs"] if X_exog_array is present
         exog_names_from_coords = coords.get("coeffs")
-        # This will be further processed into a list by _prepare_time_and_exog_features
-        # if isinstance(exog_names_from_coords, str): # Handle single coeff name
-        #     exog_names_from_coords = [exog_names_from_coords]
 
         (
             time_for_trend,
@@ -738,44 +806,19 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 "t_season_data", time_for_seasonality, dims="obs_ind", mutable=True
             )
 
-            # Attempt to import and instantiate pymc_marketing components here
-            _PymcMarketingLinearTrend = None
-            _PymcMarketingYearlyFourier = None
-            pymc_marketing_available = False
-            try:
-                from pymc_marketing.mmm import LinearTrend as PymcMLinearTrend
-                from pymc_marketing.mmm import YearlyFourier as PymcMYearlyFourier
-
-                _PymcMarketingLinearTrend = PymcMLinearTrend
-                _PymcMarketingYearlyFourier = PymcMYearlyFourier
-                pymc_marketing_available = True
-            except ImportError:
-                # pymc-marketing is not available. This is handled conditionally below.
-                pass
-
-            if not pymc_marketing_available:
-                raise ImportError(
-                    "pymc-marketing is required. "
-                    "Please install it with `pip install pymc-marketing`."
-                )
-
-            # Instantiate components for this specific build_model call
-            local_yearly_fourier = _PymcMarketingYearlyFourier(n_order=self.n_order)
-            local_linear_trend = _PymcMarketingLinearTrend(
-                n_changepoints=self.n_changepoints_trend
-            )
+            # Get validated components (no more ugly imports in build_model!)
+            trend_component_instance = self._get_trend_component()
+            seasonality_component_instance = self._get_seasonality_component()
 
             # Seasonal component
             season_component = pm.Deterministic(
                 "season_component",
-                local_yearly_fourier.apply(t_season_data),  # Use local instance
+                seasonality_component_instance.apply(t_season_data),
                 dims="obs_ind",
             )
 
             # Trend component
-            trend_component_values = local_linear_trend.apply(
-                t_trend_data
-            )  # Use local instance
+            trend_component_values = trend_component_instance.apply(t_trend_data)
             trend_component = pm.Deterministic(
                 "trend_component",
                 trend_component_values,
