@@ -229,7 +229,7 @@ class StructuralTimeSeries(BaseExperiment):
         # pre-intervention period
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu,
+            self.pre_pred["posterior_predictive"].y_hat,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -243,7 +243,7 @@ class StructuralTimeSeries(BaseExperiment):
         # post intervention period
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            self.post_pred["posterior_predictive"].mu,
+            self.post_pred["posterior_predictive"].y_hat,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -422,10 +422,10 @@ class StructuralTimeSeries(BaseExperiment):
                 .values
             )
             pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+                self.pre_pred["posterior_predictive"].y_hat, hdi_prob=hdi_prob
             ).set_index(pre_data.index)
             post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+                self.post_pred["posterior_predictive"].y_hat, hdi_prob=hdi_prob
             ).set_index(post_data.index)
 
             pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
