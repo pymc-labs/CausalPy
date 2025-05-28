@@ -122,7 +122,13 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X, coords: Optional[Dict[str, Any]] = None, **kwargs):
+    def predict(
+        self,
+        X,
+        coords: Optional[Dict[str, Any]] = None,
+        out_of_sample: Optional[bool] = False,
+        **kwargs,
+    ):
         """
         Predict data given input data `X`
 
@@ -983,6 +989,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self,
         X: Optional[np.ndarray],
         coords: Dict[str, Any],  # Must contain "datetime_index" for prediction period
+        out_of_sample: Optional[bool] = False,
     ):
         """
         Predict data given input X and coords for prediction period.
@@ -1018,3 +1025,260 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         ).T.values
         # Note: First argument must be a 1D array
         return r2_score(y.flatten(), mu_pred)
+
+
+class StateSpaceTimeSeries(PyMCModel):
+    """
+    State-space time series model using pymc_extras.statespace.structural.
+
+    Parameters
+    ----------
+    level_order : int, optional
+        Order of the local level/trend component. Defaults to 2.
+    seasonal_length : int, optional
+        Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
+    trend_component : optional
+        Custom state-space trend component.
+    seasonality_component : optional
+        Custom state-space seasonal component.
+    sample_kwargs : dict, optional
+        Kwargs passed to `pm.sample`.
+    mode : str, optional
+        Mode passed to `build_statespace_graph` (e.g., "JAX").
+    """
+
+    def __init__(
+        self,
+        level_order: int = 2,
+        seasonal_length: int = 12,
+        trend_component: Optional[Any] = None,
+        seasonality_component: Optional[Any] = None,
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+        mode: str = "JAX",
+    ):
+        super().__init__(sample_kwargs=sample_kwargs)
+        self._custom_trend_component = trend_component
+        self._custom_seasonality_component = seasonality_component
+        self.level_order = level_order
+        self.seasonal_length = seasonal_length
+        self.mode = mode
+        self.ss_mod = None
+        self._validate_and_initialize_components()
+
+    def _validate_and_initialize_components(self):
+        """
+        Validate and initialize trend and seasonality components.
+        This separates validation from model building for cleaner code.
+        """
+        # Validate pymc-extras availability if using default components
+        if (
+            self._custom_trend_component is None
+            or self._custom_seasonality_component is None
+        ):
+            try:
+                from pymc_extras.statespace import structural as st
+
+                self._PymcExtrasLevelTrendComponent = st.LevelTrendComponent
+                self._PymcExtrasFrequencySeasonality = st.FrequencySeasonality
+            except ImportError:
+                raise ImportError(
+                    "pymc-extras is required when using default trend or seasonality components. "
+                    "Please install it with `conda install -c conda-forge pymc-extras` or provide custom components."
+                )
+
+        # Validate custom components have required methods
+        if self._custom_trend_component is not None:
+            if not hasattr(self._custom_trend_component, "apply"):
+                raise ValueError(
+                    "Custom trend_component must have an 'apply' method that accepts time data "
+                    "and returns a PyMC tensor."
+                )
+
+        if self._custom_seasonality_component is not None:
+            if not hasattr(self._custom_seasonality_component, "apply"):
+                raise ValueError(
+                    "Custom seasonality_component must have an 'apply' method that accepts time data "
+                    "and returns a PyMC tensor."
+                )
+
+        # Initialize components
+        self._trend_component = None
+        self._seasonality_component = None
+
+    def _get_trend_component(self):
+        """Get the trend component, creating default if needed."""
+        if self._custom_trend_component is not None:
+            return self._custom_trend_component
+
+        # Create default trend component
+        if self._trend_component is None:
+            self._trend_component = self._PymcExtrasLevelTrendComponent(
+                order=self.level_order
+            )
+        return self._trend_component
+
+    def _get_seasonality_component(self):
+        """Get the seasonality component, creating default if needed."""
+        if self._custom_seasonality_component is not None:
+            return self._custom_seasonality_component
+
+        # Create default seasonality component
+        if self._seasonality_component is None:
+            self._seasonality_component = self._PymcExtrasFrequencySeasonality(
+                season_length=self.seasonal_length, name="freq"
+            )
+        return self._seasonality_component
+
+    def build_model(
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+    ) -> None:
+        """
+        Build the PyMC state-space model.  `coords` must include:
+          - 'datetime_index': a pandas.DatetimeIndex matching `y`.
+        """
+        coords = coords.copy()
+        datetime_index = coords.pop("datetime_index", None)
+        if not isinstance(datetime_index, pd.DatetimeIndex):
+            raise ValueError(
+                "coords must contain 'datetime_index' of type pandas.DatetimeIndex."
+            )
+        self._train_index = datetime_index
+
+        # Instantiate components and build state-space object
+        trend = self._get_trend_component()
+        season = self._get_seasonality_component()
+        combined = trend + season
+        self.ss_mod = combined.build()
+
+        # Extract parameter dims (order: initial_trend, sigma_trend, seasonal, P0)
+        initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
+            self.ss_mod.param_dims.values()
+        )
+        coordinates = {**coords, **self.ss_mod.coords}
+
+        # Build model
+        with pm.Model(coords=coordinates) as self.second_model:
+            # Add coords for statespace (includes 'time' and 'state' dims)
+            P0_diag = pm.Gamma("P0_diag", alpha=2, beta=1, dims=P0_dims[0])
+            _P0 = pm.Deterministic("P0", pt.diag(P0_diag), dims=P0_dims)
+            _initial_trend = pm.Normal(
+                "initial_trend", sigma=50, dims=initial_trend_dims
+            )
+            _annual_seasonal = pm.ZeroSumNormal("freq", sigma=80, dims=annual_dims)
+
+            _sigma_trend = pm.Gamma(
+                "sigma_trend", alpha=2, beta=5, dims=sigma_trend_dims
+            )
+            _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
+
+            # Attach the state-space graph using the observed data
+            df = pd.DataFrame({"y": y.flatten()}, index=datetime_index)
+            self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
+
+    def fit(
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+    ) -> az.InferenceData:
+        """
+        Fit the model, drawing posterior samples.
+        Returns the InferenceData with parameter draws.
+        """
+        self.build_model(X, y, coords)
+        with self.second_model:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata,
+                )
+            )
+        self.conditional_idata = self._smooth()
+        return self._prepare_idata()
+
+    def _prepare_idata(self):
+        if self.idata is None:
+            raise RuntimeError("Model must be fit before smoothing.")
+
+        new_idata = self.idata.copy()
+        # Get smoothed posterior and sum over state dimension
+        smoothed = self.conditional_idata.rename({"smoothed_posterior": "y_hat"})
+        y_hat_summed = smoothed.y_hat.sum(dim="state")
+
+        # Rename 'time' to 'obs_ind' to match CausalPy conventions
+        if "time" in y_hat_summed.dims:
+            y_hat_final = y_hat_summed.rename({"time": "obs_ind"})
+        else:
+            y_hat_final = y_hat_summed
+
+        new_idata["posterior_predictive"]["y_hat"] = y_hat_final
+        new_idata["posterior_predictive"]["mu"] = y_hat_final
+
+        return new_idata
+
+    def _smooth(self) -> xr.Dataset:
+        """
+        Run the Kalman smoother / conditional posterior sampler.
+        Returns an xarray Dataset with 'smoothed_posterior'.
+        """
+        if self.idata is None:
+            raise RuntimeError("Model must be fit before smoothing.")
+        return self.ss_mod.sample_conditional_posterior(self.idata)
+
+    def _forecast(self, start: pd.Timestamp, periods: int) -> xr.Dataset:
+        """
+        Forecast future values.
+        `start` is the timestamp of the last observed point, and `periods` is the number of steps ahead.
+        Returns an xarray Dataset with 'forecast_observed'.
+        """
+        if self.idata is None:
+            raise RuntimeError("Model must be fit before forecasting.")
+        return self.ss_mod.forecast(self.idata, start=start, periods=periods)
+
+    def predict(
+        self,
+        X: Optional[np.ndarray],
+        coords: Dict[str, Any],
+        out_of_sample: Optional[bool] = False,
+    ) -> xr.Dataset:
+        """
+        Wrapper around forecast: expects coords with 'datetime_index' of future points.
+        """
+        if not out_of_sample:
+            return self._prepare_idata()
+        else:
+            idx = coords.get("datetime_index")
+            if not isinstance(idx, pd.DatetimeIndex):
+                raise ValueError(
+                    "coords must contain 'datetime_index' for prediction period."
+                )
+            last = self._train_index[-1]  # start forecasting after the last observed
+            temp_idata = self._forecast(start=last, periods=len(idx))
+            new_idata = temp_idata.copy()
+
+            # Rename 'time' to 'obs_ind' to match CausalPy conventions
+            if "time" in new_idata.dims:
+                new_idata = new_idata.rename({"time": "obs_ind"})
+
+            # Extract the forecasted observed data and assign it to 'y_hat'
+            new_idata["y_hat"] = new_idata["forecast_observed"].isel(observed_state=0)
+
+            # Assign 'y_hat' to 'mu' for consistency
+            new_idata["mu"] = new_idata["y_hat"]
+
+            return new_idata
+
+    def score(
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+    ) -> pd.Series:
+        """
+        Compute R^2 between observed and mean forecast.
+        """
+        pred = self.predict(X, coords)
+        fc = pred["posterior_predictive"]["y_hat"]  # .isel(observed_state=0)
+
+        # Use all posterior samples to compute Bayesian R²
+        # fc has shape (chain, draw, time), we want (n_samples, time)
+        fc_samples = fc.stack(
+            sample=["chain", "draw"]
+        ).T.values  # Shape: (time, n_samples)
+
+        # Use arviz.r2_score to get both r2 and r2_std
+        return r2_score(y.flatten(), fc_samples)

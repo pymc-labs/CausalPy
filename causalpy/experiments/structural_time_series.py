@@ -159,6 +159,8 @@ class StructuralTimeSeries(BaseExperiment):
                 "datetime_index": self.datapre.index,  # For BSTS
             }
             self.pre_pred = self.model.predict(X=X_pre_predict, coords=pre_pred_coords)
+            if not isinstance(self.pre_pred, az.InferenceData):
+                self.pre_pred = az.InferenceData(posterior_predictive=self.pre_pred)
         elif isinstance(self.model, RegressorMixin):
             self.pre_pred = self.model.predict(X=X_pre_predict)
         else:
@@ -173,8 +175,10 @@ class StructuralTimeSeries(BaseExperiment):
                 "datetime_index": self.datapost.index,  # For BSTS
             }
             self.post_pred = self.model.predict(
-                X=X_post_predict, coords=post_pred_coords
+                X=X_post_predict, coords=post_pred_coords, out_of_sample=True
             )
+            if not isinstance(self.post_pred, az.InferenceData):
+                self.post_pred = az.InferenceData(posterior_predictive=self.post_pred)
         elif isinstance(self.model, RegressorMixin):
             self.post_pred = self.model.predict(X=X_post_predict)
         else:
