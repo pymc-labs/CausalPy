@@ -497,3 +497,114 @@ class PropensityScore(PyMCModel):
                 )
             )
         return self.idata
+
+
+class InterventionTimeEstimator(PyMCModel):
+    r"""
+    Custom PyMC model to estimate the time an intervetnion took place.
+
+    defines the PyMC model :
+
+    .. math::
+        \alpha &\sim \mathrm{Normal}(0, 1) \\
+        \beta &\sim \mathrm{Normal}(0, 1) \\
+        s(t) &= \gamma_{i(t)} \quad \textrm{with} \quad \gamma_{k \in [0, ..., n_{seasons}-1]} \sim \mathrm{Normal}(0, 1)\\
+        base_{\mu}(t) &= \alpha + \beta \cdot t + s_t\\
+        \\
+        \tau &\sim \mathrm{Uniform}(0, 1) \\
+        w(t) &= sigmoid(t-\tau) \\
+        \\
+        level &\sim \mathrm{Normal}(0, 1) \\
+        trend &\sim \mathrm{Normal}(0, 1) \\
+        A &\sim \mathrm{Normal}(0, 1) \\
+        \lambda &\sim \mathrm{HalfNormal}(0, 1) \\
+        impulse(t) &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
+        intervention(t) &= level + trend \cdot (t-\tau) + impulse_t\\
+        \\
+        \sigma &\sim \mathrm{Normal}(0, 1) \\
+        \mu(t) &= base_{\mu}(t) + w(t) \cdot intervention(t) \\
+        \\
+        y(t) &\sim \mathrm{Normal}(\mu (t), \sigma)
+
+    Example
+        --------
+        >>> import causalpy as cp
+        >>> import numpy as np
+        >>> from causalpy.pymc_models import InterventionTimeEstimator
+        >>> df = cp.load("its")
+        >>> y = df["y"].values
+        >>> t = df["t"].values
+        >>> coords = {"sseasons" = range(12)} # The data is monthly
+        >>> estimator = InterventionTimeEstimator()
+        >>> # We are trying to capture an impulse in the number of death per month due to Covid.
+        >>> estimator.fit(
+        ...     t,
+        ...     y,
+        ...     coords,
+        ...     effect=["impulse"])
+        Inference data...
+    """
+
+    def build_model(self, t, y, coords, effect, span, grain_season):
+        """
+        Defines the PyMC model
+
+        :param t: An array of values representing the time over which y is spread
+        :param y: An array of values representing our outcome y
+        :param coords: A dictionary with the coordinate names for our instruments
+        """
+
+        with self:
+            self.add_coords(coords)
+
+            if span is None:
+                span = (t.min(), t.max())
+
+            # --- Priors ---
+            switchpoint = pm.Uniform("switchpoint", lower=span[0], upper=span[1])
+            alpha = pm.Normal(name="alpha", mu=0, sigma=10)
+            beta = pm.Normal(name="beta", mu=0, sigma=10)
+            seasons = 0
+            if "seasons" in coords and len(coords["seasons"]) > 0:
+                season_idx = np.arange(len(y)) // grain_season % len(coords["seasons"])
+                season_effect = pm.Normal("season", mu=0, sigma=1, dims="seasons")
+                seasons = season_effect[season_idx]
+
+            # --- Intervention effect ---
+            level = trend = impulse = 0
+
+            if "level" in effect:
+                level = pm.Normal("level", mu=0, sigma=10)
+
+            if "trend" in effect:
+                trend = pm.Normal("trend", mu=0, sigma=10)
+
+            if "impulse" in effect:
+                impulse_amplitude = pm.Normal("impulse_amplitude", mu=0, sigma=1)
+                decay_rate = pm.HalfNormal("decay_rate", sigma=1)
+                impulse = impulse_amplitude * pm.math.exp(
+                    -decay_rate * abs(t - switchpoint)
+                )
+
+            # --- Parameterization ---
+            weight = pm.math.sigmoid(t - switchpoint)
+            # Compute and store the modelled time series
+            mu_ts = pm.Deterministic(name="mu_ts", var=alpha + beta * t + seasons)
+            # Compute and store the modelled intervention effect
+            mu_in = pm.Deterministic(
+                name="mu_in", var=level + trend * (t - switchpoint) + impulse
+            )
+            # Compute and store the the sum of the intervention and the time series
+            mu = pm.Deterministic("mu", mu_ts + weight * mu_in)
+
+            # --- Likelihood ---
+            pm.Normal("y_hat", mu=mu, sigma=2, observed=y)
+
+    def fit(self, t, y, coords, effect=[], span=None, grain_season=1, n=1000):
+        """
+        Draw samples from posterior distribution
+        """
+        self.build_model(t, y, coords, effect, span, grain_season)
+        with self:
+            self.idata = pm.sample(n, **self.sample_kwargs)
+        return self.idata
