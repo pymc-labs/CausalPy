@@ -19,7 +19,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from formulae import design_matrices
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
@@ -91,18 +91,15 @@ class DifferenceInDifferences(BaseExperiment):
         self.data = data
         self.expt_type = "Difference in Differences"
         self.formula = formula
-        self.rhs_formula = formula.split("~", 1)[1].strip()
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
         self.input_validation()
 
-        dm = design_matrices(self.formula, self.data)
-        self.labels = list(dm.common.terms.keys())
-        self.y, self.X = (
-            np.asarray(dm.response.design_matrix).reshape(-1, 1),
-            np.asarray(dm.common.design_matrix),
-        )
-        self.outcome_variable_name = dm.response.name
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
         # fit model
         if isinstance(self.model, PyMCModel):
@@ -127,7 +124,9 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
-        new_x = np.array(design_matrices(self.rhs_formula, self.x_pred_control).common)
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_control
+        ).to_numpy()
         self.y_pred_control = self.model.predict(new_x)
 
         # predicted outcome for treatment group
@@ -144,9 +143,9 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
-        new_x = np.array(
-            design_matrices(self.rhs_formula, self.x_pred_treatment).common
-        )
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_treatment
+        ).to_numpy()
         self.y_pred_treatment = self.model.predict(new_x)
 
         # predicted outcome for counterfactual. This is given by removing the influence
@@ -166,9 +165,9 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_counterfactual.empty:
             raise ValueError("x_pred_counterfactual is empty")
-        new_x = np.array(
-            design_matrices(self.rhs_formula, self.x_pred_counterfactual).common
-        )
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_counterfactual
+        ).to_numpy()
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):

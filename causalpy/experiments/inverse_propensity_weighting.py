@@ -21,8 +21,8 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from formulaic import model_matrix
 from matplotlib.lines import Line2D
-from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
@@ -89,11 +89,11 @@ class InversePropensityWeighting(BaseExperiment):
         self.weighting_scheme = weighting_scheme
         self.input_validation()
 
-        t, X = dmatrices(formula, self.data)
-        self._t_design_info = t.design_info
-        self._t_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.t, self.X = np.asarray(t), np.asarray(X)
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        self.t, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
         self.y = self.data[self.outcome_variable]
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}

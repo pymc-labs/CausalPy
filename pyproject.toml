@@ -34,7 +34,7 @@ dependencies = [
     "numpy",
     "pandas",
     "patsy",
-    "formulae",
+    "formulaic",
     "pymc>=5.15.1",
     "scikit-learn>=1",
     "scipy",
