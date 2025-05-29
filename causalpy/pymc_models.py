@@ -542,9 +542,9 @@ class InterventionTimeEstimator(PyMCModel):
         ...     y,
         ...     coords,
         ...     effect=["impulse"],
-        ...     n=5000)
-        ...
-        Inference data...
+        ...     n=5000
+        ...)
+        Inference...
     """
 
     def build_model(self, t, y, coords, effect, span, grain_season):
