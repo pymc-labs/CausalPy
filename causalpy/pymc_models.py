@@ -531,7 +531,7 @@ class InterventionTimeEstimator(PyMCModel):
         >>> import causalpy as cp
         >>> import numpy as np
         >>> from causalpy.pymc_models import InterventionTimeEstimator
-        >>> df = cp.load("its")
+        >>> df = cp.load_data("its")
         >>> y = df["y"].values
         >>> t = df["t"].values
         >>> coords = {"sseasons" = range(12)} # The data is monthly
