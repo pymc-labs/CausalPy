@@ -541,8 +541,7 @@ class InterventionTimeEstimator(PyMCModel):
         ...     t,
         ...     y,
         ...     coords,
-        ...     effect=["impulse"],
-        ...     n=1000)
+        ...     effect=["impulse"])
         Inference data...
     """
 
@@ -601,7 +600,7 @@ class InterventionTimeEstimator(PyMCModel):
             # --- Likelihood ---
             pm.Normal("y_hat", mu=mu, sigma=2, observed=y)
 
-    def fit(self, t, y, coords, effect=[], span=None, grain_season=1, n=1000):
+    def fit(self, t, y, coords, effect=[], span=None, grain_season=1, n=None):
         """
         Draw samples from posterior distribution
         """
