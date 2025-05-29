@@ -28,7 +28,7 @@ from .experiments.instrumental_variable import (
     InstrumentalVariable as NewInstrumentalVariable,
 )
 from .experiments.interrupted_time_series import (
-    InterruptedTimeSeries as NewInterruptedTimeSeries,
+    InterruptedTimeSeries as DeprecatedInterruptedTimeSeriesFromExperiments,
 )
 from .experiments.inverse_propensity_weighting import (
     InversePropensityWeighting as NewInversePropensityWeighting,
@@ -38,6 +38,9 @@ from .experiments.regression_discontinuity import (
     RegressionDiscontinuity as NewRegressionDiscontinuity,
 )
 from .experiments.regression_kink import RegressionKink as NewRegressionKink
+from .experiments.structural_time_series import (
+    StructuralTimeSeries as NewBasisExpansionTimeSeries,
+)
 from .experiments.synthetic_control import (
     SyntheticControl as NewSyntheticControl,
 )
@@ -46,6 +49,7 @@ from .experiments.synthetic_control import (
 warnings.simplefilter("always", DeprecationWarning)
 RED = "\033[91m"
 RESET = "\033[0m"
+BLUE = "\033[94m"
 
 
 def PrePostNEGD(*args, **kwargs):
@@ -78,7 +82,7 @@ def InterruptedTimeSeries(*args, **kwargs):
         DeprecationWarning,
         stacklevel=2,
     )
-    return NewInterruptedTimeSeries(*args, **kwargs)
+    return DeprecatedInterruptedTimeSeriesFromExperiments(*args, **kwargs)
 
 
 def SyntheticControl(*args, **kwargs):
@@ -134,3 +138,14 @@ def InstrumentalVariable(*args, **kwargs):
         stacklevel=2,
     )
     return NewInstrumentalVariable(*args, **kwargs)
+
+
+def StructuralTimeSeries(*args, **kwargs):
+    warnings.warn(
+        f"""{RED}cp.pymc_experiments.StructuralTimeSeries is deprecated and will be removed in a future release. Please use:
+        import causalpy as cp
+        cp.StructuralTimeSeries(...){RESET}""",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NewBasisExpansionTimeSeries(*args, **kwargs)
