@@ -21,8 +21,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
@@ -104,12 +104,11 @@ class PrePostNEGD(BaseExperiment):
         self.pretreatment_variable_name = pretreatment_variable_name
         self.input_validation()
 
-        y, X = dmatrices(formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
@@ -135,10 +134,10 @@ class PrePostNEGD(BaseExperiment):
                 self.group_variable_name: np.zeros(self.pred_xi.shape),
             }
         )
-        (new_x_untreated,) = build_design_matrices(
-            [self._x_design_info], x_pred_untreated
-        )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+        new_x_untreated = model_matrix(
+            spec=self.rhs_matrix_spec, data=x_pred_untreated
+        ).to_numpy()
+        self.pred_untreated = self.model.predict(X=new_x_untreated)
         # treated
         x_pred_treated = pd.DataFrame(
             {
@@ -146,8 +145,10 @@ class PrePostNEGD(BaseExperiment):
                 self.group_variable_name: np.ones(self.pred_xi.shape),
             }
         )
-        (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+        new_x_treated = model_matrix(
+            spec=self.rhs_matrix_spec, data=x_pred_treated
+        ).to_numpy()
+        self.pred_treated = self.model.predict(X=new_x_treated)
 
         # Evaluate causal impact as equal to the trestment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
