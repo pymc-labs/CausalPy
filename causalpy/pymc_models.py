@@ -534,7 +534,7 @@ class InterventionTimeEstimator(PyMCModel):
         >>> df = cp.load_data("its")
         >>> y = df["y"].values
         >>> t = df["t"].values
-        >>> coords = {"sseasons" = range(12)} # The data is monthly
+        >>> coords = {"seasons": range(12)} # The data is monthly
         >>> estimator = InterventionTimeEstimator()
         >>> # We are trying to capture an impulse in the number of death per month due to Covid.
         >>> estimator.fit(
