@@ -541,7 +541,8 @@ class InterventionTimeEstimator(PyMCModel):
         ...     t,
         ...     y,
         ...     coords,
-        ...     effect=["impulse"])
+        ...     effect=["impulse"],
+        ...     n=1000)
         Inference data...
     """
 
