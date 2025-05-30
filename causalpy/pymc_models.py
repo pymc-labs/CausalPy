@@ -605,6 +605,7 @@ class InterventionTimeEstimator(PyMCModel):
         """
         Draw samples from posterior distribution
         """
+        self.sample_kwargs["progressbar"] = False
         self.build_model(t, y, coords, effect, span, grain_season)
         with self:
             self.idata = pm.sample(n, **self.sample_kwargs)
