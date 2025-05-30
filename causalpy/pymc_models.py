@@ -541,48 +541,79 @@ class InterventionTimeEstimator(PyMCModel):
         ...     t,
         ...     y,
         ...     coords,
-        ...     effect=["impulse"]
+        ...     priors={"impulse":[]}
         ... )
         Inference data...
     """
 
-    def build_model(self, t, y, coords, effect, span, grain_season):
+    def build_model(self, t, y, coords, time_range, grain_season, priors):
         """
         Defines the PyMC model
 
         :param t: An array of values representing the time over which y is spread
         :param y: An array of values representing our outcome y
-        :param coords: A dictionary with the coordinate names for our instruments
+        :param coords: An optional dictionary with the coordinate names for our instruments.
+            In particular, used to determine the number of seasons.
+        :param time_range: An optional tuple providing a specific time_range where the
+            intervention effect should have taken place.
+        :param priors: An optional dictionary of priors for the parameters of the
+            different distributions.
+            :code:`priors = {"alpha":[0, 5], "beta":[0,2], "level":[5, 5], "impulse":[1, 2 ,3]}`
         """
 
         with self:
             self.add_coords(coords)
 
-            if span is None:
-                span = (t.min(), t.max())
+            if time_range is None:
+                time_range = (t.min(), t.max())
 
             # --- Priors ---
-            switchpoint = pm.Uniform("switchpoint", lower=span[0], upper=span[1])
-            alpha = pm.Normal(name="alpha", mu=0, sigma=10)
-            beta = pm.Normal(name="beta", mu=0, sigma=10)
+            switchpoint = pm.Uniform(
+                "switchpoint", lower=time_range[0], upper=time_range[1]
+            )
+            alpha = pm.Normal(name="alpha", mu=0, sigma=50)
+            beta = pm.Normal(name="beta", mu=0, sigma=50)
             seasons = 0
             if "seasons" in coords and len(coords["seasons"]) > 0:
                 season_idx = np.arange(len(y)) // grain_season % len(coords["seasons"])
-                season_effect = pm.Normal("season", mu=0, sigma=1, dims="seasons")
-                seasons = season_effect[season_idx]
+                seasons_effect = pm.Normal(
+                    "seasons_effect", mu=0, sigma=50, dims="seasons"
+                )
+                seasons = seasons_effect[season_idx]
 
             # --- Intervention effect ---
             level = trend = impulse = 0
 
-            if "level" in effect:
-                level = pm.Normal("level", mu=0, sigma=10)
-
-            if "trend" in effect:
-                trend = pm.Normal("trend", mu=0, sigma=10)
-
-            if "impulse" in effect:
-                impulse_amplitude = pm.Normal("impulse_amplitude", mu=0, sigma=1)
-                decay_rate = pm.HalfNormal("decay_rate", sigma=1)
+            if "level" in priors:
+                mu, sigma = (
+                    (0, 50)
+                    if len(priors["level"]) != 2
+                    else (priors["level"][0], priors["level"][1])
+                )
+                level = pm.Normal(
+                    "level",
+                    mu=mu,
+                    sigma=sigma,
+                )
+            if "trend" in priors:
+                mu, sigma = (
+                    (0, 50)
+                    if len(priors["trend"]) != 2
+                    else (priors["trend"][0], priors["trend"][1])
+                )
+                trend = pm.Normal("trend", mu=mu, sigma=sigma)
+            if "impulse" in priors:
+                mu, sigma1, sigma2 = (
+                    (0, 50, 50)
+                    if len(priors["impulse"]) != 3
+                    else (
+                        priors["impulse"][0],
+                        priors["impulse"][1],
+                        priors["impulse"][2],
+                    )
+                )
+                impulse_amplitude = pm.Normal("impulse_amplitude", mu=mu, sigma=sigma1)
+                decay_rate = pm.HalfNormal("decay_rate", sigma=sigma2)
                 impulse = impulse_amplitude * pm.math.exp(
                     -decay_rate * abs(t - switchpoint)
                 )
@@ -597,16 +628,16 @@ class InterventionTimeEstimator(PyMCModel):
             )
             # Compute and store the the sum of the intervention and the time series
             mu = pm.Deterministic("mu", mu_ts + weight * mu_in)
+            sigma = pm.HalfNormal("sigma", 1)
 
             # --- Likelihood ---
-            pm.Normal("y_hat", mu=mu, sigma=2, observed=y)
+            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y)
 
-    def fit(self, t, y, coords, effect=[], span=None, grain_season=1, n=1000):
+    def fit(self, t, y, coords, time_range=None, grain_season=1, priors={}, n=1000):
         """
         Draw samples from posterior distribution
         """
-        self.sample_kwargs["progressbar"] = False
-        self.build_model(t, y, coords, effect, span, grain_season)
+        self.build_model(t, y, coords, time_range, grain_season, priors)
         with self:
-            self.idata = pm.sample(n, **self.sample_kwargs)
+            self.idata = pm.sample(n, progressbar=False, **self.sample_kwargs)
         return self.idata
