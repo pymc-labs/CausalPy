@@ -1,4 +1,4 @@
-.PHONY: init lint check_lint test
+.PHONY: init lint check_lint test uml html cleandocs
 
 init:
 	python -m pip install -e . --no-deps
@@ -20,3 +20,12 @@ test:
 
 uml:
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
+
+# Docs build commands
+
+html:
+	sphinx-build -b html docs/source docs/_build
+
+cleandocs:
+	rm -rf docs/_build
+	rm -rf docs/source/api/generated
