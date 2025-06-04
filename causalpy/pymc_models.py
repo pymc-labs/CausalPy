@@ -693,9 +693,3 @@ class InterventionTimeEstimator(PyMCModel):
                 {"X": X, "t": t, "y": np.zeros(new_no_of_observations)},
                 coords={"obs_ind": np.arange(new_no_of_observations)},
             )
-
-    def set_time_range(self, time_range):
-        """
-        Set time_range.
-        """
-        self.time_range = time_range

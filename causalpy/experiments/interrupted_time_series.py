@@ -92,7 +92,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Set the data according to if the model is
         if treatment_time is None or isinstance(treatment_time, tuple):
             self.datapre = data
-            self.model.set_time_range(self.treatment_time)
+            self.model.set_time_range(self.treatment_time, self.datapre)
         else:
             # split data in to pre and post intervention
             self.datapre = data[data.index < self.treatment_time]
@@ -120,11 +120,18 @@ class InterruptedTimeSeries(BaseExperiment):
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
         if treatment_time is None or isinstance(treatment_time, tuple):
-            self.treatment_time = int(
+            # We're getting the inferred switchpoint as one of the values of the timeline, from the last column
+            switchpoint = int(
                 az.extract(idata, group="posterior", var_names="switchpoint")
                 .mean("sample")
                 .values
             )
+
+            # we're getting the associated index of that switchpoint
+            last_column = data.columns[-1]
+            self.treatment_time = data[data[last_column] == switchpoint].index[0]
+
+            # We're getting datapre as intended for prediction
             self.datapre = data[data.index < self.treatment_time]
             (new_y, new_x) = build_design_matrices(
                 [self._y_design_info, self._x_design_info], self.datapre
@@ -155,22 +162,20 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def input_validation(self, data, treatment_time, model):
         """Validate the input data and model formula for correctness"""
-        if treatment_time is None and not hasattr(model, "set_time_range"):
+        if isinstance(treatment_time, (type(None), tuple)) and not hasattr(
+            model, "set_time_range"
+        ):
             raise ModelException(
-                "If treatment_time is None, provided model must have a 'set_time_range' method"
+                "If treatment_time is None or a tuple, provided model must have a 'set_time_range' method"
             )
-        elif isinstance(treatment_time, tuple) and not hasattr(model, "set_time_range"):
-            raise ModelException(
-                "If treatment_time is a tuple, provided model must have a 'set_time_range' method"
-            )
-        elif isinstance(data.index, pd.DatetimeIndex) and not isinstance(
-            treatment_time, pd.Timestamp
+        if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
+            treatment_time, (pd.Timestamp, tuple, type(None))
         ):
             raise BadIndexException(
                 "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
             )
-        elif not isinstance(data.index, pd.DatetimeIndex) and isinstance(
-            treatment_time, pd.Timestamp
+        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
+            treatment_time, (pd.Timestamp)
         ):
             raise BadIndexException(
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
