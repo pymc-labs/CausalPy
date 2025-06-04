@@ -25,11 +25,10 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
+from causalpy.experiments.base import BaseExperiment
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
-
-from .base import BaseExperiment
 
 LEGEND_FONT_SIZE = 12
 
@@ -78,19 +77,27 @@ class InterruptedTimeSeries(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
+        treatment_time: Union[int, float, pd.Timestamp, tuple, None],
         formula: str,
         model=None,
         **kwargs,
     ) -> None:
         super().__init__(model=model)
-        self.input_validation(data, treatment_time)
+        # input validation TODO : for the moment only valid for given treatment time
+        if treatment_time is not None or not isinstance(treatment_time, tuple):
+            self.input_validation(data, treatment_time)
+
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
+
+        # Set the data according to if the model is
+        if treatment_time is None or isinstance(treatment_time, tuple):
+            self.datapre = data
+            self.model.set_time_range(self.treatment_time)
+        else:
+            # split data in to pre and post intervention
+            self.datapre = data[data.index < self.treatment_time]
 
         self.formula = formula
 
@@ -101,17 +108,11 @@ class InterruptedTimeSeries(BaseExperiment):
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            idata = self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.pre_X, y=self.pre_y)
         else:
@@ -120,8 +121,29 @@ class InterruptedTimeSeries(BaseExperiment):
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
+        if treatment_time is None or isinstance(treatment_time, tuple):
+            self.treatment_time = int(
+                az.extract(idata, group="posterior", var_names="switchpoint")
+                .mean("sample")
+                .values
+            )
+            self.datapre = data[data.index < self.treatment_time]
+            (new_y, new_x) = build_design_matrices(
+                [self._y_design_info, self._x_design_info], self.datapre
+            )
+            self.pre_X = np.asarray(new_x)
+            self.pre_y = np.asarray(new_y)
+
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.pre_X)
+        # process post-intervention data
+        self.datapost = data[data.index >= self.treatment_time]
+
+        (new_y, new_x) = build_design_matrices(
+            [self._y_design_info, self._x_design_info], self.datapost
+        )
+        self.post_X = np.asarray(new_x)
+        self.post_y = np.asarray(new_y)
 
         # calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)

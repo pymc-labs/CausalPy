@@ -530,26 +530,30 @@ class InterventionTimeEstimator(PyMCModel):
         --------
         >>> import causalpy as cp
         >>> import numpy as np
-        >>> from causalpy.pymc_models import InterventionTimeEstimator
-        >>> df = cp.load_data("its")
-        >>> y = df["y"].values
-        >>> t = df["t"].values
-        >>> coords = {"seasons": range(12)} # The data is monthly
-        >>> estimator = InterventionTimeEstimator()
-        >>> # We are trying to capture an impulse in the number of death per month due to Covid.
-        >>> estimator.fit(
-        ...     t,
-        ...     y,
-        ...     coords,
-        ...     priors={"impulse":[]}
-        ... )
-        Inference data...
+        >>> from patsy import build_design_matrices, dmatrices
+        >>> from causalpy.pymc_models import InterventionTimeEstimator as ITE
+        >>> data = cp.load_data("its")
+        >>> formula="y ~ 1 + t + C(month)"
+        >>> y, X = dmatrices(formula, data)
+        >>> outcome_variable_name = y.design_info.column_names[0]
+        >>> labels = X.design_info.column_names
+        >>> _y, _X = np.asarray(y), np.asarray(X)
+        >>> COORDS = {"coeffs":labels, "obs_ind": np.arange(_X.shape[0])}
+        >>> model = ITE(sample_kwargs={"draws" : 10, "tune":10, "progressbar":False}) # For a quick overview. Remove sample_kwargs parameter for better performance
+        >>> model.set_time_range(None)
+        >>> model.fit(X=_X, y=_y, coords=COORDS)
+        Inference ...
     """
 
-    def build_model(self, t, y, coords, time_range, grain_season, priors):
+    def __init__(self, priors={}, sample_kwargs=None):
+        super().__init__(sample_kwargs)
+        self.priors = priors
+
+    def build_model(self, X, t, y, coords):
         """
         Defines the PyMC model
 
+        :param X: A dataframe of the covariates
         :param t: An array of values representing the time over which y is spread
         :param y: An array of values representing our outcome y
         :param coords: An optional dictionary with the coordinate names for our instruments.
@@ -564,80 +568,134 @@ class InterventionTimeEstimator(PyMCModel):
         with self:
             self.add_coords(coords)
 
-            if time_range is None:
-                time_range = (t.min(), t.max())
-
+            t = pm.Data("t", t, dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y[:, 0], dims="obs_ind")
+            lower_bound = pm.Data("lower_bound", self.time_range[0])
+            upper_bound = pm.Data("upper_bound", self.time_range[1])
             # --- Priors ---
             switchpoint = pm.Uniform(
-                "switchpoint", lower=time_range[0], upper=time_range[1]
+                "switchpoint", lower=lower_bound, upper=upper_bound
             )
-            alpha = pm.Normal(name="alpha", mu=0, sigma=50)
-            beta = pm.Normal(name="beta", mu=0, sigma=50)
-            seasons = 0
-            if "seasons" in coords and len(coords["seasons"]) > 0:
-                season_idx = np.arange(len(y)) // grain_season % len(coords["seasons"])
-                seasons_effect = pm.Normal(
-                    "seasons_effect", mu=0, sigma=50, dims="seasons"
-                )
-                seasons = seasons_effect[season_idx]
+            beta = pm.Normal(name="beta", mu=0, sigma=50, dims="coeffs")
 
             # --- Intervention effect ---
             level = trend = impulse = 0
 
-            if "level" in priors:
+            if "level" in self.priors:
                 mu, sigma = (
                     (0, 50)
-                    if len(priors["level"]) != 2
-                    else (priors["level"][0], priors["level"][1])
+                    if len(self.priors["level"]) != 2
+                    else (self.priors["level"][0], self.priors["level"][1])
                 )
                 level = pm.Normal(
                     "level",
                     mu=mu,
                     sigma=sigma,
                 )
-            if "trend" in priors:
+            if "trend" in self.priors:
                 mu, sigma = (
                     (0, 50)
-                    if len(priors["trend"]) != 2
-                    else (priors["trend"][0], priors["trend"][1])
+                    if len(self.priors["trend"]) != 2
+                    else (self.priors["trend"][0], self.priors["trend"][1])
                 )
                 trend = pm.Normal("trend", mu=mu, sigma=sigma)
-            if "impulse" in priors:
+            if "impulse" in self.priors:
                 mu, sigma1, sigma2 = (
                     (0, 50, 50)
-                    if len(priors["impulse"]) != 3
+                    if len(self.priors["impulse"]) != 3
                     else (
-                        priors["impulse"][0],
-                        priors["impulse"][1],
-                        priors["impulse"][2],
+                        self.priors["impulse"][0],
+                        self.priors["impulse"][1],
+                        self.priors["impulse"][2],
                     )
                 )
                 impulse_amplitude = pm.Normal("impulse_amplitude", mu=mu, sigma=sigma1)
                 decay_rate = pm.HalfNormal("decay_rate", sigma=sigma2)
-                impulse = impulse_amplitude * pm.math.exp(
-                    -decay_rate * abs(t - switchpoint)
+                impulse = pm.Deterministic(
+                    "impulse",
+                    impulse_amplitude
+                    * pm.math.exp(-decay_rate * pm.math.abs(t - switchpoint)),
                 )
 
             # --- Parameterization ---
             weight = pm.math.sigmoid(t - switchpoint)
-            # Compute and store the modelled time series
-            mu_ts = pm.Deterministic(name="mu_ts", var=alpha + beta * t + seasons)
+            # Compute and store the base time series
+            mu = pm.Deterministic(name="mu", var=pm.math.dot(X, beta))
             # Compute and store the modelled intervention effect
             mu_in = pm.Deterministic(
                 name="mu_in", var=level + trend * (t - switchpoint) + impulse
             )
-            # Compute and store the the sum of the intervention and the time series
-            mu = pm.Deterministic("mu", mu_ts + weight * mu_in)
+            # Compute and store the sum of the base time series and the intervention's effect
+            mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in)
             sigma = pm.HalfNormal("sigma", 1)
 
             # --- Likelihood ---
-            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y)
+            # Likelihood of the base time series
+            pm.Normal("y_hat", mu=mu, sigma=sigma, dims="obs_ind")
+            # Likelihodd of the base time series and the intervention's effect
+            pm.Normal("y_ts", mu=mu_ts, sigma=sigma, observed=y, dims="obs_ind")
 
-    def fit(self, t, y, coords, time_range=None, grain_season=1, priors={}, n=1000):
+    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
+        """Draw samples from posterior, prior predictive, and posterior predictive
+        distributions, placing them in the model's idata attribute.
         """
-        Draw samples from posterior distribution
-        """
-        self.build_model(t, y, coords, time_range, grain_season, priors)
+
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+        t = X[:, -1]
+        if self.time_range is None:
+            self.time_range = (t.min(), t.max())
+        self.build_model(X, t, y, coords)
         with self:
-            self.idata = pm.sample(n, progressbar=False, **self.sample_kwargs)
+            self.idata = pm.sample(max_treedepth=15, **self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata, progressbar=False, random_seed=random_seed
+                )
+            )
         return self.idata
+
+    def predict(self, X):
+        """
+        Predict data given input data `X`
+
+        .. caution::
+            Results in KeyError if model hasn't been fit.
+        """
+
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+        t = X[:, -1]
+        self._data_setter(X, t)
+        with self:  # sample with new input data
+            post_pred = pm.sample_posterior_predictive(
+                self.idata,
+                var_names=["y_hat", "y_ts", "mu", "mu_ts", "mu_in"],
+                progressbar=False,
+                random_seed=random_seed,
+            )
+        return post_pred
+
+    def _data_setter(self, X, t) -> None:
+        """
+        Set data for the model.
+
+        This method is used internally to register new data for the model for
+        prediction.
+        """
+        new_no_of_observations = X.shape[0]
+        with self:
+            pm.set_data(
+                {"X": X, "t": t, "y": np.zeros(new_no_of_observations)},
+                coords={"obs_ind": np.arange(new_no_of_observations)},
+            )
+
+    def set_time_range(self, time_range):
+        """
+        Set time_range.
+        """
+        self.time_range = time_range
