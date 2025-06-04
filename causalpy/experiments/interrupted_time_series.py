@@ -24,7 +24,7 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
-from causalpy.custom_exceptions import BadIndexException
+from causalpy.custom_exceptions import BadIndexException, ModelException
 from causalpy.experiments.base import BaseExperiment
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
@@ -83,9 +83,7 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
-        # input validation TODO : for the moment only valid for given treatment time
-        if treatment_time is not None or not isinstance(treatment_time, tuple):
-            self.input_validation(data, treatment_time)
+        self.input_validation(data, treatment_time, model)
 
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
@@ -155,15 +153,23 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
-    def input_validation(self, data, treatment_time):
+    def input_validation(self, data, treatment_time, model):
         """Validate the input data and model formula for correctness"""
-        if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
+        if treatment_time is None and not hasattr(model, "set_time_range"):
+            raise ModelException(
+                "If treatment_time is None, provided model must have a 'set_time_range' method"
+            )
+        elif isinstance(treatment_time, tuple) and not hasattr(model, "set_time_range"):
+            raise ModelException(
+                "If treatment_time is a tuple, provided model must have a 'set_time_range' method"
+            )
+        elif isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
             raise BadIndexException(
                 "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
             )
-        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
+        elif not isinstance(data.index, pd.DatetimeIndex) and isinstance(
             treatment_time, pd.Timestamp
         ):
             raise BadIndexException(
