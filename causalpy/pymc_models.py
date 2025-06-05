@@ -539,8 +539,9 @@ class InterventionTimeEstimator(PyMCModel):
         >>> labels = X.design_info.column_names
         >>> _y, _X = np.asarray(y), np.asarray(X)
         >>> COORDS = {"coeffs":labels, "obs_ind": np.arange(_X.shape[0])}
-        >>> model = ITE(sample_kwargs={"draws" : 10, "tune":10, "progressbar":False}) # For a quick overview. Remove sample_kwargs parameter for better performance
-        >>> model.set_time_range(None)
+        >>> model = ITE(sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model.set_time_range(None, data)
+        >>> model.set_timeline(-1)
         >>> model.fit(X=_X, y=_y, coords=COORDS)
         Inference ...
     """
@@ -549,7 +550,7 @@ class InterventionTimeEstimator(PyMCModel):
         super().__init__(sample_kwargs)
         self.priors = priors
 
-    def build_model(self, X, t, y, coords):
+    def build_model(self, X, y, coords):
         """
         Defines the PyMC model
 
@@ -568,7 +569,7 @@ class InterventionTimeEstimator(PyMCModel):
         with self:
             self.add_coords(coords)
 
-            t = pm.Data("t", t, dims="obs_ind")
+            t = pm.Data("t", X[:, self.timeline], dims="obs_ind")
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
             lower_bound = pm.Data("lower_bound", self.time_range[0])
@@ -644,10 +645,9 @@ class InterventionTimeEstimator(PyMCModel):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
-        t = X[:, -1]
         if self.time_range is None:
-            self.time_range = (t.min(), t.max())
-        self.build_model(X, t, y, coords)
+            self.time_range = (X[:, self.timeline].min(), X[:, self.timeline].max())
+        self.build_model(X, y, coords)
         with self:
             self.idata = pm.sample(max_treedepth=15, **self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
@@ -669,7 +669,7 @@ class InterventionTimeEstimator(PyMCModel):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
-        t = X[:, -1]
+        t = X[:, self.timeline]
         self._data_setter(X, t)
         with self:  # sample with new input data
             post_pred = pm.sample_posterior_predictive(
@@ -693,3 +693,21 @@ class InterventionTimeEstimator(PyMCModel):
                 {"X": X, "t": t, "y": np.zeros(new_no_of_observations)},
                 coords={"obs_ind": np.arange(new_no_of_observations)},
             )
+
+    def set_time_range(self, time_range, data):
+        """
+        Set time_range.
+        """
+        if time_range is None:
+            self.time_range = time_range
+        else:
+            self.time_range = (
+                data["t"].loc[time_range[0]],
+                data["t"].loc[time_range[1]],
+            )
+
+    def set_timeline(self, index):
+        """
+        Set the index of the timeline in the given covariates
+        """
+        self.timeline = index

@@ -88,11 +88,12 @@ class InterruptedTimeSeries(BaseExperiment):
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
+        # set if the model is supposed to infer the treatment_time
+        self.infer_treatment_time = isinstance(self.treatment_time, (type(None), tuple))
 
-        # Set the data according to if the model is
-        if treatment_time is None or isinstance(treatment_time, tuple):
+        # Set the data according to if the model is fitted on the whole bunch or not
+        if self.infer_treatment_time:
             self.datapre = data
-            self.model.set_time_range(self.treatment_time, self.datapre)
         else:
             # split data in to pre and post intervention
             self.datapre = data[data.index < self.treatment_time]
@@ -107,6 +108,12 @@ class InterruptedTimeSeries(BaseExperiment):
         self.labels = X.design_info.column_names
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
 
+        # Setting the time range in which the model infers treatment_time
+        # Setting the timeline index so that the model can keep of time track between predicts
+        if self.infer_treatment_time:
+            self.model.set_time_range(self.treatment_time, self.datapre)
+            self.model.set_timeline(self.labels.index("t"))
+
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
@@ -119,17 +126,15 @@ class InterruptedTimeSeries(BaseExperiment):
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        if treatment_time is None or isinstance(treatment_time, tuple):
+        if self.infer_treatment_time:
             # We're getting the inferred switchpoint as one of the values of the timeline, from the last column
             switchpoint = int(
                 az.extract(idata, group="posterior", var_names="switchpoint")
                 .mean("sample")
                 .values
             )
-
             # we're getting the associated index of that switchpoint
-            last_column = data.columns[-1]
-            self.treatment_time = data[data[last_column] == switchpoint].index[0]
+            self.treatment_time = data[data["t"] == switchpoint].index[0]
 
             # We're getting datapre as intended for prediction
             self.datapre = data[data.index < self.treatment_time]
@@ -162,11 +167,13 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def input_validation(self, data, treatment_time, model):
         """Validate the input data and model formula for correctness"""
-        if isinstance(treatment_time, (type(None), tuple)) and not hasattr(
-            model, "set_time_range"
-        ):
+        if treatment_time is None and not hasattr(model, "set_time_range"):
             raise ModelException(
-                "If treatment_time is None or a tuple, provided model must have a 'set_time_range' method"
+                "If treatment_time is None, provided model must have a 'set_time_range' method"
+            )
+        if isinstance(treatment_time, tuple) and not hasattr(model, "set_time_range"):
+            raise ModelException(
+                "If treatment_time is a tuple, provided model must have a 'set_time_range' method"
             )
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, (pd.Timestamp, tuple, type(None))
