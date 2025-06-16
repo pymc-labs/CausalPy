@@ -69,7 +69,9 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    default_priors: dict[str, Any]
+    @property
+    def default_priors(self):
+        return {}
 
     def __init__(
         self,
@@ -248,7 +250,7 @@ class LinearRegression(PyMCModel):
 
     default_priors = {
         "beta": Prior("Normal", mu=0, sigma=50, dims="coeffs"),
-        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1)),
+        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
     }
 
     def build_model(self, X, y, coords):
