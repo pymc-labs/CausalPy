@@ -19,8 +19,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from formulaic import model_matrix
 import xarray as xr
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
