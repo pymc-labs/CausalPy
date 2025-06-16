@@ -20,7 +20,6 @@ from typing import List, Union
 import arviz as az
 import numpy as np
 import pandas as pd
-from formulaic import model_matrix
 import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
@@ -95,18 +94,6 @@ class SyntheticControl(BaseExperiment):
         self.datapre = data[data.index < self.treatment_time]
         self.datapost = data[data.index >= self.treatment_time]
 
-        self.formula = formula
-
-        # set things up with pre-intervention data
-        dm = model_matrix(self.formula, self.datapre)
-        self.labels = list(dm.rhs.columns)
-        self.pre_y, self.pre_X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
-        self.matrix_spec = dm.model_spec
-        self.outcome_variable_name = dm.lhs.columns[0]
-        # process post-intervention data
-        new_dm = model_matrix(spec=self.matrix_spec, data=self.datapost)
-        self.post_X = new_dm.rhs.to_numpy()
-        self.post_y = new_dm.lhs.to_numpy()
         # split data into the 4 quadrants (pre/post, control/treated) and store as
         # xarray.DataArray objects.
         # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
