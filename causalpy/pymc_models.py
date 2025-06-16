@@ -292,7 +292,7 @@ class WeightedSumFitter(PyMCModel):
     """  # noqa: W605
 
     default_priors = {
-        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1)),
+        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
     }
 
     def build_model(self, X, y, coords):
