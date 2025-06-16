@@ -22,6 +22,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
+from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
 
@@ -68,7 +69,13 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    def __init__(self, sample_kwargs: Optional[Dict[str, Any]] = None):
+    default_priors: dict[str, Any]
+
+    def __init__(
+        self,
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+        priors: dict[str, Any] | None = None,
+    ):
         """
         :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
             :func:`pymc.sample` function. Defaults to an empty dictionary.
@@ -76,6 +83,8 @@ class PyMCModel(pm.Model):
         super().__init__()
         self.idata = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
+
+        self.priors = {**self.default_priors, **(priors or {})}
 
     def build_model(self, X, y, coords) -> None:
         """Build the model, must be implemented by subclass."""
@@ -237,6 +246,11 @@ class LinearRegression(PyMCModel):
     Inference data...
     """  # noqa: W605
 
+    default_priors = {
+        "beta": Prior("Normal", mu=0, sigma=50, dims="coeffs"),
+        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1)),
+    }
+
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
@@ -245,10 +259,9 @@ class LinearRegression(PyMCModel):
             self.add_coords(coords)
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims="obs_ind")
-            beta = pm.Normal("beta", 0, 50, dims="coeffs")
-            sigma = pm.HalfNormal("sigma", 1)
+            beta = self.priors["beta"].create_variable("beta")
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
 class WeightedSumFitter(PyMCModel):
@@ -276,6 +289,10 @@ class WeightedSumFitter(PyMCModel):
     Inference data...
     """  # noqa: W605
 
+    default_priors = {
+        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1)),
+    }
+
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
@@ -286,9 +303,8 @@ class WeightedSumFitter(PyMCModel):
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-            sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
 class InstrumentalVariableRegression(PyMCModel):
@@ -477,13 +493,17 @@ class PropensityScore(PyMCModel):
     Inference...
     """  # noqa: W605
 
+    default_priors = {
+        "b": Prior("Normal", mu=0, sigma=1, dims="coeffs"),
+    }
+
     def build_model(self, X, t, coords):
         "Defines the PyMC propensity model"
         with self:
             self.add_coords(coords)
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             t_data = pm.Data("t", t.flatten(), dims="obs_ind")
-            b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
+            b = self.priors["b"].create_variable("b")
             mu = pm.math.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
