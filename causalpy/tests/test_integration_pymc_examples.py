@@ -474,7 +474,8 @@ def test_sc():
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula="actual ~ 0 + a + b + c + d + e + f + g",
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -540,11 +541,11 @@ def test_sc_brexit():
     other_countries = all_countries.difference({target_country})
     all_countries = list(all_countries)
     other_countries = list(other_countries)
-    formula = target_country + " ~ " + "0 + " + " + ".join(other_countries)
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula=formula,
+        control_units=other_countries,
+        treated_units=[target_country],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -629,8 +630,8 @@ def test_geolift1():
     result = cp.SyntheticControl(
         df,
         treatment_time,
-        formula="""Denmark ~ 0 + Austria + Belgium + Bulgaria + Croatia + Cyprus
-        + Czech_Republic""",
+        control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
+        treated_units=["Denmark"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
     assert isinstance(df, pd.DataFrame)
@@ -724,121 +725,3 @@ def test_inverse_prop():
     assert all(isinstance(ax, plt.Axes) for ax in axs)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
-
-
-# DEPRECATION WARNING TESTS ============================================================
-
-
-def test_did_deprecation_warning():
-    """Test that the old DifferenceInDifferences class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = cp.load_data("did")
-        result = cp.pymc_experiments.DifferenceInDifferences(
-            df,
-            formula="y ~ 1 + group*post_treatment",
-            time_variable_name="t",
-            group_variable_name="group",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
-        assert isinstance(result, cp.DifferenceInDifferences)
-
-
-def test_rd_deprecation_warning():
-    """Test that the old RegressionDiscontinuity class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = cp.load_data("rd")
-        result = cp.pymc_experiments.RegressionDiscontinuity(
-            df,
-            formula="y ~ 1 + bs(x, df=6) + treated",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-            treatment_threshold=0.5,
-            epsilon=0.001,
-        )
-        assert isinstance(result, cp.RegressionDiscontinuity)
-
-
-def test_rk_deprecation_warning():
-    """Test that the old RegressionKink class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        kink = 0.5
-        df = setup_regression_kink_data(kink)
-        result = cp.pymc_experiments.RegressionKink(
-            df,
-            formula=f"y ~ 1 + x + I((x-{kink})*treated)",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-            kink_point=kink,
-        )
-        assert isinstance(result, cp.RegressionKink)
-
-
-def test_its_deprecation_warning():
-    """Test that the old InterruptedTimeSeries class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = (
-            cp.load_data("its")
-            .assign(date=lambda x: pd.to_datetime(x["date"]))
-            .set_index("date")
-        )
-        treatment_time = pd.to_datetime("2017-01-01")
-        result = cp.pymc_experiments.InterruptedTimeSeries(
-            df,
-            treatment_time,
-            formula="y ~ 1 + t + C(month)",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
-        assert isinstance(result, cp.InterruptedTimeSeries)
-
-
-def test_sc_deprecation_warning():
-    """Test that the old SyntheticControl class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = cp.load_data("sc")
-        treatment_time = 70
-        result = cp.pymc_experiments.SyntheticControl(
-            df,
-            treatment_time,
-            formula="actual ~ 0 + a + b + c + d + e + f + g",
-            model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-        )
-        assert isinstance(result, cp.SyntheticControl)
-
-
-def test_ancova_deprecation_warning():
-    """Test that the old PrePostNEGD class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = cp.load_data("anova1")
-        result = cp.pymc_experiments.PrePostNEGD(
-            df,
-            formula="post ~ 1 + C(group) + pre",
-            group_variable_name="group",
-            pretreatment_variable_name="pre",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
-        assert isinstance(result, cp.PrePostNEGD)
-
-
-def test_iv_deprecation_warning():
-    """Test that the old InstrumentalVariable class raises a deprecation warning."""
-
-    with pytest.warns(DeprecationWarning):
-        df = cp.load_data("risk")
-        instruments_formula = "risk  ~ 1 + logmort0"
-        formula = "loggdp ~  1 + risk"
-        instruments_data = df[["risk", "logmort0"]]
-        data = df[["loggdp", "risk"]]
-        result = cp.pymc_experiments.InstrumentalVariable(
-            instruments_data=instruments_data,
-            data=data,
-            instruments_formula=instruments_formula,
-            formula=formula,
-            model=cp.pymc_models.InstrumentalVariableRegression(
-                sample_kwargs=sample_kwargs
-            ),
-        )
-        assert isinstance(result, cp.InstrumentalVariable)

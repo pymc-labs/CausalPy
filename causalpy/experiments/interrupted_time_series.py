@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 from formulaic import model_matrix
+import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
@@ -84,6 +85,8 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        # rename the index to "obs_ind"
+        data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
@@ -104,10 +107,37 @@ class InterruptedTimeSeries(BaseExperiment):
         new_dm = model_matrix(spec=self.matrix_spec, data=self.datapost)
         self.post_X = new_dm.rhs.to_numpy()
         self.post_y = new_dm.lhs.to_numpy()
+        # turn into xarray.DataArray's
+        self.pre_X = xr.DataArray(
+            self.pre_X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapre.index,
+                "coeffs": self.labels,
+            },
+        )
+        self.pre_y = xr.DataArray(
+            self.pre_y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": self.datapre.index},
+        )
+        self.post_X = xr.DataArray(
+            self.post_X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapost.index,
+                "coeffs": self.labels,
+            },
+        )
+        self.post_y = xr.DataArray(
+            self.post_y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": self.datapost.index},
+        )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
+            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
             self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.pre_X, y=self.pre_y)
@@ -122,10 +152,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)
-        self.pre_impact = self.model.calculate_impact(self.pre_y[:, 0], self.pre_pred)
-        self.post_impact = self.model.calculate_impact(
-            self.post_y[:, 0], self.post_pred
-        )
+        self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
+        self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )

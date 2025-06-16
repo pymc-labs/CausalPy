@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from formulaic import model_matrix
+import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
@@ -87,7 +88,8 @@ class DifferenceInDifferences(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
-
+        # rename the index to "obs_ind"
+        data.index.name = "obs_ind"
         self.data = data
         self.expt_type = "Difference in Differences"
         self.formula = formula
@@ -101,9 +103,24 @@ class DifferenceInDifferences(BaseExperiment):
         self.rhs_matrix_spec = dm.rhs.model_spec
         self.outcome_variable_name = dm.lhs.columns[0]
 
+        # turn into xarray.DataArray's
+        self.X = xr.DataArray(
+            self.X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(self.X.shape[0]),
+                "coeffs": self.labels,
+            },
+        )
+        self.y = xr.DataArray(
+            self.y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": np.arange(self.y.shape[0])},
+        )
+
         # fit model
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.X.shape[0])}
+            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.X, y=self.y)
@@ -186,12 +203,14 @@ class DifferenceInDifferences(BaseExperiment):
                     )
         elif isinstance(self.model, RegressorMixin):
             # This is the coefficient on the interaction term
-            # TODO: THIS IS NOT YET CORRECT ?????
+            # TODO: CHECK FOR CORRECTNESS
             self.causal_impact = (
                 self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            )[0]
+            )
         else:
             raise ValueError("Model type not recognized")
+
+        return
 
     def input_validation(self):
         """Validate the input data and model formula for correctness"""

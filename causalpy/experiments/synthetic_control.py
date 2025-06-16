@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 from formulaic import model_matrix
+import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
@@ -41,8 +42,10 @@ class SyntheticControl(BaseExperiment):
         A pandas dataframe
     :param treatment_time:
         The time when treatment occurred, should be in reference to the data index
-    :param formula:
-        A statistical model formula
+    :param control_units:
+        A list of control units to be used in the experiment
+    :param treated_units:
+        A list of treated units to be used in the experiment
     :param model:
         A PyMC model
 
@@ -55,7 +58,8 @@ class SyntheticControl(BaseExperiment):
     >>> result = cp.SyntheticControl(
     ...     df,
     ...     treatment_time,
-    ...     formula="actual ~ 0 + a + b + c + d + e + f + g",
+    ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
+    ...     treated_units=["actual"],
     ...     model=cp.pymc_models.WeightedSumFitter(
     ...         sample_kwargs={
     ...             "target_accept": 0.95,
@@ -66,7 +70,6 @@ class SyntheticControl(BaseExperiment):
     ... )
     """
 
-    expt_type = "SyntheticControl"
     supports_ols = True
     supports_bayes = True
 
@@ -74,15 +77,20 @@ class SyntheticControl(BaseExperiment):
         self,
         data: pd.DataFrame,
         treatment_time: Union[int, float, pd.Timestamp],
-        formula: str,
+        control_units: list[str],
+        treated_units: list[str],
         model=None,
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        # rename the index to "obs_ind"
+        data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
-        # set experiment type - usually done in subclasses
-        self.expt_type = "Pre-Post Fit"
+        self.control_units = control_units
+        self.labels = control_units
+        self.treated_units = treated_units
+        self.expt_type = "SyntheticControl"
         # split data in to pre and post intervention
         self.datapre = data[data.index < self.treatment_time]
         self.datapost = data[data.index >= self.treatment_time]
@@ -99,28 +107,85 @@ class SyntheticControl(BaseExperiment):
         new_dm = model_matrix(spec=self.matrix_spec, data=self.datapost)
         self.post_X = new_dm.rhs.to_numpy()
         self.post_y = new_dm.lhs.to_numpy()
+        # split data into the 4 quadrants (pre/post, control/treated) and store as
+        # xarray.DataArray objects.
+        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
+        # make constructing the xarray DataArray objects easier.
+        self.datapre_control = xr.DataArray(
+            self.datapre[self.control_units],
+            dims=["obs_ind", "control_units"],
+            coords={
+                "obs_ind": self.datapre[self.control_units].index,
+                "control_units": self.control_units,
+            },
+        )
+        self.datapre_treated = xr.DataArray(
+            self.datapre[self.treated_units],
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": self.datapre[self.treated_units].index,
+                "treated_units": self.treated_units,
+            },
+        )
+        self.datapost_control = xr.DataArray(
+            self.datapost[self.control_units],
+            dims=["obs_ind", "control_units"],
+            coords={
+                "obs_ind": self.datapost[self.control_units].index,
+                "control_units": self.control_units,
+            },
+        )
+        self.datapost_treated = xr.DataArray(
+            self.datapost[self.treated_units],
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": self.datapost[self.treated_units].index,
+                "treated_units": self.treated_units,
+            },
+        )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_indx": np.arange(self.pre_X.shape[0])}
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            COORDS = {
+                # key must stay as "coeffs" unless we can find a way to auto identify
+                # the predictor dimension name. "coeffs" is assumed by
+                # PyMCModel.print_coefficients for example.
+                "coeffs": self.control_units,
+                "treated_units": self.treated_units,
+                "obs_ind": np.arange(self.datapre.shape[0]),
+            }
+            self.model.fit(
+                X=self.datapre_control,
+                y=self.datapre_treated,
+                coords=COORDS,
+            )
         elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.pre_X, y=self.pre_y)
+            self.model.fit(
+                X=self.datapre_control.data,
+                y=self.datapre_treated.isel(treated_units=0).data,
+            )
         else:
             raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        self.score = self.model.score(
+            X=self.datapre_control.to_numpy(),
+            y=self.datapre_treated.isel(treated_units=0).to_numpy(),
+        )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
+        self.pre_pred = self.model.predict(X=self.datapre_control)
 
         # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
-        self.pre_impact = self.model.calculate_impact(self.pre_y[:, 0], self.pre_pred)
-        self.post_impact = self.model.calculate_impact(
-            self.post_y[:, 0], self.post_pred
+        self.post_pred = self.model.predict(X=self.datapost_control)
+        self.pre_impact = self.model.calculate_impact(
+            self.datapre_treated, self.pre_pred
         )
+
+        self.post_impact = self.model.calculate_impact(
+            self.datapost_treated, self.post_pred
+        )
+
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
@@ -147,7 +212,11 @@ class SyntheticControl(BaseExperiment):
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
         """
         print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
+        print(f"Control units: {self.control_units}")
+        if len(self.treated_units) > 1:
+            print(f"Treated units: {self.treated_units}")
+        else:
+            print(f"Treated unit: {self.treated_units[0]}")
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
@@ -173,7 +242,9 @@ class SyntheticControl(BaseExperiment):
         handles = [(h_line, h_patch)]
         labels = ["Pre-intervention period"]
 
-        (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
+        (h,) = ax[0].plot(
+            self.datapre.index, self.datapre_treated, "k.", label="Observations"
+        )
         handles.append(h)
         labels.append("Observations")
 
@@ -187,14 +258,14 @@ class SyntheticControl(BaseExperiment):
         handles.append((h_line, h_patch))
         labels.append(counterfactual_label)
 
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(self.datapost.index, self.datapost_treated, "k.")
         # Shaded causal effect
         h = ax[0].fill_between(
             self.datapost.index,
             y1=az.extract(
                 self.post_pred, group="posterior_predictive", var_names="mu"
             ).mean("sample"),
-            y2=np.squeeze(self.post_y),
+            y2=np.squeeze(self.datapost_treated),
             color="C0",
             alpha=0.25,
         )
@@ -211,20 +282,22 @@ class SyntheticControl(BaseExperiment):
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
-            self.pre_impact,
+            self.pre_impact.sel(treated_units=self.treated_units[0]),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact,
+            self.post_impact.sel(treated_units=self.treated_units[0]),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]),
+            y1=self.post_impact.mean(["chain", "draw"]).sel(
+                treated_units=self.treated_units[0]
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -235,7 +308,7 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative,
+            self.post_impact_cumulative.sel(treated_units=self.treated_units[0]),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -256,15 +329,22 @@ class SyntheticControl(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        # code above: same as `PrePostFit._bayesian_plot` -------------------------------
-        # code below: additional for the synthetic control experiment ------------------
-
         plot_predictors = kwargs.get("plot_predictors", False)
         if plot_predictors:
             # plot control units as well
-            ax[0].plot(self.datapre.index, self.pre_X, "-", c=[0.8, 0.8, 0.8], zorder=1)
             ax[0].plot(
-                self.datapost.index, self.post_X, "-", c=[0.8, 0.8, 0.8], zorder=1
+                self.datapre.index,
+                self.datapre_control,
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
+            )
+            ax[0].plot(
+                self.datapost.index,
+                self.datapost_control,
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
             )
 
         return fig, ax
@@ -280,8 +360,16 @@ class SyntheticControl(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(
+            self.datapre_treated["obs_ind"],
+            self.datapre_treated.isel(treated_units=0),
+            "k.",
+        )
+        ax[0].plot(
+            self.datapost_treated["obs_ind"],
+            self.datapost_treated.isel(treated_units=0),
+            "k.",
+        )
 
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
         ax[0].plot(
@@ -293,6 +381,15 @@ class SyntheticControl(BaseExperiment):
         )
         ax[0].set(
             title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+        )
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_pred),
+            y2=np.squeeze(self.datapost_treated.isel(treated_units=0).data),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
         )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")
@@ -310,14 +407,6 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_y),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
         ax[1].fill_between(
             self.datapost.index,
             y1=np.squeeze(self.post_impact),
@@ -362,45 +451,49 @@ class SyntheticControl(BaseExperiment):
         :param hdi_prob:
             Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
         """
-        if isinstance(self.model, PyMCModel):
-            hdi_pct = int(round(hdi_prob * 100))
-
-            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-
-            pre_data = self.datapre.copy()
-            post_data = self.datapost.copy()
-
-            pre_data["prediction"] = (
-                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .values
-            )
-            post_data["prediction"] = (
-                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .values
-            )
-            pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            ).set_index(pre_data.index)
-            post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            ).set_index(post_data.index)
-
-            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
-            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.pre_impact, hdi_prob=hdi_prob
-            ).set_index(pre_data.index)
-            post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.post_impact, hdi_prob=hdi_prob
-            ).set_index(post_data.index)
-
-            self.plot_data = pd.concat([pre_data, post_data])
-
-            return self.plot_data
-        else:
+        if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
+
+        hdi_pct = int(round(hdi_prob * 100))
+
+        pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+        pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+        impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+        impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+
+        pre_data["prediction"] = (
+            az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
+            .mean("sample")
+            .values
+        )
+        post_data["prediction"] = (
+            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+            .mean("sample")
+            .values
+        )
+        pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+        ).set_index(pre_data.index)
+        post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+        ).set_index(post_data.index)
+
+        pre_data["impact"] = (
+            self.pre_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
+        post_data["impact"] = (
+            self.post_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
+        pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+            self.pre_impact, hdi_prob=hdi_prob
+        ).set_index(pre_data.index)
+        post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
+            self.post_impact, hdi_prob=hdi_prob
+        ).set_index(post_data.index)
+
+        self.plot_data = pd.concat([pre_data, post_data])
+
+        return self.plot_data
