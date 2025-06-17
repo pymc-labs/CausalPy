@@ -33,6 +33,154 @@ from causalpy.utils import round_num
 LEGEND_FONT_SIZE = 12
 
 
+class HandlerUTT:
+    """
+    Handle data preprocessing, postprocessing, and plotting steps for models
+    with unknown treatment intervention times.
+    """
+
+    def data_preprocessing(self, data, treatment_time, formula, model):
+        """
+        Preprocess the data using patsy for fittng into the model and update the model with required infos
+        """
+        y, X = dmatrices(formula, data)
+        # Restrict model's treatment time inference to given range
+        model.set_time_range(treatment_time, data)
+        # Needed to track time evolution across model predictions
+        model.set_timeline(X.design_info.column_names.index("t"))
+        return y, X
+
+    def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
+        """
+        Postprocess the data accordingly to the inferred treatment time for calculation and plot purpose
+        """
+        # Retrieve posterior mean of inferred treatment time
+        treatment_time_mean = idata.posterior["treatment_time"].mean().item()
+        inferred_time = int(treatment_time_mean)
+
+        # Safety check: ensure the inferred time is present in the dataset
+        if inferred_time not in data["t"].values:
+            raise ValueError(
+                f"Inferred treatment time {inferred_time} not found in data['t']."
+            )
+
+        # Convert the inferred time to its corresponding DataFrame index
+        inferred_index = data[data["t"] == inferred_time].index[0]
+
+        # Retrieve HDI bounds of treatment time (uncertainty interval)
+        hdi_bounds = az.hdi(idata, var_names=["treatment_time"])[
+            "treatment_time"
+        ].values
+        hdi_start_time = int(hdi_bounds[0])
+
+        # Convert HDI lower bound to DataFrame index for slicing
+        if hdi_start_time not in data["t"].values:
+            raise ValueError(f"HDI start time {hdi_start_time} not found in data['t'].")
+
+        hdi_start_idx_df = data[data["t"] == hdi_start_time].index[0]
+        hdi_start_idx_np = data.index.get_loc(hdi_start_idx_df)
+
+        # Slice both pandas and numpy objects accordingly
+        df_pre = data[data.index < hdi_start_idx_df]
+        df_post = data[data.index >= hdi_start_idx_df]
+        truncated_y = pre_y[:hdi_start_idx_np]
+        truncated_X = pre_X[:hdi_start_idx_np]
+
+        return df_pre, df_post, truncated_y, truncated_X, inferred_index
+
+    def plot_intervention_line(self, ax, idata, datapost, treatment_time):
+        """
+        Plot a vertical line at the inferred treatment time, along with a shaded area
+        representing the Highest Density Interval (HDI) of the inferred time.
+        """
+        # Extract the HDI (uncertainty interval) of the treatment time
+        hdi = az.hdi(idata, var_names=["treatment_time"])["treatment_time"].values
+        x1 = datapost.index[datapost["t"] == int(hdi[0])][0]
+        x2 = datapost.index[datapost["t"] == int(hdi[1])][0]
+
+        for i in [0, 1, 2]:
+            ymin, ymax = ax[i].get_ylim()
+
+            # Vertical line for inferred treatment time
+            ax[i].plot(
+                [treatment_time, treatment_time],
+                [ymin, ymax],
+                ls="-",
+                lw=3,
+                color="r",
+                solid_capstyle="butt",
+            )
+
+            # Shaded region for HDI of treatment time
+            ax[i].fill_betweenx(
+                y=[ymin, ymax],
+                x1=x1,
+                x2=x2,
+                alpha=0.1,
+                color="r",
+            )
+
+    def plot_treated_counterfactual(
+        self, ax, handles, labels, datapost, post_pred, post_y
+    ):
+        """
+        Plot the inferred post-intervention trajectory (with treatment effect).
+        """
+        # --- Plot predicted trajectory under treatment (with HDI)
+        h_line, h_patch = plot_xY(
+            datapost.index,
+            post_pred["posterior_predictive"].mu_ts,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "yellowgreen"},
+        )
+        handles.append((h_line, h_patch))
+        labels.append("treated counterfactual")
+
+
+class HandlerKTT:
+    """
+    Handles data preprocessing, postprocessing, and plotting logic for models
+    where the treatment time is known in advance.
+    """
+
+    def data_preprocessing(self, data, treatment_time, formula, model):
+        """
+        Preprocess the data using patsy for fitting into the model
+        """
+        # Use only data before treatment for training the model
+        return dmatrices(formula, data[data.index < treatment_time])
+
+    def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
+        """
+        Postprocess data by splitting it into pre- and post-intervention periods, using the known treatment time.
+        """
+        return (
+            data[data.index < treatment_time],
+            data[data.index >= treatment_time],
+            pre_y,
+            pre_X,
+            treatment_time,
+        )
+
+    def plot_intervention_line(self, ax, idata, datapost, treatment_time):
+        """
+        Plot a vertical line at the known treatment time.
+        """
+        # --- Plot a vertical line at the known treatment time
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=treatment_time, ls="-", lw=3, color="r", solid_capstyle="butt"
+            )
+
+    def plot_treated_counterfactual(
+        self, sax, handles, labels, datapost, post_pred, post_y
+    ):
+        """
+        Placeholder method to maintain interface compatibility.
+        """
+        pass
+
+
 class InterruptedTimeSeries(BaseExperiment):
     """
     The class for interrupted time series analysis.
@@ -86,38 +234,33 @@ class InterruptedTimeSeries(BaseExperiment):
         self.input_validation(data, treatment_time, model)
 
         self.treatment_time = treatment_time
-        # set experiment type - usually done in subclasses
-        self.expt_type = "Pre-Post Fit"
-        # set if the model is supposed to infer the treatment_time
-        self.infer_treatment_time = isinstance(self.treatment_time, (type(None), tuple))
-
-        # Set the data according to if the model is fitted on the whole bunch or not
-        if self.infer_treatment_time:
-            self.datapre = data
-        else:
-            # split data in to pre and post intervention
-            self.datapre = data[data.index < self.treatment_time]
-
         self.formula = formula
 
+        # Getting the right handler
+        if treatment_time is None or isinstance(treatment_time, tuple):
+            self.handler = HandlerUTT()
+        else:
+            self.handler = HandlerKTT()
+
+        # set experiment type - usually done in subclasses
+        self.expt_type = "Pre-Post Fit"
+
+        # Preprocessing based on handler type
+        y, X = self.handler.data_preprocessing(
+            data, self.treatment_time, formula, self.model
+        )
+
         # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
 
-        # Setting the time range in which the model infers treatment_time
-        # Setting the timeline index so that the model can keep of time track between predicts
-        if self.infer_treatment_time:
-            self.model.set_time_range(self.treatment_time, self.datapre)
-            self.model.set_timeline(self.labels.index("t"))
-
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
-            idata = self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.pre_X, y=self.pre_y)
         else:
@@ -126,29 +269,17 @@ class InterruptedTimeSeries(BaseExperiment):
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        if self.infer_treatment_time:
-            # We're getting the inferred switchpoint as one of the values of the timeline, from the last column
-            switchpoint = int(
-                az.extract(idata, group="posterior", var_names="switchpoint")
-                .mean("sample")
-                .values
+        # Postprocessing with handler
+        self.datapre, self.datapost, self.pre_y, self.pre_X, self.treatment_time = (
+            self.handler.data_postprocessing(
+                data, self.idata, treatment_time, self.pre_y, self.pre_X
             )
-            # we're getting the associated index of that switchpoint
-            self.treatment_time = data[data["t"] == switchpoint].index[0]
-
-            # We're getting datapre as intended for prediction
-            self.datapre = data[data.index < self.treatment_time]
-            (new_y, new_x) = build_design_matrices(
-                [self._y_design_info, self._x_design_info], self.datapre
-            )
-            self.pre_X = np.asarray(new_x)
-            self.pre_y = np.asarray(new_y)
+        )
 
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.pre_X)
-        # process post-intervention data
-        self.datapost = data[data.index >= self.treatment_time]
 
+        # process post-intervention data
         (new_y, new_x) = build_design_matrices(
             [self._y_design_info, self._x_design_info], self.datapost
         )
@@ -211,6 +342,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
+
         # pre-intervention period
         h_line, h_patch = plot_xY(
             self.datapre.index,
@@ -224,6 +356,11 @@ class InterruptedTimeSeries(BaseExperiment):
         (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
         handles.append(h)
         labels.append("Observations")
+
+        # Green line for treated counterfactual (if unknown treatment time)
+        self.handler.plot_treated_counterfactual(
+            ax, handles, labels, self.datapost, self.post_pred, self.post_y
+        )
 
         # post intervention period
         h_line, h_patch = plot_xY(
@@ -289,14 +426,10 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         ax[2].axhline(y=0, c="k")
 
-        # Intervention line
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
+        # Plot vertical line marking treatment time (with HDI if it's inferred)
+        self.handler.plot_intervention_line(
+            ax, self.idata, self.datapost, self.treatment_time
+        )
 
         ax[0].legend(
             handles=(h_tuple for h_tuple in handles),
@@ -441,3 +574,14 @@ class InterruptedTimeSeries(BaseExperiment):
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
+
+    def plot_treatment_time(self):
+        """
+        display the posterior estimates of the treatment time
+        """
+        if "treatment_time" not in self.idata.posterior.data_vars:
+            raise ValueError(
+                "Variable 'treatment_time' not found in inference data (idata)."
+            )
+
+        az.plot_trace(self.idata, var_names="treatment_time")

@@ -501,30 +501,28 @@ class PropensityScore(PyMCModel):
 
 class InterventionTimeEstimator(PyMCModel):
     r"""
-    Custom PyMC model to estimate the time an intervetnion took place.
+    Custom PyMC model to estimate the time an intervention took place.
 
     defines the PyMC model :
 
     .. math::
-        \alpha &\sim \mathrm{Normal}(0, 1) \\
         \beta &\sim \mathrm{Normal}(0, 1) \\
-        s(t) &= \gamma_{i(t)} \quad \textrm{with} \quad \gamma_{k \in [0, ..., n_{seasons}-1]} \sim \mathrm{Normal}(0, 1)\\
-        base_{\mu}(t) &= \alpha + \beta \cdot t + s_t\\
+        \mu &= \beta \cdot X\\
         \\
         \tau &\sim \mathrm{Uniform}(0, 1) \\
-        w(t) &= sigmoid(t-\tau) \\
+        w &= sigmoid(t-\tau) \\
         \\
-        level &\sim \mathrm{Normal}(0, 1) \\
-        trend &\sim \mathrm{Normal}(0, 1) \\
+        \text{level} &\sim \mathrm{Normal}(0, 1) \\
+        \text{trend} &\sim \mathrm{Normal}(0, 1) \\
         A &\sim \mathrm{Normal}(0, 1) \\
         \lambda &\sim \mathrm{HalfNormal}(0, 1) \\
-        impulse(t) &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
-        intervention(t) &= level + trend \cdot (t-\tau) + impulse_t\\
+        \text{impulse} &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
+        \mu_{in} &= \text{level} + \text{trend} \cdot (t-\tau) + \text{impulse}\\
         \\
         \sigma &\sim \mathrm{Normal}(0, 1) \\
-        \mu(t) &= base_{\mu}(t) + w(t) \cdot intervention(t) \\
+        \mu_{ts} &= \mu + \mu_{in} \\
         \\
-        y(t) &\sim \mathrm{Normal}(\mu (t), \sigma)
+        y &\sim \mathrm{Normal}(\mu_{ts}, \sigma)
 
     Example
         --------
@@ -546,25 +544,45 @@ class InterventionTimeEstimator(PyMCModel):
         Inference ...
     """
 
-    def __init__(self, priors={}, sample_kwargs=None):
+    def __init__(self, treatment_type_effect=None, sample_kwargs=None):
+        """
+        Initializes the InterventionTimeEstimator model.
+
+        :param treatment_type_effect: Optional dictionary that specifies prior parameters for the
+            intervention effects. Expected keys are:
+                - "level": [mu, sigma]
+                - "trend": [mu, sigma]
+                - "impulse": [mu, sigma1, sigma2]
+            If a key is missing, the corresponding effect is ignored.
+            If the associated list is incomplete, default values will be used.
+        :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
+        """
+        if treatment_type_effect is None:
+            treatment_type_effect = {}
+
+        if not isinstance(treatment_type_effect, dict):
+            raise TypeError("treatment_type_effect must be a dictionary.")
+
         super().__init__(sample_kwargs)
-        self.priors = priors
+        self.treatment_type_effect = treatment_type_effect
 
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
 
-        :param X: A dataframe of the covariates
-        :param t: An array of values representing the time over which y is spread
+        :param X: An array of the covariates
         :param y: An array of values representing our outcome y
-        :param coords: An optional dictionary with the coordinate names for our instruments.
-            In particular, used to determine the number of seasons.
-        :param time_range: An optional tuple providing a specific time_range where the
-            intervention effect should have taken place.
-        :param priors: An optional dictionary of priors for the parameters of the
-            different distributions.
-            :code:`priors = {"alpha":[0, 5], "beta":[0,2], "level":[5, 5], "impulse":[1, 2 ,3]}`
+        :param coords: Dictionary of named coordinates for PyMC variables (e.g., {"obs_ind": range(n_obs), "coeffs": range(n_covariates)}).
+
+        Assumes the following attributes are already defined in self:
+            - self.timeline: the index of the column in X representing time.
+            - self.time_range: a tuple (lower_bound, upper_bound) for the intervention time.
+            - self.treatment_type_effect: a dictionary specifying which intervention effects to include and their priors.
         """
+        DEFAULT_BETA_PRIOR = (0, 1)
+        DEFAULT_LEVEL_PRIOR = (0, 1)
+        DEFAULT_TREND_PRIOR = (0, 0.1)
+        DEFAULT_IMPULSE_PRIOR = (0, 1, 1)
 
         with self:
             self.add_coords(coords)
@@ -574,41 +592,55 @@ class InterventionTimeEstimator(PyMCModel):
             y = pm.Data("y", y[:, 0], dims="obs_ind")
             lower_bound = pm.Data("lower_bound", self.time_range[0])
             upper_bound = pm.Data("upper_bound", self.time_range[1])
+
             # --- Priors ---
-            switchpoint = pm.Uniform(
-                "switchpoint", lower=lower_bound, upper=upper_bound
+            treatment_time = pm.Uniform(
+                "treatment_time", lower=lower_bound, upper=upper_bound
             )
-            beta = pm.Normal(name="beta", mu=0, sigma=50, dims="coeffs")
+            beta = pm.Normal(
+                name="beta",
+                mu=DEFAULT_BETA_PRIOR[0],
+                sigma=DEFAULT_BETA_PRIOR[1],
+                dims="coeffs",
+            )
 
             # --- Intervention effect ---
-            level = trend = impulse = 0
+            mu_in_components = []
 
-            if "level" in self.priors:
+            if "level" in self.treatment_type_effect:
                 mu, sigma = (
-                    (0, 50)
-                    if len(self.priors["level"]) != 2
-                    else (self.priors["level"][0], self.priors["level"][1])
+                    DEFAULT_LEVEL_PRIOR
+                    if len(self.treatment_type_effect["level"]) != 2
+                    else (
+                        self.treatment_type_effect["level"][0],
+                        self.treatment_type_effect["level"][1],
+                    )
                 )
                 level = pm.Normal(
                     "level",
                     mu=mu,
                     sigma=sigma,
                 )
-            if "trend" in self.priors:
+                mu_in_components.append(level)
+            if "trend" in self.treatment_type_effect:
                 mu, sigma = (
-                    (0, 50)
-                    if len(self.priors["trend"]) != 2
-                    else (self.priors["trend"][0], self.priors["trend"][1])
+                    DEFAULT_TREND_PRIOR
+                    if len(self.treatment_type_effect["trend"]) != 2
+                    else (
+                        self.treatment_type_effect["trend"][0],
+                        self.treatment_type_effect["trend"][1],
+                    )
                 )
                 trend = pm.Normal("trend", mu=mu, sigma=sigma)
-            if "impulse" in self.priors:
+                mu_in_components.append(trend * (t - treatment_time))
+            if "impulse" in self.treatment_type_effect:
                 mu, sigma1, sigma2 = (
-                    (0, 50, 50)
-                    if len(self.priors["impulse"]) != 3
+                    DEFAULT_IMPULSE_PRIOR
+                    if len(self.treatment_type_effect["impulse"]) != 3
                     else (
-                        self.priors["impulse"][0],
-                        self.priors["impulse"][1],
-                        self.priors["impulse"][2],
+                        self.treatment_type_effect["impulse"][0],
+                        self.treatment_type_effect["impulse"][1],
+                        self.treatment_type_effect["impulse"][2],
                     )
                 )
                 impulse_amplitude = pm.Normal("impulse_amplitude", mu=mu, sigma=sigma1)
@@ -616,16 +648,19 @@ class InterventionTimeEstimator(PyMCModel):
                 impulse = pm.Deterministic(
                     "impulse",
                     impulse_amplitude
-                    * pm.math.exp(-decay_rate * pm.math.abs(t - switchpoint)),
+                    * pm.math.exp(-decay_rate * pm.math.abs(t - treatment_time)),
                 )
+                mu_in_components.append(impulse)
 
             # --- Parameterization ---
-            weight = pm.math.sigmoid(t - switchpoint)
+            weight = pm.math.sigmoid(t - treatment_time)
             # Compute and store the base time series
             mu = pm.Deterministic(name="mu", var=pm.math.dot(X, beta))
             # Compute and store the modelled intervention effect
-            mu_in = pm.Deterministic(
-                name="mu_in", var=level + trend * (t - switchpoint) + impulse
+            mu_in = (
+                pm.Deterministic(name="mu_in", var=sum(mu_in_components))
+                if len(mu_in_components) > 0
+                else 0
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in)
@@ -649,7 +684,7 @@ class InterventionTimeEstimator(PyMCModel):
             self.time_range = (X[:, self.timeline].min(), X[:, self.timeline].max())
         self.build_model(X, y, coords)
         with self:
-            self.idata = pm.sample(max_treedepth=15, **self.sample_kwargs)
+            self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
                 pm.sample_posterior_predictive(
@@ -694,9 +729,25 @@ class InterventionTimeEstimator(PyMCModel):
                 coords={"obs_ind": np.arange(new_no_of_observations)},
             )
 
+    def score(self, X, y) -> pd.Series:
+        """
+        Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
+        """
+        mu_ts = self.predict(X)
+        mu_ts = az.extract(
+            mu_ts, group="posterior_predictive", var_names="mu_ts"
+        ).T.values
+        # Note: First argument must be a 1D array
+        return r2_score(y.flatten(), mu_ts)
+
     def set_time_range(self, time_range, data):
         """
         Set time_range.
+
+        :param time_range: tuple or None
+            If not None, a tuple of two values (start_label, end_label) that correspond
+            to index labels in the 't' column of the `data` DataFrame
+        :param data: pandas.DataFrame which contains a column "t".
         """
         if time_range is None:
             self.time_range = time_range
@@ -708,6 +759,8 @@ class InterventionTimeEstimator(PyMCModel):
 
     def set_timeline(self, index):
         """
-        Set the index of the timeline in the given covariates
+        Set the index of the timeline column in the covariates matrix X.
+
+        : param index: The integer index (position) of the column in the covariate matrix X.
         """
         self.timeline = index
