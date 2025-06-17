@@ -167,20 +167,19 @@ We recommend that your contribution complies with the following guidelines befor
 
 ## Building the documentation locally
 
-A local build of the docs is achieved by:
+To build the documentation, run from the **project root**:
 
 ```bash
-cd docs
 make html
 ```
-
-Sometimes not all changes are recognised. In that case run this (again from within the `docs` folder):
-
+To clean and rebuild the documentation from scratch:
 ```bash
-make clean && make html
+make cleandocs
+make html
 ```
+ Docs are built in docs/_build/html, but these docs are not committed to the GitHub repository due to .gitignore.
 
-Docs are built in `docs/_build`, but these docs are _not_ committed to the GitHub repository due to `.gitignore`.
+ 📌 Note: The previous docs/Makefile has been removed. Please use only the root-level Makefile for documentation commands
 
 ## Overview of code structure
 
