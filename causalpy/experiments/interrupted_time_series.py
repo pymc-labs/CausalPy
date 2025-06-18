@@ -40,54 +40,38 @@ class HandlerUTT:
     with unknown treatment intervention times.
     """
 
-    def data_preprocessing(self, data, treatment_time, formula, model):
+    def data_preprocessing(self, data, treatment_time, model):
         """
-        Preprocess the data using patsy for fittng into the model and update the model with required infos
+        Preprocess the input data and update the model's treatment time constraints.
         """
-        y, X = dmatrices(formula, data)
         # Restrict model's treatment time inference to given range
         model.set_time_range(treatment_time, data)
-        # Needed to track time evolution across model predictions
-        model.set_timeline(X.design_info.column_names.index("t"))
-        return y, X
+        return data
 
     def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
         """
-        Postprocess the data accordingly to the inferred treatment time for calculation and plot purpose
+        Postprocess data based on the inferred treatment time for further analysis and plotting.
         """
-        # Retrieve posterior mean of inferred treatment time
+        # --- Inferred treatment time ---
         treatment_time_mean = idata.posterior["treatment_time"].mean().item()
-        inferred_time = int(treatment_time_mean)
+        inferred_treatment_time = int(treatment_time_mean)
+        idx_treatment_time = data.index[data["t"] == inferred_treatment_time][0]
 
-        # Safety check: ensure the inferred time is present in the dataset
-        if inferred_time not in data["t"].values:
-            raise ValueError(
-                f"Inferred treatment time {inferred_time} not found in data['t']."
-            )
-
-        # Convert the inferred time to its corresponding DataFrame index
-        inferred_index = data[data["t"] == inferred_time].index[0]
-
-        # Retrieve HDI bounds of treatment time (uncertainty interval)
+        # --- HDI bounds (credible interval) ---
         hdi_bounds = az.hdi(idata, var_names=["treatment_time"])[
             "treatment_time"
         ].values
         hdi_start_time = int(hdi_bounds[0])
+        indice = data.index.get_loc(data.index[data["t"] == hdi_start_time][0])
 
-        # Convert HDI lower bound to DataFrame index for slicing
-        if hdi_start_time not in data["t"].values:
-            raise ValueError(f"HDI start time {hdi_start_time} not found in data['t'].")
+        # --- Slicing ---
+        datapre = data[data["t"] < hdi_start_time]
+        datapost = data[data["t"] >= hdi_start_time]
 
-        hdi_start_idx_df = data[data["t"] == hdi_start_time].index[0]
-        hdi_start_idx_np = data.index.get_loc(hdi_start_idx_df)
+        truncated_y = pre_y.isel(obs_ind=slice(0, indice))
+        truncated_X = pre_X.isel(obs_ind=slice(0, indice))
 
-        # Slice both pandas and numpy objects accordingly
-        df_pre = data[data.index < hdi_start_idx_df]
-        df_post = data[data.index >= hdi_start_idx_df]
-        truncated_y = pre_y[:hdi_start_idx_np]
-        truncated_X = pre_X[:hdi_start_idx_np]
-
-        return df_pre, df_post, truncated_y, truncated_X, inferred_index
+        return datapre, datapost, truncated_y, truncated_X, idx_treatment_time
 
     def plot_intervention_line(self, ax, idata, datapost, treatment_time):
         """
@@ -144,16 +128,16 @@ class HandlerKTT:
     where the treatment time is known in advance.
     """
 
-    def data_preprocessing(self, data, treatment_time, formula, model):
+    def data_preprocessing(self, data, treatment_time, model):
         """
-        Preprocess the data using patsy for fitting into the model
+        Preprocess the data by selecting only the pre-treatment period for model fitting.
         """
         # Use only data before treatment for training the model
-        return dmatrices(formula, data[data.index < treatment_time])
+        return data[data.index < treatment_time]
 
     def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
         """
-        Postprocess data by splitting it into pre- and post-intervention periods, using the known treatment time.
+        Split data into pre- and post-treatment periods using the known treatment time.
         """
         return (
             data[data.index < treatment_time],
@@ -165,7 +149,7 @@ class HandlerKTT:
 
     def plot_intervention_line(self, ax, idata, datapost, treatment_time):
         """
-        Plot a vertical line at the known treatment time.
+        Plot a vertical line at the known treatment time on provided axes.
         """
         # --- Plot a vertical line at the known treatment time
         for i in [0, 1, 2]:
@@ -177,7 +161,7 @@ class HandlerKTT:
         self, sax, handles, labels, datapost, post_pred, post_y
     ):
         """
-        Placeholder method to maintain interface compatibility.
+        Placeholder method to maintain interface compatibility with HandlerUTT.
         """
         pass
 
@@ -236,7 +220,6 @@ class InterruptedTimeSeries(BaseExperiment):
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time, model)
-        self.treatment_time = treatment_time
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
 
@@ -249,14 +232,12 @@ class InterruptedTimeSeries(BaseExperiment):
         else:
             self.handler = HandlerKTT()
 
-        # set experiment type - usually done in subclasses
-        self.expt_type = "Pre-Post Fit"
-
         # Preprocessing based on handler type
-        y, X = self.handler.data_preprocessing(
-            data, self.treatment_time, formula, self.model
+        self.datapre = self.handler.data_preprocessing(
+            data, self.treatment_time, self.model
         )
 
+        y, X = dmatrices(formula, self.datapre)
         # set things up with pre-intervention data
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
@@ -264,34 +245,6 @@ class InterruptedTimeSeries(BaseExperiment):
         self.labels = X.design_info.column_names
         self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
 
-        # fit the model to the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.pre_X, y=self.pre_y)
-        else:
-            raise ValueError("Model type not recognized")
-
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
-
-        # Postprocessing with handler
-        self.datapre, self.datapost, self.pre_y, self.pre_X, self.treatment_time = (
-            self.handler.data_postprocessing(
-                data, self.idata, treatment_time, self.pre_y, self.pre_X
-            )
-        )
-
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
-
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
         # turn into xarray.DataArray's
         self.pre_X = xr.DataArray(
             self.pre_X,
@@ -306,6 +259,36 @@ class InterruptedTimeSeries(BaseExperiment):
             dims=["obs_ind"],
             coords={"obs_ind": self.datapre.index},
         )
+
+        # fit the model to the observed (pre-intervention) data
+        if isinstance(self.model, PyMCModel):
+            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(X.shape[0])}
+            idata = self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+        elif isinstance(self.model, RegressorMixin):
+            self.model.fit(X=self.pre_X, y=self.pre_y)
+            idata = None
+        else:
+            raise ValueError("Model type not recognized")
+
+        # score the goodness of fit to the pre-intervention data
+        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+
+        # Postprocessing with handler
+        self.datapre, self.datapost, self.pre_y, self.pre_X, self.treatment_time = (
+            self.handler.data_postprocessing(
+                data, idata, treatment_time, self.pre_y, self.pre_X
+            )
+        )
+
+        # get the model predictions of the observed (pre-intervention) data
+        self.pre_pred = self.model.predict(X=self.pre_X)
+
+        # process post-intervention data
+        (new_y, new_x) = build_design_matrices(
+            [self._y_design_info, self._x_design_info], self.datapost
+        )
+        self.post_X = np.asarray(new_x)
+        self.post_y = np.asarray(new_y)
         self.post_X = xr.DataArray(
             self.post_X,
             dims=["obs_ind", "coeffs"],
