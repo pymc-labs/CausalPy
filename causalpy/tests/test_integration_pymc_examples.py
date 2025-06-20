@@ -369,7 +369,7 @@ def test_its():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.StructuralTimeSeries(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
@@ -378,7 +378,7 @@ def test_its():
     # Test 1. plot method runs
     result.plot()
     # 2. causalpy.StructuralTimeSeries returns correct type
-    assert isinstance(result, cp.StructuralTimeSeries)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -425,7 +425,7 @@ def test_its_covid():
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2020-01-01")
-    result = cp.StructuralTimeSeries(
+    result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
@@ -434,7 +434,7 @@ def test_its_covid():
     # Test 1. plot method runs
     result.plot()
     # 2. causalpy.StructuralTimeSeries returns correct type
-    assert isinstance(result, cp.StructuralTimeSeries)
+    assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
