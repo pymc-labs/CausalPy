@@ -82,7 +82,7 @@ class PrePostNEGD(BaseExperiment):
         Intercept      -0.5, 94% HDI [-1, 0.2]
         C(group)[T.1]  2, 94% HDI [2, 2]
         pre            1, 94% HDI [1, 1]
-        sigma          0.5, 94% HDI [0.5, 0.6]
+        y_hat_sigma    0.5, 94% HDI [0.5, 0.6]
     """
 
     supports_ols = False
