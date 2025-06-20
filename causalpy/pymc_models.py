@@ -699,25 +699,6 @@ class InterventionTimeEstimator(PyMCModel):
             # Likelihodd of the base time series and the intervention's effect
             pm.Normal("y_ts", mu=mu_ts, sigma=sigma, observed=y, dims="obs_ind")
 
-    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions, placing them in the model's idata attribute.
-        """
-
-        # Ensure random_seed is used in sample_prior_predictive() and
-        # sample_posterior_predictive() if provided in sample_kwargs.
-        random_seed = self.sample_kwargs.get("random_seed", None)
-        self.build_model(X, y, coords)
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata, progressbar=False, random_seed=random_seed
-                )
-            )
-        return self.idata
-
     def predict(self, X):
         """
         Predict data given input data `X`
@@ -731,19 +712,20 @@ class InterventionTimeEstimator(PyMCModel):
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
         with self:  # sample with new input data
-            post_pred = pm.sample_posterior_predictive(
+            pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "y_ts", "mu", "mu_ts", "mu_in"],
                 progressbar=False,
                 random_seed=random_seed,
             )
-        return post_pred
 
-    def calculate_impact(
-        self, y_true: xr.DataArray, y_pred: az.InferenceData
-    ) -> xr.DataArray:
-        impact = y_true.data - y_pred["posterior_predictive"]["y_hat"]
-        return impact.transpose(..., "obs_ind")
+        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
+        if isinstance(X, xr.DataArray):
+            pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
+                obs_ind=X.obs_ind
+            )
+
+        return pp
 
     def _data_setter(self, X) -> None:
         """
@@ -770,7 +752,7 @@ class InterventionTimeEstimator(PyMCModel):
         mu_ts = self.predict(X)
         mu_ts = az.extract(mu_ts, group="posterior_predictive", var_names="mu_ts").T
         # Note: First argument must be a 1D array
-        return r2_score(y.data, mu_ts)
+        return r2_score(y.data, mu_ts.data)
 
     def set_time_range(self, time_range, data):
         """
