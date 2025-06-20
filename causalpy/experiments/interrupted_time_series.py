@@ -157,7 +157,7 @@ class HandlerKTT:
             treatment_time,
         )
 
-    def plot_intervention_line(self, model, ax, idata, datapost, treatment_time):
+    def plot_intervention_line(self, ax, model, idata, datapost, treatment_time):
         """
         Plot a vertical line at the known treatment time on provided axes.
         """
