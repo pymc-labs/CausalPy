@@ -37,3 +37,10 @@ class DataException(Exception):
 
     def __init__(self, message: str):
         self.message = message
+
+
+class ModelException(Exception):
+    """Exception raised given when there is some error in user-provided model"""
+
+    def __init__(self, message: str):
+        self.message = message
