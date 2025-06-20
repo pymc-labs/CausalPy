@@ -199,15 +199,15 @@ class PyMCModel(pm.Model):
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
         # Determine the width of the longest label
-        max_label_length = max(len(name) for name in labels + ["sigma"])
+        max_label_length = max(len(name) for name in labels + ["y_hat_sigma"])
 
         for name in labels:
             coeff_samples = coeffs.sel(coeffs=name)
             print_row(max_label_length, name, coeff_samples, round_to)
 
         # Add coefficient for measurement std
-        coeff_samples = az.extract(self.idata.posterior, var_names="sigma")
-        name = "sigma"
+        coeff_samples = az.extract(self.idata.posterior, var_names="y_hat_sigma")
+        name = "y_hat_sigma"
         print_row(max_label_length, name, coeff_samples, round_to)
 
 
