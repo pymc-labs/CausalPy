@@ -566,10 +566,13 @@ class InterventionTimeEstimator(PyMCModel):
         Inference ...
     """
 
-    def __init__(self, treatment_type_effect=None, sample_kwargs=None):
+    def __init__(
+        self, time_variable_name: str, treatment_type_effect=None, sample_kwargs=None
+    ):
         """
         Initializes the InterventionTimeEstimator model.
 
+        :param time_variable_name: name of the column representing time among the covariates
         :param treatment_type_effect: Optional dictionary that specifies prior parameters for the
             intervention effects. Expected keys are:
                 - "level": [mu, sigma]
@@ -579,9 +582,10 @@ class InterventionTimeEstimator(PyMCModel):
             If the associated list is incomplete, default values will be used.
         :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
         """
+        self.time_variable_name = time_variable_name
+
         if treatment_type_effect is None:
             treatment_type_effect = {}
-
         if not isinstance(treatment_type_effect, dict):
             raise TypeError("treatment_type_effect must be a dictionary.")
 
@@ -609,7 +613,7 @@ class InterventionTimeEstimator(PyMCModel):
         with self:
             self.add_coords(coords)
 
-            t = pm.Data("t", X.sel(coeffs="t"), dims="obs_ind")
+            t = pm.Data("t", X.sel(coeffs=self.time_variable_name), dims="obs_ind")
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims="obs_ind")
 
@@ -751,7 +755,11 @@ class InterventionTimeEstimator(PyMCModel):
         new_no_of_observations = X.shape[0]
         with self:
             pm.set_data(
-                {"X": X, "t": X.sel(coeffs="t"), "y": np.zeros(new_no_of_observations)},
+                {
+                    "X": X,
+                    "t": X.sel(coeffs=self.time_variable_name),
+                    "y": np.zeros(new_no_of_observations),
+                },
                 coords={"obs_ind": np.arange(new_no_of_observations)},
             )
 
@@ -771,12 +779,18 @@ class InterventionTimeEstimator(PyMCModel):
         :param time_range: tuple or None
             If not None, a tuple of two values (start_label, end_label) that correspond
             to index labels in the 't' column of the `data` DataFrame
-        :param data: pandas.DataFrame which contains a column "t".
+        :param data: pandas.DataFrame.
         """
         if time_range is None:
-            self.time_range = data["t"].min(), data["t"].max()
+            self.time_range = (
+                data[self.time_variable_name].min(),
+                data[self.time_variable_name].max(),
+            )
         else:
             self.time_range = (
-                data["t"].loc[time_range[0]],
-                data["t"].loc[time_range[1]],
+                data[self.time_variable_name].loc[time_range[0]],
+                data[self.time_variable_name].loc[time_range[1]],
             )
+
+    def get_time_variable_name(self):
+        return self.time_variable_name

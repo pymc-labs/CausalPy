@@ -48,40 +48,50 @@ class HandlerUTT:
         model.set_time_range(treatment_time, data)
         return data
 
-    def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
+    def data_postprocessing(self, model, data, idata, treatment_time, pre_y, pre_X):
         """
         Postprocess data based on the inferred treatment time for further analysis and plotting.
         """
+        # --- Getting the time_variable_name ---
+        time_variable_name = model.get_time_variable_name()
+
         # --- Inferred treatment time ---
         treatment_time_mean = idata.posterior["treatment_time"].mean().item()
         inferred_treatment_time = int(treatment_time_mean)
-        idx_treatment_time = data.index[data["t"] == inferred_treatment_time][0]
+        idx_treatment_time = data.index[
+            data[time_variable_name] == inferred_treatment_time
+        ][0]
 
         # --- HDI bounds (credible interval) ---
         hdi_bounds = az.hdi(idata, var_names=["treatment_time"])[
             "treatment_time"
         ].values
         hdi_start_time = int(hdi_bounds[0])
-        indice = data.index.get_loc(data.index[data["t"] == hdi_start_time][0])
+        indice = data.index.get_loc(
+            data.index[data[time_variable_name] == hdi_start_time][0]
+        )
 
         # --- Slicing ---
-        datapre = data[data["t"] < hdi_start_time]
-        datapost = data[data["t"] >= hdi_start_time]
+        datapre = data[data[time_variable_name] < hdi_start_time]
+        datapost = data[data[time_variable_name] >= hdi_start_time]
 
         truncated_y = pre_y.isel(obs_ind=slice(0, indice))
         truncated_X = pre_X.isel(obs_ind=slice(0, indice))
 
         return datapre, datapost, truncated_y, truncated_X, idx_treatment_time
 
-    def plot_intervention_line(self, ax, idata, datapost, treatment_time):
+    def plot_intervention_line(self, ax, model, idata, datapost, treatment_time):
         """
         Plot a vertical line at the inferred treatment time, along with a shaded area
         representing the Highest Density Interval (HDI) of the inferred time.
         """
+        # --- Getting the time_variable_name ---
+        time_variable_name = model.get_time_variable_name()
+
         # Extract the HDI (uncertainty interval) of the treatment time
         hdi = az.hdi(idata, var_names=["treatment_time"])["treatment_time"].values
-        x1 = datapost.index[datapost["t"] == int(hdi[0])][0]
-        x2 = datapost.index[datapost["t"] == int(hdi[1])][0]
+        x1 = datapost.index[datapost[time_variable_name] == int(hdi[0])][0]
+        x2 = datapost.index[datapost[time_variable_name] == int(hdi[1])][0]
 
         for i in [0, 1, 2]:
             ymin, ymax = ax[i].get_ylim()
@@ -119,7 +129,7 @@ class HandlerUTT:
             plot_hdi_kwargs={"color": "yellowgreen"},
         )
         handles.append((h_line, h_patch))
-        labels.append("treated counterfactual")
+        labels.append("Treated counterfactual")
 
 
 class HandlerKTT:
@@ -135,7 +145,7 @@ class HandlerKTT:
         # Use only data before treatment for training the model
         return data[data.index < treatment_time]
 
-    def data_postprocessing(self, data, idata, treatment_time, pre_y, pre_X):
+    def data_postprocessing(self, model, data, idata, treatment_time, pre_y, pre_X):
         """
         Split data into pre- and post-treatment periods using the known treatment time.
         """
@@ -147,7 +157,7 @@ class HandlerKTT:
             treatment_time,
         )
 
-    def plot_intervention_line(self, ax, idata, datapost, treatment_time):
+    def plot_intervention_line(self, model, ax, idata, datapost, treatment_time):
         """
         Plot a vertical line at the known treatment time on provided axes.
         """
@@ -276,7 +286,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Postprocessing with handler
         self.datapre, self.datapost, self.pre_y, self.pre_X, self.treatment_time = (
             self.handler.data_postprocessing(
-                data, idata, treatment_time, self.pre_y, self.pre_X
+                self.model, data, idata, treatment_time, self.pre_y, self.pre_X
             )
         )
 
@@ -443,7 +453,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Plot vertical line marking treatment time (with HDI if it's inferred)
         self.handler.plot_intervention_line(
-            ax, self.idata, self.datapost, self.treatment_time
+            ax, self.model, self.idata, self.datapost, self.treatment_time
         )
 
         ax[0].legend(
