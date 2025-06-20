@@ -143,13 +143,20 @@ class PyMCModel(pm.Model):
         # If a subclass needs coords in _data_setter, it should handle it.
         self._data_setter(X)
         with self:  # sample with new input data
-            post_pred = pm.sample_posterior_predictive(
+            pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
                 progressbar=False,
                 random_seed=random_seed,
             )
-        return post_pred
+
+        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
+        if isinstance(X, xr.DataArray):
+            pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
+                obs_ind=X.obs_ind
+            )
+
+        return pp
 
     def score(
         self, X, y, coords: Optional[Dict[str, Any]] = None, **kwargs
@@ -165,15 +172,14 @@ class PyMCModel(pm.Model):
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
         """
-        # Pass coords (and kwargs) to predict, in case a subclass's predict uses them
-        mu = self.predict(X, coords=coords, **kwargs)
-        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T.values
-        # Note: First argument must be a 1D array
-        return r2_score(y.flatten(), mu)
+        mu = self.predict(X)
+        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T
+        return r2_score(y.data, mu.data)
 
-    def calculate_impact(self, y_true, y_pred):
-        pre_data = xr.DataArray(y_true, dims=["obs_ind"])
-        impact = pre_data - y_pred["posterior_predictive"]["y_hat"]
+    def calculate_impact(
+        self, y_true: xr.DataArray, y_pred: az.InferenceData
+    ) -> xr.DataArray:
+        impact = y_true - y_pred["posterior_predictive"]["y_hat"]
         return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact):
@@ -220,16 +226,24 @@ class LinearRegression(PyMCModel):
     --------
     >>> import causalpy as cp
     >>> import numpy as np
+    >>> import xarray as xr
     >>> from causalpy.pymc_models import LinearRegression
     >>> rd = cp.load_data("rd")
-    >>> X = rd[["x", "treated"]]
-    >>> y = np.asarray(rd["y"]).reshape((rd["y"].shape[0],1))
-    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> lr.fit(X, y, coords={
-    ...                 'coeffs': ['x', 'treated'],
-    ...                 'obs_ind': np.arange(rd.shape[0])
-    ...                },
+    >>> rd["treated"] = rd["treated"].astype(int)
+    >>> coeffs = ["x", "treated"]
+    >>> X = xr.DataArray(
+    ...     rd[coeffs].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": rd.index, "coeffs": coeffs},
     ... )
+    >>> y = xr.DataArray(
+    ...     rd["y"].values,
+    ...     dims=["obs_ind"],
+    ...     coords={"obs_ind": rd.index},
+    ... )
+    >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
+    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0])}
+    >>> lr.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 
@@ -240,7 +254,7 @@ class LinearRegression(PyMCModel):
         with self:
             self.add_coords(coords)
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y[:, 0], dims="obs_ind")
+            y = pm.Data("y", y, dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
@@ -268,7 +282,7 @@ class WeightedSumFitter(PyMCModel):
     >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
     >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> wsf.fit(X,y)
+    >>> wsf.fit(X, y)
     Inference data...
     """  # noqa: W605
 
@@ -281,12 +295,7 @@ class WeightedSumFitter(PyMCModel):
             n_predictors = X.shape[1]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
-            # TODO: There we should allow user-specified priors here
             beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-            # beta = pm.Dirichlet(
-            #     name="beta", a=(1 / n_predictors) * np.ones(n_predictors),
-            #     dims="coeffs"
-            # )
             sigma = pm.HalfNormal("sigma", 1)
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")

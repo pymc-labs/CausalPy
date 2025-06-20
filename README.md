@@ -4,7 +4,7 @@
 
 ----
 
-![Build Status](https://github.com/pymc-labs/CausalPy/workflows/ci/badge.svg?branch=main)
+![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
