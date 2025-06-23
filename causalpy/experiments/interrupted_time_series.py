@@ -36,62 +36,131 @@ LEGEND_FONT_SIZE = 12
 
 class HandlerUTT:
     """
-    Handle data preprocessing, postprocessing, and plotting steps for models
-    with unknown treatment intervention times.
+    A utility class for managing data preprocessing, postprocessing,
+    and plotting steps for models that infer unknown treatment times.
+
+    This handler prepares input data for the model, extracts relevant
+    outputs after inference, and structures them for further analysis
+    and visualization.
     """
 
     def data_preprocessing(self, data, treatment_time, model):
         """
-        Preprocess the input data and update the model's treatment time constraints.
+        Preprocesses the input data by constraining the model's
+        treatment time inference window.
         """
         # Restrict model's treatment time inference to given range
         model.set_time_range(treatment_time, data)
         return data
 
-    def data_postprocessing(self, model, data, idata, treatment_time, pre_y, pre_X):
+    def data_postprocessing(
+        self, model, data, idata, treatment_time, y, X, pre_y, pre_X
+    ):
         """
-        Postprocess data based on the inferred treatment time for further analysis and plotting.
+        Postprocesses model outputs and input data using the inferred
+        treatment time. Slices the data into pre/post segments, generates
+        predictions and impact estimates, and prepares them for analysis.
         """
-        # --- Getting the time_variable_name ---
-        time_variable_name = model.get_time_variable_name()
+        # --- Return ---
+        res = {}
 
-        # --- Inferred treatment time ---
-        treatment_time_mean = idata.posterior["treatment_time"].mean().item()
-        inferred_treatment_time = int(treatment_time_mean)
-        idx_treatment_time = data.index[
-            data[time_variable_name] == inferred_treatment_time
-        ][0]
+        # --- Retrieve timeline and inferred treatment time ---
+        time_var = model.time_variable_name
+        timeline = data[time_var]
 
-        # --- HDI bounds (credible interval) ---
-        hdi_bounds = az.hdi(idata, var_names=["treatment_time"])[
-            "treatment_time"
-        ].values
-        hdi_start_time = int(hdi_bounds[0])
-        indice = data.index.get_loc(
-            data.index[data[time_variable_name] == hdi_start_time][0]
+        tt_samples = idata.posterior["treatment_time"].values
+        tt_mean = int(tt_samples.mean().item())
+
+        # Actual timestamp (index) corresponding to inferred treatment
+        tt = data[timeline == tt_mean].index[0]
+        # Index of the inferred treatment time in the data
+        tt_idx = data.index.get_loc(tt)
+        res["treatment_time"] = tt
+
+        # --- Slice data into pre/post-treatment ---
+        res["datapre"] = data.head(tt_idx)
+        res["datapost"] = data.iloc[tt_idx:]
+
+        # --- Slice covariates into pre/post treatment time ---
+        res["pre_y"] = pre_y.isel(obs_ind=slice(0, tt_idx))
+        res["pre_X"] = pre_X.isel(obs_ind=slice(0, tt_idx))
+        res["post_y"] = pre_y.isel(obs_ind=slice(tt_idx, None))
+        res["post_X"] = pre_X.isel(obs_ind=slice(tt_idx, None))
+
+        # --- Predict outcomes using the model ---
+        pred = model.predict(X=pre_X)
+        res["pre_pred"] = pred.isel(obs_ind=slice(0, tt_idx))
+        res["post_pred"] = pred.isel(obs_ind=slice(tt_idx, None))
+
+        # --- Estimate causal impact ---
+        impact = model.calculate_impact(pre_y, pred)
+        res["pre_impact"] = impact.isel(obs_ind=slice(0, tt_idx))
+        res["post_impact"] = impact.isel(obs_ind=slice(tt_idx, None))
+
+        # --- Create a mask to isolate post-treatment period ---
+        # Timeline reshaped to match broadcasting with treatment time
+        timeline_reshape = timeline.values.reshape(1, 1, -1)
+        tt_broadcast = tt_samples[:, :, None].astype(int)
+        mask = (timeline_reshape >= tt_broadcast).astype(int)
+
+        # --- Compute cumulative post-treatment impact ---
+        post_impact = impact * mask
+        res["post_impact_cumulative"] = model.calculate_cumulative_impact(post_impact)
+
+        return res
+
+    def plot_treated_counterfactual(
+        self, ax, handles, labels, datapre, datapost, pre_pred, post_pred
+    ):
+        """
+        Plot the predicted post-intervention trajectory, including its
+        Highest Density Interval (HDI), on the first subplot.
+        """
+        # Plot predicted values under treatment (with HDI)
+        h_line, h_patch = plot_xY(
+            datapre.index,
+            pre_pred["posterior_predictive"].mu_ts,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "yellowgreen"},
         )
 
-        # --- Slicing ---
-        datapre = data[data[time_variable_name] < hdi_start_time]
-        datapost = data[data[time_variable_name] >= hdi_start_time]
+        h_line, h_patch = plot_xY(
+            datapost.index,
+            post_pred["posterior_predictive"].mu_ts,
+            ax=ax[0],
+            plot_hdi_kwargs={"color": "yellowgreen"},
+        )
 
-        truncated_y = pre_y.isel(obs_ind=slice(0, indice))
-        truncated_X = pre_X.isel(obs_ind=slice(0, indice))
+        handles.append((h_line, h_patch))
+        labels.append("Treated counterfactual")
 
-        return datapre, datapost, truncated_y, truncated_X, idx_treatment_time
-
-    def plot_intervention_line(self, ax, model, idata, datapost, treatment_time):
+    def plot_impact_cumulative(self, ax, datapre, datapost, post_impact_cumulative):
         """
-        Plot a vertical line at the inferred treatment time, along with a shaded area
-        representing the Highest Density Interval (HDI) of the inferred time.
+        Plot the cumulative causal impact over the full time series.
         """
-        # --- Getting the time_variable_name ---
-        time_variable_name = model.get_time_variable_name()
+        # Concatenate the time indices
+        full_index = datapre.index.append(datapost.index)
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            full_index,
+            post_impact_cumulative,
+            ax=ax[2],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+
+    def plot_intervention_line(
+        self, ax, model, idata, datapre, datapost, treatment_time
+    ):
+        """
+        Draw a vertical line at the inferred treatment time and shade the HDI interval around it.
+        """
+        data = pd.concat([datapre, datapost])
+        timeline = data[model.time_variable_name]
 
         # Extract the HDI (uncertainty interval) of the treatment time
         hdi = az.hdi(idata, var_names=["treatment_time"])["treatment_time"].values
-        x1 = datapost.index[datapost[time_variable_name] == int(hdi[0])][0]
-        x2 = datapost.index[datapost[time_variable_name] == int(hdi[1])][0]
+        x1 = data[timeline == int(hdi[0])].index[0]
+        x2 = data[timeline == int(hdi[1])].index[0]
 
         for i in [0, 1, 2]:
             ymin, ymax = ax[i].get_ylim()
@@ -115,22 +184,6 @@ class HandlerUTT:
                 color="r",
             )
 
-    def plot_treated_counterfactual(
-        self, ax, handles, labels, datapost, post_pred, post_y
-    ):
-        """
-        Plot the inferred post-intervention trajectory (with treatment effect).
-        """
-        # --- Plot predicted trajectory under treatment (with HDI)
-        h_line, h_patch = plot_xY(
-            datapost.index,
-            post_pred["posterior_predictive"].mu_ts,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "yellowgreen"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append("Treated counterfactual")
-
 
 class HandlerKTT:
     """
@@ -145,35 +198,86 @@ class HandlerKTT:
         # Use only data before treatment for training the model
         return data[data.index < treatment_time]
 
-    def data_postprocessing(self, model, data, idata, treatment_time, pre_y, pre_X):
+    def data_postprocessing(
+        self, model, data, idata, treatment_time, y, X, pre_y, pre_X
+    ):
         """
-        Split data into pre- and post-treatment periods using the known treatment time.
+        Splits data and computes predictions and causal impact metrics.
         """
-        return (
-            data[data.index < treatment_time],
-            data[data.index >= treatment_time],
-            pre_y,
-            pre_X,
-            treatment_time,
+        res = {
+            "treatment_time": treatment_time,
+            "datapre": data[data.index < treatment_time],
+            "datapost": data[data.index >= treatment_time],
+            "pre_y": pre_y,
+            "pre_X": pre_X,
+        }
+
+        # --- Build post-treatment design matrices ---
+        (new_y, new_x) = build_design_matrices(
+            [y.design_info, X.design_info], res["datapost"]
+        )
+        post_X = np.asarray(new_x)
+        post_y = np.asarray(new_y)
+        post_X = xr.DataArray(
+            post_X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": res["datapost"].index,
+                "coeffs": X.design_info.column_names,
+            },
+        )
+        post_y = xr.DataArray(
+            post_y[:, 0],
+            dims=["obs_ind"],
+            coords={"obs_ind": res["datapost"].index},
+        )
+        res["post_y"] = post_y
+        res["post_X"] = post_X
+
+        # --- Predictions (counterfactual under treatment) ---
+        res["pre_pred"] = model.predict(X=pre_X)
+        res["post_pred"] = model.predict(X=post_X)
+
+        # --- Impacts ---
+        res["pre_impact"] = model.calculate_impact(res["pre_y"], res["pre_pred"])
+        res["post_impact"] = model.calculate_impact(res["post_y"], res["post_pred"])
+        res["post_impact_cumulative"] = model.calculate_cumulative_impact(
+            res["post_impact"]
         )
 
-    def plot_intervention_line(self, ax, model, idata, datapost, treatment_time):
+        return res
+
+    def plot_treated_counterfactual(
+        self, sax, handles, labels, datapre, datapost, pre_pred, post_pred
+    ):
         """
-        Plot a vertical line at the known treatment time on provided axes.
+        Placeholder method to maintain interface compatibility with HandlerUTT.
+        """
+        pass
+
+    def plot_impact_cumulative(self, ax, datapre, datapost, post_impact_cumulative):
+        """
+        Plot the cumulative causal impact for the post-intervention period.
+        """
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            datapost.index,
+            post_impact_cumulative,
+            ax=ax[2],
+            plot_hdi_kwargs={"color": "C1"},
+        )
+
+    def plot_intervention_line(
+        self, ax, model, idata, datapre, datapost, treatment_time
+    ):
+        """
+        Plot a vertical line at the known treatment time on all subplots.
         """
         # --- Plot a vertical line at the known treatment time
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=treatment_time, ls="-", lw=3, color="r", solid_capstyle="butt"
             )
-
-    def plot_treated_counterfactual(
-        self, sax, handles, labels, datapost, post_pred, post_y
-    ):
-        """
-        Placeholder method to maintain interface compatibility with HandlerUTT.
-        """
-        pass
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -284,42 +388,13 @@ class InterruptedTimeSeries(BaseExperiment):
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
         # Postprocessing with handler
-        self.datapre, self.datapost, self.pre_y, self.pre_X, self.treatment_time = (
-            self.handler.data_postprocessing(
-                self.model, data, idata, treatment_time, self.pre_y, self.pre_X
-            )
+        results = self.handler.data_postprocessing(
+            self.model, data, idata, treatment_time, y, X, self.pre_y, self.pre_X
         )
 
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
-
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
-        self.post_X = xr.DataArray(
-            self.post_X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost.index,
-                "coeffs": self.labels,
-            },
-        )
-        self.post_y = xr.DataArray(
-            self.post_y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": self.datapost.index},
-        )
-
-        # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
-        self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-        self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
-        )
+        # Inject all results into self
+        for k, v in results.items():
+            setattr(self, k, v)
 
     def input_validation(self, data, treatment_time, model):
         """Validate the input data and model formula for correctness"""
@@ -367,6 +442,19 @@ class InterruptedTimeSeries(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
+        handles = []
+        labels = []
+
+        # Treated counterfactual (only for unknown treatment time)
+        self.handler.plot_treated_counterfactual(
+            ax,
+            handles,
+            labels,
+            self.datapre,
+            self.datapost,
+            self.pre_pred,
+            self.post_pred,
+        )
 
         # pre-intervention period
         h_line, h_patch = plot_xY(
@@ -375,17 +463,12 @@ class InterruptedTimeSeries(BaseExperiment):
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
+        handles.append((h_line, h_patch))
+        labels.append("Pre-intervention period")
 
         (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
         handles.append(h)
         labels.append("Observations")
-
-        # Green line for treated counterfactual (if unknown treatment time)
-        self.handler.plot_treated_counterfactual(
-            ax, handles, labels, self.datapost, self.post_pred, self.post_y
-        )
 
         # post intervention period
         h_line, h_patch = plot_xY(
@@ -442,18 +525,14 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[1].set(title="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(
-            self.datapost.index,
-            self.post_impact_cumulative,
-            ax=ax[2],
-            plot_hdi_kwargs={"color": "C1"},
+        self.handler.plot_impact_cumulative(
+            ax, self.datapre, self.datapost, self.post_impact_cumulative
         )
         ax[2].axhline(y=0, c="k")
 
         # Plot vertical line marking treatment time (with HDI if it's inferred)
         self.handler.plot_intervention_line(
-            ax, self.model, self.idata, self.datapost, self.treatment_time
+            ax, self.model, self.idata, self.datapre, self.datapost, self.treatment_time
         )
 
         ax[0].legend(

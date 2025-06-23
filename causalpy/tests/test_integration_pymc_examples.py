@@ -420,9 +420,10 @@ def test_its_no_treatment_time():
         .assign(date=lambda x: pd.to_datetime(x["date"]))
         .set_index("date")
     )
+    treatment_time = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
     result = cp.InterruptedTimeSeries(
         df,
-        None,
+        treatment_time,
         formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.InterventionTimeEstimator(
             time_variable_name="t",

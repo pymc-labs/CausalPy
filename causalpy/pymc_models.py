@@ -682,7 +682,7 @@ class InterventionTimeEstimator(PyMCModel):
             # --- Parameterization ---
             weight = pm.math.sigmoid(t - treatment_time)
             # Compute and store the base time series
-            mu = pm.Deterministic(name="mu", var=pm.math.dot(X, beta))
+            mu = pm.Deterministic(name="mu", var=pm.math.dot(X, beta), dims="obs_ind")
             # Compute and store the modelled intervention effect
             mu_in = (
                 pm.Deterministic(name="mu_in", var=sum(mu_in_components))
@@ -690,7 +690,7 @@ class InterventionTimeEstimator(PyMCModel):
                 else 0
             )
             # Compute and store the sum of the base time series and the intervention's effect
-            mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in)
+            mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in, dims="obs_ind")
             sigma = pm.HalfNormal("sigma", 1)
 
             # --- Likelihood ---
@@ -773,6 +773,3 @@ class InterventionTimeEstimator(PyMCModel):
                 data[self.time_variable_name].loc[time_range[0]],
                 data[self.time_variable_name].loc[time_range[1]],
             )
-
-    def get_time_variable_name(self):
-        return self.time_variable_name
