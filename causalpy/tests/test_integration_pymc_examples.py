@@ -427,7 +427,7 @@ def test_its_no_treatment_time():
         formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.InterventionTimeEstimator(
             time_variable_name="t",
-            treatment_type_effect={"impulse": []},
+            treatment_type_effect={"impulse": [], "level": [], "trend": []},
             sample_kwargs=sample_kwargs,
         ),
     )
