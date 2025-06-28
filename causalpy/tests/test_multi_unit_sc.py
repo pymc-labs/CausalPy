@@ -246,7 +246,6 @@ class TestSyntheticControlMultiUnit:
             assert (
                 "R²" in title or "R^2" in title
             )  # Score information should be displayed
-            assert "Unit:" in title  # Unit information should be displayed
 
     def test_multi_unit_plot_data(self, multi_unit_sc_data):
         """Test that plot data generation works with multiple treated units."""

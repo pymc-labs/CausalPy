@@ -266,10 +266,10 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             self.datapre_treated.sel(treated_units=primary_unit_name),
             "k.",
-            label=f"Observations ({primary_unit_name})",
+            label="Observations",
         )
         handles.append(h)
-        labels.append(f"Observations ({primary_unit_name})")
+        labels.append("Observations")
 
         # post intervention period
         h_line, h_patch = plot_xY(
@@ -298,7 +298,7 @@ class SyntheticControl(BaseExperiment):
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(title=f"{self._get_score_title(round_to)}\nUnit: {primary_unit_name}")
+        ax[0].set(title=f"{self._get_score_title(round_to)}\nUnit")
 
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
@@ -323,10 +323,10 @@ class SyntheticControl(BaseExperiment):
             alpha=0.25,
             label="Causal impact",
         )
-        ax[1].set(title=f"Causal Impact ({primary_unit_name})")
+        ax[1].set(title="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title=f"Cumulative Causal Impact ({primary_unit_name})")
+        ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=primary_unit_name),
@@ -415,7 +415,7 @@ class SyntheticControl(BaseExperiment):
             ls=":",
             c="k",
         )
-        ax[0].set(title=f"{self._get_score_title(round_to)}\nUnit: {primary_unit_name}")
+        ax[0].set(title=f"{self._get_score_title(round_to)}\nUnit")
         # Shaded causal effect - handle different prediction formats
         try:
             # For OLS, predictions might be simple arrays
@@ -451,11 +451,11 @@ class SyntheticControl(BaseExperiment):
             label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
-        ax[1].set(title=f"Causal Impact ({primary_unit_name})")
+        ax[1].set(title="Causal Impact")
 
         ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
         ax[2].axhline(y=0, c="k")
-        ax[2].set(title=f"Cumulative Causal Impact ({primary_unit_name})")
+        ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[1].fill_between(
