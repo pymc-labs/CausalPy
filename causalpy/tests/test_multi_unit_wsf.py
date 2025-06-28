@@ -233,10 +233,9 @@ class TestWeightedSumFitterMultiUnit:
         # Test prediction
         pred = wsf.predict(X)
 
-        # For single unit, should not have treated_units dimension in some places
-        # but should still work correctly
+        # Now always has treated_units dimension, even for single unit
         mu_shape = pred["posterior_predictive"]["mu"].shape
-        expected_shape = (sample_kwargs["chains"], sample_kwargs["draws"], len(X))
+        expected_shape = (sample_kwargs["chains"], sample_kwargs["draws"], len(X), 1)
         assert mu_shape == expected_shape
 
     def test_print_coefficients_multi_unit(self, synthetic_control_data, capsys):
@@ -297,14 +296,16 @@ class TestWeightedSumFitterMultiUnit:
         # Test scoring
         score = wsf.score(X, y)
 
-        # For single unit, should have the same format as before
+        # Now consistently uses treated unit name prefix even for single unit
         assert isinstance(score, pd.Series)
-        assert "r2" in score.index
-        assert "r2_std" in score.index
+        assert "treated_0_r2" in score.index
+        assert "treated_0_r2_std" in score.index
 
         # R2 should be reasonable
-        assert score["r2"] >= -1  # R2 can be negative for very bad fits
-        assert score["r2_std"] >= 0  # Standard deviation should be non-negative
+        assert score["treated_0_r2"] >= -1  # R2 can be negative for very bad fits
+        assert (
+            score["treated_0_r2_std"] >= 0
+        )  # Standard deviation should be non-negative
 
     def test_r2_scores_differ_across_units(self, rng):
         """Test that R² scores are different for different treated units.

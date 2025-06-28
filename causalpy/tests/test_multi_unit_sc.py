@@ -210,8 +210,8 @@ class TestSyntheticControlMultiUnit:
 
         # Score should still work
         assert isinstance(sc.score, pd.Series)
-        assert "r2" in sc.score.index
-        assert "r2_std" in sc.score.index
+        assert "treated_0_r2" in sc.score.index
+        assert "treated_0_r2_std" in sc.score.index
 
     def test_multi_unit_plotting(self, multi_unit_sc_data):
         """Test that plotting works with multiple treated units."""

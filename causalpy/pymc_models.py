@@ -110,7 +110,7 @@ class PyMCModel(pm.Model):
 
         with self:
             if has_treated_units:
-                # Multiple treated units - get the number from the model coordinates
+                # Get the number of treated units from the model coordinates
                 treated_units_coord = getattr(self, "coords", {}).get(
                     "treated_units", []
                 )
@@ -122,7 +122,7 @@ class PyMCModel(pm.Model):
                     coords={"obs_ind": np.arange(new_no_of_observations)},
                 )
             else:
-                # Single treated unit case
+                # Legacy case - this shouldn't happen with new WeightedSumFitter
                 pm.set_data(
                     {"X": X, "y": np.zeros(new_no_of_observations)},
                     coords={"obs_ind": np.arange(new_no_of_observations)},
@@ -378,28 +378,29 @@ class WeightedSumFitter(PyMCModel):
             n_predictors = X.shape[1]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
 
-            # Check if we have multiple treated units
-            if y.ndim > 1 and y.shape[1] > 1:
-                # Multiple treated units case
-                y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
-                beta = pm.Dirichlet(
-                    "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
-                )
-                sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
-                mu = pm.Deterministic(
-                    "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
-                )
-                pm.Normal(
-                    "y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"]
-                )
+            # Always use treated_units dimension for consistency
+            # Convert to numpy array if it's an xarray DataArray
+            if hasattr(y, "values"):
+                y_data = y.values
             else:
-                # Single treated unit case (backward compatibility)
-                y_data = y[:, 0] if y.ndim > 1 else y
-                y = pm.Data("y", y_data, dims="obs_ind")
-                beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-                sigma = pm.HalfNormal("sigma", 1)
-                mu = pm.Deterministic("mu", pt.dot(X, beta), dims="obs_ind")
-                pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+                y_data = np.asarray(y)
+
+            # Ensure y_data has treated_units dimension
+            if y_data.ndim == 1:
+                y_data = y_data.reshape(-1, 1)  # Add treated_units dimension
+            elif y_data.ndim > 1 and y_data.shape[1] == 1:
+                pass  # Already has correct shape
+            # If y_data.ndim > 1 and y_data.shape[1] > 1, it's multi-unit and already correct
+
+            y = pm.Data("y", y_data, dims=["obs_ind", "treated_units"])
+            beta = pm.Dirichlet(
+                "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
+            )
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
 
 
 class InstrumentalVariableRegression(PyMCModel):

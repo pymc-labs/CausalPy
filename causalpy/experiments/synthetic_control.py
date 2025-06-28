@@ -240,17 +240,12 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        # For multi-unit, select primary unit for main plot
-        if len(self.treated_units) > 1:
-            pre_pred_plot = self.pre_pred["posterior_predictive"].mu.sel(
-                treated_units=treated_unit
-            )
-            post_pred_plot = self.post_pred["posterior_predictive"].mu.sel(
-                treated_units=treated_unit
-            )
-        else:
-            pre_pred_plot = self.pre_pred["posterior_predictive"].mu
-            post_pred_plot = self.post_pred["posterior_predictive"].mu
+        pre_pred_plot = self.pre_pred["posterior_predictive"].mu.sel(
+            treated_units=treated_unit
+        )
+        post_pred_plot = self.post_pred["posterior_predictive"].mu.sel(
+            treated_units=treated_unit
+        )
 
         h_line, h_patch = plot_xY(
             self.datapre.index,
@@ -419,6 +414,7 @@ class SyntheticControl(BaseExperiment):
             # For OLS, predictions might be simple arrays
             post_pred_values = np.squeeze(self.post_pred)
         except (TypeError, AttributeError):
+            # TODO: WILL THIS PATH EVERY BIT HIT?
             # For PyMC predictions (InferenceData)
             post_pred_values = (
                 az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
@@ -534,40 +530,19 @@ class SyntheticControl(BaseExperiment):
             self.post_pred, group="posterior_predictive", var_names="mu"
         ).mean("sample")
 
-        if len(self.treated_units) > 1:
-            # Multi-unit case: extract primary unit
-            pre_data["prediction"] = pre_pred_vals.sel(
-                treated_units=treated_unit
-            ).values
-            post_data["prediction"] = post_pred_vals.sel(
-                treated_units=treated_unit
-            ).values
-        else:
-            # Single unit case
-            pre_data["prediction"] = pre_pred_vals.values
-            post_data["prediction"] = post_pred_vals.values
+        # Extract predictions for the specified treated unit (always has treated_units dimension)
+        pre_data["prediction"] = pre_pred_vals.sel(treated_units=treated_unit).values
+        post_data["prediction"] = post_pred_vals.sel(treated_units=treated_unit).values
 
-        # HDI intervals for predictions
-        if len(self.treated_units) > 1:
-            pre_hdi = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu.sel(
-                    treated_units=treated_unit
-                ),
-                hdi_prob=hdi_prob,
-            )
-            post_hdi = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu.sel(
-                    treated_units=treated_unit
-                ),
-                hdi_prob=hdi_prob,
-            )
-        else:
-            pre_hdi = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
-            post_hdi = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
+        # HDI intervals for predictions (always use treated_units dimension)
+        pre_hdi = get_hdi_to_df(
+            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            hdi_prob=hdi_prob,
+        )
+        post_hdi = get_hdi_to_df(
+            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            hdi_prob=hdi_prob,
+        )
 
         # Extract only the lower and upper columns and ensure proper indexing
         pre_lower_upper = pre_hdi.iloc[:, [0, -1]].values  # Get first and last columns
@@ -587,17 +562,13 @@ class SyntheticControl(BaseExperiment):
             .sel(treated_units=treated_unit)
             .values
         )
-        # Impact HDI intervals - use primary unit
-        if len(self.treated_units) > 1:
-            pre_impact_hdi = get_hdi_to_df(
-                self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-            )
-            post_impact_hdi = get_hdi_to_df(
-                self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-            )
-        else:
-            pre_impact_hdi = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
-            post_impact_hdi = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
+        # Impact HDI intervals (always use treated_units dimension)
+        pre_impact_hdi = get_hdi_to_df(
+            self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+        )
+        post_impact_hdi = get_hdi_to_df(
+            self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+        )
 
         # Extract only the lower and upper columns for impact HDI
         pre_impact_lower_upper = pre_impact_hdi.iloc[:, [0, -1]].values
@@ -614,7 +585,7 @@ class SyntheticControl(BaseExperiment):
         """Generate appropriate score title based on model type and number of treated units"""
         if isinstance(self.model, PyMCModel):
             if isinstance(self.score, pd.Series):
-                # Check if it's multi-unit format (has unit-specific keys)
+                # Now consistently has unit-specific keys for all cases
                 if len(self.treated_units) > 1:
                     mean_r2 = self.score.filter(regex=r".*_r2$").mean()
                     mean_r2_std = self.score.filter(regex=r".*_r2_std$").mean()
@@ -623,10 +594,11 @@ class SyntheticControl(BaseExperiment):
                     (avg std = {round_num(mean_r2_std, round_to)})
                     """
                 else:
-                    # Single treated unit - Series has 'r2' and 'r2_std' keys
+                    # Single treated unit - use unit-specific keys
+                    unit_name = self.treated_units[0]
                     return f"""
-                    Pre-intervention Bayesian $R^2$: {round_num(self.score["r2"], round_to)}
-                    (std = {round_num(self.score["r2_std"], round_to)})
+                    Pre-intervention Bayesian $R^2$: {round_num(self.score[f"{unit_name}_r2"], round_to)}
+                    (std = {round_num(self.score[f"{unit_name}_r2_std"], round_to)})
                     """
             else:
                 # Fallback for non-Series score (shouldn't happen with WeightedSumFitter)
