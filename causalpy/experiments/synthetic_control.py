@@ -213,7 +213,7 @@ class SyntheticControl(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, treated_unit=None, **kwargs
+        self, round_to=None, treated_unit: str | None = None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results for a specific treated unit
@@ -221,7 +221,7 @@ class SyntheticControl(BaseExperiment):
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         :param treated_unit:
-            Which treated unit to plot. Can be an integer index or string name.
+            Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
         """
         counterfactual_label = "Counterfactual"
@@ -229,16 +229,24 @@ class SyntheticControl(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
-        primary_unit_idx = self._get_primary_treated_unit_index(treated_unit)
-        primary_unit_name = self.treated_units[primary_unit_idx]
+
+        # Get treated unit name - default to first unit if None
+        primary_unit_name = (
+            treated_unit if treated_unit is not None else self.treated_units[0]
+        )
+
+        if primary_unit_name not in self.treated_units:
+            raise ValueError(
+                f"treated_unit '{primary_unit_name}' not found. Available units: {self.treated_units}"
+            )
 
         # For multi-unit, select primary unit for main plot
         if len(self.treated_units) > 1:
-            pre_pred_plot = self.pre_pred["posterior_predictive"].mu.isel(
-                treated_units=primary_unit_idx
+            pre_pred_plot = self.pre_pred["posterior_predictive"].mu.sel(
+                treated_units=primary_unit_name
             )
-            post_pred_plot = self.post_pred["posterior_predictive"].mu.isel(
-                treated_units=primary_unit_idx
+            post_pred_plot = self.post_pred["posterior_predictive"].mu.sel(
+                treated_units=primary_unit_name
             )
         else:
             pre_pred_plot = self.pre_pred["posterior_predictive"].mu
@@ -256,12 +264,12 @@ class SyntheticControl(BaseExperiment):
         # Plot observations for primary treated unit
         (h,) = ax[0].plot(
             self.datapre.index,
-            self.datapre_treated.isel(treated_units=primary_unit_idx),
+            self.datapre_treated.sel(treated_units=primary_unit_name),
             "k.",
-            label=f"Observations ({self.treated_units[primary_unit_idx]})",
+            label=f"Observations ({primary_unit_name})",
         )
         handles.append(h)
-        labels.append(f"Observations ({self.treated_units[primary_unit_idx]})")
+        labels.append(f"Observations ({primary_unit_name})")
 
         # post intervention period
         h_line, h_patch = plot_xY(
@@ -275,14 +283,14 @@ class SyntheticControl(BaseExperiment):
 
         ax[0].plot(
             self.datapost.index,
-            self.datapost_treated.isel(treated_units=primary_unit_idx),
+            self.datapost_treated.sel(treated_units=primary_unit_name),
             "k.",
         )
         # Shaded causal effect for primary treated unit
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_plot.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost_treated.isel(treated_units=primary_unit_idx).values,
+            y2=self.datapost_treated.sel(treated_units=primary_unit_name).values,
             color="C2",
             alpha=0.25,
             label="Causal impact",
@@ -295,13 +303,13 @@ class SyntheticControl(BaseExperiment):
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
-            self.pre_impact.sel(treated_units=self.treated_units[primary_unit_idx]),
+            self.pre_impact.sel(treated_units=primary_unit_name),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact.sel(treated_units=self.treated_units[primary_unit_idx]),
+            self.post_impact.sel(treated_units=primary_unit_name),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -309,7 +317,7 @@ class SyntheticControl(BaseExperiment):
         ax[1].fill_between(
             self.datapost.index,
             y1=self.post_impact.mean(["chain", "draw"]).sel(
-                treated_units=self.treated_units[primary_unit_idx]
+                treated_units=primary_unit_name
             ),
             color="C0",
             alpha=0.25,
@@ -321,9 +329,7 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title=f"Cumulative Causal Impact ({primary_unit_name})")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.sel(
-                treated_units=self.treated_units[primary_unit_idx]
-            ),
+            self.post_impact_cumulative.sel(treated_units=primary_unit_name),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -365,7 +371,7 @@ class SyntheticControl(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to=None, treated_unit=None, **kwargs
+        self, round_to=None, treated_unit: str | None = None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results for OLS model for a specific treated unit
@@ -373,23 +379,31 @@ class SyntheticControl(BaseExperiment):
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         :param treated_unit:
-            Which treated unit to plot. Can be an integer index or string name.
+            Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
         """
         counterfactual_label = "Counterfactual"
-        primary_unit_idx = self._get_primary_treated_unit_index(treated_unit)
-        primary_unit_name = self.treated_units[primary_unit_idx]
+
+        # Get treated unit name - default to first unit if None
+        primary_unit_name = (
+            treated_unit if treated_unit is not None else self.treated_units[0]
+        )
+
+        if primary_unit_name not in self.treated_units:
+            raise ValueError(
+                f"treated_unit '{primary_unit_name}' not found. Available units: {self.treated_units}"
+            )
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(
             self.datapre_treated["obs_ind"],
-            self.datapre_treated.isel(treated_units=primary_unit_idx),
+            self.datapre_treated.sel(treated_units=primary_unit_name),
             "k.",
         )
         ax[0].plot(
             self.datapost_treated["obs_ind"],
-            self.datapost_treated.isel(treated_units=primary_unit_idx),
+            self.datapost_treated.sel(treated_units=primary_unit_name),
             "k.",
         )
 
@@ -422,7 +436,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             y1=post_pred_values,
             y2=np.squeeze(
-                self.datapost_treated.isel(treated_units=primary_unit_idx).data
+                self.datapost_treated.sel(treated_units=primary_unit_name).data
             ),
             color="C0",
             alpha=0.25,
@@ -482,7 +496,7 @@ class SyntheticControl(BaseExperiment):
         return self.plot_data
 
     def get_plot_data_bayesian(
-        self, hdi_prob: float = 0.94, treated_unit=None
+        self, hdi_prob: float = 0.94, treated_unit: str | None = None
     ) -> pd.DataFrame:
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
@@ -490,7 +504,7 @@ class SyntheticControl(BaseExperiment):
         :param hdi_prob:
             Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
         :param treated_unit:
-            Which treated unit to extract data for. Can be an integer index or string name.
+            Which treated unit to extract data for. Must be a string name of the treated unit.
             If None, uses the first treated unit.
         """
         if not isinstance(self.model, PyMCModel):
@@ -506,8 +520,15 @@ class SyntheticControl(BaseExperiment):
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
 
-        # Get primary treated unit index for data extraction
-        primary_unit_idx = self._get_primary_treated_unit_index(treated_unit)
+        # Get treated unit name - default to first unit if None
+        primary_unit_name = (
+            treated_unit if treated_unit is not None else self.treated_units[0]
+        )
+
+        if primary_unit_name not in self.treated_units:
+            raise ValueError(
+                f"treated_unit '{primary_unit_name}' not found. Available units: {self.treated_units}"
+            )
 
         # Extract predictions - handle multi-unit case
         pre_pred_vals = az.extract(
@@ -519,11 +540,11 @@ class SyntheticControl(BaseExperiment):
 
         if len(self.treated_units) > 1:
             # Multi-unit case: extract primary unit
-            pre_data["prediction"] = pre_pred_vals.isel(
-                treated_units=primary_unit_idx
+            pre_data["prediction"] = pre_pred_vals.sel(
+                treated_units=primary_unit_name
             ).values
-            post_data["prediction"] = post_pred_vals.isel(
-                treated_units=primary_unit_idx
+            post_data["prediction"] = post_pred_vals.sel(
+                treated_units=primary_unit_name
             ).values
         else:
             # Single unit case
@@ -533,14 +554,14 @@ class SyntheticControl(BaseExperiment):
         # HDI intervals for predictions
         if len(self.treated_units) > 1:
             pre_hdi = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu.isel(
-                    treated_units=primary_unit_idx
+                self.pre_pred["posterior_predictive"].mu.sel(
+                    treated_units=primary_unit_name
                 ),
                 hdi_prob=hdi_prob,
             )
             post_hdi = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu.isel(
-                    treated_units=primary_unit_idx
+                self.post_pred["posterior_predictive"].mu.sel(
+                    treated_units=primary_unit_name
                 ),
                 hdi_prob=hdi_prob,
             )
@@ -562,21 +583,21 @@ class SyntheticControl(BaseExperiment):
         # Impact data - always use primary unit for main dataframe
         pre_data["impact"] = (
             self.pre_impact.mean(dim=["chain", "draw"])
-            .isel(treated_units=primary_unit_idx)
+            .sel(treated_units=primary_unit_name)
             .values
         )
         post_data["impact"] = (
             self.post_impact.mean(dim=["chain", "draw"])
-            .isel(treated_units=primary_unit_idx)
+            .sel(treated_units=primary_unit_name)
             .values
         )
         # Impact HDI intervals - use primary unit
         if len(self.treated_units) > 1:
             pre_impact_hdi = get_hdi_to_df(
-                self.pre_impact.isel(treated_units=primary_unit_idx), hdi_prob=hdi_prob
+                self.pre_impact.sel(treated_units=primary_unit_name), hdi_prob=hdi_prob
             )
             post_impact_hdi = get_hdi_to_df(
-                self.post_impact.isel(treated_units=primary_unit_idx), hdi_prob=hdi_prob
+                self.post_impact.sel(treated_units=primary_unit_name), hdi_prob=hdi_prob
             )
         else:
             pre_impact_hdi = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
@@ -617,30 +638,3 @@ class SyntheticControl(BaseExperiment):
         else:
             # OLS model - score is typically a simple float
             return f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
-
-    def _get_primary_treated_unit_index(self, treated_unit=None):
-        """Get the index for the treated unit to plot.
-
-        :param treated_unit: Optional. Either an integer index or string name of the treated unit.
-                           If None, defaults to the first treated unit (index 0).
-        """
-        if treated_unit is None:
-            return 0
-        elif isinstance(treated_unit, int):
-            if 0 <= treated_unit < len(self.treated_units):
-                return treated_unit
-            else:
-                raise ValueError(
-                    f"treated_unit index {treated_unit} out of range. Valid range: 0-{len(self.treated_units) - 1}"
-                )
-        elif isinstance(treated_unit, str):
-            if treated_unit in self.treated_units:
-                return self.treated_units.index(treated_unit)
-            else:
-                raise ValueError(
-                    f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
-                )
-        else:
-            raise ValueError(
-                "treated_unit must be an integer index, string name, or None"
-            )

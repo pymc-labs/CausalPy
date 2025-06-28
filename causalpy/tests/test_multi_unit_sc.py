@@ -231,10 +231,10 @@ class TestSyntheticControlMultiUnit:
         # Test default (first unit)
         fig, ax = sc.plot()
 
-        # Test specific unit by index
-        fig2, ax2 = sc.plot(treated_unit=1)
-
         # Test specific unit by name
+        fig2, ax2 = sc.plot(treated_unit="treated_1")
+
+        # Test another specific unit by name
         fig3, ax3 = sc.plot(treated_unit="treated_2")
 
         # Check that we got the expected plot structure
@@ -287,16 +287,10 @@ class TestSyntheticControlMultiUnit:
             model=model,
         )
 
-        # Test invalid index
-        with pytest.raises(ValueError, match="treated_unit index.*out of range"):
-            sc.plot(treated_unit=10)
-
         # Test invalid name
         with pytest.raises(ValueError, match="treated_unit.*not found"):
             sc.plot(treated_unit="invalid_unit")
 
-        # Test invalid type
-        with pytest.raises(
-            ValueError, match="treated_unit must be.*integer.*string.*None"
-        ):
-            sc.plot(treated_unit=3.14)
+        # Test another invalid name
+        with pytest.raises(ValueError, match="treated_unit.*not found"):
+            sc.plot(treated_unit="treated_10")
