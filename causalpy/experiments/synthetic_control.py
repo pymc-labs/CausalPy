@@ -291,7 +291,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             y1=post_pred_plot.mean(dim=["chain", "draw"]).values,
             y2=self.datapost_treated.sel(treated_units=treated_unit).values,
-            color="C2",
+            color="C0",
             alpha=0.25,
             label="Causal impact",
         )
