@@ -155,16 +155,10 @@ class SyntheticControl(BaseExperiment):
             raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
-        if isinstance(self.model, PyMCModel):
-            self.score = self.model.score(
-                X=self.datapre_control.to_numpy(),
-                y=self.datapre_treated.to_numpy(),
-            )
-        else:
-            self.score = self.model.score(
-                X=self.datapre_control.to_numpy(),
-                y=self.datapre_treated.isel(treated_units=0).to_numpy(),
-            )
+        self.score = self.model.score(
+            X=self.datapre_control.to_numpy(),
+            y=self.datapre_treated.to_numpy(),
+        )
 
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.datapre_control)
