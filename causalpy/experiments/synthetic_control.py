@@ -403,22 +403,8 @@ class SyntheticControl(BaseExperiment):
             c="k",
         )
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
-        # Shaded causal effect - handle different prediction formats
-        try:
-            # For OLS, predictions might be simple arrays
-            post_pred_values = np.squeeze(self.post_pred)
-        except (TypeError, AttributeError):
-            # TODO: WILL THIS PATH EVERY BIT HIT?
-            # For PyMC predictions (InferenceData)
-            post_pred_values = (
-                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .values
-            )
-            if len(post_pred_values.shape) > 1:
-                post_pred_values = post_pred_values[
-                    :, 0
-                ]  # Take first treated unit for OLS
+        # Shaded causal effect
+        post_pred_values = np.squeeze(self.post_pred)
 
         ax[0].fill_between(
             self.datapost.index,
