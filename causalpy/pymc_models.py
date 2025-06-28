@@ -109,20 +109,18 @@ class PyMCModel(pm.Model):
             has_treated_units = False
 
         with self:
-            if has_treated_units:
-                # Get the number of treated units from the model coordinates
-                treated_units_coord = getattr(self, "coords", {}).get(
-                    "treated_units", []
-                )
-                n_treated_units = (
-                    len(treated_units_coord) if treated_units_coord is not None else 1
-                )
+            # Get the number of treated units from the model coordinates
+            treated_units_coord = getattr(self, "coords", {}).get("treated_units", [])
+            n_treated_units = len(treated_units_coord) if treated_units_coord else 1
+
+            if n_treated_units > 1 or has_treated_units:
+                # Multi-unit case or single unit with treated_units dimension
                 pm.set_data(
                     {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
                     coords={"obs_ind": np.arange(new_no_of_observations)},
                 )
             else:
-                # Legacy case - this shouldn't happen with new WeightedSumFitter
+                # Other model types (e.g., LinearRegression) without treated_units dimension
                 pm.set_data(
                     {"X": X, "y": np.zeros(new_no_of_observations)},
                     coords={"obs_ind": np.arange(new_no_of_observations)},
