@@ -293,7 +293,7 @@ class SyntheticControl(BaseExperiment):
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(title=f"{self._get_score_title(round_to)}")
+        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
 
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
@@ -408,7 +408,7 @@ class SyntheticControl(BaseExperiment):
             ls=":",
             c="k",
         )
-        ax[0].set(title=f"{self._get_score_title(round_to)}")
+        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
         # Shaded causal effect - handle different prediction formats
         try:
             # For OLS, predictions might be simple arrays
@@ -581,28 +581,13 @@ class SyntheticControl(BaseExperiment):
 
         return self.plot_data
 
-    def _get_score_title(self, round_to=None):
-        """Generate appropriate score title based on model type and number of treated units"""
+    def _get_score_title(self, treated_unit: str, round_to=None):
+        """Generate appropriate score title for the specified treated unit"""
         if isinstance(self.model, PyMCModel):
-            if isinstance(self.score, pd.Series):
-                # Now consistently has unit-specific keys for all cases
-                if len(self.treated_units) > 1:
-                    mean_r2 = self.score.filter(regex=r".*_r2$").mean()
-                    mean_r2_std = self.score.filter(regex=r".*_r2_std$").mean()
-                    return f"""
-                    Pre-intervention Bayesian $R^2$ (avg): {round_num(mean_r2, round_to)}
-                    (avg std = {round_num(mean_r2_std, round_to)})
-                    """
-                else:
-                    # Single treated unit - use unit-specific keys
-                    unit_name = self.treated_units[0]
-                    return f"""
-                    Pre-intervention Bayesian $R^2$: {round_num(self.score[f"{unit_name}_r2"], round_to)}
-                    (std = {round_num(self.score[f"{unit_name}_r2_std"], round_to)})
-                    """
-            else:
-                # Fallback for non-Series score (shouldn't happen with WeightedSumFitter)
-                return f"Pre-intervention score: {round_num(self.score, round_to)}"
+            # Bayesian model - get unit-specific R² scores
+            r2_val = round_num(self.score[f"{treated_unit}_r2"], round_to)
+            r2_std_val = round_num(self.score[f"{treated_unit}_r2_std"], round_to)
+            return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
-            # OLS model - score is typically a simple float
+            # OLS model - simple float score
             return f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
