@@ -305,3 +305,90 @@ class TestWeightedSumFitterMultiUnit:
         # R2 should be reasonable
         assert score["r2"] >= -1  # R2 can be negative for very bad fits
         assert score["r2_std"] >= 0  # Standard deviation should be non-negative
+
+    def test_r2_scores_differ_across_units(self, rng):
+        """Test that R² scores are different for different treated units.
+
+        This is a defensive test to ensure that each treated unit is being scored
+        independently and not getting identical scores due to implementation bugs.
+        """
+        n_obs = 100  # Use more observations for better differentiation
+        n_control = 4
+
+        # Control unit data
+        control_data = {}
+        for i in range(n_control):
+            control_data[f"control_{i}"] = rng.normal(0, 1, n_obs)
+
+        # Create treated units with deliberately different quality of fit
+        treated_data = {}
+
+        # Treated unit 0: Good fit (close to control combination)
+        weights_0 = rng.dirichlet(np.ones(n_control))
+        treated_data["treated_0"] = sum(
+            weights_0[i] * control_data[f"control_{i}"] for i in range(n_control)
+        ) + rng.normal(0, 0.05, n_obs)  # Low noise
+
+        # Treated unit 1: Medium fit
+        weights_1 = rng.dirichlet(np.ones(n_control))
+        treated_data["treated_1"] = sum(
+            weights_1[i] * control_data[f"control_{i}"] for i in range(n_control)
+        ) + rng.normal(0, 0.3, n_obs)  # Medium noise
+
+        # Treated unit 2: Poor fit (mostly random)
+        treated_data["treated_2"] = rng.normal(0, 2, n_obs)  # Largely independent
+
+        # Create DataFrame
+        df = pd.DataFrame({**control_data, **treated_data})
+
+        # Prepare data for model
+        control_units = [f"control_{i}" for i in range(n_control)]
+        treated_units = ["treated_0", "treated_1", "treated_2"]
+
+        X = xr.DataArray(
+            df[control_units].values,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": df.index,
+                "coeffs": control_units,
+            },
+        )
+
+        y = xr.DataArray(
+            df[treated_units].values,
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": df.index,
+                "treated_units": treated_units,
+            },
+        )
+
+        coords = {
+            "coeffs": control_units,
+            "treated_units": treated_units,
+            "obs_ind": np.arange(n_obs),
+        }
+
+        # Fit model and score
+        wsf = WeightedSumFitter(sample_kwargs=sample_kwargs)
+        wsf.fit(X, y, coords=coords)
+        scores = wsf.score(X, y)
+
+        # Extract R² values for each treated unit
+        r2_values = [scores[f"{unit}_r2"] for unit in treated_units]
+
+        # Test that not all R² values are the same
+        # Use a tolerance to avoid issues with floating point precision
+        assert not np.allclose(r2_values, r2_values[0], atol=1e-6), (
+            f"All R² scores are too similar: {r2_values}. "
+            "This suggests the scoring might not be working correctly for individual units."
+        )
+
+        # Test that the expected ordering holds (good > medium > poor fit)
+        # Note: This might occasionally fail due to randomness, but should generally hold
+        # We'll just check that they're not all identical and that we have reasonable variation
+        r2_std = np.std(r2_values)
+        assert r2_std > 0.01, (
+            f"R² standard deviation is too low ({r2_std}), suggesting insufficient variation "
+            "between treated units. This might indicate a scoring implementation issue."
+        )
