@@ -47,8 +47,16 @@ class PyMCModel(pm.Model):
     ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
     ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
     >>> rng = np.random.default_rng(seed=42)
-    >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> X = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20, 2)),
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": np.arange(20), "coeffs": ["coeff_0", "coeff_1"]},
+    ... )
+    >>> y = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20,)),
+    ...     dims=["obs_ind"],
+    ...     coords={"obs_ind": np.arange(20)},
+    ... )
     >>> model = MyToyModel(
     ...     sample_kwargs={
     ...         "chains": 2,
@@ -174,7 +182,7 @@ class PyMCModel(pm.Model):
 
         return pp
 
-    def score(self, X, y) -> pd.Series:
+    def score(self, X: xr.DataArray, y: xr.DataArray) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         Note that the score is based on a comparison of the observed data ``y`` and the
@@ -197,14 +205,7 @@ class PyMCModel(pm.Model):
 
             for unit in treated_units:
                 unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
-
-                # Handle both xarray and numpy arrays for y
-                if hasattr(y, "sel"):  # xarray.DataArray
-                    unit_y = y.sel(treated_units=unit).data
-                else:  # numpy array
-                    unit_idx = list(treated_units).index(unit)
-                    unit_y = y[:, unit_idx] if y.ndim > 1 else y
-
+                unit_y = y.sel(treated_units=unit).data
                 unit_score = r2_score(unit_y, unit_mu.data)
 
                 # Flatten the r2_score results into the expected format
@@ -215,24 +216,7 @@ class PyMCModel(pm.Model):
         else:
             # Single treated unit - transpose to match expected format
             mu_data = mu_data.T
-
-            # Handle different y types robustly
-            if hasattr(y, "data"):  # xarray.DataArray
-                y_raw = y.data
-                # Convert to numpy array if it's a memoryview
-                if isinstance(y_raw, memoryview):
-                    y_data = np.asarray(y_raw)
-                else:
-                    y_data = y_raw
-                # Squeeze if needed
-                y_data = y_data if y_data.ndim == 1 else y_data.squeeze()
-            else:  # numpy array or memoryview
-                if hasattr(y, "squeeze"):  # numpy array
-                    y_data = y if y.ndim == 1 else y.squeeze()
-                else:  # memoryview or other
-                    y_data = np.asarray(y)
-                    y_data = y_data if y_data.ndim == 1 else y_data.squeeze()
-
+            y_data = y.data.squeeze() if y.data.ndim > 1 else y.data
             return r2_score(y_data, mu_data.data)
 
     def calculate_impact(

@@ -156,8 +156,8 @@ class SyntheticControl(BaseExperiment):
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(
-            X=self.datapre_control.to_numpy(),
-            y=self.datapre_treated.to_numpy(),
+            X=self.datapre_control,
+            y=self.datapre_treated,
         )
 
         # get the model predictions of the observed (pre-intervention) data
