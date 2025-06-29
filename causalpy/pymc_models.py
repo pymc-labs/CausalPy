@@ -360,22 +360,7 @@ class WeightedSumFitter(PyMCModel):
             self.add_coords(coords)
             n_predictors = X.shape[1]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-
-            # Always use treated_units dimension for consistency
-            # Convert to numpy array if it's an xarray DataArray
-            if hasattr(y, "values"):
-                y_data = y.values
-            else:
-                y_data = np.asarray(y)
-
-            # Ensure y_data has treated_units dimension
-            if y_data.ndim == 1:
-                y_data = y_data.reshape(-1, 1)  # Add treated_units dimension
-            elif y_data.ndim > 1 and y_data.shape[1] == 1:
-                pass  # Already has correct shape
-            # If y_data.ndim > 1 and y_data.shape[1] > 1, it's multi-unit and already correct
-
-            y = pm.Data("y", y_data, dims=["obs_ind", "treated_units"])
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             beta = pm.Dirichlet(
                 "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
             )
