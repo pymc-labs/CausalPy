@@ -364,7 +364,7 @@ class WeightedSumFitter(PyMCModel):
         """
         with self:
             self.add_coords(coords)
-            n_predictors = X.shape[1]
+            n_predictors = X.sizes["coeffs"]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             beta = pm.Dirichlet(
