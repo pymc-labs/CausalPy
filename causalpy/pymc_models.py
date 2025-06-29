@@ -89,7 +89,7 @@ class PyMCModel(pm.Model):
         """Build the model, must be implemented by subclass."""
         raise NotImplementedError("This method must be implemented by a subclass")
 
-    def _data_setter(self, X) -> None:
+    def _data_setter(self, X: xr.DataArray) -> None:
         """
         Set data for the model.
 
@@ -104,6 +104,9 @@ class PyMCModel(pm.Model):
         to update all of them - ideally programmatically.
         """
         new_no_of_observations = X.shape[0]
+
+        # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
+        obs_coords = np.arange(new_no_of_observations)
 
         # Check if this model has multiple treated units
         if hasattr(self, "idata") and self.idata is not None:
@@ -125,13 +128,13 @@ class PyMCModel(pm.Model):
                 # Multi-unit case or single unit with treated_units dimension
                 pm.set_data(
                     {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
-                    coords={"obs_ind": np.arange(new_no_of_observations)},
+                    coords={"obs_ind": obs_coords},
                 )
             else:
                 # Other model types (e.g., LinearRegression) without treated_units dimension
                 pm.set_data(
                     {"X": X, "y": np.zeros(new_no_of_observations)},
-                    coords={"obs_ind": np.arange(new_no_of_observations)},
+                    coords={"obs_ind": obs_coords},
                 )
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
@@ -154,7 +157,7 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X):
+    def predict(self, X: xr.DataArray):
         """
         Predict data given input data `X`
 
@@ -166,7 +169,7 @@ class PyMCModel(pm.Model):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
-        with self:  # sample with new input data
+        with self:
             pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
@@ -174,8 +177,11 @@ class PyMCModel(pm.Model):
                 random_seed=random_seed,
             )
 
-        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
-        if isinstance(X, xr.DataArray):
+        # Assign coordinates from input X to ensure xarray operations work correctly
+        # This is necessary because PyMC uses integer indices internally, but we need
+        # to preserve the original coordinates (e.g., datetime indices) for proper
+        # alignment with other xarray operations like calculate_impact()
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
             pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
                 obs_ind=X.obs_ind
             )
