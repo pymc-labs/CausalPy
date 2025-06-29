@@ -47,8 +47,16 @@ class PyMCModel(pm.Model):
     ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
     ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
     >>> rng = np.random.default_rng(seed=42)
-    >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> X = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20, 2)),
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": np.arange(20), "coeffs": ["coeff_0", "coeff_1"]},
+    ... )
+    >>> y = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20,)),
+    ...     dims=["obs_ind"],
+    ...     coords={"obs_ind": np.arange(20)},
+    ... )
     >>> model = MyToyModel(
     ...     sample_kwargs={
     ...         "chains": 2,
@@ -81,7 +89,7 @@ class PyMCModel(pm.Model):
         """Build the model, must be implemented by subclass."""
         raise NotImplementedError("This method must be implemented by a subclass")
 
-    def _data_setter(self, X) -> None:
+    def _data_setter(self, X: xr.DataArray) -> None:
         """
         Set data for the model.
 
@@ -96,11 +104,38 @@ class PyMCModel(pm.Model):
         to update all of them - ideally programmatically.
         """
         new_no_of_observations = X.shape[0]
+
+        # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
+        obs_coords = np.arange(new_no_of_observations)
+
+        # Check if this model has multiple treated_units as a dimension
+        if hasattr(self, "idata") and self.idata is not None:
+            posterior = self.idata.posterior
+            if "beta" in posterior.data_vars:
+                beta_dims = posterior["beta"].dims
+                has_treated_units = "treated_units" in beta_dims
+            else:
+                has_treated_units = False
+        else:
+            has_treated_units = False
+
         with self:
-            pm.set_data(
-                {"X": X, "y": np.zeros(new_no_of_observations)},
-                coords={"obs_ind": np.arange(new_no_of_observations)},
-            )
+            # Get the number of treated units from the model coordinates
+            treated_units_coord = getattr(self, "coords", {}).get("treated_units", [])
+            n_treated_units = len(treated_units_coord) if treated_units_coord else 1
+
+            if n_treated_units > 1 or has_treated_units:
+                # Multi-unit case or single unit with treated_units dimension
+                pm.set_data(
+                    {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                    coords={"obs_ind": obs_coords},
+                )
+            else:
+                # Other model types (e.g., LinearRegression) without treated_units dimension
+                pm.set_data(
+                    {"X": X, "y": np.zeros(new_no_of_observations)},
+                    coords={"obs_ind": obs_coords},
+                )
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
         """Draw samples from posterior, prior predictive, and posterior predictive
@@ -122,7 +157,7 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X):
+    def predict(self, X: xr.DataArray):
         """
         Predict data given input data `X`
 
@@ -134,7 +169,7 @@ class PyMCModel(pm.Model):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
-        with self:  # sample with new input data
+        with self:
             pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
@@ -142,15 +177,18 @@ class PyMCModel(pm.Model):
                 random_seed=random_seed,
             )
 
-        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
-        if isinstance(X, xr.DataArray):
+        # Assign coordinates from input X to ensure xarray operations work correctly
+        # This is necessary because PyMC uses integer indices internally, but we need
+        # to preserve the original coordinates (e.g., datetime indices) for proper
+        # alignment with other xarray operations like calculate_impact()
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
             pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
                 obs_ind=X.obs_ind
             )
 
         return pp
 
-    def score(self, X, y) -> pd.Series:
+    def score(self, X: xr.DataArray, y: xr.DataArray) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         Note that the score is based on a comparison of the observed data ``y`` and the
@@ -163,8 +201,29 @@ class PyMCModel(pm.Model):
 
         """
         mu = self.predict(X)
-        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T
-        return r2_score(y.data, mu.data)
+        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
+
+        # Handle both single and multiple treated units
+        if "treated_units" in mu_data.dims:
+            # Multiple treated units - we need to score each unit separately
+            treated_units = mu_data.coords["treated_units"].values
+            scores = {}
+
+            for unit in treated_units:
+                unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+                unit_y = y.sel(treated_units=unit).data
+                unit_score = r2_score(unit_y, unit_mu.data)
+
+                # Flatten the r2_score results into the expected format
+                scores[f"{unit}_r2"] = unit_score["r2"]
+                scores[f"{unit}_r2_std"] = unit_score["r2_std"]
+
+            return pd.Series(scores)
+        else:
+            # Single treated unit - transpose to match expected format
+            mu_data = mu_data.T
+            y_data = y.data.squeeze() if y.data.ndim > 1 else y.data
+            return r2_score(y_data, mu_data.data)
 
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
@@ -184,20 +243,43 @@ class PyMCModel(pm.Model):
             formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1 - 0.03).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
+        def print_coefficients_for_unit(
+            unit_coeffs: xr.DataArray,
+            unit_sigma: xr.DataArray,
+            labels: list,
+            round_to: int,
+        ) -> None:
+            """Print coefficients for a single unit"""
+            # Determine the width of the longest label
+            max_label_length = max(len(name) for name in labels + ["sigma"])
+
+            for name in labels:
+                coeff_samples = unit_coeffs.sel(coeffs=name)
+                print_row(max_label_length, name, coeff_samples, round_to)
+
+            # Add coefficient for measurement std
+            print_row(max_label_length, "sigma", unit_sigma, round_to)
+
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
-        # Determine the width of the longest label
-        max_label_length = max(len(name) for name in labels + ["sigma"])
-
-        for name in labels:
-            coeff_samples = coeffs.sel(coeffs=name)
-            print_row(max_label_length, name, coeff_samples, round_to)
-
-        # Add coefficient for measurement std
-        coeff_samples = az.extract(self.idata.posterior, var_names="sigma")
-        name = "sigma"
-        print_row(max_label_length, name, coeff_samples, round_to)
+        # Check if we have multiple treated units
+        if "treated_units" in coeffs.dims:
+            # Multiple treated units case - print coefficients for each unit
+            treated_units = coeffs.coords["treated_units"].values
+            for unit in treated_units:
+                print(f"\nTreated unit: {unit}")
+                unit_coeffs = coeffs.sel(treated_units=unit)
+                unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
+                    treated_units=unit
+                )
+                print_coefficients_for_unit(
+                    unit_coeffs, unit_sigma, labels, round_to or 2
+                )
+        else:
+            # Single treated unit case (backward compatibility)
+            unit_sigma = az.extract(self.idata.posterior, var_names="sigma")
+            print_coefficients_for_unit(coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):
@@ -247,7 +329,7 @@ class LinearRegression(PyMCModel):
             y = pm.Data("y", y, dims="obs_ind")
             beta = pm.Normal("beta", 0, 50, dims="coeffs")
             sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
+            mu = pm.Deterministic("mu", pt.dot(X, beta), dims="obs_ind")
             pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
 
 
@@ -267,12 +349,27 @@ class WeightedSumFitter(PyMCModel):
     --------
     >>> import causalpy as cp
     >>> import numpy as np
+    >>> import xarray as xr
     >>> from causalpy.pymc_models import WeightedSumFitter
     >>> sc = cp.load_data("sc")
-    >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
-    >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
+    >>> control_units = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    >>> X = xr.DataArray(
+    ...     sc[control_units].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": sc.index, "coeffs": control_units},
+    ... )
+    >>> y = xr.DataArray(
+    ...     sc['actual'].values.reshape((sc.shape[0], 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": sc.index, "treated_units": ["actual"]},
+    ... )
+    >>> coords = {
+    ...     "coeffs": control_units,
+    ...     "treated_units": ["actual"],
+    ...     "obs_ind": np.arange(sc.shape[0]),
+    ... }
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> wsf.fit(X, y)
+    >>> wsf.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 
@@ -282,13 +379,17 @@ class WeightedSumFitter(PyMCModel):
         """
         with self:
             self.add_coords(coords)
-            n_predictors = X.shape[1]
+            n_predictors = X.sizes["coeffs"]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y[:, 0], dims="obs_ind")
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-            sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            beta = pm.Dirichlet(
+                "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
+            )
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
 
 
 class InstrumentalVariableRegression(PyMCModel):
@@ -379,9 +480,9 @@ class InstrumentalVariableRegression(PyMCModel):
             pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
 
             # --- Parameterization ---
-            mu_y = pm.Deterministic(name="mu_y", var=pm.math.dot(X, beta_z))
+            mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
             # focal regression
-            mu_t = pm.Deterministic(name="mu_t", var=pm.math.dot(Z, beta_t))
+            mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
             # instrumental regression
             mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
 
@@ -484,7 +585,7 @@ class PropensityScore(PyMCModel):
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             t_data = pm.Data("t", t.flatten(), dims="obs_ind")
             b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
-            mu = pm.math.dot(X_data, b)
+            mu = pt.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
