@@ -349,12 +349,27 @@ class WeightedSumFitter(PyMCModel):
     --------
     >>> import causalpy as cp
     >>> import numpy as np
+    >>> import xarray as xr
     >>> from causalpy.pymc_models import WeightedSumFitter
     >>> sc = cp.load_data("sc")
-    >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
-    >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
+    >>> control_units = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    >>> X = xr.DataArray(
+    ...     sc[control_units].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": sc.index, "coeffs": control_units},
+    ... )
+    >>> y = xr.DataArray(
+    ...     sc['actual'].values.reshape((sc.shape[0], 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": sc.index, "treated_units": ["actual"]},
+    ... )
+    >>> coords = {
+    ...     "coeffs": control_units,
+    ...     "treated_units": ["actual"],
+    ...     "obs_ind": np.arange(sc.shape[0]),
+    ... }
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> wsf.fit(X, y)
+    >>> wsf.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 

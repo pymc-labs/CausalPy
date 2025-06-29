@@ -100,10 +100,10 @@ class SyntheticControl(BaseExperiment):
         # make constructing the xarray DataArray objects easier.
         self.datapre_control = xr.DataArray(
             self.datapre[self.control_units],
-            dims=["obs_ind", "control_units"],
+            dims=["obs_ind", "coeffs"],
             coords={
                 "obs_ind": self.datapre[self.control_units].index,
-                "control_units": self.control_units,
+                "coeffs": self.control_units,
             },
         )
         self.datapre_treated = xr.DataArray(
@@ -116,10 +116,10 @@ class SyntheticControl(BaseExperiment):
         )
         self.datapost_control = xr.DataArray(
             self.datapost[self.control_units],
-            dims=["obs_ind", "control_units"],
+            dims=["obs_ind", "coeffs"],
             coords={
                 "obs_ind": self.datapost[self.control_units].index,
-                "control_units": self.control_units,
+                "coeffs": self.control_units,
             },
         )
         self.datapost_treated = xr.DataArray(
