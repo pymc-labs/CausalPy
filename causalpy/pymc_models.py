@@ -108,7 +108,7 @@ class PyMCModel(pm.Model):
         # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
         obs_coords = np.arange(new_no_of_observations)
 
-        # Check if this model has multiple treated units
+        # Check if this model has multiple treated_units as a dimension
         if hasattr(self, "idata") and self.idata is not None:
             posterior = self.idata.posterior
             if "beta" in posterior.data_vars:
