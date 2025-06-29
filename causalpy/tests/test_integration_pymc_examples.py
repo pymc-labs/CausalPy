@@ -23,7 +23,7 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_did():
+def test_did(mock_pymc_sample):
     """
     Test Difference in Differences (DID) PyMC experiment.
 
@@ -57,7 +57,7 @@ def test_did():
 
 
 @pytest.mark.integration
-def test_did_banks_simple():
+def test_did_banks_simple(mock_pymc_sample):
     """
     Test simple Differences In Differences Experiment on the 'banks' data set.
 
@@ -113,7 +113,7 @@ def test_did_banks_simple():
 
 
 @pytest.mark.integration
-def test_did_banks_multi():
+def test_did_banks_multi(mock_pymc_sample):
     """
     Test multiple regression Differences In Differences Experiment on the 'banks'
     data set.
@@ -168,7 +168,7 @@ def test_did_banks_multi():
 
 
 @pytest.mark.integration
-def test_rd():
+def test_rd(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment.
 
@@ -199,7 +199,7 @@ def test_rd():
 
 
 @pytest.mark.integration
-def test_rd_bandwidth():
+def test_rd_bandwidth(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment with bandwidth parameter.
 
@@ -229,7 +229,7 @@ def test_rd_bandwidth():
 
 
 @pytest.mark.integration
-def test_rd_drinking():
+def test_rd_drinking(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment on drinking age data.
 
@@ -289,7 +289,7 @@ def reg_kink_function(x, beta, kink):
 
 
 @pytest.mark.integration
-def test_rkink():
+def test_rkink(mock_pymc_sample):
     """
     Test Regression Kink design.
 
@@ -320,7 +320,7 @@ def test_rkink():
 
 
 @pytest.mark.integration
-def test_rkink_bandwidth():
+def test_rkink_bandwidth(mock_pymc_sample):
     """
     Test Regression Kink experiment with bandwidth parameter.
 
@@ -350,7 +350,7 @@ def test_rkink_bandwidth():
 
 
 @pytest.mark.integration
-def test_its():
+def test_its(mock_pymc_sample):
     """
     Test Interrupted Time-Series experiment.
 
@@ -403,7 +403,7 @@ def test_its():
 
 
 @pytest.mark.integration
-def test_its_covid():
+def test_its_covid(mock_pymc_sample):
     """
     Test Interrupted Time-Series experiment on COVID data.
 
@@ -457,7 +457,7 @@ def test_its_covid():
 
 
 @pytest.mark.integration
-def test_sc():
+def test_sc(mock_pymc_sample):
     """
     Test Synthetic Control experiment.
 
@@ -516,7 +516,7 @@ def test_sc():
 
 
 @pytest.mark.integration
-def test_sc_brexit():
+def test_sc_brexit(mock_pymc_sample):
     """
     Test Synthetic Control experiment on Brexit data.
 
@@ -579,7 +579,7 @@ def test_sc_brexit():
 
 
 @pytest.mark.integration
-def test_ancova():
+def test_ancova(mock_pymc_sample):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -611,7 +611,7 @@ def test_ancova():
 
 
 @pytest.mark.integration
-def test_geolift1():
+def test_geolift1(mock_pymc_sample):
     """
     Test Synthetic Control experiment on geo lift data.
 
@@ -648,7 +648,7 @@ def test_geolift1():
 
 
 @pytest.mark.integration
-def test_iv_reg():
+def test_iv_reg(mock_pymc_sample):
     df = cp.load_data("risk")
     instruments_formula = "risk  ~ 1 + logmort0"
     formula = "loggdp ~  1 + risk"
@@ -676,7 +676,7 @@ def test_iv_reg():
 
 
 @pytest.mark.integration
-def test_inverse_prop():
+def test_inverse_prop(mock_pymc_sample):
     """Test the InversePropensityWeighting class."""
     df = cp.load_data("nhefs")
     sample_kwargs = {

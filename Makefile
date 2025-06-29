@@ -1,4 +1,4 @@
-.PHONY: init lint check_lint test uml html cleandocs
+.PHONY: init lint check_lint test uml html cleandocs doctest
 
 init:
 	python -m pip install -e . --no-deps
@@ -13,7 +13,7 @@ check_lint:
 	interrogate .
 
 doctest:
-	pytest --doctest-modules --ignore=causalpy/tests/ causalpy/
+	pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
 
 test:
 	pytest
