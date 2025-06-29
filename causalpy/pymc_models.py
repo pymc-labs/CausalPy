@@ -237,6 +237,23 @@ class PyMCModel(pm.Model):
             formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1 - 0.03).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
+        def print_coefficients_for_unit(
+            unit_coeffs: xr.DataArray,
+            unit_sigma: xr.DataArray,
+            labels: list,
+            round_to: int,
+        ) -> None:
+            """Print coefficients for a single unit"""
+            # Determine the width of the longest label
+            max_label_length = max(len(name) for name in labels + ["sigma"])
+
+            for name in labels:
+                coeff_samples = unit_coeffs.sel(coeffs=name)
+                print_row(max_label_length, name, coeff_samples, round_to)
+
+            # Add coefficient for measurement std
+            print_row(max_label_length, "sigma", unit_sigma, round_to)
+
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
@@ -247,32 +264,16 @@ class PyMCModel(pm.Model):
             for unit in treated_units:
                 print(f"\nTreated unit: {unit}")
                 unit_coeffs = coeffs.sel(treated_units=unit)
-
-                # Determine the width of the longest label
-                max_label_length = max(len(name) for name in labels + ["sigma"])
-
-                for name in labels:
-                    coeff_samples = unit_coeffs.sel(coeffs=name)
-                    print_row(max_label_length, name, coeff_samples, round_to or 2)
-
-                # Add coefficient for measurement std for this unit
                 unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
                     treated_units=unit
                 )
-                print_row(max_label_length, "sigma", unit_sigma, round_to or 2)
+                print_coefficients_for_unit(
+                    unit_coeffs, unit_sigma, labels, round_to or 2
+                )
         else:
             # Single treated unit case (backward compatibility)
-            # Determine the width of the longest label
-            max_label_length = max(len(name) for name in labels + ["sigma"])
-
-            for name in labels:
-                coeff_samples = coeffs.sel(coeffs=name)
-                print_row(max_label_length, name, coeff_samples, round_to or 2)
-
-            # Add coefficient for measurement std
-            coeff_samples = az.extract(self.idata.posterior, var_names="sigma")
-            name = "sigma"
-            print_row(max_label_length, name, coeff_samples, round_to or 2)
+            unit_sigma = az.extract(self.idata.posterior, var_names="sigma")
+            print_coefficients_for_unit(coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):
