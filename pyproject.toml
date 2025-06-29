@@ -68,6 +68,7 @@ docs = [
     "sphinx-notfound-page",
     "ipywidgets",
     "sphinx-design",
+    "sphinx-togglebutton",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
