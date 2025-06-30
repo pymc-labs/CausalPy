@@ -36,12 +36,26 @@ class MyToyModel(PyMCModel):
         This is a basic 1-variable linear regression model for use in tests.
         """
         with self:
-            X_ = pm.Data(name="X", value=X)
-            y_ = pm.Data(name="y", value=y)
-            beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-            sigma = pm.HalfNormal("sigma", sigma=1)
-            mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
-            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+            # Ensure treated_units coordinate exists for consistency
+            if "treated_units" not in coords:
+                coords = coords.copy() if coords else {}
+                coords["treated_units"] = ["unit_0"]
+
+            self.add_coords(coords)
+            X_ = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
+            y_ = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
+            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
+            sigma = pm.HalfNormal("sigma", sigma=1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_,
+                dims=["obs_ind", "treated_units"],
+            )
 
 
 class TestPyMCModel:
@@ -106,20 +120,59 @@ class TestPyMCModel:
         4. checks that predictions are az.InferenceData type
         """
         X = rng.normal(loc=0, scale=1, size=(20, 2))
-        y = rng.normal(loc=0, scale=1, size=(20,))
+        y = rng.normal(loc=0, scale=1, size=(20, 1))  # Now 2D with single treated unit
+
+        # Convert to xr.DataArrays with proper dimensions
+        X = xr.DataArray(
+            X,
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(20), "coeffs": ["x1", "x2"]},
+        )
+        y = xr.DataArray(
+            y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+        )
+
+        # Create base coords
+        base_coords = {
+            "obs_ind": np.arange(20),
+            "coeffs": ["x1", "x2"],
+            "treated_units": ["unit_0"],
+        }
+
+        # Only update with coords if it contains coordinate arrays, not arbitrary values
+        if coords is not None:
+            # Filter out non-coordinate values (e.g., {"a": 1} is not a coordinate)
+            coord_keys = {"obs_ind", "coeffs", "treated_units"}
+            for key, value in coords.items():
+                if key in coord_keys:
+                    base_coords[key] = value
+
         model = MyToyModel(sample_kwargs={"chains": 2, "draws": 2})
-        model.fit(X, y, coords=coords)
+        model.fit(X, y, coords=base_coords)
         predictions = model.predict(X=X)
         score = model.score(X=X, y=y)
         assert isinstance(model.idata, az.InferenceData)
-        assert az.extract(data=model.idata, var_names=["beta"]).shape == (2, 2 * 2)
-        assert az.extract(data=model.idata, var_names=["sigma"]).shape == (2 * 2,)
-        assert az.extract(data=model.idata, var_names=["mu"]).shape == (20, 2 * 2)
+        assert az.extract(data=model.idata, var_names=["beta"]).shape == (
+            1,
+            2,
+            2 * 2,
+        )  # (treated_units, coeffs, sample)
+        assert az.extract(data=model.idata, var_names=["sigma"]).shape == (
+            1,
+            2 * 2,
+        )  # (treated_units, sample)
+        assert az.extract(data=model.idata, var_names=["mu"]).shape == (
+            20,
+            1,
+            2 * 2,
+        )  # (obs_ind, treated_units, sample)
         assert az.extract(
             data=model.idata, group="posterior_predictive", var_names=["y_hat"]
-        ).shape == (20, 2 * 2)
+        ).shape == (20, 1, 2 * 2)  # (obs_ind, treated_units, sample)
         assert isinstance(score, pd.Series)
-        assert score.shape == (2,)
+        assert score.shape == (2,)  # Still 2 metrics (r2 and r2_std)
         # Test that the score follows the new unified format
         assert "unit_0_r2" in score.index
         assert "unit_0_r2_std" in score.index

@@ -131,15 +131,19 @@ class RegressionDiscontinuity(BaseExperiment):
             },
         )
         self.y = xr.DataArray(
-            self.y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": np.arange(self.y.shape[0])},
+            self.y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
         # fit model
         if isinstance(self.model, PyMCModel):
             # fit the model to the observed (pre-intervention) data
-            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
+            COORDS = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.X.shape[0]),
+                "treated_units": ["unit_0"],
+            }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.X, y=self.y)
@@ -248,7 +252,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_xY(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu,
+            self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
         )

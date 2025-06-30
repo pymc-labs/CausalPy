@@ -40,11 +40,16 @@ class PyMCModel(pm.Model):
     >>> class MyToyModel(PyMCModel):
     ...     def build_model(self, X, y, coords):
     ...         with self:
+    ...             self.add_coords(coords)
     ...             X_ = pm.Data(name="X", value=X)
     ...             y_ = pm.Data(name="y", value=y)
-    ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-    ...             sigma = pm.HalfNormal("sigma", sigma=1)
-    ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+    ...             beta = pm.Normal(
+    ...                 "beta", mu=0, sigma=1, shape=(y.shape[1], X.shape[1])
+    ...             )
+    ...             sigma = pm.HalfNormal("sigma", sigma=1, shape=y.shape[1])
+    ...             mu = pm.Deterministic(
+    ...                 "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+    ...             )
     ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
     >>> rng = np.random.default_rng(seed=42)
     >>> X = xr.DataArray(
@@ -53,9 +58,9 @@ class PyMCModel(pm.Model):
     ...     coords={"obs_ind": np.arange(20), "coeffs": ["coeff_0", "coeff_1"]},
     ... )
     >>> y = xr.DataArray(
-    ...     rng.normal(loc=0, scale=1, size=(20,)),
-    ...     dims=["obs_ind"],
-    ...     coords={"obs_ind": np.arange(20)},
+    ...     rng.normal(loc=0, scale=1, size=(20, 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
     ... )
     >>> model = MyToyModel(
     ...     sample_kwargs={
@@ -65,7 +70,15 @@ class PyMCModel(pm.Model):
     ...         "random_seed": 42,
     ...     }
     ... )
-    >>> model.fit(X, y)
+    >>> model.fit(
+    ...     X,
+    ...     y,
+    ...     coords={
+    ...         "coeffs": ["coeff_0", "coeff_1"],
+    ...         "obs_ind": np.arange(20),
+    ...         "treated_units": ["unit_0"],
+    ...     },
+    ... )
     Inference data...
     >>> model.score(X, y)  # doctest: +ELLIPSIS
     unit_0_r2        ...
@@ -108,34 +121,18 @@ class PyMCModel(pm.Model):
         # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
         obs_coords = np.arange(new_no_of_observations)
 
-        # Check if this model has multiple treated_units as a dimension
-        if hasattr(self, "idata") and self.idata is not None:
-            posterior = self.idata.posterior
-            if "beta" in posterior.data_vars:
-                beta_dims = posterior["beta"].dims
-                has_treated_units = "treated_units" in beta_dims
-            else:
-                has_treated_units = False
-        else:
-            has_treated_units = False
-
         with self:
             # Get the number of treated units from the model coordinates
-            treated_units_coord = getattr(self, "coords", {}).get("treated_units", [])
-            n_treated_units = len(treated_units_coord) if treated_units_coord else 1
+            treated_units_coord = getattr(self, "coords", {}).get(
+                "treated_units", ["unit_0"]
+            )
+            n_treated_units = len(treated_units_coord)
 
-            if n_treated_units > 1 or has_treated_units:
-                # Multi-unit case or single unit with treated_units dimension
-                pm.set_data(
-                    {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
-                    coords={"obs_ind": obs_coords},
-                )
-            else:
-                # Other model types (e.g., LinearRegression) without treated_units dimension
-                pm.set_data(
-                    {"X": X, "y": np.zeros(new_no_of_observations)},
-                    coords={"obs_ind": obs_coords},
-                )
+            # Always use 2D format for consistency
+            pm.set_data(
+                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                coords={"obs_ind": obs_coords},
+            )
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
         """Draw samples from posterior, prior predictive, and posterior predictive
@@ -203,28 +200,12 @@ class PyMCModel(pm.Model):
         mu = self.predict(X)
         mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
 
-        # Always use unified labeling system: unit_0_r2, unit_1_r2, etc.
         scores = {}
 
-        # Determine units to process - always use a loop for consistency
-        if "treated_units" in mu_data.dims:
-            # Multiple treated units
-            units = list(enumerate(mu_data.coords["treated_units"].values))
-        else:
-            # Single unit - treat as single-item list
-            units = [(0, None)]
-
-        # Process all units using the same loop logic
-        for i, unit_selector in units:
-            if unit_selector is not None:
-                # Multi-unit case: select specific unit
-                unit_mu = mu_data.sel(treated_units=unit_selector).T
-                unit_y = y.sel(treated_units=unit_selector).data
-            else:
-                # Single unit case: use all data
-                unit_mu = mu_data.T
-                unit_y = y.data.squeeze() if y.data.ndim > 1 else y.data
-
+        # Always iterate over treated_units dimension - no branching needed!
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
             unit_score = r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
@@ -269,23 +250,17 @@ class PyMCModel(pm.Model):
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
-        # Check if we have multiple treated units
-        if "treated_units" in coeffs.dims:
-            # Multiple treated units case - print coefficients for each unit
-            treated_units = coeffs.coords["treated_units"].values
-            for unit in treated_units:
+        # Always has treated_units dimension - no branching needed!
+        treated_units = coeffs.coords["treated_units"].values
+        for unit in treated_units:
+            if len(treated_units) > 1:
                 print(f"\nTreated unit: {unit}")
-                unit_coeffs = coeffs.sel(treated_units=unit)
-                unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
-                    treated_units=unit
-                )
-                print_coefficients_for_unit(
-                    unit_coeffs, unit_sigma, labels, round_to or 2
-                )
-        else:
-            # Single treated unit case (backward compatibility)
-            unit_sigma = az.extract(self.idata.posterior, var_names="sigma")
-            print_coefficients_for_unit(coeffs, unit_sigma, labels, round_to or 2)
+
+            unit_coeffs = coeffs.sel(treated_units=unit)
+            unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
+                treated_units=unit
+            )
+            print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):
@@ -315,12 +290,12 @@ class LinearRegression(PyMCModel):
     ...     coords={"obs_ind": rd.index, "coeffs": coeffs},
     ... )
     >>> y = xr.DataArray(
-    ...     rd["y"].values,
-    ...     dims=["obs_ind"],
-    ...     coords={"obs_ind": rd.index},
+    ...     rd["y"].values.reshape(-1, 1),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": rd.index, "treated_units": ["unit_0"]},
     ... )
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0])}
+    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0]), "treated_units": ["unit_0"]}
     >>> lr.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
@@ -330,13 +305,20 @@ class LinearRegression(PyMCModel):
         Defines the PyMC model
         """
         with self:
+            # Ensure treated_units coordinate exists for consistency
+            if "treated_units" not in coords:
+                coords = coords.copy()
+                coords["treated_units"] = ["unit_0"]
+
             self.add_coords(coords)
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y, dims="obs_ind")
-            beta = pm.Normal("beta", 0, 50, dims="coeffs")
-            sigma = pm.HalfNormal("sigma", 1)
-            mu = pm.Deterministic("mu", pt.dot(X, beta), dims="obs_ind")
-            pm.Normal("y_hat", mu, sigma, observed=y, dims="obs_ind")
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            beta = pm.Normal("beta", 0, 50, dims=["treated_units", "coeffs"])
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
 
 
 class WeightedSumFitter(PyMCModel):
