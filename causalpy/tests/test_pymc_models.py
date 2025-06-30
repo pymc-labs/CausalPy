@@ -120,9 +120,9 @@ class TestPyMCModel:
         ).shape == (20, 2 * 2)
         assert isinstance(score, pd.Series)
         assert score.shape == (2,)
-        # Test that the score follows the new standardized format
-        assert "unit_r2" in score.index
-        assert "unit_r2_std" in score.index
+        # Test that the score follows the new unified format
+        assert "unit_0_r2" in score.index
+        assert "unit_0_r2_std" in score.index
         assert isinstance(predictions, az.InferenceData)
 
 
@@ -423,15 +423,15 @@ class TestWeightedSumFitterMultiUnit:
         # Score should be a pandas Series with separate r2 and r2_std for each treated unit
         assert isinstance(score, pd.Series)
 
-        # Check that we have r2 and r2_std for each treated unit
-        for unit in treated_units:
-            assert f"{unit}_r2" in score.index
-            assert f"{unit}_r2_std" in score.index
+        # Check that we have r2 and r2_std for each treated unit using unified format
+        for i, unit in enumerate(treated_units):
+            assert f"unit_{i}_r2" in score.index
+            assert f"unit_{i}_r2_std" in score.index
 
             # R2 should be reasonable (between 0 and 1 typically, though can be negative)
-            assert score[f"{unit}_r2"] >= -1  # R2 can be negative for very bad fits
+            assert score[f"unit_{i}_r2"] >= -1  # R2 can be negative for very bad fits
             assert (
-                score[f"{unit}_r2_std"] >= 0
+                score[f"unit_{i}_r2_std"] >= 0
             )  # Standard deviation should be non-negative
 
     def test_scoring_single_unit(self, single_treated_data):
@@ -444,16 +444,14 @@ class TestWeightedSumFitterMultiUnit:
         # Test scoring
         score = wsf.score(X, y)
 
-        # Now consistently uses treated unit name prefix even for single unit
+        # Now consistently uses unified unit indexing even for single unit
         assert isinstance(score, pd.Series)
-        assert "treated_0_r2" in score.index
-        assert "treated_0_r2_std" in score.index
+        assert "unit_0_r2" in score.index
+        assert "unit_0_r2_std" in score.index
 
         # R2 should be reasonable
-        assert score["treated_0_r2"] >= -1  # R2 can be negative for very bad fits
-        assert (
-            score["treated_0_r2_std"] >= 0
-        )  # Standard deviation should be non-negative
+        assert score["unit_0_r2"] >= -1  # R2 can be negative for very bad fits
+        assert score["unit_0_r2_std"] >= 0  # Standard deviation should be non-negative
 
     def test_r2_scores_differ_across_units(self, rng):
         """Test that R² scores are different for different treated units.
@@ -523,8 +521,8 @@ class TestWeightedSumFitterMultiUnit:
         wsf.fit(X, y, coords=coords)
         scores = wsf.score(X, y)
 
-        # Extract R² values for each treated unit
-        r2_values = [scores[f"{unit}_r2"] for unit in treated_units]
+        # Extract R² values for each treated unit using unified format
+        r2_values = [scores[f"unit_{i}_r2"] for i in range(len(treated_units))]
 
         # Test that not all R² values are the same
         # Use a tolerance to avoid issues with floating point precision

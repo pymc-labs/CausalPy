@@ -68,8 +68,8 @@ class PyMCModel(pm.Model):
     >>> model.fit(X, y)
     Inference data...
     >>> model.score(X, y)  # doctest: +ELLIPSIS
-    unit_r2        ...
-    unit_r2_std    ...
+    unit_0_r2        ...
+    unit_0_r2_std    ...
     dtype: float64
     >>> X_new = rng.normal(loc=0, scale=1, size=(20, 2))
     >>> model.predict(X_new)
@@ -203,30 +203,25 @@ class PyMCModel(pm.Model):
         mu = self.predict(X)
         mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
 
-        # Always use the multiple treated unit convention for consistency
+        # Always use unified labeling system: unit_0_r2, unit_1_r2, etc.
         scores = {}
 
         if "treated_units" in mu_data.dims:
             # Multiple treated units - score each unit separately
             treated_units = mu_data.coords["treated_units"].values
-            for unit in treated_units:
+            for i, unit in enumerate(treated_units):
                 unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
                 unit_y = y.sel(treated_units=unit).data
                 unit_score = r2_score(unit_y, unit_mu.data)
-                scores[f"{unit}_r2"] = unit_score["r2"]
-                scores[f"{unit}_r2_std"] = unit_score["r2_std"]
+                scores[f"unit_{i}_r2"] = unit_score["r2"]
+                scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         else:
-            # Single treated unit - determine unit name and use same format
-            if hasattr(y, "coords") and "treated_units" in y.coords:
-                unit_name = y.coords["treated_units"].values[0]
-            else:
-                unit_name = "unit"  # Fallback for backwards compatibility
-
+            # Single treated unit - use unit_0 for consistency
             mu_data = mu_data.T
             y_data = y.data.squeeze() if y.data.ndim > 1 else y.data
             unit_score = r2_score(y_data, mu_data.data)
-            scores[f"{unit_name}_r2"] = unit_score["r2"]
-            scores[f"{unit_name}_r2_std"] = unit_score["r2_std"]
+            scores["unit_0_r2"] = unit_score["r2"]
+            scores["unit_0_r2_std"] = unit_score["r2_std"]
 
         return pd.Series(scores)
 

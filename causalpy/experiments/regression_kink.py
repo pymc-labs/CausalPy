@@ -227,7 +227,7 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_r2'], round_to)} (std = {round_num(self.score['unit_r2_std'], round_to)})"
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
         ci = (

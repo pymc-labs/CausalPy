@@ -564,9 +564,10 @@ class SyntheticControl(BaseExperiment):
     def _get_score_title(self, treated_unit: str, round_to=None):
         """Generate appropriate score title for the specified treated unit"""
         if isinstance(self.model, PyMCModel):
-            # Bayesian model - get unit-specific R² scores
-            r2_val = round_num(self.score[f"{treated_unit}_r2"], round_to)
-            r2_std_val = round_num(self.score[f"{treated_unit}_r2_std"], round_to)
+            # Bayesian model - get unit-specific R² scores using unified format
+            unit_index = self.treated_units.index(treated_unit)
+            r2_val = round_num(self.score[f"unit_{unit_index}_r2"], round_to)
+            r2_std_val = round_num(self.score[f"unit_{unit_index}_r2_std"], round_to)
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score

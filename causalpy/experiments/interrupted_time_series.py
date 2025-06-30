@@ -239,8 +239,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         ax[0].set(
             title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score["unit_r2"], round_to)}
-            (std = {round_num(self.score["unit_r2_std"], round_to)})
+            Pre-intervention Bayesian $R^2$: {round_num(self.score["unit_0_r2"], round_to)}
+            (std = {round_num(self.score["unit_0_r2_std"], round_to)})
             """
         )
 

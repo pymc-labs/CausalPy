@@ -863,10 +863,10 @@ class TestSyntheticControlMultiUnit:
         # Score should be a pandas Series with separate entries for each unit
         assert isinstance(sc.score, pd.Series)
 
-        # Check that we have r2 and r2_std for each treated unit
-        for unit in treated_units:
-            assert f"{unit}_r2" in sc.score.index
-            assert f"{unit}_r2_std" in sc.score.index
+        # Check that we have r2 and r2_std for each treated unit using unified format
+        for i, unit in enumerate(treated_units):
+            assert f"unit_{i}_r2" in sc.score.index
+            assert f"unit_{i}_r2_std" in sc.score.index
 
     @pytest.mark.integration
     def test_multi_unit_summary(self, multi_unit_sc_data, capsys):
