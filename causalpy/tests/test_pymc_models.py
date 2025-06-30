@@ -120,6 +120,9 @@ class TestPyMCModel:
         ).shape == (20, 2 * 2)
         assert isinstance(score, pd.Series)
         assert score.shape == (2,)
+        # Test that the score follows the new standardized format
+        assert "unit_r2" in score.index
+        assert "unit_r2_std" in score.index
         assert isinstance(predictions, az.InferenceData)
 
 
