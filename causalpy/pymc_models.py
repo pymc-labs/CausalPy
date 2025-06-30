@@ -290,7 +290,7 @@ class LinearRegression(PyMCModel):
     ...     coords={"obs_ind": rd.index, "coeffs": coeffs},
     ... )
     >>> y = xr.DataArray(
-    ...     rd["y"].values.reshape(-1, 1),
+    ...     rd["y"].values[:, None],
     ...     dims=["obs_ind", "treated_units"],
     ...     coords={"obs_ind": rd.index, "treated_units": ["unit_0"]},
     ... )
