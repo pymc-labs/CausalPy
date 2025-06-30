@@ -172,7 +172,7 @@ def test_result_reproducibility(seed):
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def synthetic_control_data(rng):
     """Generate synthetic data with multiple treated and control units."""
     n_obs = 50  # Smaller for faster tests
@@ -227,7 +227,7 @@ def synthetic_control_data(rng):
     return X, y, coords, control_units, treated_units
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def single_treated_data(rng):
     """Generate synthetic data with single treated unit for backward compatibility testing."""
     n_obs = 50

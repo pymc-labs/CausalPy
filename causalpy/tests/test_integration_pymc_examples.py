@@ -727,7 +727,7 @@ def test_inverse_prop():
         result.get_plot_data()
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def multi_unit_sc_data(rng):
     """Generate synthetic data for SyntheticControl with multiple treated units."""
     n_obs = 60
@@ -773,7 +773,7 @@ def multi_unit_sc_data(rng):
     return df, treatment_time, control_units, treated_units
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def single_unit_sc_data(rng):
     """Generate synthetic data for SyntheticControl with single treated unit."""
     n_obs = 60
