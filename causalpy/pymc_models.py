@@ -206,22 +206,28 @@ class PyMCModel(pm.Model):
         # Always use unified labeling system: unit_0_r2, unit_1_r2, etc.
         scores = {}
 
+        # Determine units to process - always use a loop for consistency
         if "treated_units" in mu_data.dims:
-            # Multiple treated units - score each unit separately
-            treated_units = mu_data.coords["treated_units"].values
-            for i, unit in enumerate(treated_units):
-                unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
-                unit_y = y.sel(treated_units=unit).data
-                unit_score = r2_score(unit_y, unit_mu.data)
-                scores[f"unit_{i}_r2"] = unit_score["r2"]
-                scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+            # Multiple treated units
+            units = list(enumerate(mu_data.coords["treated_units"].values))
         else:
-            # Single treated unit - use unit_0 for consistency
-            mu_data = mu_data.T
-            y_data = y.data.squeeze() if y.data.ndim > 1 else y.data
-            unit_score = r2_score(y_data, mu_data.data)
-            scores["unit_0_r2"] = unit_score["r2"]
-            scores["unit_0_r2_std"] = unit_score["r2_std"]
+            # Single unit - treat as single-item list
+            units = [(0, None)]
+
+        # Process all units using the same loop logic
+        for i, unit_selector in units:
+            if unit_selector is not None:
+                # Multi-unit case: select specific unit
+                unit_mu = mu_data.sel(treated_units=unit_selector).T
+                unit_y = y.sel(treated_units=unit_selector).data
+            else:
+                # Single unit case: use all data
+                unit_mu = mu_data.T
+                unit_y = y.data.squeeze() if y.data.ndim > 1 else y.data
+
+            unit_score = r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
 
         return pd.Series(scores)
 
