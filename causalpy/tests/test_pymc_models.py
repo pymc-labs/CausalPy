@@ -108,7 +108,7 @@ class TestPyMCModel:
         argvalues=[None, {"a": 1}],
         ids=["None-coords", "dict-coords"],
     )
-    def test_fit_predict(self, coords, rng) -> None:
+    def test_fit_predict(self, coords, rng, mock_pymc_sample) -> None:
         """
         Test fit and predict methods on MyToyModel.
 
@@ -179,7 +179,7 @@ class TestPyMCModel:
         assert isinstance(predictions, az.InferenceData)
 
 
-def test_idata_property():
+def test_idata_property(mock_pymc_sample):
     """Test that we can access the idata property of the model"""
     df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
@@ -197,7 +197,7 @@ seeds = [1234, 42, 123456789]
 
 
 @pytest.mark.parametrize("seed", seeds)
-def test_result_reproducibility(seed):
+def test_result_reproducibility(seed, mock_pymc_sample):
     """Test that we can reproduce the results from the model. We could in theory test
     this with all the model and experiment types, but what is being targeted is
     the PyMCModel.fit method, so we should be safe testing with just one model. Here
