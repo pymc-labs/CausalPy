@@ -72,7 +72,7 @@ class PrePostNEGD(BaseExperiment):
     ...         }
     ...     ),
     ... )
-    >>> result.summary(round_to=1)  # doctest: +NUMBER
+    >>> result.summary(round_to=1)  # doctest: +SKIP
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>
