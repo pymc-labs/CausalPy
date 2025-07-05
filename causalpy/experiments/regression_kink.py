@@ -94,12 +94,16 @@ class RegressionKink(BaseExperiment):
             },
         )
         self.y = xr.DataArray(
-            self.y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": np.arange(self.y.shape[0])},
+            self.y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
-        COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
+        COORDS = {
+            "coeffs": self.labels,
+            "obs_ind": np.arange(self.X.shape[0]),
+            "treated_units": ["unit_0"],
+        }
         self.model.fit(X=self.X, y=self.y, coords=COORDS)
 
         # score the goodness of fit to all data
@@ -219,7 +223,7 @@ class RegressionKink(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_xY(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu,
+            self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -227,7 +231,7 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score.r2, round_to)} (std = {round_num(self.score.r2_std, round_to)})"
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
         ci = (
