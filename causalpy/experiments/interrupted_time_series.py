@@ -15,6 +15,7 @@
 Interrupted Time Series Analysis
 """
 
+from abc import ABC, abstractmethod
 from typing import List, Union
 
 import arviz as az
@@ -34,7 +35,35 @@ from causalpy.utils import round_num
 LEGEND_FONT_SIZE = 12
 
 
-class UnknownTreatmentTimeHandler:
+class TreatmentTimeHandler(ABC):
+    @abstractmethod
+    def data_preprocessing(self, data, treatment_time, model):
+        pass
+
+    @abstractmethod
+    def data_postprocessing(
+        self, model, data, idata, treatment_time, y, X, pre_y, pre_X
+    ):
+        pass
+
+    @abstractmethod
+    def plot_intervention_line(
+        self, ax, handles, labels, datapre, datapost, pre_pred, post_pred
+    ):
+        pass
+
+    @abstractmethod
+    def plot_impact_cumulative(self, ax, datapre, datapost, post_impact_cumulative):
+        pass
+
+    def plot_treated_counterfactual(
+        self, ax, handles, labels, datapre, datapost, pre_pred, post_pred
+    ):
+        """Optional: override if needed"""
+        pass
+
+
+class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
     """
     A utility class for managing data preprocessing, postprocessing,
     and plotting steps for models that infer unknown treatment times.
@@ -185,7 +214,7 @@ class UnknownTreatmentTimeHandler:
             )
 
 
-class KnownTreatmentTimeHandler:
+class KnownTreatmentTimeHandler(TreatmentTimeHandler):
     """
     Handles data preprocessing, postprocessing, and plotting logic for models
     where the treatment time is known in advance.
@@ -246,14 +275,6 @@ class KnownTreatmentTimeHandler:
         )
 
         return res
-
-    def plot_treated_counterfactual(
-        self, sax, handles, labels, datapre, datapost, pre_pred, post_pred
-    ):
-        """
-        Placeholder method to maintain interface compatibility with UnknownTreatmentTimeHandler.
-        """
-        pass
 
     def plot_impact_cumulative(self, ax, datapre, datapost, post_impact_cumulative):
         """

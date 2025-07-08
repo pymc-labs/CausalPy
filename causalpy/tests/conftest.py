@@ -20,6 +20,7 @@ Functions:
 
 import numpy as np
 import pytest
+from pymc.testing import mock_sample, mock_sample_setup_and_teardown
 
 
 @pytest.fixture(scope="session")
@@ -27,3 +28,16 @@ def rng() -> np.random.Generator:
     """Random number generator that can persist through a pytest session"""
     seed: int = sum(map(ord, "causalpy"))
     return np.random.default_rng(seed=seed)
+
+
+mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="session")
+
+
+@pytest.fixture(autouse=True)
+def mock_sample_for_doctest(request):
+    if not request.config.getoption("--doctest-modules", default=False):
+        return
+
+    import pymc as pm
+
+    pm.sample = mock_sample
