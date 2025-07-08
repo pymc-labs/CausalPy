@@ -567,13 +567,17 @@ class InterventionTimeEstimator(PyMCModel):
     """
 
     def __init__(
-        self, time_variable_name: str, treatment_type_effect=None, sample_kwargs=None
+        self,
+        time_variable_name: str,
+        treatment_effect_type: str | list[str],
+        treatment_effect_param=None,
+        sample_kwargs=None,
     ):
         """
         Initializes the InterventionTimeEstimator model.
 
         :param time_variable_name: name of the column representing time among the covariates
-        :param treatment_type_effect: Optional dictionary that specifies prior parameters for the
+        :param treatment_effect_type: Optional dictionary that specifies prior parameters for the
             intervention effects. Expected keys are:
                 - "level": [mu, sigma]
                 - "trend": [mu, sigma]
@@ -584,13 +588,57 @@ class InterventionTimeEstimator(PyMCModel):
         """
         self.time_variable_name = time_variable_name
 
-        if treatment_type_effect is None:
-            treatment_type_effect = {}
-        if not isinstance(treatment_type_effect, dict):
-            raise TypeError("treatment_type_effect must be a dictionary.")
-
         super().__init__(sample_kwargs)
-        self.treatment_type_effect = treatment_type_effect
+
+        # Hardcoded default priors
+        self.DEFAULT_BETA_PRIOR = (0, 5)
+        self.DEFAULT_LEVEL_PRIOR = (0, 5)
+        self.DEFAULT_TREND_PRIOR = (0, 0.5)
+        self.DEFAULT_IMPULSE_PRIOR = (0, 5, 5)
+
+        # Make sure we get a list of all expected effects
+        if isinstance(treatment_effect_type, str):
+            self.treatment_effect_type = [treatment_effect_type]
+        else:
+            self.treatment_effect_type = treatment_effect_type
+
+        # Defining the priors here
+        self.treatment_effect_param = (
+            {} if treatment_effect_param is None else treatment_effect_param
+        )
+
+        if "level" in self.treatment_effect_type:
+            if (
+                "level" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["level"]) != 2
+            ):
+                self.treatment_effect_param["level"] = self.DEFAULT_LEVEL_PRIOR
+            else:
+                self.treatment_effect_param["level"] = self.treatment_effect_param[
+                    "level"
+                ]
+
+        if "trend" in self.treatment_effect_type:
+            if (
+                "trend" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["trend"]) != 2
+            ):
+                self.treatment_effect_param["trend"] = self.DEFAULT_TREND_PRIOR
+            else:
+                self.treatment_effect_param["trend"] = self.treatment_effect_param[
+                    "trend"
+                ]
+
+        if "impulse" in self.treatment_effect_type:
+            if (
+                "impulse" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["impulse"]) != 3
+            ):
+                self.treatment_effect_param["impulse"] = self.DEFAULT_IMPULSE_PRIOR
+            else:
+                self.treatment_effect_param["impulse"] = self.treatment_effect_param[
+                    "impulse"
+                ]
 
     def build_model(self, X, y, coords):
         """
@@ -603,12 +651,8 @@ class InterventionTimeEstimator(PyMCModel):
         Assumes the following attributes are already defined in self:
             - self.timeline: the index of the column in X representing time.
             - self.time_range: a tuple (lower_bound, upper_bound) for the intervention time.
-            - self.treatment_type_effect: a dictionary specifying which intervention effects to include and their priors.
+            - self.treatment_effect_type: a dictionary specifying which intervention effects to include and their priors.
         """
-        DEFAULT_BETA_PRIOR = (0, 5)
-        DEFAULT_LEVEL_PRIOR = (0, 5)
-        DEFAULT_TREND_PRIOR = (0, 0.5)
-        DEFAULT_IMPULSE_PRIOR = (0, 5, 5)
 
         with self:
             self.add_coords(coords)
@@ -626,52 +670,37 @@ class InterventionTimeEstimator(PyMCModel):
             )
             beta = pm.Normal(
                 name="beta",
-                mu=DEFAULT_BETA_PRIOR[0],
-                sigma=DEFAULT_BETA_PRIOR[1],
+                mu=self.DEFAULT_BETA_PRIOR[0],
+                sigma=self.DEFAULT_BETA_PRIOR[1],
                 dims="coeffs",
             )
 
             # --- Intervention effect ---
             mu_in_components = []
 
-            if "level" in self.treatment_type_effect:
-                mu, sigma = (
-                    DEFAULT_LEVEL_PRIOR
-                    if len(self.treatment_type_effect["level"]) != 2
-                    else (
-                        self.treatment_type_effect["level"][0],
-                        self.treatment_type_effect["level"][1],
-                    )
-                )
+            if "level" in self.treatment_effect_param:
                 level = pm.Normal(
                     "level",
-                    mu=mu,
-                    sigma=sigma,
+                    mu=self.treatment_effect_param["level"][0],
+                    sigma=self.treatment_effect_param["level"][1],
                 )
                 mu_in_components.append(level)
-            if "trend" in self.treatment_type_effect:
-                mu, sigma = (
-                    DEFAULT_TREND_PRIOR
-                    if len(self.treatment_type_effect["trend"]) != 2
-                    else (
-                        self.treatment_type_effect["trend"][0],
-                        self.treatment_type_effect["trend"][1],
-                    )
+            if "trend" in self.treatment_effect_param:
+                trend = pm.Normal(
+                    "trend",
+                    mu=self.treatment_effect_param["trend"][0],
+                    sigma=self.treatment_effect_param["trend"][1],
                 )
-                trend = pm.Normal("trend", mu=mu, sigma=sigma)
                 mu_in_components.append(trend * (t - treatment_time))
-            if "impulse" in self.treatment_type_effect:
-                mu, sigma1, sigma2 = (
-                    DEFAULT_IMPULSE_PRIOR
-                    if len(self.treatment_type_effect["impulse"]) != 3
-                    else (
-                        self.treatment_type_effect["impulse"][0],
-                        self.treatment_type_effect["impulse"][1],
-                        self.treatment_type_effect["impulse"][2],
-                    )
+            if "impulse" in self.treatment_effect_param:
+                impulse_amplitude = pm.Normal(
+                    "impulse_amplitude",
+                    mu=self.treatment_effect_param["impulse"][0],
+                    sigma=self.treatment_effect_param["impulse"][1],
                 )
-                impulse_amplitude = pm.Normal("impulse_amplitude", mu=mu, sigma=sigma1)
-                decay_rate = pm.HalfNormal("decay_rate", sigma=sigma2)
+                decay_rate = pm.HalfNormal(
+                    "decay_rate", sigma=self.treatment_effect_param["impulse"][2]
+                )
                 impulse = pm.Deterministic(
                     "impulse",
                     impulse_amplitude
@@ -687,7 +716,7 @@ class InterventionTimeEstimator(PyMCModel):
             mu_in = (
                 pm.Deterministic(name="mu_in", var=sum(mu_in_components))
                 if len(mu_in_components) > 0
-                else 0
+                else pm.Data(name="mu_in", vars=0)
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in, dims="obs_ind")
