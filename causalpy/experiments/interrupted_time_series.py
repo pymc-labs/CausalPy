@@ -34,7 +34,7 @@ from causalpy.utils import round_num
 LEGEND_FONT_SIZE = 12
 
 
-class HandlerUTT:
+class UnknownTreatmentTimeHandler:
     """
     A utility class for managing data preprocessing, postprocessing,
     and plotting steps for models that infer unknown treatment times.
@@ -185,7 +185,7 @@ class HandlerUTT:
             )
 
 
-class HandlerKTT:
+class KnownTreatmentTimeHandler:
     """
     Handles data preprocessing, postprocessing, and plotting logic for models
     where the treatment time is known in advance.
@@ -251,7 +251,7 @@ class HandlerKTT:
         self, sax, handles, labels, datapre, datapost, pre_pred, post_pred
     ):
         """
-        Placeholder method to maintain interface compatibility with HandlerUTT.
+        Placeholder method to maintain interface compatibility with UnknownTreatmentTimeHandler.
         """
         pass
 
@@ -342,9 +342,9 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Getting the right handler
         if treatment_time is None or isinstance(treatment_time, tuple):
-            self.handler = HandlerUTT()
+            self.handler = UnknownTreatmentTimeHandler()
         else:
-            self.handler = HandlerKTT()
+            self.handler = KnownTreatmentTimeHandler()
 
         # Preprocessing based on handler type
         self.datapre = self.handler.data_preprocessing(
