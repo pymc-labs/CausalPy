@@ -560,7 +560,7 @@ class InterventionTimeEstimator(PyMCModel):
         ...     coords={"obs_ind": data.index},
         ...     )
         >>> COORDS = {"coeffs":labels, "obs_ind": np.arange(_X.shape[0])}
-        >>> model = ITE(time_variable_name="t", treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model = ITE(treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
         >>> model.set_time_range(None, data)
         >>> model.fit(X=_X, y=_y, coords=COORDS)
         Inference ...
@@ -568,7 +568,6 @@ class InterventionTimeEstimator(PyMCModel):
 
     def __init__(
         self,
-        time_variable_name: str,
         treatment_effect_type: str | list[str],
         treatment_effect_param=None,
         sample_kwargs=None,
@@ -576,7 +575,6 @@ class InterventionTimeEstimator(PyMCModel):
         """
         Initializes the InterventionTimeEstimator model.
 
-        :param time_variable_name: name of the column representing time among the covariates
         :param treatment_effect_type: Optional dictionary that specifies prior parameters for the
             intervention effects. Expected keys are:
                 - "level": [mu, sigma]
@@ -586,7 +584,6 @@ class InterventionTimeEstimator(PyMCModel):
             If the associated list is incomplete, default values will be used.
         :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
         """
-        self.time_variable_name = time_variable_name
 
         super().__init__(sample_kwargs)
 
@@ -657,7 +654,7 @@ class InterventionTimeEstimator(PyMCModel):
         with self:
             self.add_coords(coords)
 
-            t = pm.Data("t", X.sel(coeffs=self.time_variable_name), dims="obs_ind")
+            t = pm.Data("t", np.arange(len(X)), dims="obs_ind")
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims="obs_ind")
 
@@ -768,7 +765,7 @@ class InterventionTimeEstimator(PyMCModel):
             pm.set_data(
                 {
                     "X": X,
-                    "t": X.sel(coeffs=self.time_variable_name),
+                    "t": np.arange(len(X)),
                     "y": np.zeros(new_no_of_observations),
                 },
                 coords={"obs_ind": np.arange(new_no_of_observations)},
@@ -794,11 +791,11 @@ class InterventionTimeEstimator(PyMCModel):
         """
         if time_range is None:
             self.time_range = (
-                data[self.time_variable_name].min(),
-                data[self.time_variable_name].max(),
+                0,
+                len(data),
             )
         else:
             self.time_range = (
-                data[self.time_variable_name].loc[time_range[0]],
-                data[self.time_variable_name].loc[time_range[1]],
+                data.index.get_loc(time_range[0]),
+                data.index.get_loc(time_range[1]),
             )

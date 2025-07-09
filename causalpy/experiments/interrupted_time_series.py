@@ -93,15 +93,11 @@ class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
         # --- Return ---
         res = {}
 
-        # --- Retrieve timeline and inferred treatment time ---
-        time_var = model.time_variable_name
-        timeline = data[time_var]
-
         tt_samples = idata.posterior["treatment_time"].values
         tt_mean = int(tt_samples.mean().item())
 
         # Actual timestamp (index) corresponding to inferred treatment
-        tt = data[timeline == tt_mean].index[0]
+        tt = data.index[tt_mean]
         # Index of the inferred treatment time in the data
         tt_idx = data.index.get_loc(tt)
         res["treatment_time"] = tt
@@ -128,9 +124,13 @@ class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
 
         # --- Create a mask to isolate post-treatment period ---
         # Timeline reshaped to match broadcasting with treatment time
-        timeline_reshape = timeline.values.reshape(1, 1, -1)
+        timeline = [
+            [[i for i in range(len(data))] for _ in range(len(tt_samples[0]))]
+            for _ in range(len(tt_samples))
+        ]
+        timeline_broadcast = np.array(timeline)
         tt_broadcast = tt_samples[:, :, None].astype(int)
-        mask = (timeline_reshape >= tt_broadcast).astype(int)
+        mask = (timeline_broadcast >= tt_broadcast).astype(int)
 
         # --- Compute cumulative post-treatment impact ---
         post_impact = impact * mask
@@ -184,12 +184,10 @@ class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
         Draw a vertical line at the inferred treatment time and shade the HDI interval around it.
         """
         data = pd.concat([datapre, datapost])
-        timeline = data[model.time_variable_name]
-
         # Extract the HDI (uncertainty interval) of the treatment time
         hdi = az.hdi(idata, var_names=["treatment_time"])["treatment_time"].values
-        x1 = data[timeline == int(hdi[0])].index[0]
-        x2 = data[timeline == int(hdi[1])].index[0]
+        x1 = data.index[int(hdi[0])]
+        x2 = data.index[int(hdi[1])]
 
         for i in [0, 1, 2]:
             ymin, ymax = ax[i].get_ylim()
