@@ -560,7 +560,7 @@ class InterventionTimeEstimator(PyMCModel):
         ...     coords={"obs_ind": data.index},
         ...     )
         >>> COORDS = {"coeffs":labels, "obs_ind": np.arange(_X.shape[0])}
-        >>> model = ITE(time_variable_name="t", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model = ITE(time_variable_name="t", treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
         >>> model.set_time_range(None, data)
         >>> model.fit(X=_X, y=_y, coords=COORDS)
         Inference ...
