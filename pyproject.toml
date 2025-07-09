@@ -35,6 +35,7 @@ dependencies = [
     "pandas",
     "patsy",
     "pymc>=5.15.1",
+    "pymc-marketing>=0.13.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",

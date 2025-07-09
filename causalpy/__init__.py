@@ -26,6 +26,7 @@ from .experiments.inverse_propensity_weighting import InversePropensityWeighting
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
+from .experiments.structural_time_series import StructuralTimeSeries
 from .experiments.synthetic_control import SyntheticControl
 
 az.style.use("arviz-darkgrid")
@@ -36,6 +37,7 @@ __all__ = [
     "create_causalpy_compatible_class",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
+    "StructuralTimeSeries",
     "InversePropensityWeighting",
     "load_data",
     "PrePostNEGD",
