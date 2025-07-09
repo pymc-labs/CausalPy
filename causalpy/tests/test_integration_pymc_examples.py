@@ -421,6 +421,20 @@ def test_its_no_treatment_time():
         .set_index("date")
     )
     treatment_time = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
+
+    # Assert that we correctfully raise a value if the given model can't predict InterventionTime
+    with pytest.raises(ValueError) as exc_info:
+        cp.InterruptedTimeSeries(
+            df,
+            treatment_time,
+            formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+    assert (
+        "If treatment_time is None, provided model must have a 'set_time_range' method"
+        in str(exc_info.value)
+    )
+
     result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
