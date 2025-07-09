@@ -431,7 +431,7 @@ def test_its_no_treatment_time():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
     assert (
-        "If treatment_time is None, provided model must have a 'set_time_range' method"
+        "If treatment_time is a tuple, provided model must have a 'set_time_range' method"
         in str(exc_info.value)
     )
 
