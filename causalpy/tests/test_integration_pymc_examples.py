@@ -422,7 +422,7 @@ def test_its_no_treatment_time():
     )
     treatment_time = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
 
-    # Assert that we correctfully raise a value if the given model can't predict InterventionTime
+    # Assert that we correctfully raise a ModelException if the given model can't predict InterventionTime
     with pytest.raises(cp.custom_exceptions.ModelException) as exc_info:
         cp.InterruptedTimeSeries(
             df,
