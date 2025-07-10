@@ -22,6 +22,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
+from patsy import dmatrix
 
 from causalpy.utils import round_num
 
@@ -473,22 +474,30 @@ class PropensityScore(PyMCModel):
     ...                 'coeffs': ['age', 'race'],
     ...                 'obs_ind': np.arange(df.shape[0])
     ...                },
+    ...                prior={'b': [0, 1]},
     ... )
     Inference...
     """  # noqa: W605
 
-    def build_model(self, X, t, coords):
+    def build_model(self, X, t, coords, prior, noncentred):
         "Defines the PyMC propensity model"
         with self:
             self.add_coords(coords)
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             t_data = pm.Data("t", t.flatten(), dims="obs_ind")
-            b = pm.Normal("b", mu=0, sigma=1, dims="coeffs")
+            if noncentred:
+                mu_beta, sigma_beta = prior["b"]
+                beta_std = pm.Normal("beta_std", 0, 1, dims="coeffs")
+                b = pm.Deterministic(
+                    "beta_", mu_beta + sigma_beta * beta_std, dims="coeffs"
+                )
+            else:
+                b = pm.Normal("b", mu=prior["b"][0], sigma=prior["b"][1], dims="coeffs")
             mu = pm.math.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
-    def fit(self, X, t, coords):
+    def fit(self, X, t, coords, prior={"b": [0, 1]}, noncentred=True):
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
@@ -497,7 +506,7 @@ class PropensityScore(PyMCModel):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
 
-        self.build_model(X, t, coords)
+        self.build_model(X, t, coords, prior, noncentred)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
@@ -507,3 +516,73 @@ class PropensityScore(PyMCModel):
                 )
             )
         return self.idata
+
+    def fit_outcome_model(
+        self,
+        X_outcome,
+        y,
+        coords,
+        priors={"b_outcome": [0, 1], "a_outcome": [0, 1], "sigma": 1},
+        noncentred=True,
+        normal_outcome=True,
+    ):
+        if not hasattr(self, "idata"):
+            raise AttributeError("""Object is missing required attribute 'idata'
+                                 so cannot proceed. Call fit() first""")
+        propensity_scores = az.extract(self.idata)["p"]
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        with pm.Model(coords=coords) as model_outcome:
+            X_data_outcome = pm.Data("X_outcome", X_outcome)
+            Y_data_ = pm.Data("Y", y)
+
+            if noncentred:
+                mu_beta, sigma_beta = priors["b_outcome"]
+                beta_std = pm.Normal("beta_std", 0, 1, dims="outcome_coeffs")
+                beta = pm.Deterministic(
+                    "beta_", mu_beta + sigma_beta * beta_std, dims="outcome_coeffs"
+                )
+            else:
+                beta = pm.Normal(
+                    "beta_",
+                    priors["b_outcome"][0],
+                    priors["b_outcome"][1],
+                    dims="outcome_coeffs",
+                )
+
+            beta_ps_spline = pm.Normal("beta_ps_spline", 0, 1, size=34)
+            beta_ps = pm.Normal("beta_ps", 0, 1)
+
+            chosen = np.random.choice(range(propensity_scores.shape[1]))
+            p = propensity_scores[:, chosen].values
+
+            B = dmatrix(
+                "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
+                {"ps": p, "knots": np.linspace(0, 1, 30)},
+            )
+            B_f = np.asarray(B, order="F")
+            splines_summed = pm.Deterministic(
+                "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
+            )
+
+            alpha_outcome = pm.Normal(
+                "a_outcome", priors["a_outcome"][0], priors["a_outcome"][1]
+            )
+            mu_outcome = (
+                alpha_outcome
+                + pm.math.dot(X_data_outcome, beta)
+                + p * beta_ps
+                + splines_summed
+            )
+            sigma = pm.HalfNormal("sigma", priors["sigma"])
+
+            if normal_outcome:
+                _ = pm.Normal("like", mu_outcome, sigma, observed=Y_data_)
+            else:
+                nu = pm.Exponential("nu", lam=1 / 30)
+                _ = pm.StudentT("like", nu=nu, mu=mu_outcome, sigma=sigma)
+
+            idata_outcome = pm.sample_prior_predictive(random_seed=random_seed)
+            idata_outcome.extend(pm.sample(**self.sample_kwargs))
+
+        return idata_outcome, model_outcome
