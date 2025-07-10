@@ -525,6 +525,7 @@ class PropensityScore(PyMCModel):
         priors={"b_outcome": [0, 1], "a_outcome": [0, 1], "sigma": 1},
         noncentred=True,
         normal_outcome=True,
+        spline_component=False,
     ):
         if not hasattr(self, "idata"):
             raise AttributeError("""Object is missing required attribute 'idata'
@@ -551,35 +552,40 @@ class PropensityScore(PyMCModel):
                 )
 
             beta_ps_spline = pm.Normal("beta_ps_spline", 0, 1, size=34)
-            beta_ps = pm.Normal("beta_ps", 0, 1)
+            beta_ps = pm.Normal("beta_ps", 0, 1, size=2)
 
             chosen = np.random.choice(range(propensity_scores.shape[1]))
             p = propensity_scores[:, chosen].values
 
-            B = dmatrix(
-                "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
-                {"ps": p, "knots": np.linspace(0, 1, 30)},
-            )
-            B_f = np.asarray(B, order="F")
-            splines_summed = pm.Deterministic(
-                "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
-            )
-
             alpha_outcome = pm.Normal(
                 "a_outcome", priors["a_outcome"][0], priors["a_outcome"][1]
             )
+
             mu_outcome = (
                 alpha_outcome
                 + pm.math.dot(X_data_outcome, beta)
-                + p * beta_ps
-                + splines_summed
+                + beta_ps[0] * p
+                + beta_ps[1] * (p * self.t.flatten())
             )
+
+            if spline_component:
+                beta_ps_spline = pm.Normal("beta_ps_spline", 0, 1, size=34)
+                B = dmatrix(
+                    "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
+                    {"ps": p, "knots": np.linspace(0, 1, 30)},
+                )
+                B_f = np.asarray(B, order="F")
+                splines_summed = pm.Deterministic(
+                    "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
+                )
+                mu_outcome = mu_outcome + splines_summed
+
             sigma = pm.HalfNormal("sigma", priors["sigma"])
 
             if normal_outcome:
                 _ = pm.Normal("like", mu_outcome, sigma, observed=Y_data_)
             else:
-                nu = pm.Exponential("nu", lam=1 / 30)
+                nu = pm.Exponential("nu", lam=1 / 10)
                 _ = pm.StudentT("like", nu=nu, mu=mu_outcome, sigma=sigma)
 
             idata_outcome = pm.sample_prior_predictive(random_seed=random_seed)
