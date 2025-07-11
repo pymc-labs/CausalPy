@@ -527,6 +527,69 @@ class PropensityScore(PyMCModel):
         normal_outcome=True,
         spline_component=False,
     ):
+        """
+        Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
+
+        This function implements the second stage of a modular two-step causal inference procedure.
+        It uses propensity scores extracted from a prior treatment model (via `self.fit()`) to adjust
+        for confounding when estimating treatment effects on an outcome variable `y`.
+
+        Parameters
+        ----------
+        X_outcome : array-like, shape (n_samples, n_covariates)
+            Covariate matrix for the outcome model.
+
+        y : array-like, shape (n_samples,)
+            Observed outcome variable.
+
+        coords : dict
+            Coordinate dictionary for named dimensions in the PyMC model. Should include
+            a key "outcome_coeffs" for `X_outcome`.
+
+        priors : dict, optional
+            Dictionary specifying priors for outcome model parameters:
+                - "b_outcome": list [mean, std] for regression coefficients.
+                - "a_outcome": list [mean, std] for the intercept.
+                - "sigma": standard deviation of the outcome noise (default 1).
+
+        noncentred : bool, default True
+            If True, use a non-centred parameterization for the outcome coefficients.
+
+        normal_outcome : bool, default True
+            If True, assume a Normal likelihood for the outcome.
+            If False, use a Student-t likelihood with unknown degrees of freedom.
+
+        spline_component : bool, default False
+            If True, include a spline basis expansion on the propensity score to allow
+            flexible (nonlinear) adjustment. Uses B-splines with 30 internal knots.
+
+        Returns
+        -------
+        idata_outcome : arviz.InferenceData
+            The posterior and prior predictive samples from the outcome model.
+
+        model_outcome : pm.Model
+            The PyMC model object.
+
+        Raises
+        ------
+        AttributeError
+            If the `self.idata` attribute is not available, which indicates that
+            `fit()` (i.e., the treatment model) has not been called yet.
+
+        Notes
+        -----
+        - This model uses a sampled version of the propensity score (`p`) from the
+        posterior of the treatment model, randomly selecting one posterior draw
+        per call.
+        - The term `beta_ps[0] * p + beta_ps[1] * (p * treatment)` captures both
+        main and interaction effects of the propensity score.
+        - Including spline adjustment enables modeling nonlinear relationships
+        between the propensity score and the outcome.
+        - Compatible with IPW-style estimation when combined with weighted loss or
+        diagnostics outside this function.
+
+        """
         if not hasattr(self, "idata"):
             raise AttributeError("""Object is missing required attribute 'idata'
                                  so cannot proceed. Call fit() first""")
@@ -551,7 +614,6 @@ class PropensityScore(PyMCModel):
                     dims="outcome_coeffs",
                 )
 
-            beta_ps_spline = pm.Normal("beta_ps_spline", 0, 1, size=34)
             beta_ps = pm.Normal("beta_ps", 0, 1, size=2)
 
             chosen = np.random.choice(range(propensity_scores.shape[1]))
