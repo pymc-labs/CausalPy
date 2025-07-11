@@ -750,3 +750,14 @@ def test_inverse_prop(mock_pymc_sample):
         spline_component=True,
     )
     assert "spline_features" in idata_spline.posterior
+
+    # Test student-t outcome
+    idata_student, _ = result.model.fit_outcome_model(
+        X_outcome=result.X_outcome,
+        y=result.y,
+        coords=result.coords,
+        noncentred=False,
+        normal_outcome=False,
+        spline_component=False,
+    )
+    assert "nu" in idata_student.posterior
