@@ -38,6 +38,8 @@ DATASETS = {
     "nhefs": {"filename": "nhefs.csv"},
     "schoolReturns": {"filename": "schoolingReturns.csv"},
     "pisa18": {"filename": "PISA18sampleScale.csv"},
+    "nets": {"filename": "nets_df.csv"},
+    "lalonde": {"filename": "lalonde.csv"},
 }
 
 
