@@ -73,6 +73,9 @@ class PyMCModel(pm.Model):
     def default_priors(self):
         return {}
 
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        return {}
+
     def __init__(
         self,
         sample_kwargs: Optional[Dict[str, Any]] = None,
@@ -121,6 +124,8 @@ class PyMCModel(pm.Model):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
+
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
 
         self.build_model(X, y, coords)
         with self:
@@ -295,16 +300,22 @@ class WeightedSumFitter(PyMCModel):
         "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
     }
 
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        n_predictors = X.shape[1]
+
+        return {
+            "beta": Prior("Dirichlet", a=np.ones(n_predictors), dims="coeffs"),
+        }
+
     def build_model(self, X, y, coords):
         """
         Defines the PyMC model
         """
         with self:
             self.add_coords(coords)
-            n_predictors = X.shape[1]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y[:, 0], dims="obs_ind")
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
+            beta = self.priors["beta"].create_variable("beta")
             mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
