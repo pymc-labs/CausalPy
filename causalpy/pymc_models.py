@@ -642,7 +642,9 @@ class PropensityScore(PyMCModel):
                 _ = pm.Normal("like", mu_outcome, sigma, observed=Y_data_)
             else:
                 nu = pm.Exponential("nu", lam=1 / 10)
-                _ = pm.StudentT("like", nu=nu, mu=mu_outcome, sigma=sigma)
+                _ = pm.StudentT(
+                    "like", nu=nu, mu=mu_outcome, sigma=sigma, observed=Y_data_
+                )
 
             idata_outcome = pm.sample_prior_predictive(random_seed=random_seed)
             idata_outcome.extend(pm.sample(**self.sample_kwargs))
