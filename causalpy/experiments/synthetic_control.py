@@ -234,16 +234,16 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        pre_pred_plot = self.pre_pred["posterior_predictive"].mu.sel(
+        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
             treated_units=treated_unit
         )
-        post_pred_plot = self.post_pred["posterior_predictive"].mu.sel(
+        post_pred = self.post_pred["posterior_predictive"].mu.sel(
             treated_units=treated_unit
         )
 
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            pre_pred_plot,
+            pre_pred,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -263,7 +263,7 @@ class SyntheticControl(BaseExperiment):
         # post intervention period
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            post_pred_plot,
+            post_pred,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -278,7 +278,7 @@ class SyntheticControl(BaseExperiment):
         # Shaded causal effect for primary treated unit
         h = ax[0].fill_between(
             self.datapost.index,
-            y1=post_pred_plot.mean(dim=["chain", "draw"]).values,
+            y1=post_pred.mean(dim=["chain", "draw"]).values,
             y2=self.datapost_treated.sel(treated_units=treated_unit).values,
             color="C0",
             alpha=0.25,
