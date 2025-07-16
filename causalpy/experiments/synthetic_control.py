@@ -15,7 +15,7 @@
 Synthetic Control Experiment
 """
 
-from typing import List, Union
+from typing import List, Optional, Union
 
 import arviz as az
 import numpy as np
@@ -561,7 +561,9 @@ class SyntheticControl(BaseExperiment):
 
         return self.plot_data
 
-    def _get_score_title(self, treated_unit: str, round_to=None):
+    def _get_score_title(
+        self, treated_unit: str, round_to: Optional[int] = None
+    ) -> str:
         """Generate appropriate score title for the specified treated unit"""
         if isinstance(self.model, PyMCModel):
             # Bayesian model - get unit-specific R² scores using unified format
