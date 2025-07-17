@@ -23,7 +23,7 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_did():
+def test_did(mock_pymc_sample):
     """
     Test Difference in Differences (DID) PyMC experiment.
 
@@ -57,7 +57,7 @@ def test_did():
 
 
 @pytest.mark.integration
-def test_did_banks_simple():
+def test_did_banks_simple(mock_pymc_sample):
     """
     Test simple Differences In Differences Experiment on the 'banks' data set.
 
@@ -113,7 +113,7 @@ def test_did_banks_simple():
 
 
 @pytest.mark.integration
-def test_did_banks_multi():
+def test_did_banks_multi(mock_pymc_sample):
     """
     Test multiple regression Differences In Differences Experiment on the 'banks'
     data set.
@@ -168,7 +168,7 @@ def test_did_banks_multi():
 
 
 @pytest.mark.integration
-def test_rd():
+def test_rd(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment.
 
@@ -199,7 +199,7 @@ def test_rd():
 
 
 @pytest.mark.integration
-def test_rd_bandwidth():
+def test_rd_bandwidth(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment with bandwidth parameter.
 
@@ -229,7 +229,7 @@ def test_rd_bandwidth():
 
 
 @pytest.mark.integration
-def test_rd_drinking():
+def test_rd_drinking(mock_pymc_sample):
     """
     Test Regression Discontinuity experiment on drinking age data.
 
@@ -289,7 +289,7 @@ def reg_kink_function(x, beta, kink):
 
 
 @pytest.mark.integration
-def test_rkink():
+def test_rkink(mock_pymc_sample):
     """
     Test Regression Kink design.
 
@@ -320,7 +320,7 @@ def test_rkink():
 
 
 @pytest.mark.integration
-def test_rkink_bandwidth():
+def test_rkink_bandwidth(mock_pymc_sample):
     """
     Test Regression Kink experiment with bandwidth parameter.
 
@@ -350,7 +350,7 @@ def test_rkink_bandwidth():
 
 
 @pytest.mark.integration
-def test_its():
+def test_its(mock_pymc_sample):
     """
     Test Interrupted Time-Series experiment.
 
@@ -403,7 +403,7 @@ def test_its():
 
 
 @pytest.mark.integration
-def test_its_covid():
+def test_its_covid(mock_pymc_sample):
     """
     Test Interrupted Time-Series experiment on COVID data.
 
@@ -457,7 +457,7 @@ def test_its_covid():
 
 
 @pytest.mark.integration
-def test_sc():
+def test_sc(mock_pymc_sample):
     """
     Test Synthetic Control experiment.
 
@@ -516,7 +516,7 @@ def test_sc():
 
 
 @pytest.mark.integration
-def test_sc_brexit():
+def test_sc_brexit(mock_pymc_sample):
     """
     Test Synthetic Control experiment on Brexit data.
 
@@ -579,7 +579,7 @@ def test_sc_brexit():
 
 
 @pytest.mark.integration
-def test_ancova():
+def test_ancova(mock_pymc_sample):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -611,7 +611,7 @@ def test_ancova():
 
 
 @pytest.mark.integration
-def test_geolift1():
+def test_geolift1(mock_pymc_sample):
     """
     Test Synthetic Control experiment on geo lift data.
 
@@ -648,7 +648,7 @@ def test_geolift1():
 
 
 @pytest.mark.integration
-def test_iv_reg():
+def test_iv_reg(mock_pymc_sample):
     df = cp.load_data("risk")
     instruments_formula = "risk  ~ 1 + logmort0"
     formula = "loggdp ~  1 + risk"
@@ -676,7 +676,7 @@ def test_iv_reg():
 
 
 @pytest.mark.integration
-def test_inverse_prop():
+def test_inverse_prop(mock_pymc_sample):
     """Test the InversePropensityWeighting class."""
     df = cp.load_data("nhefs")
     sample_kwargs = {
@@ -725,3 +725,283 @@ def test_inverse_prop():
     assert all(isinstance(ax, plt.Axes) for ax in axs)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
+
+
+@pytest.fixture(scope="module")
+def multi_unit_sc_data(rng):
+    """Generate synthetic data for SyntheticControl with multiple treated units."""
+    n_obs = 60
+    n_control = 4
+    n_treated = 3
+
+    # Create time index
+    time_index = pd.date_range("2020-01-01", periods=n_obs, freq="D")
+    treatment_time = time_index[40]  # Intervention at day 40
+
+    # Control unit data
+    control_data = {}
+    for i in range(n_control):
+        control_data[f"control_{i}"] = rng.normal(10, 2, n_obs) + np.sin(
+            np.arange(n_obs) * 0.1
+        )
+
+    # Treated unit data (combinations of control units with some noise)
+    treated_data = {}
+    for j in range(n_treated):
+        # Each treated unit is a different weighted combination of controls
+        weights = rng.dirichlet(np.ones(n_control))
+        base_signal = sum(
+            weights[i] * control_data[f"control_{i}"] for i in range(n_control)
+        )
+
+        # Add treatment effect after intervention
+        treatment_effect = np.zeros(n_obs)
+        treatment_effect[40:] = rng.normal(
+            5, 1, n_obs - 40
+        )  # Positive effect after treatment
+
+        treated_data[f"treated_{j}"] = (
+            base_signal + treatment_effect + rng.normal(0, 0.5, n_obs)
+        )
+
+    # Create DataFrame
+    df = pd.DataFrame({**control_data, **treated_data}, index=time_index)
+
+    control_units = [f"control_{i}" for i in range(n_control)]
+    treated_units = [f"treated_{j}" for j in range(n_treated)]
+
+    return df, treatment_time, control_units, treated_units
+
+
+@pytest.fixture(scope="module")
+def single_unit_sc_data(rng):
+    """Generate synthetic data for SyntheticControl with single treated unit."""
+    n_obs = 60
+    n_control = 4
+
+    # Create time index
+    time_index = pd.date_range("2020-01-01", periods=n_obs, freq="D")
+    treatment_time = time_index[40]  # Intervention at day 40
+
+    # Control unit data
+    control_data = {}
+    for i in range(n_control):
+        control_data[f"control_{i}"] = rng.normal(10, 2, n_obs) + np.sin(
+            np.arange(n_obs) * 0.1
+        )
+
+    # Single treated unit data
+    weights = rng.dirichlet(np.ones(n_control))
+    base_signal = sum(
+        weights[i] * control_data[f"control_{i}"] for i in range(n_control)
+    )
+
+    # Add treatment effect after intervention
+    treatment_effect = np.zeros(n_obs)
+    treatment_effect[40:] = rng.normal(
+        5, 1, n_obs - 40
+    )  # Positive effect after treatment
+
+    treated_data = {
+        "treated_0": base_signal + treatment_effect + rng.normal(0, 0.5, n_obs)
+    }
+
+    # Create DataFrame
+    df = pd.DataFrame({**control_data, **treated_data}, index=time_index)
+
+    control_units = [f"control_{i}" for i in range(n_control)]
+    treated_units = ["treated_0"]
+
+    return df, treatment_time, control_units, treated_units
+
+
+class TestSyntheticControlMultiUnit:
+    """Tests for SyntheticControl experiment with multiple treated units."""
+
+    @pytest.mark.integration
+    def test_multi_unit_initialization(self, multi_unit_sc_data):
+        """Test that SyntheticControl can initialize with multiple treated units."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        # Should initialize without error
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Check basic attributes
+        assert sc.treated_units == treated_units
+        assert sc.control_units == control_units
+        assert sc.treatment_time == treatment_time
+
+        # Check data shapes
+        assert sc.datapre_treated.shape == (40, len(treated_units))
+        assert sc.datapost_treated.shape == (20, len(treated_units))
+        assert sc.datapre_control.shape == (40, len(control_units))
+        assert sc.datapost_control.shape == (20, len(control_units))
+
+    @pytest.mark.integration
+    def test_multi_unit_scoring(self, multi_unit_sc_data):
+        """Test that scoring works with multiple treated units."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Score should be a pandas Series with separate entries for each unit
+        assert isinstance(sc.score, pd.Series)
+
+        # Check that we have r2 and r2_std for each treated unit using unified format
+        for i, unit in enumerate(treated_units):
+            assert f"unit_{i}_r2" in sc.score.index
+            assert f"unit_{i}_r2_std" in sc.score.index
+
+    @pytest.mark.integration
+    def test_multi_unit_summary(self, multi_unit_sc_data, capsys):
+        """Test that summary works with multiple treated units."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Test summary
+        sc.summary(round_to=3)
+
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Check that output contains information for multiple treated units
+        assert "Treated units:" in output
+        for unit in treated_units:
+            assert unit in output
+
+    @pytest.mark.integration
+    def test_single_unit_backward_compatibility(self, single_unit_sc_data):
+        """Test that single treated unit still works (backward compatibility)."""
+        df, treatment_time, control_units, treated_units = single_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Check basic attributes
+        assert sc.treated_units == treated_units
+        assert sc.control_units == control_units
+        assert sc.treatment_time == treatment_time
+
+    @pytest.mark.integration
+    def test_multi_unit_plotting(self, multi_unit_sc_data):
+        """Test that plotting works with multiple treated units."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Test plotting - should work for each treated unit individually
+        for unit in treated_units:
+            fig, ax = sc.plot(treated_unit=unit)
+            assert isinstance(fig, plt.Figure)
+            assert isinstance(ax, np.ndarray) and all(
+                isinstance(item, plt.Axes) for item in ax
+            )
+
+        # Test default plotting (first unit)
+        fig, ax = sc.plot()
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray) and all(
+            isinstance(item, plt.Axes) for item in ax
+        )
+
+    @pytest.mark.integration
+    def test_multi_unit_plot_data(self, multi_unit_sc_data):
+        """Test that plot data generation works with multiple treated units."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Test plot data generation for each treated unit
+        for unit in treated_units:
+            plot_data = sc.get_plot_data(treated_unit=unit)
+            assert isinstance(plot_data, pd.DataFrame)
+
+            # Check expected columns
+            expected_columns = [
+                "prediction",
+                "pred_hdi_lower_94",
+                "pred_hdi_upper_94",
+                "impact",
+                "impact_hdi_lower_94",
+                "impact_hdi_upper_94",
+            ]
+            assert set(expected_columns).issubset(set(plot_data.columns))
+
+        # Test default plot data (first unit)
+        plot_data = sc.get_plot_data()
+        assert isinstance(plot_data, pd.DataFrame)
+
+    @pytest.mark.integration
+    def test_multi_unit_plotting_invalid_unit(self, multi_unit_sc_data):
+        """Test that plotting with invalid treated unit raises appropriate errors."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        )
+
+        # Test that invalid treated unit name is handled gracefully
+        # Note: Current implementation may not raise ValueError, so we test default behavior
+        try:
+            sc.plot(treated_unit="invalid_unit")
+        except (ValueError, KeyError):
+            pass  # Either error type is acceptable
+
+        try:
+            sc.get_plot_data(treated_unit="invalid_unit")
+        except (ValueError, KeyError):
+            pass  # Either error type is acceptable

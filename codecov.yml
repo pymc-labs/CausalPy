@@ -1,4 +1,7 @@
 coverage:
+  ignore:
+    - "*/conftest.py"
+    - "*/tests/conftest.py"
   status:
     project:
       default:
