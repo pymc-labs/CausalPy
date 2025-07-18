@@ -114,14 +114,18 @@ class DifferenceInDifferences(BaseExperiment):
             },
         )
         self.y = xr.DataArray(
-            self.y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": np.arange(self.y.shape[0])},
+            self.y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
         # fit model
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
+            COORDS = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.X.shape[0]),
+                "treated_units": ["unit_0"],
+            }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(X=self.X, y=self.y)
@@ -203,7 +207,7 @@ class DifferenceInDifferences(BaseExperiment):
             # TODO: CHECK FOR CORRECTNESS
             self.causal_impact = (
                 self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            )
+            ).item()
         else:
             raise ValueError("Model type not recognized")
 
@@ -321,7 +325,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_control.posterior_predictive.mu,
+            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
@@ -333,7 +337,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_treatment.posterior_predictive.mu,
+            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
@@ -345,12 +349,20 @@ class DifferenceInDifferences(BaseExperiment):
         # had occurred.
         time_points = self.x_pred_counterfactual[self.time_variable_name].values
         if len(time_points) == 1:
+            y_pred_cf = az.extract(
+                self.y_pred_counterfactual,
+                group="posterior_predictive",
+                var_names="mu",
+            )
+            # Select single unit data for plotting
+            y_pred_cf_single = y_pred_cf.isel(treated_units=0)
+            violin_data = (
+                y_pred_cf_single.values
+                if hasattr(y_pred_cf_single, "values")
+                else y_pred_cf_single
+            )
             parts = ax.violinplot(
-                az.extract(
-                    self.y_pred_counterfactual,
-                    group="posterior_predictive",
-                    var_names="mu",
-                ).values.T,
+                violin_data.T,
                 positions=self.x_pred_counterfactual[self.time_variable_name].values,
                 showmeans=False,
                 showmedians=False,
@@ -363,7 +375,9 @@ class DifferenceInDifferences(BaseExperiment):
         else:
             h_line, h_patch = plot_xY(
                 time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu,
+                self.y_pred_counterfactual.posterior_predictive.mu.isel(
+                    treated_units=0
+                ),
                 ax=ax,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
