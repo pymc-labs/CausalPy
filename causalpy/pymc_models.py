@@ -634,7 +634,9 @@ class PropensityScore(PyMCModel):
                 splines_summed = pm.Deterministic(
                     "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
                 )
-                mu_outcome = mu_outcome + splines_summed
+                mu_outcome = (
+                    alpha_outcome + pm.math.dot(X_data_outcome, beta) + splines_summed
+                )
 
             sigma = pm.HalfNormal("sigma", priors["sigma"])
 
