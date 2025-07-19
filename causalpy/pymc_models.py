@@ -712,11 +712,7 @@ class PropensityScore(PyMCModel):
             chosen = np.random.choice(range(propensity_scores.shape[1]))
             p = propensity_scores[:, chosen].values
 
-            alpha_outcome = pm.Normal(
-                "a_outcome", priors["a_outcome"][0], priors["a_outcome"][1]
-            )
-
-            mu_outcome = alpha_outcome + pm.math.dot(X_data_outcome, beta) + beta_ps * p
+            mu_outcome = pm.math.dot(X_data_outcome, beta) + beta_ps * p
 
             if spline_component:
                 beta_ps_spline = pm.Normal(
@@ -733,9 +729,7 @@ class PropensityScore(PyMCModel):
                 splines_summed = pm.Deterministic(
                     "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
                 )
-                mu_outcome = (
-                    alpha_outcome + pm.math.dot(X_data_outcome, beta) + splines_summed
-                )
+                mu_outcome = pm.math.dot(X_data_outcome, beta) + splines_summed
 
             sigma = pm.HalfNormal("sigma", priors["sigma"])
 
