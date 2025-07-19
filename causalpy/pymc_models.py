@@ -613,13 +613,13 @@ class PropensityScore(PyMCModel):
         coords,
         priors={
             "b_outcome": [0, 1],
-            "a_outcome": [0, 1],
             "sigma": 1,
             "beta_ps": [0, 1],
         },
         noncentred=True,
         normal_outcome=True,
         spline_component=False,
+        winsorize_boundary=0.0,
     ):
         """
         Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
@@ -643,7 +643,6 @@ class PropensityScore(PyMCModel):
         priors : dict, optional
             Dictionary specifying priors for outcome model parameters:
                 - "b_outcome": list [mean, std] for regression coefficients.
-                - "a_outcome": list [mean, std] for the intercept.
                 - "sigma": standard deviation of the outcome noise (default 1).
 
         noncentred : bool, default True
@@ -656,6 +655,10 @@ class PropensityScore(PyMCModel):
         spline_component : bool, default False
             If True, include a spline basis expansion on the propensity score to allow
             flexible (nonlinear) adjustment. Uses B-splines with 30 internal knots.
+
+        winsorize_boundary : float, default 0.0
+            If we wish to winsorize the propensity score this can be set to clip the high
+            and low values of the propensity at 0 + winsorize_boundary and 1-winsorize_boundary
 
         Returns
         -------
@@ -677,8 +680,8 @@ class PropensityScore(PyMCModel):
         posterior of the treatment model, randomly selecting one posterior draw
         per call. This term is estimated initially in the InversePropensity
         class initialisation.
-        - The term `beta_ps[0] * p + beta_ps[1] * (p * treatment)` captures both
-        main and interaction effects of the propensity score.
+        - The term `beta_ps[0] * p` captures both
+        main effects of the propensity score.
         - Including spline adjustment enables modeling nonlinear relationships
         between the propensity score and the outcome.
 
@@ -711,6 +714,7 @@ class PropensityScore(PyMCModel):
 
             chosen = np.random.choice(range(propensity_scores.shape[1]))
             p = propensity_scores[:, chosen].values
+            p = np.clip(p, winsorize_boundary, 1 - winsorize_boundary)
 
             mu_outcome = pm.math.dot(X_data_outcome, beta) + beta_ps * p
 
