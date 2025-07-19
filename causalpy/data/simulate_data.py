@@ -147,7 +147,9 @@ def generate_time_series_data(
     for var in ["deaths_actual", "temperature"]:
         df[var] += norm(0, 0.1).rvs(N)
 
-    # add intercept
+    # add intercept column of ones (for modeling purposes)
+    # This is correctly a column of ones, not beta_intercept, as beta_intercept
+    # is already incorporated in the data generation above
     df["intercept"] = np.ones(df.shape[0])
 
     return df
