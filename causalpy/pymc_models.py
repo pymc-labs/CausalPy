@@ -611,7 +611,12 @@ class PropensityScore(PyMCModel):
         X_outcome,
         y,
         coords,
-        priors={"b_outcome": [0, 1], "a_outcome": [0, 1], "sigma": 1},
+        priors={
+            "b_outcome": [0, 1],
+            "a_outcome": [0, 1],
+            "sigma": 1,
+            "beta_ps": [0, 1],
+        },
         noncentred=True,
         normal_outcome=True,
         spline_component=False,
@@ -702,7 +707,7 @@ class PropensityScore(PyMCModel):
                     dims="outcome_coeffs",
                 )
 
-            beta_ps = pm.Normal("beta_ps", 0, 1)
+            beta_ps = pm.Normal("beta_ps", priors["beta_ps"][0], priors["beta_ps"][1])
 
             chosen = np.random.choice(range(propensity_scores.shape[1]))
             p = propensity_scores[:, chosen].values
@@ -714,7 +719,12 @@ class PropensityScore(PyMCModel):
             mu_outcome = alpha_outcome + pm.math.dot(X_data_outcome, beta) + beta_ps * p
 
             if spline_component:
-                beta_ps_spline = pm.Normal("beta_ps_spline", 0, 1, size=34)
+                beta_ps_spline = pm.Normal(
+                    "beta_ps_spline",
+                    priors["beta_ps"][0],
+                    priors["beta_ps"][1],
+                    size=34,
+                )
                 B = dmatrix(
                     "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
                     {"ps": p, "knots": np.linspace(0, 1, 30)},
