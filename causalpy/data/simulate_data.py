@@ -125,12 +125,12 @@ def generate_time_series_data(
         The intercept
 
     """
-    x = np.arange(0, 100, 1)
+    x = np.arange(0, N, 1)
     df = pd.DataFrame(
         {
             "temperature": np.sin(x * 0.5) + 1,
-            "linear": np.linspace(0, 1, 100),
-            "causal effect": 10 * gamma(10).pdf(np.arange(0, 100, 1) - treatment_time),
+            "linear": np.linspace(0, 1, N),
+            "causal effect": 10 * gamma(10).pdf(np.arange(0, N, 1) - treatment_time),
         }
     )
 
