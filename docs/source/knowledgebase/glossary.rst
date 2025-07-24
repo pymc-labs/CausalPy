@@ -69,6 +69,9 @@ Glossary
    Propensity scores
       An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
 
+   Potential outcomes
+      A potential outcome is definable for a candidate or experimental unit under a treatment regime with respect to a measured outcome. The outcome Y(0) for that experimental unit is the outcome when the individual does not have the treatment. The outcome Y(1) for that experimental unit is the outcome when the individual does receive the treatment. Only one case can be observed in reality, and this is called the fundamental problem of causal inference. Seen this way causal inference becomes a kind of imputation problem.
+
    Quasi-experiment
       An empirical comparison used to estimate the effects of a treatment where units are not assigned to conditions at random.
 
