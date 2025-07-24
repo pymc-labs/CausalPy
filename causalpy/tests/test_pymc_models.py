@@ -45,7 +45,7 @@ class MyToyModel(PyMCModel):
             X_ = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
             y_ = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
             beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
-            sigma = pm.HalfNormal("sigma", sigma=1, dims="treated_units")
+            sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
             mu = pm.Deterministic(
                 "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
             )
@@ -159,7 +159,7 @@ class TestPyMCModel:
             2,
             2 * 2,
         )  # (treated_units, coeffs, sample)
-        assert az.extract(data=model.idata, var_names=["sigma"]).shape == (
+        assert az.extract(data=model.idata, var_names=["y_hat_sigma"]).shape == (
             1,
             2 * 2,
         )  # (treated_units, sample)
@@ -402,7 +402,7 @@ class TestWeightedSumFitterMultiUnit:
 
         # Extract coefficients
         beta = az.extract(wsf.idata.posterior, var_names="beta")
-        sigma = az.extract(wsf.idata.posterior, var_names="sigma")
+        sigma = az.extract(wsf.idata.posterior, var_names="y_hat_sigma")
 
         # Check beta dimensions: should be (sample, treated_units, coeffs)
         assert "treated_units" in beta.dims
@@ -461,7 +461,7 @@ class TestWeightedSumFitterMultiUnit:
             assert control in output
 
         # Check that sigma is printed for each unit
-        assert output.count("sigma") == len(treated_units)
+        assert output.count("y_hat_sigma") == len(treated_units)
 
     def test_scoring_multi_unit(self, synthetic_control_data):
         """Test that scoring works with multiple treated units."""
