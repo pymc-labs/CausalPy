@@ -383,3 +383,52 @@ def test_rkink_epsilon_check():
             kink_point=kink,
             epsilon=-1,
         )
+
+
+# RegressionDiscontinuity
+
+
+def setup_regression_discontinuity_data(threshold=0.5):
+    """Create data for a regression discontinuity test."""
+    np.random.seed(42)
+    x = np.random.uniform(0, 1, 100)
+    treated = np.where(x > threshold, 1, 0)
+    y = 2 * x + treated + np.random.normal(0, 1, 100)
+    return pd.DataFrame({"x": x, "treated": treated, "y": y})
+
+
+def test_regression_discontinuity_int_treatment():
+    """Test that RegressionDiscontinuity works with integer treatment variables."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+    assert df["treated"].dtype == np.int64  # Ensure treatment is int
+
+    # This should work now with our fix
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+    )
+
+    # Check that the treatment variable was converted to bool
+    assert result.data["treated"].dtype == bool
+
+
+def test_regression_discontinuity_bool_treatment():
+    """Test that RegressionDiscontinuity works with boolean treatment variables."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+    df["treated"] = df["treated"].astype(bool)  # Convert to bool
+    assert df["treated"].dtype == bool  # Ensure treatment is bool
+
+    # This should work as before
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+    )
+
+    # Check that the treatment variable is still bool
+    assert result.data["treated"].dtype == bool
