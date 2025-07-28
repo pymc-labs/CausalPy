@@ -1208,7 +1208,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
         new_idata = self.idata.copy()
         # Get smoothed posterior and sum over state dimension
-        smoothed = self.conditional_idata.rename({"smoothed_posterior": "y_hat"})
+        smoothed = self.conditional_idata.isel(observed_state=0).rename(
+            {"smoothed_posterior": "y_hat"}
+        )
         y_hat_summed = smoothed.y_hat.sum(dim="state")
 
         # Rename 'time' to 'obs_ind' to match CausalPy conventions
