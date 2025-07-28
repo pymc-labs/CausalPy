@@ -13,7 +13,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.4.2"
+version = "0.5.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -69,13 +69,10 @@ docs = [
     "sphinx-notfound-page",
     "ipywidgets",
     "sphinx-design",
+    "sphinx-togglebutton",
 ]
 lint = ["interrogate", "pre-commit", "ruff"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
-
-[metadata]
-description-file = 'README.md'
-license_files = 'LICENSE'
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
@@ -130,3 +127,23 @@ extend-select = [
 [tool.codespell]
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
+
+[tool.coverage.run]
+omit = [
+    "*/conftest.py",
+    "*/tests/conftest.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
