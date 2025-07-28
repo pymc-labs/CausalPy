@@ -89,7 +89,6 @@ addopts = [
     "--strict-config",
     "--cov=causalpy",
     "--cov-report=term-missing",
-    "--doctest-modules",
 ]
 testpaths = "causalpy/tests"
 markers = [

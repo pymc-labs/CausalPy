@@ -33,5 +33,4 @@ __all__ = [
     "SyntheticControl",
     "StructuralTimeSeries",
     "InterruptedTimeSeries",  # For backward compatibility
-    "IVRegression",
 ]
