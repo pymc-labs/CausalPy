@@ -125,12 +125,12 @@ def generate_time_series_data(
         The intercept
 
     """
-    x = np.arange(0, 100, 1)
+    x = np.arange(0, N, 1)
     df = pd.DataFrame(
         {
             "temperature": np.sin(x * 0.5) + 1,
-            "linear": np.linspace(0, 1, 100),
-            "causal effect": 10 * gamma(10).pdf(np.arange(0, 100, 1) - treatment_time),
+            "linear": np.linspace(0, 1, N),
+            "causal effect": 10 * gamma(10).pdf(np.arange(0, N, 1) - treatment_time),
         }
     )
 
@@ -147,7 +147,9 @@ def generate_time_series_data(
     for var in ["deaths_actual", "temperature"]:
         df[var] += norm(0, 0.1).rvs(N)
 
-    # add intercept
+    # add intercept column of ones (for modeling purposes)
+    # This is correctly a column of ones, not beta_intercept, as beta_intercept
+    # is already incorporated in the data generation above
     df["intercept"] = np.ones(df.shape[0])
 
     return df
