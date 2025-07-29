@@ -15,6 +15,7 @@
 import arviz as az
 import numpy as np
 import pandas as pd
+import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -729,8 +730,43 @@ def test_inverse_prop(mock_pymc_sample):
     assert isinstance(fig, plt.Figure)
     assert isinstance(axs, list)
     assert all(isinstance(ax, plt.Axes) for ax in axs)
+    plt.close()
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
+
+    ### testing outcome model
+    idata_normal, model_normal = result.model.fit_outcome_model(
+        X_outcome=result.X_outcome,
+        y=result.y,
+        coords=result.coords,
+        normal_outcome=True,
+        spline_component=False,
+    )
+    assert isinstance(idata_normal, az.InferenceData)
+    assert isinstance(model_normal, pm.Model)
+    assert "beta_" in idata_normal.posterior
+    assert "beta_ps" in idata_normal.posterior
+
+    # Test spline model
+    idata_spline, _ = result.model.fit_outcome_model(
+        X_outcome=result.X_outcome,
+        y=result.y,
+        coords=result.coords,
+        normal_outcome=True,
+        spline_component=True,
+    )
+    assert "spline_features" in idata_spline.posterior
+
+    # Test student-t outcome
+    idata_student, _ = result.model.fit_outcome_model(
+        X_outcome=result.X_outcome,
+        y=result.y,
+        coords=result.coords,
+        noncentred=False,
+        normal_outcome=False,
+        spline_component=False,
+    )
+    assert "nu" in idata_student.posterior
 
 
 @pytest.mark.integration
