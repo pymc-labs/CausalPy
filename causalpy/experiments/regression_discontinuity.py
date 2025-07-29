@@ -210,6 +210,12 @@ class RegressionDiscontinuity(BaseExperiment):
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
 
+        # Convert integer treated variable to boolean if needed
+        if self.data["treated"].dtype in ["int64", "int32"]:
+            # Make a copy to avoid SettingWithCopyWarning
+            self.data = self.data.copy()
+            self.data["treated"] = self.data["treated"].astype(bool)
+
     def _is_treated(self, x):
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
 
