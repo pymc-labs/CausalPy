@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
     DataException,
+    FormulaException,
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
@@ -233,27 +234,40 @@ class DifferenceInDifferences(BaseExperiment):
 
     def input_validation(self):
         """Validate the input data and model formula for correctness"""
-        if (
-            self.post_treatment_variable_name not in self.formula
-            or self.post_treatment_variable_name not in self.data.columns
-        ):
+        # Check if post_treatment_variable_name is in formula
+        if self.post_treatment_variable_name not in self.formula:
+            if self.post_treatment_variable_name == "post_treatment":
+                # Default case - user didn't specify custom name, so guide them to use "post_treatment"
+                raise FormulaException(
+                    "Missing 'post_treatment' in formula.\n"
+                    "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
+                    "Add 'post_treatment' to formula (e.g., 'y ~ 1 + group*post_treatment').\n"
+                    "Or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
+                )
+            else:
+                # Custom case - user specified custom name, so remind them what they specified
+                raise FormulaException(
+                    f"Missing required variable '{self.post_treatment_variable_name}' in formula.\n\n"
+                    f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
+                    f"please ensure formula includes '{self.post_treatment_variable_name}'"
+                )
+
+        # Check if post_treatment_variable_name is in data columns
+        if self.post_treatment_variable_name not in self.data.columns:
             if self.post_treatment_variable_name == "post_treatment":
                 # Default case - user didn't specify custom name, so guide them to use "post_treatment"
                 raise DataException(
-                    "Missing 'post_treatment' in formula or dataset.\n"
+                    "Missing 'post_treatment' column in dataset.\n"
                     "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
-                    "1) Add 'post_treatment' to formula (e.g., 'y ~ 1 + group*post_treatment')\n"
-                    "2) and ensure dataset has boolean column 'post_treatment'.\n"
-                    "To use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
+                    "Ensure dataset has boolean column 'post_treatment'.\n"
+                    "or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
                 )
             else:
                 # Custom case - user specified custom name, so remind them what they specified
                 raise DataException(
-                    f"Missing required variable '{self.post_treatment_variable_name}' in formula or dataset.\n\n"
+                    f"Missing required column '{self.post_treatment_variable_name}' in dataset.\n\n"
                     f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
-                    f"please ensure:\n"
-                    f"1) formula includes '{self.post_treatment_variable_name}'\n"
-                    f"2) dataset has boolean column named '{self.post_treatment_variable_name}'"
+                    f"please ensure dataset has boolean column named '{self.post_treatment_variable_name}'"
                 )
 
         if "unit" not in self.data.columns:
