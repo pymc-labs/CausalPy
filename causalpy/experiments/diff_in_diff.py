@@ -84,6 +84,7 @@ class DifferenceInDifferences(BaseExperiment):
         formula: str,
         time_variable_name: str,
         group_variable_name: str,
+        post_treatment_variable_name: str = "post_treatment",
         model=None,
         **kwargs,
     ) -> None:
@@ -95,6 +96,7 @@ class DifferenceInDifferences(BaseExperiment):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
+        self.post_treatment_variable_name = post_treatment_variable_name
         self.input_validation()
 
         y, X = dmatrices(formula, self.data)
@@ -128,6 +130,12 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
+            # For scikit-learn models, automatically set fit_intercept=False
+            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
+            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
+            # TODO: later, this should be handled in ScikitLearnAdaptor itself
+            if hasattr(self.model, "fit_intercept"):
+                self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")
@@ -173,7 +181,7 @@ class DifferenceInDifferences(BaseExperiment):
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
             # just the treatment period(s)
-            .query("post_treatment == True")
+            .query(f"{self.post_treatment_variable_name} == True")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
@@ -189,7 +197,10 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if "post_treatment" in label and self.group_variable_name in label:
+            if (
+                self.post_treatment_variable_name in label
+                and self.group_variable_name in label
+            ):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
@@ -198,16 +209,24 @@ class DifferenceInDifferences(BaseExperiment):
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
-                if "post_treatment" in label and self.group_variable_name in label:
+                if (
+                    self.post_treatment_variable_name in label
+                    and self.group_variable_name in label
+                ):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
         elif isinstance(self.model, RegressorMixin):
             # This is the coefficient on the interaction term
-            # TODO: CHECK FOR CORRECTNESS
-            self.causal_impact = (
-                self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            ).item()
+            # Store the coefficient into dictionary {intercept:value}
+            coef_map = dict(zip(self.labels, self.model.get_coeffs()))
+            # Create and find the interaction term based on the values user provided
+            interaction_term = (
+                f"{self.group_variable_name}:{self.post_treatment_variable_name}"
+            )
+            matched_key = next((k for k in coef_map if interaction_term in k), None)
+            att = coef_map.get(matched_key)
+            self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
 
@@ -215,15 +234,41 @@ class DifferenceInDifferences(BaseExperiment):
 
     def input_validation(self):
         """Validate the input data and model formula for correctness"""
-        if "post_treatment" not in self.formula:
-            raise FormulaException(
-                "A predictor called `post_treatment` should be in the formula"
-            )
+        # Check if post_treatment_variable_name is in formula
+        if self.post_treatment_variable_name not in self.formula:
+            if self.post_treatment_variable_name == "post_treatment":
+                # Default case - user didn't specify custom name, so guide them to use "post_treatment"
+                raise FormulaException(
+                    "Missing 'post_treatment' in formula.\n"
+                    "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
+                    "Add 'post_treatment' to formula (e.g., 'y ~ 1 + group*post_treatment').\n"
+                    "Or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
+                )
+            else:
+                # Custom case - user specified custom name, so remind them what they specified
+                raise FormulaException(
+                    f"Missing required variable '{self.post_treatment_variable_name}' in formula.\n\n"
+                    f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
+                    f"please ensure formula includes '{self.post_treatment_variable_name}'"
+                )
 
-        if "post_treatment" not in self.data.columns:
-            raise DataException(
-                "Require a boolean column labelling observations which are `treated`"
-            )
+        # Check if post_treatment_variable_name is in data columns
+        if self.post_treatment_variable_name not in self.data.columns:
+            if self.post_treatment_variable_name == "post_treatment":
+                # Default case - user didn't specify custom name, so guide them to use "post_treatment"
+                raise DataException(
+                    "Missing 'post_treatment' column in dataset.\n"
+                    "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
+                    "Ensure dataset has boolean column 'post_treatment'.\n"
+                    "or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
+                )
+            else:
+                # Custom case - user specified custom name, so remind them what they specified
+                raise DataException(
+                    f"Missing required column '{self.post_treatment_variable_name}' in dataset.\n\n"
+                    f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
+                    f"please ensure dataset has boolean column named '{self.post_treatment_variable_name}'"
+                )
 
         if "unit" not in self.data.columns:
             raise DataException(
