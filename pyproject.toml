@@ -52,7 +52,7 @@ dependencies = [
 dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell", "nbformat", "nbconvert"]
 docs = [
     "ipykernel",
-    "daft",
+    "daft-pgm",
     "linkify-it-py",
     "myst-nb<=1.0.0",
     "pathlib",
