@@ -15,6 +15,8 @@
 Difference in differences
 """
 
+import re
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -233,42 +235,21 @@ class DifferenceInDifferences(BaseExperiment):
         return
 
     def input_validation(self):
+        # Validate formula structure and interaction interaction terms
+        self._validate_formula_interaction_terms()
+
         """Validate the input data and model formula for correctness"""
         # Check if post_treatment_variable_name is in formula
         if self.post_treatment_variable_name not in self.formula:
-            if self.post_treatment_variable_name == "post_treatment":
-                # Default case - user didn't specify custom name, so guide them to use "post_treatment"
-                raise FormulaException(
-                    "Missing 'post_treatment' in formula.\n"
-                    "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
-                    "Add 'post_treatment' to formula (e.g., 'y ~ 1 + group*post_treatment').\n"
-                    "Or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
-                )
-            else:
-                # Custom case - user specified custom name, so remind them what they specified
-                raise FormulaException(
-                    f"Missing required variable '{self.post_treatment_variable_name}' in formula.\n\n"
-                    f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
-                    f"please ensure formula includes '{self.post_treatment_variable_name}'"
-                )
+            raise FormulaException(
+                f"Missing required variable '{self.post_treatment_variable_name}' in formula"
+            )
 
         # Check if post_treatment_variable_name is in data columns
         if self.post_treatment_variable_name not in self.data.columns:
-            if self.post_treatment_variable_name == "post_treatment":
-                # Default case - user didn't specify custom name, so guide them to use "post_treatment"
-                raise DataException(
-                    "Missing 'post_treatment' column in dataset.\n"
-                    "Note: post_treatment_variable_name might have been set to 'post_treatment' by default.\n"
-                    "Ensure dataset has boolean column 'post_treatment'.\n"
-                    "or to use custom name, provide additional argument post_treatment_variable_name='your_post_treatment_variable_name'."
-                )
-            else:
-                # Custom case - user specified custom name, so remind them what they specified
-                raise DataException(
-                    f"Missing required column '{self.post_treatment_variable_name}' in dataset.\n\n"
-                    f"Since you specified post_treatment_variable_name='{self.post_treatment_variable_name}', "
-                    f"please ensure dataset has boolean column named '{self.post_treatment_variable_name}'"
-                )
+            raise DataException(
+                f"Missing required column '{self.post_treatment_variable_name}' in dataset"
+            )
 
         if "unit" not in self.data.columns:
             raise DataException(
@@ -279,6 +260,61 @@ class DifferenceInDifferences(BaseExperiment):
             raise DataException(
                 f"""The grouping variable {self.group_variable_name} should be dummy
                 coded. Consisting of 0's and 1's only."""
+            )
+
+    def _get_interaction_terms(self):
+        """
+        Extract interaction terms from the formula.
+        Returns a list of interaction terms (those with '*' or ':').
+        """
+        # Define interaction indicators
+        INTERACTION_INDICATORS = ["*", ":"]
+
+        # Remove whitespace
+        formula = self.formula.replace(" ", "")
+
+        # Extract right-hand side of the formula
+        rhs = formula.split("~")[1]
+
+        # Split terms by '+' or '-' while keeping them intact
+        terms = re.split(r"(?=[+-])", rhs)
+
+        # Clean up terms and get interaction terms (those with '*' or ':')
+        interaction_terms = []
+        for term in terms:
+            # Remove leading + or - for processing
+            clean_term = term.lstrip("+-")
+            if any(indicator in clean_term for indicator in INTERACTION_INDICATORS):
+                interaction_terms.append(clean_term)
+
+        return interaction_terms
+
+    def _validate_formula_interaction_terms(self):
+        """
+        Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
+        Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
+        """
+        # Define interaction indicators
+        INTERACTION_INDICATORS = ["*", ":"]
+
+        # Get interaction terms
+        interaction_terms = self._get_interaction_terms()
+
+        # Check for interaction terms with more than 2 variables (more than one '*' or ':')
+        for term in interaction_terms:
+            total_indicators = sum(
+                term.count(indicator) for indicator in INTERACTION_INDICATORS
+            )
+            if (
+                total_indicators >= 2
+            ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
+                raise FormulaException(
+                    f"Formula contains interaction term with more than 2 variables: {term}. Only two-way interactions are allowed."
+                )
+
+        if len(interaction_terms) > 1:
+            raise FormulaException(
+                f"Formula contains more than 1 interaction term: {interaction_terms}. Maximum of 1 allowed."
             )
 
     def summary(self, round_to=None) -> None:
