@@ -30,18 +30,29 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 def test_did_validation_post_treatment_formula():
-    """Test that we get a FormulaException if do not include post_treatment in the
-    formula"""
+    """Test that we get a FormulaException for invalid formulas and missing post_treatment variables"""
     df = pd.DataFrame(
         {
             "group": [0, 0, 1, 1],
             "t": [0, 1, 0, 1],
             "unit": [0, 0, 1, 1],
             "post_treatment": [0, 1, 0, 1],
+            "male": [0, 1, 0, 1],  # Additional variable for testing
             "y": [1, 2, 3, 4],
         }
     )
 
+    df_with_custom = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1],
+            "t": [0, 1, 0, 1],
+            "unit": [0, 0, 1, 1],
+            "custom_post": [0, 1, 0, 1],  # Custom column name
+            "y": [1, 2, 3, 4],
+        }
+    )
+
+    # Test 1: Missing post_treatment variable in formula
     with pytest.raises(FormulaException):
         _ = cp.DifferenceInDifferences(
             df,
@@ -51,10 +62,93 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
+    # Test 2: Missing post_treatment variable in formula (duplicate test)
     with pytest.raises(FormulaException):
         _ = cp.DifferenceInDifferences(
             df,
             formula="y ~ 1 + group*post_SOMETHING",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 3: Custom post_treatment_variable_name but formula uses different name
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df_with_custom,
+            formula="y ~ 1 + group*post_treatment",  # Formula uses 'post_treatment'
+            time_variable_name="t",
+            group_variable_name="group",
+            post_treatment_variable_name="custom_post",  # But user specifies 'custom_post'
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 4: Default post_treatment_variable_name but formula uses different name
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*custom_post",  # Formula uses 'custom_post'
+            time_variable_name="t",
+            group_variable_name="group",
+            # post_treatment_variable_name defaults to "post_treatment"
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 5: Repeated interaction terms (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group*post_treatment + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 6: Three-way interactions using * (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group*post_treatment*male",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 7: Three-way interactions using : (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group:post_treatment:male",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 8: Multiple different interaction terms using * (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group*post_treatment + group*male",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 9: Multiple different interaction terms using : (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group:post_treatment + group:male",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 10: Mixed issues - multiple terms + three-way interaction (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + group*post_treatment + group:post_treatment:male",
             time_variable_name="t",
             group_variable_name="group",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -88,6 +182,27 @@ def test_did_validation_post_treatment_data():
             formula="y ~ 1 + group*post_treatment",
             time_variable_name="t",
             group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 2: Custom post_treatment_variable_name but column doesn't exist in data
+    df_with_post = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1],
+            "t": [0, 1, 0, 1],
+            "unit": [0, 0, 1, 1],
+            "post_treatment": [0, 1, 0, 1],  # Data has 'post_treatment'
+            "y": [1, 2, 3, 4],
+        }
+    )
+
+    with pytest.raises(DataException):
+        _ = cp.DifferenceInDifferences(
+            df_with_post,
+            formula="y ~ 1 + group*custom_post",  # Formula uses 'custom_post'
+            time_variable_name="t",
+            group_variable_name="group",
+            post_treatment_variable_name="custom_post",  # User specifies 'custom_post'
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
