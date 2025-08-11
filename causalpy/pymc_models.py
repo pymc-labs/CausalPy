@@ -1118,9 +1118,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                         f"Shape mismatch: X_values_for_pymc has {X_values_for_pymc.shape[1]} columns, but "
                         f"{len(self._exog_var_names)} names in self._exog_var_names ({self._exog_var_names})."
                     )
-                X_data = pm.MutableData(
-                    "X", X_values_for_pymc, dims=["obs_ind", "coeffs"]
-                )
+                X_data = pm.Data("X", X_values_for_pymc, dims=["obs_ind", "coeffs"])
                 beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
                 mu_ = mu_ + pm.math.dot(X_data, beta)
 
@@ -1129,7 +1127,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
             # Likelihood
             sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma)
-            y_data = pm.MutableData("y", y.flatten(), dims="obs_ind")
+            y_data = pm.Data("y", y.flatten(), dims="obs_ind")
             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_data, dims="obs_ind")
 
     def fit(
