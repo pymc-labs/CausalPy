@@ -784,7 +784,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         \text{seasonality} &\sim \text{YearlyFourier}(...) \\
         \beta &\sim \mathrm{Normal}(0, \sigma_{\beta}) \quad \text{(if X is provided)} \\
         \sigma &\sim \mathrm{HalfNormal}(\sigma_{err}) \\
-        \mu &= \text{trend_component} + \text{seasonality_component} [+ X \cdot \beta] \\
+        \mu &= \text{trend_component} + \text{seasonality_component} + X \cdot \beta \quad \text{(if X is provided)} \\
         y &\sim \mathrm{Normal}(\mu, \sigma)
 
     Parameters
