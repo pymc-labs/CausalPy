@@ -226,7 +226,18 @@ class PyMCModel(pm.Model):
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
-        impact = y_true - y_pred["posterior_predictive"]["y_hat"]
+        y_hat = y_pred["posterior_predictive"]["y_hat"]
+        # Ensure the coordinate type and values match along obs_ind so xarray can align
+        if "obs_ind" in y_hat.dims and "obs_ind" in getattr(y_true, "coords", {}):
+            try:
+                # Assign the same coordinate values (e.g., DatetimeIndex) to prediction
+                y_hat = y_hat.assign_coords(obs_ind=y_true["obs_ind"])  # type: ignore[index]
+            except Exception:
+                # If assignment fails, fall back to position-based subtraction
+                # by temporarily dropping coords to avoid dtype promotion issues
+                y_hat = y_hat.reset_coords(names=["obs_ind"], drop=True)
+                y_true = y_true.reset_coords(names=["obs_ind"], drop=True)
+        impact = y_true - y_hat
         return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact):
@@ -826,25 +837,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def _validate_and_initialize_components(self):
         """
-        Validate and initialize trend and seasonality components.
-        This separates validation from model building for cleaner code.
+        Validate custom components only. Optional dependencies are imported lazily
+        when default components are actually needed.
         """
-        # Validate pymc-marketing availability if using default components
-        if (
-            self._custom_trend_component is None
-            or self._custom_seasonality_component is None
-        ):
-            try:
-                from pymc_marketing.mmm import LinearTrend, YearlyFourier
-
-                self._PymcMarketingLinearTrend = LinearTrend
-                self._PymcMarketingYearlyFourier = YearlyFourier
-            except ImportError:
-                raise ImportError(
-                    "pymc-marketing is required when using default trend or seasonality components. "
-                    "Please install it with `pip install pymc-marketing` or provide custom components."
-                )
-
         # Validate custom components have required methods
         if self._custom_trend_component is not None:
             if not hasattr(self._custom_trend_component, "apply"):
@@ -865,9 +860,16 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         if self._custom_trend_component is not None:
             return self._custom_trend_component
 
-        # Create default trend component
+        # Create default trend component (lazy import of pymc-marketing)
         if self._trend_component is None:
-            self._trend_component = self._PymcMarketingLinearTrend(
+            try:
+                from pymc_marketing.mmm import LinearTrend
+            except ImportError as err:
+                raise ImportError(
+                    "BayesianBasisExpansionTimeSeries requires pymc-marketing when default trend "
+                    "component is used. Install it with `pip install pymc-marketing`."
+                ) from err
+            self._trend_component = LinearTrend(
                 n_changepoints=self.n_changepoints_trend
             )
         return self._trend_component
@@ -877,11 +879,16 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         if self._custom_seasonality_component is not None:
             return self._custom_seasonality_component
 
-        # Create default seasonality component
+        # Create default seasonality component (lazy import of pymc-marketing)
         if self._seasonality_component is None:
-            self._seasonality_component = self._PymcMarketingYearlyFourier(
-                n_order=self.n_order
-            )
+            try:
+                from pymc_marketing.mmm import YearlyFourier
+            except ImportError as err:
+                raise ImportError(
+                    "BayesianBasisExpansionTimeSeries requires pymc-marketing when default seasonality "
+                    "component is used. Install it with `pip install pymc-marketing`."
+                ) from err
+            self._seasonality_component = YearlyFourier(n_order=self.n_order)
         return self._seasonality_component
 
     def _prepare_time_and_exog_features(
@@ -1318,25 +1325,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def _validate_and_initialize_components(self):
         """
-        Validate and initialize trend and seasonality components.
-        This separates validation from model building for cleaner code.
+        Validate custom components only. Optional dependencies are imported lazily
+        when default components are actually needed.
         """
-        # Validate pymc-extras availability if using default components
-        if (
-            self._custom_trend_component is None
-            or self._custom_seasonality_component is None
-        ):
-            try:
-                from pymc_extras.statespace import structural as st
-
-                self._PymcExtrasLevelTrendComponent = st.LevelTrendComponent
-                self._PymcExtrasFrequencySeasonality = st.FrequencySeasonality
-            except ImportError:
-                raise ImportError(
-                    "pymc-extras is required when using default trend or seasonality components. "
-                    "Please install it with `conda install -c conda-forge pymc-extras` or provide custom components."
-                )
-
         # Validate custom components have required methods
         if self._custom_trend_component is not None:
             if not hasattr(self._custom_trend_component, "apply"):
@@ -1361,11 +1352,16 @@ class StateSpaceTimeSeries(PyMCModel):
         if self._custom_trend_component is not None:
             return self._custom_trend_component
 
-        # Create default trend component
+        # Create default trend component (lazy import of pymc-extras)
         if self._trend_component is None:
-            self._trend_component = self._PymcExtrasLevelTrendComponent(
-                order=self.level_order
-            )
+            try:
+                from pymc_extras.statespace import structural as st
+            except ImportError as err:
+                raise ImportError(
+                    "StateSpaceTimeSeries requires pymc-extras when default trend component is used. "
+                    "Install it with `conda install -c conda-forge pymc-extras`."
+                ) from err
+            self._trend_component = st.LevelTrendComponent(order=self.level_order)
         return self._trend_component
 
     def _get_seasonality_component(self):
@@ -1373,9 +1369,16 @@ class StateSpaceTimeSeries(PyMCModel):
         if self._custom_seasonality_component is not None:
             return self._custom_seasonality_component
 
-        # Create default seasonality component
+        # Create default seasonality component (lazy import of pymc-extras)
         if self._seasonality_component is None:
-            self._seasonality_component = self._PymcExtrasFrequencySeasonality(
+            try:
+                from pymc_extras.statespace import structural as st
+            except ImportError as err:
+                raise ImportError(
+                    "StateSpaceTimeSeries requires pymc-extras when default seasonality component is used. "
+                    "Install it with `conda install -c conda-forge pymc-extras`."
+                ) from err
+            self._seasonality_component = st.FrequencySeasonality(
                 season_length=self.seasonal_length, name="freq"
             )
         return self._seasonality_component

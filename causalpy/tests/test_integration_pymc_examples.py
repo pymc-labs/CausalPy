@@ -359,7 +359,7 @@ def test_its(mock_pymc_sample):
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.StructuralTimeSeries returns correct type
+    2. causalpy.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -378,7 +378,7 @@ def test_its(mock_pymc_sample):
     )
     # Test 1. plot method runs
     result.plot()
-    # 2. causalpy.StructuralTimeSeries returns correct type
+    # 2. causalpy.InterruptedTimeSeries returns correct type
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -414,7 +414,7 @@ def test_its_covid(mock_pymc_sample):
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.StructuralTimeSeries returns correct type
+    2. causalpy.InterruptedTimeSeries returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -434,7 +434,7 @@ def test_its_covid(mock_pymc_sample):
     )
     # Test 1. plot method runs
     result.plot()
-    # 2. causalpy.StructuralTimeSeries returns correct type
+    # 2. causalpy.InterruptedTimeSeries returns correct type
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -947,9 +947,9 @@ def test_bayesian_structural_time_series():
 @pytest.mark.integration
 def test_state_space_time_series():
     """
-    Test StateSpaceTimeSeries model.
+    Test InterruptedTimeSeries model.
 
-    This test verifies the StateSpaceTimeSeries model functionality including:
+    This test verifies the InterruptedTimeSeries model functionality including:
     1. Model initialization and parameter validation
     2. Model fitting with synthetic time series data
     3. In-sample and out-of-sample prediction
@@ -957,7 +957,7 @@ def test_state_space_time_series():
     5. Error handling for invalid inputs
     6. State-space model components and structure
 
-    The StateSpaceTimeSeries model uses pymc-extras for state-space modeling,
+    The InterruptedTimeSeries model uses pymc-extras for state-space modeling,
     which provides Kalman filtering and smoothing capabilities.
 
     Note: This test will be skipped if pymc-extras is not available in the environment.
@@ -967,7 +967,7 @@ def test_state_space_time_series():
     try:
         import pymc_extras.statespace.structural  # noqa: F401
     except ImportError:
-        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+        pytest.skip("pymc-extras is required for InterruptedTimeSeries tests")
 
     # Generate synthetic time series data with trend and seasonality
     rng = np.random.default_rng(seed=123)
@@ -1002,7 +1002,7 @@ def test_state_space_time_series():
     }
 
     # Initialize model with PyMC mode (more stable than JAX for testing)
-    model = cp.pymc_models.StateSpaceTimeSeries(
+    model = cp.pymc_models.InterruptedTimeSeries(
         level_order=2,  # Local linear trend (level + slope)
         seasonal_length=7,  # Weekly seasonality for shorter test period
         sample_kwargs=ss_sample_kwargs,
@@ -1098,7 +1098,7 @@ def test_state_space_time_series():
     except Exception as e:
         # If there are still compatibility issues, skip the test with a warning
         pytest.skip(
-            f"StateSpaceTimeSeries test skipped due to compatibility issue: {e}"
+            f"InterruptedTimeSeries test skipped due to compatibility issue: {e}"
         )
 
     # --- Test Case 6: Error handling --- #
@@ -1107,7 +1107,7 @@ def test_state_space_time_series():
         ValueError,
         match="coords must contain 'datetime_index' of type pandas.DatetimeIndex.",
     ):
-        model_error = cp.pymc_models.StateSpaceTimeSeries(
+        model_error = cp.pymc_models.InterruptedTimeSeries(
             sample_kwargs=ss_sample_kwargs
         )
         bad_coords = coords.copy()
@@ -1130,7 +1130,9 @@ def test_state_space_time_series():
         )
 
     # Test methods before fitting
-    unfitted_model = cp.pymc_models.StateSpaceTimeSeries(sample_kwargs=ss_sample_kwargs)
+    unfitted_model = cp.pymc_models.InterruptedTimeSeries(
+        sample_kwargs=ss_sample_kwargs
+    )
 
     with pytest.raises(RuntimeError, match="Model must be fit before"):
         unfitted_model._smooth()
@@ -1140,7 +1142,7 @@ def test_state_space_time_series():
 
     # --- Test Case 7: Model initialization with different parameters --- #
     # Test different level orders
-    model_level1 = cp.pymc_models.StateSpaceTimeSeries(
+    model_level1 = cp.pymc_models.InterruptedTimeSeries(
         level_order=1,  # Local level only (no slope)
         seasonal_length=7,
         sample_kwargs=ss_sample_kwargs,
@@ -1149,7 +1151,7 @@ def test_state_space_time_series():
     assert model_level1.level_order == 1
 
     # Test different seasonal lengths
-    model_monthly = cp.pymc_models.StateSpaceTimeSeries(
+    model_monthly = cp.pymc_models.InterruptedTimeSeries(
         level_order=2,
         seasonal_length=30,  # Monthly seasonality
         sample_kwargs=ss_sample_kwargs,

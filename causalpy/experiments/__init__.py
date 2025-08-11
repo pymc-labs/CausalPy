@@ -15,12 +15,11 @@
 
 from .diff_in_diff import DifferenceInDifferences
 from .instrumental_variable import InstrumentalVariable
-from .interrupted_time_series import InterruptedTimeSeries  # For backward compatibility
+from .interrupted_time_series import InterruptedTimeSeries
 from .inverse_propensity_weighting import InversePropensityWeighting
 from .prepostnegd import PrePostNEGD
 from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
-from .structural_time_series import StructuralTimeSeries
 from .synthetic_control import SyntheticControl
 
 __all__ = [
@@ -31,6 +30,5 @@ __all__ = [
     "RegressionDiscontinuity",
     "RegressionKink",
     "SyntheticControl",
-    "StructuralTimeSeries",
-    "InterruptedTimeSeries",  # For backward compatibility
+    "InterruptedTimeSeries",
 ]
