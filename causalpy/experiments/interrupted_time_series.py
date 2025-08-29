@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
@@ -159,22 +159,14 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _build_data(self, data: pd.DataFrame) -> xr.Dataset:
         """Build the experiment dataset as unified time series."""
-        # We need to be careful here - the original approach used separate design matrices
-        # for pre and post because patsy/dmatrices might create different encodings
-        # Let's use the complete data but ensure consistency
+        # Build design matrices for the complete dataset directly
+        y_full, X_full = dmatrices(self.formula, data)
 
-        # First build design matrices on pre-intervention data to establish the pattern
-        datapre = data[self._is_pre_intervention(data.index, self.treatment_time)]
-        y_pre, X_pre = dmatrices(self.formula, datapre)
-        self.outcome_variable_name = y_pre.design_info.column_names[0]
-        self._y_design_info = y_pre.design_info
-        self._x_design_info = X_pre.design_info
-        self.labels = X_pre.design_info.column_names
-
-        # Now build design matrices for the complete dataset using the same pattern
-        (y_full, X_full) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], data
-        )
+        # Store metadata from the design matrices
+        self.outcome_variable_name = y_full.design_info.column_names[0]
+        self._y_design_info = y_full.design_info
+        self._x_design_info = X_full.design_info
+        self.labels = X_full.design_info.column_names
 
         # Return complete time series as a single xarray Dataset
         return xr.Dataset(
