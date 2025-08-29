@@ -26,6 +26,7 @@ autodoc_mock_imports = [
     "pandas",
     "patsy",
     "pymc",
+    "pymc-extras",
     "scipy",
     "seaborn",
     "sklearn",
