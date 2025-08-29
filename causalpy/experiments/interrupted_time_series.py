@@ -89,54 +89,12 @@ class InterruptedTimeSeries(BaseExperiment):
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
-        # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
 
         self.formula = formula
 
-        # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
-        # turn into xarray.DataArray's
-        self.pre_X = xr.DataArray(
-            self.pre_X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre.index,
-                "coeffs": self.labels,
-            },
-        )
-        self.pre_y = xr.DataArray(
-            self.pre_y,  # Keep 2D shape
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapre.index, "treated_units": ["unit_0"]},
-        )
-        self.post_X = xr.DataArray(
-            self.post_X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost.index,
-                "coeffs": self.labels,
-            },
-        )
-        self.post_y = xr.DataArray(
-            self.post_y,  # Keep 2D shape
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
-        )
+        # Build unified time series data (pass data explicitly to method)
+        self._data = self._build_data(data)
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
@@ -179,6 +137,100 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
+    @staticmethod
+    def _is_pre_intervention(obs_ind, treatment_time) -> bool:
+        """Check if observation indices are pre-intervention.
+
+        :param obs_ind: Observation indices to check
+        :param treatment_time: The treatment time threshold
+        :return: Boolean mask for pre-intervention observations
+        """
+        return obs_ind < treatment_time
+
+    @staticmethod
+    def _is_post_intervention(obs_ind, treatment_time) -> bool:
+        """Check if observation indices are post-intervention.
+
+        :param obs_ind: Observation indices to check
+        :param treatment_time: The treatment time threshold
+        :return: Boolean mask for post-intervention observations
+        """
+        return obs_ind >= treatment_time
+
+    def _build_data(self, data: pd.DataFrame) -> xr.Dataset:
+        """Build the experiment dataset as unified time series."""
+        # We need to be careful here - the original approach used separate design matrices
+        # for pre and post because patsy/dmatrices might create different encodings
+        # Let's use the complete data but ensure consistency
+
+        # First build design matrices on pre-intervention data to establish the pattern
+        datapre = data[self._is_pre_intervention(data.index, self.treatment_time)]
+        y_pre, X_pre = dmatrices(self.formula, datapre)
+        self.outcome_variable_name = y_pre.design_info.column_names[0]
+        self._y_design_info = y_pre.design_info
+        self._x_design_info = X_pre.design_info
+        self.labels = X_pre.design_info.column_names
+
+        # Now build design matrices for the complete dataset using the same pattern
+        (y_full, X_full) = build_design_matrices(
+            [self._y_design_info, self._x_design_info], data
+        )
+
+        # Return complete time series as a single xarray Dataset
+        return xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    np.asarray(X_full),
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": data.index,
+                        "coeffs": self.labels,
+                    },
+                ),
+                "y": xr.DataArray(
+                    np.asarray(y_full),
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": data.index,
+                        "treated_units": ["unit_0"],
+                    },
+                ),
+            }
+        )
+
+    # Properties for pre/post intervention data access
+    @property
+    def pre_X(self) -> xr.DataArray:
+        """Pre-intervention features."""
+        return self._data.X.sel(
+            obs_ind=self._is_pre_intervention(self._data.X.obs_ind, self.treatment_time)
+        )
+
+    @property
+    def pre_y(self) -> xr.DataArray:
+        """Pre-intervention outcomes."""
+        return self._data.y.sel(
+            obs_ind=self._is_pre_intervention(self._data.y.obs_ind, self.treatment_time)
+        )
+
+    @property
+    def post_X(self) -> xr.DataArray:
+        """Post-intervention features."""
+        return self._data.X.sel(
+            obs_ind=self._is_post_intervention(
+                self._data.X.obs_ind, self.treatment_time
+            )
+        )
+
+    @property
+    def post_y(self) -> xr.DataArray:
+        """Post-intervention outcomes."""
+        return self._data.y.sel(
+            obs_ind=self._is_post_intervention(
+                self._data.y.obs_ind, self.treatment_time
+            )
+        )
+
     def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
@@ -219,7 +271,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
         h_line, h_patch = plot_xY(
-            self.datapre.index,
+            self.pre_X.obs_ind,
             self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
@@ -228,7 +280,7 @@ class InterruptedTimeSeries(BaseExperiment):
         labels = ["Pre-intervention period"]
 
         (h,) = ax[0].plot(
-            self.datapre.index,
+            self.pre_X.obs_ind,
             self.pre_y.isel(treated_units=0)
             if hasattr(self.pre_y, "isel")
             else self.pre_y[:, 0],
@@ -240,7 +292,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # post intervention period
         h_line, h_patch = plot_xY(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
@@ -249,7 +301,7 @@ class InterruptedTimeSeries(BaseExperiment):
         labels.append(counterfactual_label)
 
         ax[0].plot(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_y.isel(treated_units=0)
             if hasattr(self.post_y, "isel")
             else self.post_y[:, 0],
@@ -262,7 +314,7 @@ class InterruptedTimeSeries(BaseExperiment):
             .mean("sample")
         )  # Add .mean("sample") to get 1D array
         h = ax[0].fill_between(
-            self.datapost.index,
+            self.post_X.obs_ind,
             y1=post_pred_mu,
             y2=self.post_y.isel(treated_units=0)
             if hasattr(self.post_y, "isel")
@@ -282,20 +334,20 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
-            self.datapre.index,
+            self.pre_X.obs_ind,
             self.pre_impact.isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_impact.isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
-            self.datapost.index,
+            self.post_X.obs_ind,
             y1=self.post_impact.mean(["chain", "draw"]).isel(treated_units=0),
             color="C0",
             alpha=0.25,
@@ -306,7 +358,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_impact_cumulative.isel(treated_units=0),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
@@ -341,12 +393,12 @@ class InterruptedTimeSeries(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(self.pre_X.obs_ind, self.pre_y, "k.")
+        ax[0].plot(self.post_X.obs_ind, self.post_y, "k.")
 
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(self.pre_X.obs_ind, self.pre_pred, c="k", label="model fit")
         ax[0].plot(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_pred,
             label=counterfactual_label,
             ls=":",
@@ -356,9 +408,9 @@ class InterruptedTimeSeries(BaseExperiment):
             title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
         )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(self.pre_X.obs_ind, self.pre_impact, "k.")
         ax[1].plot(
-            self.datapost.index,
+            self.post_X.obs_ind,
             self.post_impact,
             "k.",
             label=counterfactual_label,
@@ -366,13 +418,13 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].plot(self.post_X.obs_ind, self.post_impact_cumulative, c="k")
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[0].fill_between(
-            self.datapost.index,
+            self.post_X.obs_ind,
             y1=np.squeeze(self.post_pred),
             y2=np.squeeze(self.post_y),
             color="C0",
@@ -380,7 +432,7 @@ class InterruptedTimeSeries(BaseExperiment):
             label="Causal impact",
         )
         ax[1].fill_between(
-            self.datapost.index,
+            self.post_X.obs_ind,
             y1=np.squeeze(self.post_impact),
             color="C0",
             alpha=0.25,
@@ -417,8 +469,16 @@ class InterruptedTimeSeries(BaseExperiment):
             impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
             impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
 
-            pre_data = self.datapre.copy()
-            post_data = self.datapost.copy()
+            # Reconstruct DataFrame structure from our xarray data
+            pre_data = pd.DataFrame(
+                {self.outcome_variable_name: self.pre_y.isel(treated_units=0).values},
+                index=self.pre_y.obs_ind.values,
+            )
+
+            post_data = pd.DataFrame(
+                {self.outcome_variable_name: self.post_y.isel(treated_units=0).values},
+                index=self.post_y.obs_ind.values,
+            )
 
             pre_data["prediction"] = (
                 az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
@@ -474,8 +534,17 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         Recover the data of the experiment along with the prediction and causal impact information.
         """
-        pre_data = self.datapre.copy()
-        post_data = self.datapost.copy()
+        # Reconstruct DataFrame structure from our xarray data
+        pre_data = pd.DataFrame(
+            {self.outcome_variable_name: self.pre_y.isel(treated_units=0).values},
+            index=self.pre_y.obs_ind.values,
+        )
+
+        post_data = pd.DataFrame(
+            {self.outcome_variable_name: self.post_y.isel(treated_units=0).values},
+            index=self.post_y.obs_ind.values,
+        )
+
         pre_data["prediction"] = self.pre_pred
         post_data["prediction"] = self.post_pred
         pre_data["impact"] = self.pre_impact
