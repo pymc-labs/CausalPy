@@ -85,18 +85,24 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
-        # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.expt_type = "Pre-Post Fit"
-
         self.formula = formula
-
-        # Build unified time series data (pass data explicitly to method)
         self._data = self._build_data(data)
+        self.algorithm()
 
-        # fit the model to the observed (pre-intervention) data
+    def algorithm(self) -> None:
+        """Execute the core interrupted time series algorithm.
+
+        This method implements the standard interrupted time series analysis workflow:
+        1. Fit model on pre-intervention data
+        2. Score model goodness of fit
+        3. Generate predictions for pre and post periods
+        4. Calculate causal impact and cumulative impact
+        """
+        # 1. Fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
                 "coeffs": self.labels,
@@ -110,16 +116,16 @@ class InterruptedTimeSeries(BaseExperiment):
         else:
             raise ValueError("Model type not recognized")
 
-        # score the goodness of fit to the pre-intervention data
+        # 2. Score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        # get the model predictions of the observed (pre-intervention) data
+        # 3a. Get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.pre_X)
 
-        # calculate the counterfactual
+        # 3b. Calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)
 
-        # calculate impact - use appropriate y data format for each model type
+        # 4a. Calculate impact - use appropriate y data format for each model type
         if isinstance(self.model, PyMCModel):
             # PyMC models work with 2D data
             self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
@@ -133,6 +139,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 self.post_y.isel(treated_units=0), self.post_pred
             )
 
+        # 4b. Calculate cumulative impact
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
