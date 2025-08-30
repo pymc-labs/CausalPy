@@ -105,18 +105,27 @@ class InterruptedTimeSeries(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             COORDS = {
                 "coeffs": self.labels,
-                "obs_ind": np.arange(self.pre_X.shape[0]),
+                "obs_ind": np.arange(self.data.X.sel(period="pre").shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            self.model.fit(
+                X=self.data.X.sel(period="pre"),
+                y=self.data.y.sel(period="pre"),
+                coords=COORDS,
+            )
         elif isinstance(self.model, RegressorMixin):
             # For OLS models, use 1D y data
-            self.model.fit(X=self.pre_X, y=self.pre_y.isel(treated_units=0))
+            self.model.fit(
+                X=self.data.X.sel(period="pre"),
+                y=self.data.y.sel(period="pre").isel(treated_units=0),
+            )
         else:
             raise ValueError("Model type not recognized")
 
         # 2. Score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        self.score = self.model.score(
+            X=self.data.X.sel(period="pre"), y=self.data.y.sel(period="pre")
+        )
 
         # 3. Generate predictions for the full dataset using unified approach
         # This creates predictions aligned with our complete time series
@@ -187,53 +196,26 @@ class InterruptedTimeSeries(BaseExperiment):
         # Create period coordinate based on treatment time
         period_coord = xr.where(data.index < self.treatment_time, "pre", "post")
 
-        # Return complete time series as a single xarray Dataset
-        X_array = xr.DataArray(
-            np.asarray(X_full),
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": data.index,
-                "coeffs": self.labels,
-                "period": ("obs_ind", period_coord),
-            },
-        )
+        # Return as a xarray.Dataset
+        common_coords = {
+            "obs_ind": data.index,
+            "period": ("obs_ind", period_coord),
+        }
 
-        y_array = xr.DataArray(
-            np.asarray(y_full),
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": data.index,
-                "treated_units": ["unit_0"],
-                "period": ("obs_ind", period_coord),
-            },
-        )
-
-        # Create dataset and use set_xindex to make period selectable with .sel()
-        dataset = xr.Dataset({"X": X_array, "y": y_array})
-        dataset = dataset.set_xindex("period")
-
-        return dataset
-
-    # Properties for pre/post intervention data access
-    @property
-    def pre_X(self) -> xr.DataArray:
-        """Pre-intervention features."""
-        return self.data.X.sel(period="pre")
-
-    @property
-    def pre_y(self) -> xr.DataArray:
-        """Pre-intervention outcomes."""
-        return self.data.y.sel(period="pre")
-
-    @property
-    def post_X(self) -> xr.DataArray:
-        """Post-intervention features."""
-        return self.data.X.sel(period="post")
-
-    @property
-    def post_y(self) -> xr.DataArray:
-        """Post-intervention outcomes."""
-        return self.data.y.sel(period="post")
+        return xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    np.asarray(X_full),
+                    dims=["obs_ind", "coeffs"],
+                    coords={**common_coords, "coeffs": self.labels},
+                ),
+                "y": xr.DataArray(
+                    np.asarray(y_full),
+                    dims=["obs_ind", "treated_units"],
+                    coords={**common_coords, "treated_units": ["unit_0"]},
+                ),
+            }
+        ).set_xindex("period")
 
     def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
@@ -285,7 +267,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
         h_line, h_patch = plot_xY(
-            self.pre_X.obs_ind,
+            self.data.X.sel(period="pre").obs_ind,
             pre_pred.mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
@@ -294,8 +276,8 @@ class InterruptedTimeSeries(BaseExperiment):
         labels = ["Pre-intervention period"]
 
         (h,) = ax[0].plot(
-            self.pre_X.obs_ind,
-            self.pre_y.isel(treated_units=0),
+            self.data.X.sel(period="pre").obs_ind,
+            self.data.y.sel(period="pre").isel(treated_units=0),
             "k.",
             label="Observations",
         )
@@ -304,7 +286,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # post intervention period
         h_line, h_patch = plot_xY(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             post_pred.mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
@@ -313,17 +295,17 @@ class InterruptedTimeSeries(BaseExperiment):
         labels.append(counterfactual_label)
 
         ax[0].plot(
-            self.post_X.obs_ind,
-            self.post_y.isel(treated_units=0),
+            self.data.X.sel(period="post").obs_ind,
+            self.data.y.sel(period="post").isel(treated_units=0),
             "k.",
         )
 
         # Shaded causal effect - use direct calculation
         post_pred_mu = post_pred.mu.mean(dim=["chain", "draw"]).isel(treated_units=0)
         h = ax[0].fill_between(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             y1=post_pred_mu,
-            y2=self.post_y.isel(treated_units=0),
+            y2=self.data.y.sel(period="post").isel(treated_units=0),
             color="C0",
             alpha=0.25,
         )
@@ -339,20 +321,20 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
-            self.pre_X.obs_ind,
+            self.data.X.sel(period="pre").obs_ind,
             self.impact.sel(period="pre").isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             self.impact.sel(period="post").isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             y1=self.impact.sel(period="post")
             .mean(["chain", "draw"])
             .isel(treated_units=0),
@@ -365,7 +347,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             self.post_impact_cumulative.isel(treated_units=0),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
@@ -424,12 +406,18 @@ class InterruptedTimeSeries(BaseExperiment):
             pre_pred = self.predictions.sel(period="pre")
             post_pred = self.predictions.sel(period="post")
 
-        ax[0].plot(self.pre_X.obs_ind, self.pre_y, "k.")
-        ax[0].plot(self.post_X.obs_ind, self.post_y, "k.")
-
-        ax[0].plot(self.pre_X.obs_ind, pre_pred, c="k", label="model fit")
         ax[0].plot(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="pre").obs_ind, self.data.y.sel(period="pre"), "k."
+        )
+        ax[0].plot(
+            self.data.X.sel(period="post").obs_ind, self.data.y.sel(period="post"), "k."
+        )
+
+        ax[0].plot(
+            self.data.X.sel(period="pre").obs_ind, pre_pred, c="k", label="model fit"
+        )
+        ax[0].plot(
+            self.data.X.sel(period="post").obs_ind,
             post_pred,
             label=counterfactual_label,
             ls=":",
@@ -439,9 +427,11 @@ class InterruptedTimeSeries(BaseExperiment):
             title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
         )
 
-        ax[1].plot(self.pre_X.obs_ind, self.impact.sel(period="pre"), "k.")
         ax[1].plot(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="pre").obs_ind, self.impact.sel(period="pre"), "k."
+        )
+        ax[1].plot(
+            self.data.X.sel(period="post").obs_ind,
             self.impact.sel(period="post"),
             "k.",
             label=counterfactual_label,
@@ -449,21 +439,23 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.post_X.obs_ind, self.post_impact_cumulative, c="k")
+        ax[2].plot(
+            self.data.X.sel(period="post").obs_ind, self.post_impact_cumulative, c="k"
+        )
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[0].fill_between(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             y1=np.squeeze(post_pred),
-            y2=np.squeeze(self.post_y),
+            y2=np.squeeze(self.data.y.sel(period="post")),
             color="C0",
             alpha=0.25,
             label="Causal impact",
         )
         ax[1].fill_between(
-            self.post_X.obs_ind,
+            self.data.X.sel(period="post").obs_ind,
             y1=np.squeeze(self.impact.sel(period="post")),
             color="C0",
             alpha=0.25,
