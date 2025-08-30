@@ -90,7 +90,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.treatment_time = treatment_time
         self.expt_type = "Pre-Post Fit"
         self.formula = formula
-        self._data = self._build_data(data)
+        self.data = self._build_data(data)
         self.algorithm()
 
     def algorithm(self) -> None:
@@ -201,33 +201,29 @@ class InterruptedTimeSeries(BaseExperiment):
     @property
     def pre_X(self) -> xr.DataArray:
         """Pre-intervention features."""
-        return self._data.X.sel(
-            obs_ind=self._is_pre_intervention(self._data.X.obs_ind, self.treatment_time)
+        return self.data.X.sel(
+            obs_ind=self._is_pre_intervention(self.data.X.obs_ind, self.treatment_time)
         )
 
     @property
     def pre_y(self) -> xr.DataArray:
         """Pre-intervention outcomes."""
-        return self._data.y.sel(
-            obs_ind=self._is_pre_intervention(self._data.y.obs_ind, self.treatment_time)
+        return self.data.y.sel(
+            obs_ind=self._is_pre_intervention(self.data.y.obs_ind, self.treatment_time)
         )
 
     @property
     def post_X(self) -> xr.DataArray:
         """Post-intervention features."""
-        return self._data.X.sel(
-            obs_ind=self._is_post_intervention(
-                self._data.X.obs_ind, self.treatment_time
-            )
+        return self.data.X.sel(
+            obs_ind=self._is_post_intervention(self.data.X.obs_ind, self.treatment_time)
         )
 
     @property
     def post_y(self) -> xr.DataArray:
         """Post-intervention outcomes."""
-        return self._data.y.sel(
-            obs_ind=self._is_post_intervention(
-                self._data.y.obs_ind, self.treatment_time
-            )
+        return self.data.y.sel(
+            obs_ind=self._is_post_intervention(self.data.y.obs_ind, self.treatment_time)
         )
 
     def input_validation(self, data, treatment_time):
