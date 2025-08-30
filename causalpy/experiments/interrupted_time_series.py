@@ -17,7 +17,6 @@ Interrupted Time Series Analysis
 
 from typing import List, Union
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -26,7 +25,7 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import get_hdi_to_df, plot_xY
+from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -119,19 +118,53 @@ class InterruptedTimeSeries(BaseExperiment):
         # 2. Score the goodness of fit to the pre-intervention data
         self.score = self.model.score(X=self.pre_X, y=self.pre_y)
 
-        # 3a. Get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
-
-        # 3b. Calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
-
-        # 4a. Calculate impact - use appropriate y data format for each model type
+        # 3. Generate predictions for the full dataset using unified approach
+        # This creates predictions aligned with our complete time series
         if isinstance(self.model, PyMCModel):
-            # PyMC models work with 2D data
+            # PyMC models expect xarray DataArrays
+            self.predictions = self.model.predict(X=self.data.X)
+            # Add period coordinate to predictions - key insight for unified operations!
+            self.predictions = self.predictions.assign_coords(
+                period=("obs_ind", self.data.period.data)
+            )
+        else:
+            # Sklearn models expect numpy arrays
+            pred_array = self.model.predict(X=self.data.X.values)
+            # Create xarray DataArray with period coordinate for unified operations
+            self.predictions = xr.DataArray(
+                pred_array,
+                dims=["obs_ind"],
+                coords={
+                    "obs_ind": self.data.obs_ind,
+                    "period": ("obs_ind", self.data.period.data),
+                },
+            )
+
+        # 4. Use native xarray operations on unified predictions with period coordinate
+        # No more manual indexing - leverage xarray's .where() operations!
+        if isinstance(self.model, PyMCModel):
+            # For PyMC models, use .where() on the posterior_predictive dataset
+            pp = self.predictions.posterior_predictive
+            pre_pp = pp.where(pp.period == "pre", drop=True)
+            post_pp = pp.where(pp.period == "post", drop=True)
+
+            # Create new InferenceData objects for pre/post with the filtered data
+            import arviz as az
+
+            self.pre_pred = az.InferenceData(posterior_predictive=pre_pp)
+            self.post_pred = az.InferenceData(posterior_predictive=post_pp)
+
             self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
             self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
-        elif isinstance(self.model, RegressorMixin):
-            # SKL models work with 1D data
+        else:
+            # For sklearn models, same clean .where() approach
+            self.pre_pred = self.predictions.where(
+                self.predictions.period == "pre", drop=True
+            )
+            self.post_pred = self.predictions.where(
+                self.predictions.period == "post", drop=True
+            )
+
             self.pre_impact = self.model.calculate_impact(
                 self.pre_y.isel(treated_units=0), self.pre_pred
             )
@@ -144,28 +177,8 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
-    @staticmethod
-    def _is_pre_intervention(obs_ind, treatment_time) -> bool:
-        """Check if observation indices are pre-intervention.
-
-        :param obs_ind: Observation indices to check
-        :param treatment_time: The treatment time threshold
-        :return: Boolean mask for pre-intervention observations
-        """
-        return obs_ind < treatment_time
-
-    @staticmethod
-    def _is_post_intervention(obs_ind, treatment_time) -> bool:
-        """Check if observation indices are post-intervention.
-
-        :param obs_ind: Observation indices to check
-        :param treatment_time: The treatment time threshold
-        :return: Boolean mask for post-intervention observations
-        """
-        return obs_ind >= treatment_time
-
     def _build_data(self, data: pd.DataFrame) -> xr.Dataset:
-        """Build the experiment dataset as unified time series."""
+        """Build the experiment dataset as unified time series with period coordinate."""
         # Build design matrices for the complete dataset directly
         y_full, X_full = dmatrices(self.formula, data)
 
@@ -175,56 +188,54 @@ class InterruptedTimeSeries(BaseExperiment):
         self._x_design_info = X_full.design_info
         self.labels = X_full.design_info.column_names
 
+        # Create period coordinate based on treatment time
+        period_coord = xr.where(data.index < self.treatment_time, "pre", "post")
+
         # Return complete time series as a single xarray Dataset
-        return xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    np.asarray(X_full),
-                    dims=["obs_ind", "coeffs"],
-                    coords={
-                        "obs_ind": data.index,
-                        "coeffs": self.labels,
-                    },
-                ),
-                "y": xr.DataArray(
-                    np.asarray(y_full),
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": data.index,
-                        "treated_units": ["unit_0"],
-                    },
-                ),
-            }
+        X_array = xr.DataArray(
+            np.asarray(X_full),
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": data.index,
+                "coeffs": self.labels,
+            },
         )
+
+        y_array = xr.DataArray(
+            np.asarray(y_full),
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": data.index,
+                "treated_units": ["unit_0"],
+            },
+        )
+
+        # Create dataset and add period as a coordinate
+        dataset = xr.Dataset({"X": X_array, "y": y_array})
+        dataset = dataset.assign_coords(period=("obs_ind", period_coord))
+
+        return dataset
 
     # Properties for pre/post intervention data access
     @property
     def pre_X(self) -> xr.DataArray:
         """Pre-intervention features."""
-        return self.data.X.sel(
-            obs_ind=self._is_pre_intervention(self.data.X.obs_ind, self.treatment_time)
-        )
+        return self.data.X.where(self.data.period == "pre", drop=True)
 
     @property
     def pre_y(self) -> xr.DataArray:
         """Pre-intervention outcomes."""
-        return self.data.y.sel(
-            obs_ind=self._is_pre_intervention(self.data.y.obs_ind, self.treatment_time)
-        )
+        return self.data.y.where(self.data.period == "pre", drop=True)
 
     @property
     def post_X(self) -> xr.DataArray:
         """Post-intervention features."""
-        return self.data.X.sel(
-            obs_ind=self._is_post_intervention(self.data.X.obs_ind, self.treatment_time)
-        )
+        return self.data.X.where(self.data.period == "post", drop=True)
 
     @property
     def post_y(self) -> xr.DataArray:
         """Post-intervention outcomes."""
-        return self.data.y.sel(
-            obs_ind=self._is_post_intervention(self.data.y.obs_ind, self.treatment_time)
-        )
+        return self.data.y.where(self.data.period == "post", drop=True)
 
     def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
@@ -304,10 +315,10 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         # Shaded causal effect
         post_pred_mu = (
-            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+            self.post_pred["posterior_predictive"]
+            .mu.mean(dim=["chain", "draw"])
             .isel(treated_units=0)
-            .mean("sample")
-        )  # Add .mean("sample") to get 1D array
+        )
         h = ax[0].fill_between(
             self.post_X.obs_ind,
             y1=post_pred_mu,
@@ -456,94 +467,64 @@ class InterruptedTimeSeries(BaseExperiment):
         :param hdi_prob:
             Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
         """
-        if isinstance(self.model, PyMCModel):
-            hdi_pct = int(round(hdi_prob * 100))
-
-            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-
-            # Reconstruct DataFrame structure from our xarray data
-            pre_data = pd.DataFrame(
-                {self.outcome_variable_name: self.pre_y.isel(treated_units=0).values},
-                index=self.pre_y.obs_ind.values,
-            )
-
-            post_data = pd.DataFrame(
-                {self.outcome_variable_name: self.post_y.isel(treated_units=0).values},
-                index=self.post_y.obs_ind.values,
-            )
-
-            pre_data["prediction"] = (
-                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .isel(treated_units=0)
-                .values
-            )
-            post_data["prediction"] = (
-                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .isel(treated_units=0)
-                .values
-            )
-            hdi_pre_pred = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
-            hdi_post_pred = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
-            # Select the single unit from the MultiIndex results
-            pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
-                "unit_0", level="treated_units"
-            ).set_index(pre_data.index)
-            post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
-                "unit_0", level="treated_units"
-            ).set_index(post_data.index)
-
-            pre_data["impact"] = (
-                self.pre_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
-            )
-            post_data["impact"] = (
-                self.post_impact.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-                .values
-            )
-            hdi_pre_impact = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
-            hdi_post_impact = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
-            # Select the single unit from the MultiIndex results
-            pre_data[[impact_lower_col, impact_upper_col]] = hdi_pre_impact.xs(
-                "unit_0", level="treated_units"
-            ).set_index(pre_data.index)
-            post_data[[impact_lower_col, impact_upper_col]] = hdi_post_impact.xs(
-                "unit_0", level="treated_units"
-            ).set_index(post_data.index)
-
-            self.plot_data = pd.concat([pre_data, post_data])
-
-            return self.plot_data
-        else:
+        if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
+
+        hdi_pct = int(round(hdi_prob * 100))
+
+        # Start with the outcome data from our unified dataset
+        plot_data = pd.DataFrame(
+            {self.outcome_variable_name: self.data.y.isel(treated_units=0).values},
+            index=self.data.y.obs_ind.values,
+        )
+
+        # Extract predictions directly from unified predictions object
+        pred_mu = self.predictions["posterior_predictive"].mu.isel(treated_units=0)
+        plot_data["prediction"] = pred_mu.mean(dim=["chain", "draw"]).values
+
+        # Calculate impact directly from unified data
+        observed = self.data.y.isel(treated_units=0)
+        predicted = pred_mu.mean(dim=["chain", "draw"])
+        plot_data["impact"] = (observed - predicted).values
+
+        # Calculate HDI bounds directly using arviz
+        import arviz as az
+
+        pred_hdi = az.hdi(pred_mu, hdi_prob=hdi_prob)
+        impact_data = observed - pred_mu
+        impact_hdi = az.hdi(impact_data, hdi_prob=hdi_prob)
+
+        # Extract HDI bounds from xarray Dataset results
+        # Use the actual variable name that arviz creates (usually the first data variable)
+        pred_var_name = list(pred_hdi.data_vars.keys())[0]
+        impact_var_name = list(impact_hdi.data_vars.keys())[0]
+
+        pred_hdi_data = pred_hdi[pred_var_name]
+        impact_hdi_data = impact_hdi[impact_var_name]
+
+        plot_data[f"pred_hdi_lower_{hdi_pct}"] = pred_hdi_data.isel(hdi=0).values
+        plot_data[f"pred_hdi_upper_{hdi_pct}"] = pred_hdi_data.isel(hdi=1).values
+        plot_data[f"impact_hdi_lower_{hdi_pct}"] = impact_hdi_data.isel(hdi=0).values
+        plot_data[f"impact_hdi_upper_{hdi_pct}"] = impact_hdi_data.isel(hdi=1).values
+
+        self.plot_data = plot_data
+        return plot_data
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
         """
-        # Reconstruct DataFrame structure from our xarray data
-        pre_data = pd.DataFrame(
-            {self.outcome_variable_name: self.pre_y.isel(treated_units=0).values},
-            index=self.pre_y.obs_ind.values,
+        # Create unified DataFrame from our xarray data
+        plot_data = pd.DataFrame(
+            {self.outcome_variable_name: self.data.y.isel(treated_units=0).values},
+            index=self.data.y.obs_ind.values,
         )
 
-        post_data = pd.DataFrame(
-            {self.outcome_variable_name: self.post_y.isel(treated_units=0).values},
-            index=self.post_y.obs_ind.values,
-        )
+        # With unified predictions, extract values directly (no more reconstruction needed!)
+        plot_data["prediction"] = self.predictions.values
+        plot_data["impact"] = (
+            self.data.y.isel(treated_units=0) - self.predictions
+        ).values
 
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
-        self.plot_data = pd.concat([pre_data, post_data])
-
+        self.plot_data = plot_data
         return self.plot_data
