@@ -123,14 +123,14 @@ class InterruptedTimeSeries(BaseExperiment):
         if isinstance(self.model, PyMCModel):
             # PyMC models expect xarray DataArrays
             self.predictions = self.model.predict(X=self.data.X)
-            # Add period coordinate to predictions - key insight for unified operations!
+            # Add period coordinate to predictions - InferenceData handles multiple data arrays
             self.predictions = self.predictions.assign_coords(
                 period=("obs_ind", self.data.period.data)
             )
         else:
             # Sklearn models expect numpy arrays
             pred_array = self.model.predict(X=self.data.X.values)
-            # Create xarray DataArray with period coordinate for unified operations
+            # Create xarray DataArray with period coordinate
             self.predictions = xr.DataArray(
                 pred_array,
                 dims=["obs_ind"],
@@ -138,44 +138,40 @@ class InterruptedTimeSeries(BaseExperiment):
                     "obs_ind": self.data.obs_ind,
                     "period": ("obs_ind", self.data.period.data),
                 },
-            )
+            ).set_xindex("period")
 
-        # 4. Use native xarray operations on unified predictions with period coordinate
-        # No more manual indexing - leverage xarray's .where() operations!
+        # 4. Calculate unified impact with period coordinate - no more splitting!
         if isinstance(self.model, PyMCModel):
-            # For PyMC models, use .where() on the posterior_predictive dataset
-            pp = self.predictions.posterior_predictive
-            pre_pp = pp.where(pp.period == "pre", drop=True)
-            post_pp = pp.where(pp.period == "post", drop=True)
-
-            # Create new InferenceData objects for pre/post with the filtered data
-            import arviz as az
-
-            self.pre_pred = az.InferenceData(posterior_predictive=pre_pp)
-            self.post_pred = az.InferenceData(posterior_predictive=post_pp)
-
-            self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-            self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
+            # Calculate impact for the entire time series at once
+            self.impact = self.model.calculate_impact(self.data.y, self.predictions)
+            # Assign period coordinate to unified impact and set index
+            self.impact = self.impact.assign_coords(
+                period=("obs_ind", self.data.period.data)
+            ).set_xindex("period")
         else:
-            # For sklearn models, same clean .where() approach
-            self.pre_pred = self.predictions.where(
-                self.predictions.period == "pre", drop=True
-            )
-            self.post_pred = self.predictions.where(
-                self.predictions.period == "post", drop=True
-            )
+            # For sklearn: calculate unified impact as DataArray
+            observed_values = self.data.y.isel(treated_units=0).values
+            predicted_values = self.predictions.values
+            impact_values = observed_values - predicted_values
 
-            self.pre_impact = self.model.calculate_impact(
-                self.pre_y.isel(treated_units=0), self.pre_pred
-            )
-            self.post_impact = self.model.calculate_impact(
-                self.post_y.isel(treated_units=0), self.post_pred
-            )
+            self.impact = xr.DataArray(
+                impact_values,
+                dims=["obs_ind"],
+                coords={
+                    "obs_ind": self.data.obs_ind,
+                    "period": ("obs_ind", self.data.period.data),
+                },
+            ).set_xindex("period")
 
-        # 4b. Calculate cumulative impact
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
-        )
+        # 5. Calculate cumulative impact (only on post-intervention period)
+        post_impact = self.impact.sel(period="post")
+        if isinstance(self.model, PyMCModel):
+            self.post_impact_cumulative = self.model.calculate_cumulative_impact(
+                post_impact
+            )
+        else:
+            # For sklearn: simple cumulative sum
+            self.post_impact_cumulative = post_impact.cumsum()
 
     def _build_data(self, data: pd.DataFrame) -> xr.Dataset:
         """Build the experiment dataset as unified time series with period coordinate."""
@@ -198,6 +194,7 @@ class InterruptedTimeSeries(BaseExperiment):
             coords={
                 "obs_ind": data.index,
                 "coeffs": self.labels,
+                "period": ("obs_ind", period_coord),
             },
         )
 
@@ -207,12 +204,13 @@ class InterruptedTimeSeries(BaseExperiment):
             coords={
                 "obs_ind": data.index,
                 "treated_units": ["unit_0"],
+                "period": ("obs_ind", period_coord),
             },
         )
 
-        # Create dataset and add period as a coordinate
+        # Create dataset and use set_xindex to make period selectable with .sel()
         dataset = xr.Dataset({"X": X_array, "y": y_array})
-        dataset = dataset.assign_coords(period=("obs_ind", period_coord))
+        dataset = dataset.set_xindex("period")
 
         return dataset
 
@@ -220,22 +218,33 @@ class InterruptedTimeSeries(BaseExperiment):
     @property
     def pre_X(self) -> xr.DataArray:
         """Pre-intervention features."""
-        return self.data.X.where(self.data.period == "pre", drop=True)
+        return self.data.X.sel(period="pre")
 
     @property
     def pre_y(self) -> xr.DataArray:
         """Pre-intervention outcomes."""
-        return self.data.y.where(self.data.period == "pre", drop=True)
+        return self.data.y.sel(period="pre")
 
     @property
     def post_X(self) -> xr.DataArray:
         """Post-intervention features."""
-        return self.data.X.where(self.data.period == "post", drop=True)
+        return self.data.X.sel(period="post")
 
     @property
     def post_y(self) -> xr.DataArray:
         """Post-intervention outcomes."""
-        return self.data.y.where(self.data.period == "post", drop=True)
+        return self.data.y.sel(period="post")
+
+    # Simple backward-compatible properties for impact only (still used in plotting)
+    @property
+    def pre_impact(self):
+        """Pre-intervention impact (backward compatibility)."""
+        return self.impact.sel(period="pre")
+
+    @property
+    def post_impact(self):
+        """Post-intervention impact (backward compatibility)."""
+        return self.impact.sel(period="post")
 
     def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
@@ -266,7 +275,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self, round_to=None, **kwargs
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
-        Plot the results
+        Plot the results using unified predictions with period coordinates.
 
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
@@ -274,11 +283,21 @@ class InterruptedTimeSeries(BaseExperiment):
         counterfactual_label = "Counterfactual"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+
+        # Extract pre/post predictions - InferenceData doesn't support .sel() with period
+        # but .where() works fine with coordinates
+        pre_pred = self.predictions["posterior_predictive"].where(
+            self.predictions["posterior_predictive"].period == "pre", drop=True
+        )
+        post_pred = self.predictions["posterior_predictive"].where(
+            self.predictions["posterior_predictive"].period == "post", drop=True
+        )
+
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
         h_line, h_patch = plot_xY(
             self.pre_X.obs_ind,
-            self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
+            pre_pred.mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -287,9 +306,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         (h,) = ax[0].plot(
             self.pre_X.obs_ind,
-            self.pre_y.isel(treated_units=0)
-            if hasattr(self.pre_y, "isel")
-            else self.pre_y[:, 0],
+            self.pre_y.isel(treated_units=0),
             "k.",
             label="Observations",
         )
@@ -299,7 +316,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # post intervention period
         h_line, h_patch = plot_xY(
             self.post_X.obs_ind,
-            self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
+            post_pred.mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -308,23 +325,16 @@ class InterruptedTimeSeries(BaseExperiment):
 
         ax[0].plot(
             self.post_X.obs_ind,
-            self.post_y.isel(treated_units=0)
-            if hasattr(self.post_y, "isel")
-            else self.post_y[:, 0],
+            self.post_y.isel(treated_units=0),
             "k.",
         )
-        # Shaded causal effect
-        post_pred_mu = (
-            self.post_pred["posterior_predictive"]
-            .mu.mean(dim=["chain", "draw"])
-            .isel(treated_units=0)
-        )
+
+        # Shaded causal effect - use direct calculation
+        post_pred_mu = post_pred.mu.mean(dim=["chain", "draw"]).isel(treated_units=0)
         h = ax[0].fill_between(
             self.post_X.obs_ind,
             y1=post_pred_mu,
-            y2=self.post_y.isel(treated_units=0)
-            if hasattr(self.post_y, "isel")
-            else self.post_y[:, 0],
+            y2=self.post_y.isel(treated_units=0),
             color="C0",
             alpha=0.25,
         )
@@ -390,7 +400,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
         """
-        Plot the results
+        Plot the results using unified predictions with period coordinates.
 
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
@@ -399,13 +409,37 @@ class InterruptedTimeSeries(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
+        # Extract pre/post predictions - handle PyMC vs sklearn differently
+        if isinstance(self.model, PyMCModel):
+            # For PyMC models, predictions is InferenceData - use .where() with coordinates
+            pre_pred = (
+                self.predictions["posterior_predictive"]
+                .where(
+                    self.predictions["posterior_predictive"].period == "pre", drop=True
+                )
+                .mu.mean(dim=["chain", "draw"])
+                .isel(treated_units=0)
+            )
+            post_pred = (
+                self.predictions["posterior_predictive"]
+                .where(
+                    self.predictions["posterior_predictive"].period == "post", drop=True
+                )
+                .mu.mean(dim=["chain", "draw"])
+                .isel(treated_units=0)
+            )
+        else:
+            # For sklearn models, predictions is DataArray - use .sel() with indexed coordinates
+            pre_pred = self.predictions.sel(period="pre")
+            post_pred = self.predictions.sel(period="post")
+
         ax[0].plot(self.pre_X.obs_ind, self.pre_y, "k.")
         ax[0].plot(self.post_X.obs_ind, self.post_y, "k.")
 
-        ax[0].plot(self.pre_X.obs_ind, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(self.pre_X.obs_ind, pre_pred, c="k", label="model fit")
         ax[0].plot(
             self.post_X.obs_ind,
-            self.post_pred,
+            post_pred,
             label=counterfactual_label,
             ls=":",
             c="k",
@@ -431,7 +465,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Shaded causal effect
         ax[0].fill_between(
             self.post_X.obs_ind,
-            y1=np.squeeze(self.post_pred),
+            y1=np.squeeze(post_pred),
             y2=np.squeeze(self.post_y),
             color="C0",
             alpha=0.25,
@@ -482,20 +516,18 @@ class InterruptedTimeSeries(BaseExperiment):
         pred_mu = self.predictions["posterior_predictive"].mu.isel(treated_units=0)
         plot_data["prediction"] = pred_mu.mean(dim=["chain", "draw"]).values
 
-        # Calculate impact directly from unified data
-        observed = self.data.y.isel(treated_units=0)
-        predicted = pred_mu.mean(dim=["chain", "draw"])
-        plot_data["impact"] = (observed - predicted).values
+        # Extract impact directly from unified impact - no more calculation needed!
+        plot_data["impact"] = (
+            self.impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
 
         # Calculate HDI bounds directly using arviz
         import arviz as az
 
         pred_hdi = az.hdi(pred_mu, hdi_prob=hdi_prob)
-        impact_data = observed - pred_mu
-        impact_hdi = az.hdi(impact_data, hdi_prob=hdi_prob)
+        impact_hdi = az.hdi(self.impact.isel(treated_units=0), hdi_prob=hdi_prob)
 
         # Extract HDI bounds from xarray Dataset results
-        # Use the actual variable name that arviz creates (usually the first data variable)
         pred_var_name = list(pred_hdi.data_vars.keys())[0]
         impact_var_name = list(impact_hdi.data_vars.keys())[0]
 
@@ -520,11 +552,9 @@ class InterruptedTimeSeries(BaseExperiment):
             index=self.data.y.obs_ind.values,
         )
 
-        # With unified predictions, extract values directly (no more reconstruction needed!)
+        # Extract directly from unified data structures - ultimate simplification!
         plot_data["prediction"] = self.predictions.values
-        plot_data["impact"] = (
-            self.data.y.isel(treated_units=0) - self.predictions
-        ).values
+        plot_data["impact"] = self.impact.values
 
         self.plot_data = plot_data
         return self.plot_data
