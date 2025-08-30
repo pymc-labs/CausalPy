@@ -17,6 +17,7 @@ Interrupted Time Series Analysis
 
 from typing import List, Union
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -505,8 +506,6 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
         # Calculate HDI bounds directly using arviz
-        import arviz as az
-
         pred_hdi = az.hdi(pred_mu, hdi_prob=hdi_prob)
         impact_hdi = az.hdi(self.impact.isel(treated_units=0), hdi_prob=hdi_prob)
 
