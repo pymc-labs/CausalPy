@@ -140,7 +140,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 },
             ).set_xindex("period")
 
-        # 4. Calculate unified impact with period coordinate - no more splitting!
+        # 4. Calculate impact
         if isinstance(self.model, PyMCModel):
             # Calculate impact for the entire time series at once
             self.impact = self.model.calculate_impact(self.data.y, self.predictions)
@@ -234,17 +234,6 @@ class InterruptedTimeSeries(BaseExperiment):
     def post_y(self) -> xr.DataArray:
         """Post-intervention outcomes."""
         return self.data.y.sel(period="post")
-
-    # Simple backward-compatible properties for impact only (still used in plotting)
-    @property
-    def pre_impact(self):
-        """Pre-intervention impact (backward compatibility)."""
-        return self.impact.sel(period="pre")
-
-    @property
-    def post_impact(self):
-        """Post-intervention impact (backward compatibility)."""
-        return self.impact.sel(period="post")
 
     def input_validation(self, data, treatment_time):
         """Validate the input data and model formula for correctness"""
@@ -351,20 +340,22 @@ class InterruptedTimeSeries(BaseExperiment):
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.pre_X.obs_ind,
-            self.pre_impact.isel(treated_units=0),
+            self.impact.sel(period="pre").isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.post_X.obs_ind,
-            self.post_impact.isel(treated_units=0),
+            self.impact.sel(period="post").isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.post_X.obs_ind,
-            y1=self.post_impact.mean(["chain", "draw"]).isel(treated_units=0),
+            y1=self.impact.sel(period="post")
+            .mean(["chain", "draw"])
+            .isel(treated_units=0),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -448,10 +439,10 @@ class InterruptedTimeSeries(BaseExperiment):
             title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
         )
 
-        ax[1].plot(self.pre_X.obs_ind, self.pre_impact, "k.")
+        ax[1].plot(self.pre_X.obs_ind, self.impact.sel(period="pre"), "k.")
         ax[1].plot(
             self.post_X.obs_ind,
-            self.post_impact,
+            self.impact.sel(period="post"),
             "k.",
             label=counterfactual_label,
         )
@@ -473,7 +464,7 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         ax[1].fill_between(
             self.post_X.obs_ind,
-            y1=np.squeeze(self.post_impact),
+            y1=np.squeeze(self.impact.sel(period="post")),
             color="C0",
             alpha=0.25,
             label="Causal impact",
