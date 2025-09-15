@@ -26,7 +26,6 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -243,127 +242,205 @@ class InterruptedTimeSeries(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(
-        self, round_to=None, **kwargs
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
-        """
-        Plot the results using unified predictions with period coordinates.
+    def plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+        """Plot the interrupted time series analysis results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Creates a unified plot that works for both Bayesian (PyMC) and OLS (sklearn) models,
+        automatically detecting the model type and adjusting the visualization accordingly.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimal places to round displayed values. Defaults to 2.
+            Use None to return raw numbers.
+        **kwargs
+            Additional keyword arguments passed to matplotlib plotting functions
+
+        Returns
+        -------
+        tuple[plt.Figure, List[plt.Axes]]
+            Matplotlib figure and list of axes objects
         """
+        # Get plot data using the appropriate method based on model type
+        if isinstance(self.model, PyMCModel):
+            plot_data = self.get_plot_data_bayesian(**kwargs)
+            has_hdi = True
+        else:
+            plot_data = self.get_plot_data_ols()
+            has_hdi = False
+
+        # Extract period masks and observation indices for cleaner plotting
+        pre_mask = self.data.period == "pre"
+        post_mask = self.data.period == "post"
+        pre_obs_ind = self.data.X.sel(period="pre").obs_ind
+        post_obs_ind = self.data.X.sel(period="post").obs_ind
+
+        # Convert xarray boolean masks to pandas boolean arrays for DataFrame indexing
+        pre_mask_pd = pre_mask.values
+        post_mask_pd = post_mask.values
+
         counterfactual_label = "Counterfactual"
-
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        handles = []
+        labels = []
 
-        # Extract pre/post predictions - InferenceData doesn't support .sel() with period
-        # but .where() works fine with coordinates
-        pre_pred = self.predictions["posterior_predictive"].where(
-            self.predictions["posterior_predictive"].period == "pre", drop=True
-        )
-        post_pred = self.predictions["posterior_predictive"].where(
-            self.predictions["posterior_predictive"].period == "post", drop=True
-        )
-
-        # TOP PLOT --------------------------------------------------
-        # pre-intervention period
-        h_line, h_patch = plot_xY(
-            self.data.X.sel(period="pre").obs_ind,
-            pre_pred.mu.isel(treated_units=0),
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
-
+        # TOP PLOT - Observations and Predictions -------------------------
+        # Plot observations (same for both model types)
         (h,) = ax[0].plot(
-            self.data.X.sel(period="pre").obs_ind,
-            self.data.y.sel(period="pre").isel(treated_units=0),
+            pre_obs_ind,
+            plot_data[self.outcome_variable_name][pre_mask_pd],
             "k.",
             label="Observations",
         )
         handles.append(h)
         labels.append("Observations")
 
-        # post intervention period
-        h_line, h_patch = plot_xY(
-            self.data.X.sel(period="post").obs_ind,
-            post_pred.mu.isel(treated_units=0),
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
-
         ax[0].plot(
-            self.data.X.sel(period="post").obs_ind,
-            self.data.y.sel(period="post").isel(treated_units=0),
+            post_obs_ind,
+            plot_data[self.outcome_variable_name][post_mask_pd],
             "k.",
         )
 
-        # Shaded causal effect - use direct calculation
-        post_pred_mu = post_pred.mu.mean(dim=["chain", "draw"]).isel(treated_units=0)
+        # Plot predictions with appropriate styling
+        if isinstance(self.model, PyMCModel):
+            # Bayesian: plot mean predictions as lines
+            (h,) = ax[0].plot(
+                pre_obs_ind,
+                plot_data["prediction"][pre_mask_pd],
+                c="C0",
+                label="Pre-intervention period",
+            )
+            handles.append(h)
+            labels.append("Pre-intervention period")
+
+            (h,) = ax[0].plot(
+                post_obs_ind,
+                plot_data["prediction"][post_mask_pd],
+                c="C1",
+                label=counterfactual_label,
+            )
+            handles.append(h)
+            labels.append(counterfactual_label)
+        else:
+            # OLS: plot predictions as lines
+            ax[0].plot(
+                pre_obs_ind,
+                plot_data["prediction"][pre_mask_pd],
+                c="k",
+                label="model fit",
+            )
+            ax[0].plot(
+                post_obs_ind,
+                plot_data["prediction"][post_mask_pd],
+                label=counterfactual_label,
+                ls=":",
+                c="k",
+            )
+
+        # Add HDI bands if available (Bayesian only)
+        if has_hdi:
+            hdi_prob = kwargs.get("hdi_prob", 0.94)
+            hdi_pct = int(round(hdi_prob * 100))
+
+            # Pre-intervention HDI
+            ax[0].fill_between(
+                pre_obs_ind,
+                plot_data[f"pred_hdi_lower_{hdi_pct}"][pre_mask_pd],
+                plot_data[f"pred_hdi_upper_{hdi_pct}"][pre_mask_pd],
+                alpha=0.3,
+                color="C0",
+            )
+
+            # Post-intervention HDI
+            ax[0].fill_between(
+                post_obs_ind,
+                plot_data[f"pred_hdi_lower_{hdi_pct}"][post_mask_pd],
+                plot_data[f"pred_hdi_upper_{hdi_pct}"][post_mask_pd],
+                alpha=0.3,
+                color="C1",
+            )
+
+        # Shaded causal effect
         h = ax[0].fill_between(
-            self.data.X.sel(period="post").obs_ind,
-            y1=post_pred_mu,
-            y2=self.data.y.sel(period="post").isel(treated_units=0),
+            post_obs_ind,
+            plot_data["prediction"][post_mask_pd],
+            plot_data[self.outcome_variable_name][post_mask_pd],
             color="C0",
             alpha=0.25,
+            label="Causal impact",
         )
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(
-            title=f"""
+        # Set title based on model type
+        if isinstance(self.model, PyMCModel):
+            title = f"""
             Pre-intervention Bayesian $R^2$: {round_num(self.score["unit_0_r2"], round_to)}
             (std = {round_num(self.score["unit_0_r2_std"], round_to)})
             """
-        )
+        else:
+            title = (
+                f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+            )
+        ax[0].set(title=title)
 
-        # MIDDLE PLOT -----------------------------------------------
-        plot_xY(
-            self.data.X.sel(period="pre").obs_ind,
-            self.impact.sel(period="pre").isel(treated_units=0),
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_xY(
-            self.data.X.sel(period="post").obs_ind,
-            self.impact.sel(period="post").isel(treated_units=0),
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C1"},
+        # MIDDLE PLOT - Causal Impact -----------------------------------
+        ax[1].plot(pre_obs_ind, plot_data["impact"][pre_mask_pd], "k.")
+        ax[1].plot(
+            post_obs_ind,
+            plot_data["impact"][post_mask_pd],
+            "k.",
+            label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
+
+        # Add HDI for impact if available
+        if has_hdi:
+            ax[1].fill_between(
+                pre_obs_ind,
+                plot_data[f"impact_hdi_lower_{hdi_pct}"][pre_mask_pd],
+                plot_data[f"impact_hdi_upper_{hdi_pct}"][pre_mask_pd],
+                alpha=0.3,
+                color="C0",
+            )
+            ax[1].fill_between(
+                post_obs_ind,
+                plot_data[f"impact_hdi_lower_{hdi_pct}"][post_mask_pd],
+                plot_data[f"impact_hdi_upper_{hdi_pct}"][post_mask_pd],
+                alpha=0.3,
+                color="C1",
+            )
+
+        # Shaded causal impact
         ax[1].fill_between(
-            self.data.X.sel(period="post").obs_ind,
-            y1=self.impact.sel(period="post")
-            .mean(["chain", "draw"])
-            .isel(treated_units=0),
+            post_obs_ind,
+            plot_data["impact"][post_mask_pd],
             color="C0",
             alpha=0.25,
             label="Causal impact",
         )
         ax[1].set(title="Causal Impact")
 
-        # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(
-            self.data.X.sel(period="post").obs_ind,
-            self.post_impact_cumulative.isel(treated_units=0),
-            ax=ax[2],
-            plot_hdi_kwargs={"color": "C1"},
-        )
+        # BOTTOM PLOT - Cumulative Impact -------------------------------
+        # Ensure cumulative impact is 1D for plotting (mean over all dims except obs_ind)
+        cum_impact = self.post_impact_cumulative
+        if (
+            hasattr(cum_impact, "dims")
+            and hasattr(cum_impact, "mean")
+            and cum_impact.ndim > 1
+        ):
+            # Find all dims except obs_ind
+            dims_to_mean = [d for d in cum_impact.dims if d != "obs_ind"]
+            cum_impact = cum_impact.mean(dim=dims_to_mean)
+        ax[2].plot(post_obs_ind, cum_impact, c="k")
         ax[2].axhline(y=0, c="k")
+        ax[2].set(title="Cumulative Causal Impact")
 
-        # Intervention line
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
+        # Add intervention lines to all plots
+        for i in range(3):
+            ax[i].axvline(x=self.treatment_time, ls="-", lw=3, color="r")
 
+        # Legend for top plot
         ax[0].legend(
             handles=(h_tuple for h_tuple in handles),
             labels=labels,
@@ -371,112 +448,6 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
         return fig, ax
-
-    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
-        """
-        Plot the results using unified predictions with period coordinates.
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        """
-        counterfactual_label = "Counterfactual"
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
-
-        # Extract pre/post predictions - handle PyMC vs sklearn differently
-        if isinstance(self.model, PyMCModel):
-            # For PyMC models, predictions is InferenceData - use .where() with coordinates
-            pre_pred = (
-                self.predictions["posterior_predictive"]
-                .where(
-                    self.predictions["posterior_predictive"].period == "pre", drop=True
-                )
-                .mu.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-            )
-            post_pred = (
-                self.predictions["posterior_predictive"]
-                .where(
-                    self.predictions["posterior_predictive"].period == "post", drop=True
-                )
-                .mu.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-            )
-        else:
-            # For sklearn models, predictions is DataArray - use .sel() with indexed coordinates
-            pre_pred = self.predictions.sel(period="pre")
-            post_pred = self.predictions.sel(period="post")
-
-        ax[0].plot(
-            self.data.X.sel(period="pre").obs_ind, self.data.y.sel(period="pre"), "k."
-        )
-        ax[0].plot(
-            self.data.X.sel(period="post").obs_ind, self.data.y.sel(period="post"), "k."
-        )
-
-        ax[0].plot(
-            self.data.X.sel(period="pre").obs_ind, pre_pred, c="k", label="model fit"
-        )
-        ax[0].plot(
-            self.data.X.sel(period="post").obs_ind,
-            post_pred,
-            label=counterfactual_label,
-            ls=":",
-            c="k",
-        )
-        ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
-        )
-
-        ax[1].plot(
-            self.data.X.sel(period="pre").obs_ind, self.impact.sel(period="pre"), "k."
-        )
-        ax[1].plot(
-            self.data.X.sel(period="post").obs_ind,
-            self.impact.sel(period="post"),
-            "k.",
-            label=counterfactual_label,
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(
-            self.data.X.sel(period="post").obs_ind, self.post_impact_cumulative, c="k"
-        )
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
-        # Shaded causal effect
-        ax[0].fill_between(
-            self.data.X.sel(period="post").obs_ind,
-            y1=np.squeeze(post_pred),
-            y2=np.squeeze(self.data.y.sel(period="post")),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].fill_between(
-            self.data.X.sel(period="post").obs_ind,
-            y1=np.squeeze(self.impact.sel(period="post")),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        # Intervention line
-        # TODO: make this work when treatment_time is a datetime
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-                label="Treatment time",
-            )
-
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        return (fig, ax)
 
     def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
