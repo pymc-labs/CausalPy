@@ -949,6 +949,7 @@ class InterventionTimeEstimator(PyMCModel):
 
             # --- Parameterization ---
             weight = pm.math.sigmoid(t - treatment_time)
+            weight = weight[:, None]  #  reshape (n_obs,) -> (n_obs, 1)
             # Compute and store the base time series
             mu = pm.Deterministic(
                 name="mu", var=pm.math.dot(X, beta.T), dims=["obs_ind", "treated_units"]
