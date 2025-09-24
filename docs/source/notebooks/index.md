@@ -72,4 +72,5 @@ iv_weak_instruments.ipynb
 :maxdepth: 1
 
 inv_prop_pymc.ipynb
+inv_prop_latent.ipynb
 :::
