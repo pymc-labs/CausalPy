@@ -1040,7 +1040,7 @@ class InterventionTimeEstimator(PyMCModel):
                 {
                     "X": X,
                     "t": np.arange(n_obs),
-                    "y": np.zeros(n_obs, n_treated_unit),
+                    "y": np.zeros((n_obs, n_treated_unit)),
                 },
                 coords={"obs_ind": np.arange(n_obs)},
             )
