@@ -956,9 +956,13 @@ class InterventionTimeEstimator(PyMCModel):
             )
             # Compute and store the modelled intervention effect
             mu_in = (
-                pm.Deterministic(name="mu_in", var=sum(mu_in_components))
+                pm.Deterministic(
+                    name="mu_in",
+                    var=sum(mu_in_components),
+                    dims=["obs_ind", "treated_units"],
+                )
                 if len(mu_in_components) > 0
-                else pm.Data(name="mu_in", vars=0)
+                else pm.Data(name="mu_in", vars=0, dims=["obs_ind", "treated_units"])
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic(
