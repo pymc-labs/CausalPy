@@ -909,7 +909,7 @@ class InterventionTimeEstimator(PyMCModel):
             )
             delta_t = pm.Deterministic(
                 name="delta_t",
-                var=t - treatment_time,
+                var=(t - treatment_time)[:, None],
                 dims=["obs_ind", "treated_units"],
             )
             beta = pm.Normal(
