@@ -898,7 +898,7 @@ class InterventionTimeEstimator(PyMCModel):
 
             t = pm.Data("t", np.arange(len(X)), dims="obs_ind")
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y, dims="obs_ind")
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
 
             lower_bound = pm.Data("lower_bound", self.time_range[0])
             upper_bound = pm.Data("upper_bound", self.time_range[1])
