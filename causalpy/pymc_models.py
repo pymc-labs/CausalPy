@@ -911,7 +911,7 @@ class InterventionTimeEstimator(PyMCModel):
                 name="beta",
                 mu=self.DEFAULT_BETA_PRIOR[0],
                 sigma=self.DEFAULT_BETA_PRIOR[1],
-                dims="coeffs",
+                dims=["treated_units", "coeffs"],
             )
 
             # --- Intervention effect ---
@@ -950,7 +950,9 @@ class InterventionTimeEstimator(PyMCModel):
             # --- Parameterization ---
             weight = pm.math.sigmoid(t - treatment_time)
             # Compute and store the base time series
-            mu = pm.Deterministic(name="mu", var=pm.math.dot(X, beta), dims="obs_ind")
+            mu = pm.Deterministic(
+                name="mu", var=pm.math.dot(X, beta), dims=["obs_ind", "treated_units"]
+            )
             # Compute and store the modelled intervention effect
             mu_in = (
                 pm.Deterministic(name="mu_in", var=sum(mu_in_components))
@@ -958,14 +960,22 @@ class InterventionTimeEstimator(PyMCModel):
                 else pm.Data(name="mu_in", vars=0)
             )
             # Compute and store the sum of the base time series and the intervention's effect
-            mu_ts = pm.Deterministic("mu_ts", mu + weight * mu_in, dims="obs_ind")
-            sigma = pm.HalfNormal("sigma", 1)
+            mu_ts = pm.Deterministic(
+                "mu_ts", mu + weight * mu_in, dims=["obs_ind", "treated_units"]
+            )
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
 
             # --- Likelihood ---
             # Likelihood of the base time series
-            pm.Normal("y_hat", mu=mu, sigma=sigma, dims="obs_ind")
+            pm.Normal("y_hat", mu=mu, sigma=sigma, dims=["obs_ind", "treated_units"])
             # Likelihodd of the base time series and the intervention's effect
-            pm.Normal("y_ts", mu=mu_ts, sigma=sigma, observed=y, dims="obs_ind")
+            pm.Normal(
+                "y_ts",
+                mu=mu_ts,
+                sigma=sigma,
+                observed=y,
+                dims=["obs_ind", "treated_units"],
+            )
 
     def predict(self, X):
         """
