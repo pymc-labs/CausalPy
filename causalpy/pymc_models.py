@@ -932,7 +932,8 @@ class InterventionTimeEstimator(PyMCModel):
                     sigma=self.treatment_effect_param["trend"][1],
                     dims=["obs_ind", "treated_units"],
                 )
-                mu_in_components.append(trend * (t - treatment_time))
+                delta_t = (t - treatment_time)[:, None]
+                mu_in_components.append(trend * delta_t)
             if "impulse" in self.treatment_effect_param:
                 impulse_amplitude = pm.Normal(
                     "impulse_amplitude",
