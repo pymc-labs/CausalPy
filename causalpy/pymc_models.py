@@ -1050,9 +1050,19 @@ class InterventionTimeEstimator(PyMCModel):
         Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
         """
         mu_ts = self.predict(X)
-        mu_ts = az.extract(mu_ts, group="posterior_predictive", var_names="mu_ts").T
-        # Note: First argument must be a 1D array
-        return r2_score(y.data, mu_ts.data)
+        mu_data = az.extract(mu_ts, group="posterior_predictive", var_names="mu_ts")
+
+        scores = {}
+
+        # Always iterate over treated_units dimension - no branching needed!
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
+            unit_score = r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+
+        return pd.Series(scores)
 
     def set_time_range(self, time_range, data):
         """
