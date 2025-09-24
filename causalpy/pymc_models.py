@@ -922,6 +922,7 @@ class InterventionTimeEstimator(PyMCModel):
                     "level",
                     mu=self.treatment_effect_param["level"][0],
                     sigma=self.treatment_effect_param["level"][1],
+                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(level)
             if "trend" in self.treatment_effect_param:
@@ -929,6 +930,7 @@ class InterventionTimeEstimator(PyMCModel):
                     "trend",
                     mu=self.treatment_effect_param["trend"][0],
                     sigma=self.treatment_effect_param["trend"][1],
+                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(trend * (t - treatment_time))
             if "impulse" in self.treatment_effect_param:
@@ -936,6 +938,7 @@ class InterventionTimeEstimator(PyMCModel):
                     "impulse_amplitude",
                     mu=self.treatment_effect_param["impulse"][0],
                     sigma=self.treatment_effect_param["impulse"][1],
+                    dims=["obs_ind", "treated_units"],
                 )
                 decay_rate = pm.HalfNormal(
                     "decay_rate", sigma=self.treatment_effect_param["impulse"][2]
