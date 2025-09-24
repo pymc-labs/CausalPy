@@ -952,8 +952,7 @@ class InterventionTimeEstimator(PyMCModel):
                 )
                 impulse = pm.Deterministic(
                     "impulse",
-                    impulse_amplitude
-                    * pm.math.exp(-decay_rate * pm.math.abs(t - treatment_time)),
+                    impulse_amplitude * pm.math.exp(-decay_rate * pm.math.abs(delta_t)),
                     dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(impulse)
