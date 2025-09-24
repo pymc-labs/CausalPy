@@ -148,14 +148,14 @@ class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
         # Plot predicted values under treatment (with HDI)
         h_line, h_patch = plot_xY(
             datapre.index,
-            pre_pred["posterior_predictive"].mu_ts,
+            pre_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "yellowgreen"},
         )
 
         h_line, h_patch = plot_xY(
             datapost.index,
-            post_pred["posterior_predictive"].mu_ts,
+            post_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "yellowgreen"},
         )
