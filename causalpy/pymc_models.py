@@ -1030,15 +1030,15 @@ class InterventionTimeEstimator(PyMCModel):
         This method is used internally to register new data for the model for
         prediction.
         """
-        new_no_of_observations = X.shape[0]
+        n_obs = X.shape[0]
         with self:
             pm.set_data(
                 {
                     "X": X,
-                    "t": np.arange(len(X)),
-                    "y": np.zeros(new_no_of_observations),
+                    "t": np.arange(n_obs)[:, None],
+                    "y": np.zeros(n_obs, 1),
                 },
-                coords={"obs_ind": np.arange(new_no_of_observations)},
+                coords={"obs_ind": np.arange(n_obs)},
             )
 
     def score(self, X, y) -> pd.Series:
