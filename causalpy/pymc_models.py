@@ -907,6 +907,11 @@ class InterventionTimeEstimator(PyMCModel):
             treatment_time = pm.Uniform(
                 "treatment_time", lower=lower_bound, upper=upper_bound
             )
+            delta_t = pm.Deterministic(
+                name="delta_t",
+                var=t - treatment_time,
+                dims=["obs_ind", "treated_units"],
+            )
             beta = pm.Normal(
                 name="beta",
                 mu=self.DEFAULT_BETA_PRIOR[0],
@@ -932,7 +937,6 @@ class InterventionTimeEstimator(PyMCModel):
                     sigma=self.treatment_effect_param["trend"][1],
                     dims=["obs_ind", "treated_units"],
                 )
-                delta_t = (t - treatment_time)[:, None]
                 mu_in_components.append(trend * delta_t)
             if "impulse" in self.treatment_effect_param:
                 impulse_amplitude = pm.Normal(
@@ -955,8 +959,7 @@ class InterventionTimeEstimator(PyMCModel):
                 mu_in_components.append(impulse)
 
             # --- Parameterization ---
-            weight = pm.math.sigmoid(t - treatment_time)
-            weight = weight[:, None]  #  reshape (n_obs,) -> (n_obs, 1)
+            weight = pm.math.sigmoid(delta_t)
             # Compute and store the base time series
             mu = pm.Deterministic(
                 name="mu", var=pm.math.dot(X, beta.T), dims=["obs_ind", "treated_units"]
@@ -977,7 +980,7 @@ class InterventionTimeEstimator(PyMCModel):
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic(
-                "mu_ts", mu.T + weight * mu_in, dims=["obs_ind", "treated_units"]
+                "mu_ts", mu + weight * mu_in, dims=["obs_ind", "treated_units"]
             )
             sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
 
