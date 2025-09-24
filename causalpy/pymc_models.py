@@ -1035,11 +1035,12 @@ class InterventionTimeEstimator(PyMCModel):
             treated_units_coord = getattr(self, "coords", {}).get(
                 "treated_units", ["unit_0"]
             )
+            n_treated_unit = len(treated_units_coord)
             pm.set_data(
                 {
                     "X": X,
                     "t": np.arange(n_obs)[:, None],
-                    "y": np.zeros((n_obs, treated_units_coord)),
+                    "y": np.zeros((n_obs, n_treated_unit)),
                 },
                 coords={"obs_ind": np.arange(n_obs)},
             )
