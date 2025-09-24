@@ -977,7 +977,7 @@ class InterventionTimeEstimator(PyMCModel):
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic(
-                "mu_ts", mu + weight * mu_in, dims=["obs_ind", "treated_units"]
+                "mu_ts", mu.T + weight * mu_in, dims=["obs_ind", "treated_units"]
             )
             sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
 
