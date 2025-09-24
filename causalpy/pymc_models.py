@@ -968,7 +968,11 @@ class InterventionTimeEstimator(PyMCModel):
                     dims=["obs_ind", "treated_units"],
                 )
                 if len(mu_in_components) > 0
-                else pm.Data(name="mu_in", vars=0, dims=["obs_ind", "treated_units"])
+                else pm.Data(
+                    name="mu_in",
+                    vars=np.zeros((X.sizes["obs_ind"], y.sizes["treated_units"])),
+                    dims=["obs_ind", "treated_units"],
+                )
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic(
