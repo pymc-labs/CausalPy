@@ -789,19 +789,26 @@ class InterventionTimeEstimator(PyMCModel):
         >>> labels = X.design_info.column_names
         >>> _y, _X = np.asarray(y), np.asarray(X)
         >>> _X = xr.DataArray(
-        ... _X,
-        ... dims=["obs_ind", "coeffs"],
-        ... coords={
-        ...     "obs_ind": data.index,
-        ...     "coeffs": labels,
-        ...     },
+        ...     _X,
+        ...     dims=["obs_ind", "coeffs"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "coeffs": labels,
+        ...         },
         ... )
         >>> _y = xr.DataArray(
-        ...     _y[:, 0],
-        ...     dims=["obs_ind"],
-        ...     coords={"obs_ind": data.index},
-        ...     )
-        >>> COORDS = {"coeffs":labels, "obs_ind": np.arange(_X.shape[0])}
+        ...     _y,
+        ...     dims=["obs_ind", "treated_units"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "treated_units": ["unit_0"]
+        ...         },
+        ... )
+        >>> COORDS = {
+        ...     "coeffs": labels,
+        ...     "obs_ind": np.arange(X.shape[0]),
+        ...     "treated_units": ["unit_0"],
+        ... }
         >>> model = ITE(treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
         >>> model.set_time_range(None, data)
         >>> model.fit(X=_X, y=_y, coords=COORDS)
@@ -909,8 +916,8 @@ class InterventionTimeEstimator(PyMCModel):
             )
             delta_t = pm.Deterministic(
                 name="delta_t",
-                var=(t - treatment_time)[:, None],
-                dims=["obs_ind", "treated_units"],
+                var=(t - treatment_time),
+                dims=["obs_ind"],
             )
             beta = pm.Normal(
                 name="beta",
@@ -927,7 +934,6 @@ class InterventionTimeEstimator(PyMCModel):
                     "level",
                     mu=self.treatment_effect_param["level"][0],
                     sigma=self.treatment_effect_param["level"][1],
-                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(level)
             if "trend" in self.treatment_effect_param:
@@ -935,7 +941,6 @@ class InterventionTimeEstimator(PyMCModel):
                     "trend",
                     mu=self.treatment_effect_param["trend"][0],
                     sigma=self.treatment_effect_param["trend"][1],
-                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(trend * delta_t)
             if "impulse" in self.treatment_effect_param:
@@ -943,17 +948,14 @@ class InterventionTimeEstimator(PyMCModel):
                     "impulse_amplitude",
                     mu=self.treatment_effect_param["impulse"][0],
                     sigma=self.treatment_effect_param["impulse"][1],
-                    dims=["obs_ind", "treated_units"],
                 )
                 decay_rate = pm.HalfNormal(
                     "decay_rate",
                     sigma=self.treatment_effect_param["impulse"][2],
-                    dims=["obs_ind", "treated_units"],
                 )
                 impulse = pm.Deterministic(
                     "impulse",
                     impulse_amplitude * pm.math.exp(-decay_rate * pm.math.abs(delta_t)),
-                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(impulse)
 
@@ -968,18 +970,18 @@ class InterventionTimeEstimator(PyMCModel):
                 pm.Deterministic(
                     name="mu_in",
                     var=sum(mu_in_components),
-                    dims=["obs_ind", "treated_units"],
                 )
                 if len(mu_in_components) > 0
                 else pm.Data(
                     name="mu_in",
-                    vars=np.zeros((X.sizes["obs_ind"], y.sizes["treated_units"])),
-                    dims=["obs_ind", "treated_units"],
+                    vars=0,
                 )
             )
             # Compute and store the sum of the base time series and the intervention's effect
             mu_ts = pm.Deterministic(
-                "mu_ts", mu + weight * mu_in, dims=["obs_ind", "treated_units"]
+                "mu_ts",
+                mu + (weight * mu_in)[:, None],
+                dims=["obs_ind", "treated_units"],
             )
             sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
 
@@ -1016,7 +1018,7 @@ class InterventionTimeEstimator(PyMCModel):
             )
 
         # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
-        if isinstance(X, xr.DataArray):
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
             pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
                 obs_ind=X.obs_ind
             )
