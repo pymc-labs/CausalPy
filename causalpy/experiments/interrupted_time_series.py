@@ -246,17 +246,17 @@ class KnownTreatmentTimeHandler(TreatmentTimeHandler):
         post_X = np.asarray(new_x)
         post_y = np.asarray(new_y)
         post_X = xr.DataArray(
-            self.post_X,
+            post_X,
             dims=["obs_ind", "coeffs"],
             coords={
-                "obs_ind": self.datapost.index,
-                "coeffs": self.labels,
+                "obs_ind": res["datapost"].index,
+                "coeffs": X.design_info.column_names,
             },
         )
         post_y = xr.DataArray(
-            self.post_y,  # Keep 2D shape
+            post_y,  # Keep 2D shape
             dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
+            coords={"obs_ind": res["datapost"].index, "treated_units": ["unit_0"]},
         )
         res["post_y"] = post_y
         res["post_X"] = post_X
@@ -267,17 +267,17 @@ class KnownTreatmentTimeHandler(TreatmentTimeHandler):
 
         # --- Impacts ---
         # calculate impact - use appropriate y data format for each model type
-        if isinstance(self.model, PyMCModel):
+        if isinstance(model, PyMCModel):
             # PyMC models work with 2D data
             res["pre_impact"] = model.calculate_impact(res["pre_y"], res["pre_pred"])
             res["post_impact"] = model.calculate_impact(res["post_y"], res["post_pred"])
 
-        elif isinstance(self.model, RegressorMixin):
+        elif isinstance(model, RegressorMixin):
             # SKL models work with 1D data
-            res["pre_impact"] = self.model.calculate_impact(
+            res["pre_impact"] = model.calculate_impact(
                 res["pre_y"].isel(treated_units=0), res["pre_pred"]
             )
-            res["post_impact"] = self.model.calculate_impact(
+            res["post_impact"] = model.calculate_impact(
                 res["post_y"].isel(treated_units=0), res["post_pred"]
             )
 
