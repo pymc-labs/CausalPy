@@ -941,12 +941,15 @@ class InterventionTimeEstimator(PyMCModel):
                     dims=["obs_ind", "treated_units"],
                 )
                 decay_rate = pm.HalfNormal(
-                    "decay_rate", sigma=self.treatment_effect_param["impulse"][2]
+                    "decay_rate",
+                    sigma=self.treatment_effect_param["impulse"][2],
+                    dims=["obs_ind", "treated_units"],
                 )
                 impulse = pm.Deterministic(
                     "impulse",
                     impulse_amplitude
                     * pm.math.exp(-decay_rate * pm.math.abs(t - treatment_time)),
+                    dims=["obs_ind", "treated_units"],
                 )
                 mu_in_components.append(impulse)
 
