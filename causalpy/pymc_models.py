@@ -95,6 +95,9 @@ class PyMCModel(pm.Model):
     def default_priors(self):
         return {}
 
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        return {}
+
     def __init__(
         self,
         sample_kwargs: Optional[Dict[str, Any]] = None,
@@ -154,6 +157,8 @@ class PyMCModel(pm.Model):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
+
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
 
         self.build_model(X, y, coords)
         with self:
@@ -250,26 +255,34 @@ class PyMCModel(pm.Model):
         ) -> None:
             """Print coefficients for a single unit"""
             # Determine the width of the longest label
-            max_label_length = max(len(name) for name in labels + ["sigma"])
+            max_label_length = max(len(name) for name in labels + ["y_hat_sigma"])
 
             for name in labels:
                 coeff_samples = unit_coeffs.sel(coeffs=name)
                 print_row(max_label_length, name, coeff_samples, round_to)
 
             # Add coefficient for measurement std
-            print_row(max_label_length, "sigma", unit_sigma, round_to)
+            print_row(max_label_length, "y_hat_sigma", unit_sigma, round_to)
 
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
-        # Always has treated_units dimension - no branching needed!
+        # Check if sigma or y_hat_sigma variable exists
+        sigma_var_name = None
+        if "sigma" in self.idata.posterior:
+            sigma_var_name = "sigma"
+        elif "y_hat_sigma" in self.idata.posterior:
+            sigma_var_name = "y_hat_sigma"
+        else:
+            raise ValueError("Neither 'sigma' nor 'y_hat_sigma' found in posterior")
+
         treated_units = coeffs.coords["treated_units"].values
         for unit in treated_units:
             if len(treated_units) > 1:
                 print(f"\nTreated unit: {unit}")
 
             unit_coeffs = coeffs.sel(treated_units=unit)
-            unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
+            unit_sigma = az.extract(self.idata.posterior, var_names=sigma_var_name).sel(
                 treated_units=unit
             )
             print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
@@ -314,7 +327,11 @@ class LinearRegression(PyMCModel):
 
     default_priors = {
         "beta": Prior("Normal", mu=0, sigma=50, dims=["treated_units", "coeffs"]),
-        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+            dims=["obs_ind", "treated_units"],
+        ),
     }
 
     def build_model(self, X, y, coords):
@@ -331,11 +348,10 @@ class LinearRegression(PyMCModel):
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             beta = self.priors["beta"].create_variable("beta")
-            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
             mu = pm.Deterministic(
                 "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
             )
-            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
 class WeightedSumFitter(PyMCModel):
@@ -379,8 +395,20 @@ class WeightedSumFitter(PyMCModel):
     """  # noqa: W605
 
     default_priors = {
-        "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+            dims=["obs_ind", "treated_units"],
+        ),
     }
+
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        n_predictors = X.shape[1]
+        return {
+            "beta": Prior(
+                "Dirichlet", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
+            ),
+        }
 
     def build_model(self, X, y, coords):
         """
@@ -388,17 +416,13 @@ class WeightedSumFitter(PyMCModel):
         """
         with self:
             self.add_coords(coords)
-            n_predictors = X.sizes["coeffs"]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
-            beta = pm.Dirichlet(
-                "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
-            )
-            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            beta = self.priors["beta"].create_variable("beta")
             mu = pm.Deterministic(
                 "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
             )
-            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
 class InstrumentalVariableRegression(PyMCModel):
@@ -598,24 +622,8 @@ class PropensityScore(PyMCModel):
             self.add_coords(coords)
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             t_data = pm.Data("t", t.flatten(), dims="obs_ind")
-
-            if prior is not None:
-                # Use legacy interface for backward compatibility
-                if noncentred:
-                    mu_beta, sigma_beta = prior["b"]
-                    beta_std = pm.Normal("beta_std", 0, 1, dims="coeffs")
-                    b = pm.Deterministic(
-                        "beta_", mu_beta + sigma_beta * beta_std, dims="coeffs"
-                    )
-                else:
-                    b = pm.Normal(
-                        "b", mu=prior["b"][0], sigma=prior["b"][1], dims="coeffs"
-                    )
-            else:
-                # Use Prior class
-                b = self.priors["b"].create_variable("b")
-
-            mu = pm.math.dot(X_data, b)
+            b = self.priors["b"].create_variable("b")
+            mu = pt.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
