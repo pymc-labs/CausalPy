@@ -22,6 +22,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
+from patsy import dmatrix
 from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
@@ -41,15 +42,28 @@ class PyMCModel(pm.Model):
     >>> class MyToyModel(PyMCModel):
     ...     def build_model(self, X, y, coords):
     ...         with self:
+    ...             self.add_coords(coords)
     ...             X_ = pm.Data(name="X", value=X)
     ...             y_ = pm.Data(name="y", value=y)
-    ...             beta = pm.Normal("beta", mu=0, sigma=1, shape=X_.shape[1])
-    ...             sigma = pm.HalfNormal("sigma", sigma=1)
-    ...             mu = pm.Deterministic("mu", pm.math.dot(X_, beta))
+    ...             beta = pm.Normal(
+    ...                 "beta", mu=0, sigma=1, shape=(y.shape[1], X.shape[1])
+    ...             )
+    ...             sigma = pm.HalfNormal("sigma", sigma=1, shape=y.shape[1])
+    ...             mu = pm.Deterministic(
+    ...                 "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+    ...             )
     ...             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
     >>> rng = np.random.default_rng(seed=42)
-    >>> X = rng.normal(loc=0, scale=1, size=(20, 2))
-    >>> y = rng.normal(loc=0, scale=1, size=(20,))
+    >>> X = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20, 2)),
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": np.arange(20), "coeffs": ["coeff_0", "coeff_1"]},
+    ... )
+    >>> y = xr.DataArray(
+    ...     rng.normal(loc=0, scale=1, size=(20, 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+    ... )
     >>> model = MyToyModel(
     ...     sample_kwargs={
     ...         "chains": 2,
@@ -58,11 +72,19 @@ class PyMCModel(pm.Model):
     ...         "random_seed": 42,
     ...     }
     ... )
-    >>> model.fit(X, y)
+    >>> model.fit(
+    ...     X,
+    ...     y,
+    ...     coords={
+    ...         "coeffs": ["coeff_0", "coeff_1"],
+    ...         "obs_ind": np.arange(20),
+    ...         "treated_units": ["unit_0"],
+    ...     },
+    ... )
     Inference data...
     >>> model.score(X, y)  # doctest: +ELLIPSIS
-    r2        ...
-    r2_std    ...
+    unit_0_r2        ...
+    unit_0_r2_std    ...
     dtype: float64
     >>> X_new = rng.normal(loc=0, scale=1, size=(20, 2))
     >>> model.predict(X_new)
@@ -92,7 +114,7 @@ class PyMCModel(pm.Model):
         """Build the model, must be implemented by subclass."""
         raise NotImplementedError("This method must be implemented by a subclass")
 
-    def _data_setter(self, X) -> None:
+    def _data_setter(self, X: xr.DataArray) -> None:
         """
         Set data for the model.
 
@@ -107,10 +129,21 @@ class PyMCModel(pm.Model):
         to update all of them - ideally programmatically.
         """
         new_no_of_observations = X.shape[0]
+
+        # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
+        obs_coords = np.arange(new_no_of_observations)
+
         with self:
+            # Get the number of treated units from the model coordinates
+            treated_units_coord = getattr(self, "coords", {}).get(
+                "treated_units", ["unit_0"]
+            )
+            n_treated_units = len(treated_units_coord)
+
+            # Always use 2D format for consistency
             pm.set_data(
-                {"X": X, "y": np.zeros(new_no_of_observations)},
-                coords={"obs_ind": np.arange(new_no_of_observations)},
+                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                coords={"obs_ind": obs_coords},
             )
 
     def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
@@ -133,7 +166,7 @@ class PyMCModel(pm.Model):
             )
         return self.idata
 
-    def predict(self, X):
+    def predict(self, X: xr.DataArray):
         """
         Predict data given input data `X`
 
@@ -145,7 +178,7 @@ class PyMCModel(pm.Model):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
-        with self:  # sample with new input data
+        with self:
             pp = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
@@ -153,15 +186,18 @@ class PyMCModel(pm.Model):
                 random_seed=random_seed,
             )
 
-        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
-        if isinstance(X, xr.DataArray):
+        # Assign coordinates from input X to ensure xarray operations work correctly
+        # This is necessary because PyMC uses integer indices internally, but we need
+        # to preserve the original coordinates (e.g., datetime indices) for proper
+        # alignment with other xarray operations like calculate_impact()
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
             pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
                 obs_ind=X.obs_ind
             )
 
         return pp
 
-    def score(self, X, y) -> pd.Series:
+    def score(self, X: xr.DataArray, y: xr.DataArray) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         Note that the score is based on a comparison of the observed data ``y`` and the
@@ -174,8 +210,19 @@ class PyMCModel(pm.Model):
 
         """
         mu = self.predict(X)
-        mu = az.extract(mu, group="posterior_predictive", var_names="mu").T
-        return r2_score(y.data, mu.data)
+        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
+
+        scores = {}
+
+        # Always iterate over treated_units dimension - no branching needed!
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
+            unit_score = r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+
+        return pd.Series(scores)
 
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
@@ -195,20 +242,37 @@ class PyMCModel(pm.Model):
             formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1 - 0.03).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
+        def print_coefficients_for_unit(
+            unit_coeffs: xr.DataArray,
+            unit_sigma: xr.DataArray,
+            labels: list,
+            round_to: int,
+        ) -> None:
+            """Print coefficients for a single unit"""
+            # Determine the width of the longest label
+            max_label_length = max(len(name) for name in labels + ["sigma"])
+
+            for name in labels:
+                coeff_samples = unit_coeffs.sel(coeffs=name)
+                print_row(max_label_length, name, coeff_samples, round_to)
+
+            # Add coefficient for measurement std
+            print_row(max_label_length, "sigma", unit_sigma, round_to)
+
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
 
-        # Determine the width of the longest label
-        max_label_length = max(len(name) for name in labels + ["y_hat_sigma"])
+        # Always has treated_units dimension - no branching needed!
+        treated_units = coeffs.coords["treated_units"].values
+        for unit in treated_units:
+            if len(treated_units) > 1:
+                print(f"\nTreated unit: {unit}")
 
-        for name in labels:
-            coeff_samples = coeffs.sel(coeffs=name)
-            print_row(max_label_length, name, coeff_samples, round_to)
-
-        # Add coefficient for measurement std
-        coeff_samples = az.extract(self.idata.posterior, var_names="y_hat_sigma")
-        name = "y_hat_sigma"
-        print_row(max_label_length, name, coeff_samples, round_to)
+            unit_coeffs = coeffs.sel(treated_units=unit)
+            unit_sigma = az.extract(self.idata.posterior, var_names="sigma").sel(
+                treated_units=unit
+            )
+            print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):
@@ -238,18 +302,18 @@ class LinearRegression(PyMCModel):
     ...     coords={"obs_ind": rd.index, "coeffs": coeffs},
     ... )
     >>> y = xr.DataArray(
-    ...     rd["y"].values,
-    ...     dims=["obs_ind"],
-    ...     coords={"obs_ind": rd.index},
+    ...     rd["y"].values[:, None],
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": rd.index, "treated_units": ["unit_0"]},
     ... )
     >>> lr = LinearRegression(sample_kwargs={"progressbar": False})
-    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0])}
+    >>> coords={"coeffs": coeffs, "obs_ind": np.arange(rd.shape[0]), "treated_units": ["unit_0"]}
     >>> lr.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 
     default_priors = {
-        "beta": Prior("Normal", mu=0, sigma=50, dims="coeffs"),
+        "beta": Prior("Normal", mu=0, sigma=50, dims=["treated_units", "coeffs"]),
         "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1), dims="obs_ind"),
     }
 
@@ -258,12 +322,20 @@ class LinearRegression(PyMCModel):
         Defines the PyMC model
         """
         with self:
+            # Ensure treated_units coordinate exists for consistency
+            if "treated_units" not in coords:
+                coords = coords.copy()
+                coords["treated_units"] = ["unit_0"]
+
             self.add_coords(coords)
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y, dims="obs_ind")
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             beta = self.priors["beta"].create_variable("beta")
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
 
 
 class WeightedSumFitter(PyMCModel):
@@ -282,12 +354,27 @@ class WeightedSumFitter(PyMCModel):
     --------
     >>> import causalpy as cp
     >>> import numpy as np
+    >>> import xarray as xr
     >>> from causalpy.pymc_models import WeightedSumFitter
     >>> sc = cp.load_data("sc")
-    >>> X = sc[['a', 'b', 'c', 'd', 'e', 'f', 'g']]
-    >>> y = np.asarray(sc['actual']).reshape((sc.shape[0], 1))
+    >>> control_units = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    >>> X = xr.DataArray(
+    ...     sc[control_units].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": sc.index, "coeffs": control_units},
+    ... )
+    >>> y = xr.DataArray(
+    ...     sc['actual'].values.reshape((sc.shape[0], 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": sc.index, "treated_units": ["actual"]},
+    ... )
+    >>> coords = {
+    ...     "coeffs": control_units,
+    ...     "treated_units": ["actual"],
+    ...     "obs_ind": np.arange(sc.shape[0]),
+    ... }
     >>> wsf = WeightedSumFitter(sample_kwargs={"progressbar": False})
-    >>> wsf.fit(X, y)
+    >>> wsf.fit(X, y, coords=coords)
     Inference data...
     """  # noqa: W605
 
@@ -301,12 +388,17 @@ class WeightedSumFitter(PyMCModel):
         """
         with self:
             self.add_coords(coords)
-            n_predictors = X.shape[1]
+            n_predictors = X.sizes["coeffs"]
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y[:, 0], dims="obs_ind")
-            beta = pm.Dirichlet("beta", a=np.ones(n_predictors), dims="coeffs")
-            mu = pm.Deterministic("mu", pm.math.dot(X, beta), dims="obs_ind")
-            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            beta = pm.Dirichlet(
+                "beta", a=np.ones(n_predictors), dims=["treated_units", "coeffs"]
+            )
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal("y_hat", mu, sigma, observed=y, dims=["obs_ind", "treated_units"])
 
 
 class InstrumentalVariableRegression(PyMCModel):
@@ -397,9 +489,9 @@ class InstrumentalVariableRegression(PyMCModel):
             pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
 
             # --- Parameterization ---
-            mu_y = pm.Deterministic(name="mu_y", var=pm.math.dot(X, beta_z))
+            mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
             # focal regression
-            mu_t = pm.Deterministic(name="mu_t", var=pm.math.dot(Z, beta_t))
+            mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
             # instrumental regression
             mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
 
@@ -491,6 +583,7 @@ class PropensityScore(PyMCModel):
     ...                 'coeffs': ['age', 'race'],
     ...                 'obs_ind': np.arange(df.shape[0])
     ...                },
+    ...                prior={'b': [0, 1]},
     ... )
     Inference...
     """  # noqa: W605
@@ -499,18 +592,34 @@ class PropensityScore(PyMCModel):
         "b": Prior("Normal", mu=0, sigma=1, dims="coeffs"),
     }
 
-    def build_model(self, X, t, coords):
+    def build_model(self, X, t, coords, prior=None, noncentred=True):
         "Defines the PyMC propensity model"
         with self:
             self.add_coords(coords)
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             t_data = pm.Data("t", t.flatten(), dims="obs_ind")
-            b = self.priors["b"].create_variable("b")
+
+            if prior is not None:
+                # Use legacy interface for backward compatibility
+                if noncentred:
+                    mu_beta, sigma_beta = prior["b"]
+                    beta_std = pm.Normal("beta_std", 0, 1, dims="coeffs")
+                    b = pm.Deterministic(
+                        "beta_", mu_beta + sigma_beta * beta_std, dims="coeffs"
+                    )
+                else:
+                    b = pm.Normal(
+                        "b", mu=prior["b"][0], sigma=prior["b"][1], dims="coeffs"
+                    )
+            else:
+                # Use Prior class
+                b = self.priors["b"].create_variable("b")
+
             mu = pm.math.dot(X_data, b)
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
-    def fit(self, X, t, coords):
+    def fit(self, X, t, coords, prior={"b": [0, 1]}, noncentred=True):
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
@@ -519,7 +628,7 @@ class PropensityScore(PyMCModel):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
 
-        self.build_model(X, t, coords)
+        self.build_model(X, t, coords, prior, noncentred)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
@@ -529,3 +638,147 @@ class PropensityScore(PyMCModel):
                 )
             )
         return self.idata
+
+    def fit_outcome_model(
+        self,
+        X_outcome,
+        y,
+        coords,
+        priors={
+            "b_outcome": [0, 1],
+            "sigma": 1,
+            "beta_ps": [0, 1],
+        },
+        noncentred=True,
+        normal_outcome=True,
+        spline_component=False,
+        winsorize_boundary=0.0,
+    ):
+        """
+        Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
+
+        This function implements the second stage of a modular two-step causal inference procedure.
+        It uses propensity scores extracted from a prior treatment model (via `self.fit()`) to adjust
+        for confounding when estimating treatment effects on an outcome variable `y`.
+
+        Parameters
+        ----------
+        X_outcome : array-like, shape (n_samples, n_covariates)
+            Covariate matrix for the outcome model.
+
+        y : array-like, shape (n_samples,)
+            Observed outcome variable.
+
+        coords : dict
+            Coordinate dictionary for named dimensions in the PyMC model. Should include
+            a key "outcome_coeffs" for `X_outcome`.
+
+        priors : dict, optional
+            Dictionary specifying priors for outcome model parameters:
+                - "b_outcome": list [mean, std] for regression coefficients.
+                - "sigma": standard deviation of the outcome noise (default 1).
+
+        noncentred : bool, default True
+            If True, use a non-centred parameterization for the outcome coefficients.
+
+        normal_outcome : bool, default True
+            If True, assume a Normal likelihood for the outcome.
+            If False, use a Student-t likelihood with unknown degrees of freedom.
+
+        spline_component : bool, default False
+            If True, include a spline basis expansion on the propensity score to allow
+            flexible (nonlinear) adjustment. Uses B-splines with 30 internal knots.
+
+        winsorize_boundary : float, default 0.0
+            If we wish to winsorize the propensity score this can be set to clip the high
+            and low values of the propensity at 0 + winsorize_boundary and 1-winsorize_boundary
+
+        Returns
+        -------
+        idata_outcome : arviz.InferenceData
+            The posterior and prior predictive samples from the outcome model.
+
+        model_outcome : pm.Model
+            The PyMC model object.
+
+        Raises
+        ------
+        AttributeError
+            If the `self.idata` attribute is not available, which indicates that
+            `fit()` (i.e., the treatment model) has not been called yet.
+
+        Notes
+        -----
+        - This model uses a sampled version of the propensity score (`p`) from the
+        posterior of the treatment model, randomly selecting one posterior draw
+        per call. This term is estimated initially in the InversePropensity
+        class initialisation.
+        - The term `beta_ps[0] * p` captures both
+        main effects of the propensity score.
+        - Including spline adjustment enables modeling nonlinear relationships
+        between the propensity score and the outcome.
+
+        """
+        if not hasattr(self, "idata"):
+            raise AttributeError("""Object is missing required attribute 'idata'
+                                 so cannot proceed. Call fit() first""")
+        propensity_scores = az.extract(self.idata)["p"]
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        with pm.Model(coords=coords) as model_outcome:
+            X_data_outcome = pm.Data("X_outcome", X_outcome)
+            Y_data_ = pm.Data("Y", y)
+
+            if noncentred:
+                mu_beta, sigma_beta = priors["b_outcome"]
+                beta_std = pm.Normal("beta_std", 0, 1, dims="outcome_coeffs")
+                beta = pm.Deterministic(
+                    "beta_", mu_beta + sigma_beta * beta_std, dims="outcome_coeffs"
+                )
+            else:
+                beta = pm.Normal(
+                    "beta_",
+                    priors["b_outcome"][0],
+                    priors["b_outcome"][1],
+                    dims="outcome_coeffs",
+                )
+
+            beta_ps = pm.Normal("beta_ps", priors["beta_ps"][0], priors["beta_ps"][1])
+
+            chosen = np.random.choice(range(propensity_scores.shape[1]))
+            p = propensity_scores[:, chosen].values
+            p = np.clip(p, winsorize_boundary, 1 - winsorize_boundary)
+
+            mu_outcome = pm.math.dot(X_data_outcome, beta) + beta_ps * p
+
+            if spline_component:
+                beta_ps_spline = pm.Normal(
+                    "beta_ps_spline",
+                    priors["beta_ps"][0],
+                    priors["beta_ps"][1],
+                    size=34,
+                )
+                B = dmatrix(
+                    "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
+                    {"ps": p, "knots": np.linspace(0, 1, 30)},
+                )
+                B_f = np.asarray(B, order="F")
+                splines_summed = pm.Deterministic(
+                    "spline_features", pm.math.dot(B_f, beta_ps_spline.T)
+                )
+                mu_outcome = pm.math.dot(X_data_outcome, beta) + splines_summed
+
+            sigma = pm.HalfNormal("sigma", priors["sigma"])
+
+            if normal_outcome:
+                _ = pm.Normal("like", mu_outcome, sigma, observed=Y_data_)
+            else:
+                nu = pm.Exponential("nu", lam=1 / 10)
+                _ = pm.StudentT(
+                    "like", nu=nu, mu=mu_outcome, sigma=sigma, observed=Y_data_
+                )
+
+            idata_outcome = pm.sample_prior_predictive(random_seed=random_seed)
+            idata_outcome.extend(pm.sample(**self.sample_kwargs))
+
+        return idata_outcome, model_outcome
