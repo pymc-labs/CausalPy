@@ -13,52 +13,50 @@ A Python package focussing on causal inference for quasi-experiments. The packag
 To get the latest release you can use pip:
 
 ```bash
-   pip install CausalPy
+pip install CausalPy
 ```
 
 or conda:
 
 ```bash
-   conda install causalpy -c conda-forge
+conda install causalpy -c conda-forge
 ```
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:
 
 ```bash
-   pip install git+https://github.com/pymc-labs/CausalPy.git
+pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
 
 ## Quickstart
 
 ```python
+import causalpy as cp
+import matplotlib.pyplot as plt
 
-   import causalpy as cp
-   import matplotlib.pyplot as plt
 
+# Import and process data
+df = (
+    cp.load_data("drinking")
+    .rename(columns={"agecell": "age"})
+    .assign(treated=lambda df_: df_.age > 21)
+)
 
-   # Import and process data
-   df = (
-      cp.load_data("drinking")
-      .rename(columns={"agecell": "age"})
-      .assign(treated=lambda df_: df_.age > 21)
-      )
+# Run the analysis
+result = cp.RegressionDiscontinuity(
+    df,
+    formula="all ~ 1 + age + treated",
+    running_variable_name="age",
+    model=cp.pymc_models.LinearRegression(),
+    treatment_threshold=21,
+)
 
-   # Run the analysis
-   result = cp.RegressionDiscontinuity(
-      df,
-      formula="all ~ 1 + age + treated",
-      running_variable_name="age",
-      model=cp.pymc_models.LinearRegression(),
-      treatment_threshold=21,
-      )
+# Visualize outputs
+fig, ax = result.plot()
+# Get a results summary
+result.summary()
 
-   # Visualize outputs
-   fig, ax = result.plot();
-
-   # Get a results summary
-   result.summary()
-
-   plt.show()
+plt.show()
 ```
 
 ## Videos
