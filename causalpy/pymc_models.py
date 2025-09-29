@@ -755,19 +755,29 @@ class InterventionTimeEstimator(PyMCModel):
     r"""
     Custom PyMC model to estimate the time an intervention took place.
 
-    defines the PyMC model :
+    This model implements three types of changepoints: level shift, trend change, and impulse response.
+
+    In words:
+    - `beta` represents the regression coefficients for the baseline signal `μ`.
+    - `tau` is the changepoint time, and `w` is a sigmoid function to smooth the transition.
+    - `level` and `trend` model a linear shift after the changepoint.
+    - `A` and `lambda` define an impulse response at the changepoint.
+    - `mu_in` combines the level, trend, and impulse contributions.
+    - `mu_ts` is the total mean, including baseline and intervention.
+    - `sigma` is the observation noise.
+    - Finally, `y` is drawn from a Normal distribution with mean `mu_ts` and standard deviation `sigma`.
 
     .. math::
-        \beta &\sim \mathrm{Normal}(0, 1) \\
+        \beta &\sim \mathrm{Normal}(0, 5) \\
         \mu &= \beta \cdot X\\
         \\
-        \tau &\sim \mathrm{Uniform}(0, 1) \\
+        \tau &\sim \mathrm{Uniform}(\text{lower_bound}, \text{upper_bound}) \\
         w &= sigmoid(t-\tau) \\
         \\
-        \text{level} &\sim \mathrm{Normal}(0, 1) \\
-        \text{trend} &\sim \mathrm{Normal}(0, 1) \\
-        A &\sim \mathrm{Normal}(0, 1) \\
-        \lambda &\sim \mathrm{HalfNormal}(0, 1) \\
+        \text{level} &\sim \mathrm{Normal}(0, 5) \\
+        \text{trend} &\sim \mathrm{Normal}(0, 0.5) \\
+        A &\sim \mathrm{Normal}(0, 5) \\
+        \lambda &\sim \mathrm{HalfNormal}(0, 5) \\
         \text{impulse} &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
         \mu_{in} &= \text{level} + \text{trend} \cdot (t-\tau) + \text{impulse}\\
         \\
