@@ -73,13 +73,13 @@ class UnknownTreatmentTimeHandler(TreatmentTimeHandler):
     and visualization.
     """
 
-    def data_preprocessing(self, data, treatment_time, model):
+    def data_preprocessing(self, data, time_range, model):
         """
         Preprocesses the input data by constraining the model's
         treatment time inference window.
         """
         # Restrict model's treatment time inference to given range
-        model.set_time_range(treatment_time, data)
+        model.set_time_range(time_range, data)
         return data
 
     def data_postprocessing(
