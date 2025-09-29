@@ -96,6 +96,77 @@ class PyMCModel(pm.Model):
         return {}
 
     def priors_from_data(self, X, y) -> Dict[str, Any]:
+        """
+        Generate priors dynamically based on the input data.
+
+        This method allows models to set sensible priors that adapt to the scale
+        and characteristics of the actual data being analyzed. It's called during
+        the `fit()` method before model building, allowing data-driven prior
+        specification that can improve model performance and convergence.
+
+        The priors returned by this method are merged with any user-specified
+        priors (passed via the `priors` parameter in `__init__`), with
+        user-specified priors taking precedence in case of conflicts.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Input features/covariates with dimensions ["obs_ind", "coeffs"].
+            Used to understand the scale and structure of predictors.
+        y : xarray.DataArray
+            Target variable with dimensions ["obs_ind", "treated_units"].
+            Used to understand the scale and structure of the outcome.
+
+        Returns
+        -------
+        Dict[str, Prior]
+            Dictionary mapping parameter names to Prior objects. The keys should
+            match parameter names used in the model's `build_model()` method.
+
+        Notes
+        -----
+        The base implementation returns an empty dictionary, meaning no
+        data-driven priors are set by default. Subclasses should override
+        this method to implement data-adaptive prior specification.
+
+        **Priority Order for Priors:**
+        1. User-specified priors (passed to `__init__`)
+        2. Data-driven priors (from this method)
+        3. Default priors (from `default_priors` property)
+
+        Examples
+        --------
+        A typical implementation might scale priors based on data variance:
+
+        >>> def priors_from_data(self, X, y):
+        ...     y_std = float(y.std())
+        ...     return {
+        ...         "sigma": Prior("HalfNormal", sigma=y_std, dims="treated_units"),
+        ...         "beta": Prior(
+        ...             "Normal",
+        ...             mu=0,
+        ...             sigma=2 * y_std,
+        ...             dims=["treated_units", "coeffs"],
+        ...         ),
+        ...     }
+
+        Or set shape parameters based on data dimensions:
+
+        >>> def priors_from_data(self, X, y):
+        ...     n_predictors = X.shape[1]
+        ...     return {
+        ...         "beta": Prior(
+        ...             "Dirichlet",
+        ...             a=np.ones(n_predictors),
+        ...             dims=["treated_units", "coeffs"],
+        ...         )
+        ...     }
+
+        See Also
+        --------
+        WeightedSumFitter.priors_from_data : Example implementation that sets
+            Dirichlet prior shape based on number of control units.
+        """
         return {}
 
     def __init__(
@@ -160,6 +231,8 @@ class PyMCModel(pm.Model):
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
 
+        # Merge priors with precedence: user-specified > data-driven > defaults
+        # Data-driven priors are computed first, then user-specified priors override them
         self.priors = {**self.priors_from_data(X, y), **self.priors}
 
         self.build_model(X, y, coords)
@@ -407,6 +480,27 @@ class WeightedSumFitter(PyMCModel):
     }
 
     def priors_from_data(self, X, y) -> Dict[str, Any]:
+        """
+        Set Dirichlet prior for weights based on number of control units.
+
+        For synthetic control models, this method sets the shape parameter of the
+        Dirichlet prior on the control unit weights (`beta`) to be uniform across
+        all available control units. This ensures that all control units have
+        equal prior probability of contributing to the synthetic control.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Control unit data with shape (n_obs, n_control_units).
+        y : xarray.DataArray
+            Treated unit outcome data.
+
+        Returns
+        -------
+        Dict[str, Prior]
+            Dictionary containing:
+            - "beta": Dirichlet prior with shape=(1,...,1) for n_control_units
+        """
         n_predictors = X.shape[1]
         return {
             "beta": Prior(
