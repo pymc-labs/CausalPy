@@ -115,7 +115,9 @@ class PyMCModel(pm.Model):
 
     def build_model(self, X, y, coords) -> None:
         """Build the model, must be implemented by subclass."""
-        raise NotImplementedError("This method must be implemented by a subclass")
+        raise NotImplementedError(
+            "This method must be implemented by a subclass"
+        )  # pragma: no cover
 
     def _data_setter(self, X: xr.DataArray) -> None:
         """
@@ -274,7 +276,9 @@ class PyMCModel(pm.Model):
         elif "y_hat_sigma" in self.idata.posterior:
             sigma_var_name = "y_hat_sigma"
         else:
-            raise ValueError("Neither 'sigma' nor 'y_hat_sigma' found in posterior")
+            raise ValueError(
+                "Neither 'sigma' nor 'y_hat_sigma' found in posterior"
+            )  # pragma: no cover
 
         treated_units = coeffs.coords["treated_units"].values
         for unit in treated_units:
