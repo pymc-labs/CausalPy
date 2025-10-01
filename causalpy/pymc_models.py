@@ -749,3 +749,349 @@ class PropensityScore(PyMCModel):
             idata_outcome.extend(pm.sample(**self.sample_kwargs))
 
         return idata_outcome, model_outcome
+
+
+class InterventionTimeEstimator(PyMCModel):
+    r"""
+    Custom PyMC model to estimate the time an intervention took place.
+
+    This model implements three types of changepoints: level shift, trend change, and impulse response.
+
+    In words:
+    - `beta` represents the regression coefficients for the baseline signal `μ`.
+    - `tau` is the changepoint time, and `w` is a sigmoid function to smooth the transition.
+    - `level` and `trend` model a linear shift after the changepoint.
+    - `A` and `lambda` define an impulse response at the changepoint.
+    - `mu_in` combines the level, trend, and impulse contributions.
+    - `mu_ts` is the total mean, including baseline and intervention.
+    - `sigma` is the observation noise.
+    - Finally, `y` is drawn from a Normal distribution with mean `mu_ts` and standard deviation `sigma`.
+
+    .. math::
+        \beta &\sim \mathrm{Normal}(0, 5) \\
+        \mu &= \beta \cdot X\\
+        \\
+        \tau &\sim \mathrm{Uniform}(\text{lower_bound}, \text{upper_bound}) \\
+        w &= sigmoid(t-\tau) \\
+        \\
+        \text{level} &\sim \mathrm{Normal}(0, 5) \\
+        \text{trend} &\sim \mathrm{Normal}(0, 0.5) \\
+        A &\sim \mathrm{Normal}(0, 5) \\
+        \lambda &\sim \mathrm{HalfNormal}(0, 5) \\
+        \text{impulse} &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
+        \mu_{in} &= \text{level} + \text{trend} \cdot (t-\tau) + \text{impulse}\\
+        \\
+        \sigma &\sim \mathrm{HalfNormal}(0, 1) \\
+        \mu_{ts} &= \mu + \mu_{in} \\
+        \\
+        y &\sim \mathrm{Normal}(\mu_{ts}, \sigma)
+
+    Example
+        --------
+        >>> import causalpy as cp
+        >>> import numpy as np
+        >>> from patsy import build_design_matrices, dmatrices
+        >>> from causalpy.pymc_models import InterventionTimeEstimator as ITE
+        >>> data = cp.load_data("its")
+        >>> formula="y ~ 1 + t + C(month)"
+        >>> y, X = dmatrices(formula, data)
+        >>> outcome_variable_name = y.design_info.column_names[0]
+        >>> labels = X.design_info.column_names
+        >>> _y, _X = np.asarray(y), np.asarray(X)
+        >>> _X = xr.DataArray(
+        ...     _X,
+        ...     dims=["obs_ind", "coeffs"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "coeffs": labels,
+        ...         },
+        ... )
+        >>> _y = xr.DataArray(
+        ...     _y,
+        ...     dims=["obs_ind", "treated_units"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "treated_units": ["unit_0"]
+        ...         },
+        ... )
+        >>> COORDS = {
+        ...     "coeffs": labels,
+        ...     "obs_ind": np.arange(X.shape[0]),
+        ...     "treated_units": ["unit_0"],
+        ... }
+        >>> model = ITE(treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model.set_time_range(None, data)
+        >>> model.fit(X=_X, y=_y, coords=COORDS)
+        Inference ...
+    """
+
+    def __init__(
+        self,
+        treatment_effect_type: str | list[str],
+        treatment_effect_param=None,
+        sample_kwargs=None,
+    ):
+        """
+        Initializes the InterventionTimeEstimator model.
+
+        :param treatment_effect_type: Optional dictionary that specifies prior parameters for the
+            intervention effects. Expected keys are:
+                - "level": [mu, sigma]
+                - "trend": [mu, sigma]
+                - "impulse": [mu, sigma1, sigma2]
+            If a key is missing, the corresponding effect is ignored.
+            If the associated list is incomplete, default values will be used.
+        :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
+        """
+
+        super().__init__(sample_kwargs)
+
+        # Hardcoded default priors
+        self.DEFAULT_BETA_PRIOR = (0, 5)
+        self.DEFAULT_LEVEL_PRIOR = (0, 5)
+        self.DEFAULT_TREND_PRIOR = (0, 0.5)
+        self.DEFAULT_IMPULSE_PRIOR = (0, 5, 5)
+
+        # Make sure we get a list of all expected effects
+        if isinstance(treatment_effect_type, str):
+            self.treatment_effect_type = [treatment_effect_type]
+        else:
+            self.treatment_effect_type = treatment_effect_type
+
+        # Defining the priors here
+        self.treatment_effect_param = (
+            {} if treatment_effect_param is None else treatment_effect_param
+        )
+
+        if "level" in self.treatment_effect_type:
+            if (
+                "level" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["level"]) != 2
+            ):
+                self.treatment_effect_param["level"] = self.DEFAULT_LEVEL_PRIOR
+            else:
+                self.treatment_effect_param["level"] = self.treatment_effect_param[
+                    "level"
+                ]
+
+        if "trend" in self.treatment_effect_type:
+            if (
+                "trend" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["trend"]) != 2
+            ):
+                self.treatment_effect_param["trend"] = self.DEFAULT_TREND_PRIOR
+            else:
+                self.treatment_effect_param["trend"] = self.treatment_effect_param[
+                    "trend"
+                ]
+
+        if "impulse" in self.treatment_effect_type:
+            if (
+                "impulse" not in self.treatment_effect_param
+                or len(self.treatment_effect_param["impulse"]) != 3
+            ):
+                self.treatment_effect_param["impulse"] = self.DEFAULT_IMPULSE_PRIOR
+            else:
+                self.treatment_effect_param["impulse"] = self.treatment_effect_param[
+                    "impulse"
+                ]
+
+    def build_model(self, X, y, coords):
+        """
+        Defines the PyMC model
+
+        :param X: An array of the covariates
+        :param y: An array of values representing our outcome y
+        :param coords: Dictionary of named coordinates for PyMC variables (e.g., {"obs_ind": range(n_obs), "coeffs": range(n_covariates)}).
+
+        Assumes the following attributes are already defined in self:
+            - self.timeline: the index of the column in X representing time.
+            - self.time_range: a tuple (lower_bound, upper_bound) for the intervention time.
+            - self.treatment_effect_type: a dictionary specifying which intervention effects to include and their priors.
+        """
+
+        with self:
+            self.add_coords(coords)
+
+            t = pm.Data("t", np.arange(len(X)), dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+
+            lower_bound = pm.Data("lower_bound", self.time_range[0])
+            upper_bound = pm.Data("upper_bound", self.time_range[1])
+
+            # --- Priors ---
+            treatment_time = pm.Uniform(
+                "treatment_time", lower=lower_bound, upper=upper_bound
+            )
+            delta_t = pm.Deterministic(
+                name="delta_t",
+                var=(t - treatment_time),
+                dims=["obs_ind"],
+            )
+            beta = pm.Normal(
+                name="beta",
+                mu=self.DEFAULT_BETA_PRIOR[0],
+                sigma=self.DEFAULT_BETA_PRIOR[1],
+                dims=["treated_units", "coeffs"],
+            )
+
+            # --- Intervention effect ---
+            mu_in_components = []
+
+            if "level" in self.treatment_effect_param:
+                level = pm.Normal(
+                    "level",
+                    mu=self.treatment_effect_param["level"][0],
+                    sigma=self.treatment_effect_param["level"][1],
+                )
+                mu_in_components.append(level)
+            if "trend" in self.treatment_effect_param:
+                trend = pm.Normal(
+                    "trend",
+                    mu=self.treatment_effect_param["trend"][0],
+                    sigma=self.treatment_effect_param["trend"][1],
+                )
+                mu_in_components.append(trend * delta_t)
+            if "impulse" in self.treatment_effect_param:
+                impulse_amplitude = pm.Normal(
+                    "impulse_amplitude",
+                    mu=self.treatment_effect_param["impulse"][0],
+                    sigma=self.treatment_effect_param["impulse"][1],
+                )
+                decay_rate = pm.HalfNormal(
+                    "decay_rate",
+                    sigma=self.treatment_effect_param["impulse"][2],
+                )
+                impulse = pm.Deterministic(
+                    "impulse",
+                    impulse_amplitude * pm.math.exp(-decay_rate * pm.math.abs(delta_t)),
+                )
+                mu_in_components.append(impulse)
+
+            # --- Parameterization ---
+            weight = pm.math.sigmoid(delta_t)
+            # Compute and store the base time series
+            mu = pm.Deterministic(
+                name="mu", var=pm.math.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            # Compute and store the modelled intervention effect
+            mu_in = (
+                pm.Deterministic(
+                    name="mu_in",
+                    var=sum(mu_in_components),
+                )
+                if len(mu_in_components) > 0
+                else pm.Data(
+                    name="mu_in",
+                    vars=0,
+                )
+            )
+            # Compute and store the sum of the base time series and the intervention's effect
+            mu_ts = pm.Deterministic(
+                "mu_ts",
+                mu + (weight * mu_in)[:, None],
+                dims=["obs_ind", "treated_units"],
+            )
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
+
+            # --- Likelihood ---
+            # Likelihood of the base time series
+            pm.Normal("y_hat", mu=mu, sigma=sigma, dims=["obs_ind", "treated_units"])
+            # Likelihodd of the base time series and the intervention's effect
+            pm.Normal(
+                "y_ts",
+                mu=mu_ts,
+                sigma=sigma,
+                observed=y,
+                dims=["obs_ind", "treated_units"],
+            )
+
+    def predict(self, X):
+        """
+        Predict data given input data `X`
+
+        .. caution::
+            Results in KeyError if model hasn't been fit.
+        """
+
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+        self._data_setter(X)
+        with self:  # sample with new input data
+            pp = pm.sample_posterior_predictive(
+                self.idata,
+                var_names=["y_hat", "y_ts", "mu", "mu_ts", "mu_in"],
+                progressbar=False,
+                random_seed=random_seed,
+            )
+
+        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
+            pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
+                obs_ind=X.obs_ind
+            )
+
+        return pp
+
+    def _data_setter(self, X) -> None:
+        """
+        Set data for the model.
+
+        This method is used internally to register new data for the model for
+        prediction.
+        """
+        n_obs = X.shape[0]
+        with self:
+            treated_units_coord = getattr(self, "coords", {}).get(
+                "treated_units", ["unit_0"]
+            )
+            n_treated_unit = len(treated_units_coord)
+            pm.set_data(
+                {
+                    "X": X,
+                    "t": np.arange(n_obs),
+                    "y": np.zeros((n_obs, n_treated_unit)),
+                },
+                coords={"obs_ind": np.arange(n_obs)},
+            )
+
+    def score(self, X, y) -> pd.Series:
+        """
+        Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
+        """
+        mu_ts = self.predict(X)
+        mu_data = az.extract(mu_ts, group="posterior_predictive", var_names="mu_ts")
+
+        scores = {}
+
+        # Always iterate over treated_units dimension - no branching needed!
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
+            unit_score = r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+
+        return pd.Series(scores)
+
+    def set_time_range(self, time_range, data):
+        """
+        Set time_range.
+
+        :param time_range: tuple or None
+            If not None, a tuple of two values (start_label, end_label) that correspond
+            to index labels in the 't' column of the `data` DataFrame
+        :param data: pandas.DataFrame.
+        """
+        if time_range is None:
+            self.time_range = (
+                0,
+                len(data),
+            )
+        else:
+            self.time_range = (
+                data.index.get_loc(time_range[0]),
+                data.index.get_loc(time_range[1]),
+            )
