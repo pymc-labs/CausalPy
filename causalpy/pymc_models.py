@@ -756,6 +756,9 @@ class InterventionTimeEstimator(PyMCModel):
     Custom PyMC model to estimate the time an intervention took place.
 
     This model implements three types of changepoints: level shift, trend change, and impulse response.
+    While the underlying mathematical framework could theoretically be applied to other changepoint
+    detection problems, it has been specifically designed and tested for use in interrupted time
+    series causal inference settings.
 
     In words:
     - `beta` represents the regression coefficients for the baseline signal `μ`.
