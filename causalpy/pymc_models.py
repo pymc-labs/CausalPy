@@ -91,9 +91,7 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    @property
-    def default_priors(self):
-        return {}
+    default_priors = {}
 
     def priors_from_data(self, X, y) -> Dict[str, Any]:
         """
