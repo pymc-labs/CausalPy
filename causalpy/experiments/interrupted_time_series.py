@@ -13,6 +13,99 @@
 #   limitations under the License.
 """
 Interrupted Time Series Analysis
+
+This module implements interrupted time series (ITS) analysis for causal inference,
+supporting both traditional scenarios where the intervention time is known and
+advanced scenarios where the intervention time must be inferred from the data.
+
+Overview
+--------
+Interrupted time series analysis is a quasi-experimental design used to evaluate
+the impact of an intervention by comparing time series data before and after the
+intervention occurs. This module provides a flexible framework that can handle:
+
+1. **Known intervention times**: Traditional ITS where you specify exactly when
+   the treatment occurred (e.g., policy implementation date)
+2. **Unknown intervention times**: Advanced ITS where the model infers when an
+   intervention likely occurred based on observed changes in the data
+
+Treatment Time Handler Architecture
+----------------------------------
+The core design pattern in this module is the Strategy pattern implemented through
+the `TreatmentTimeHandler` hierarchy. This architecture was necessary because known
+and unknown treatment times require fundamentally different approaches:
+
+**Why the Handler Architecture?**
+
+- **Data Processing**: Known times require splitting data at a specific point;
+  unknown times need the full dataset for inference
+- **Model Training**: Known times train only on pre-intervention data; unknown
+  times train on all available data to detect the changepoint
+- **Uncertainty Handling**: Known times have deterministic splits; unknown times
+  have probabilistic splits with confidence intervals
+- **Visualization**: Different plotting strategies for certain vs. uncertain
+  intervention times
+
+**Handler Classes:**
+
+1. **TreatmentTimeHandler (Abstract Base Class)**
+
+   - Defines the interface that all concrete handlers must implement
+   - Ensures consistent API regardless of whether treatment time is known/unknown
+   - Abstract methods: data_preprocessing, data_postprocessing, plot_intervention_line,
+     plot_impact_cumulative
+   - Optional method: plot_treated_counterfactual (only needed for unknown times)
+
+2. **KnownTreatmentTimeHandler**
+
+   - Handles traditional ITS scenarios with predetermined intervention times
+   - **Data Preprocessing**: Filters data to pre-intervention period only for training
+   - **Data Postprocessing**: Creates clean pre/post splits at the known time point
+   - **Plotting**: Draws single vertical line at the intervention time
+   - **Use Case**: Policy evaluations, clinical trials, A/B tests with known start dates
+
+3. **UnknownTreatmentTimeHandler**
+
+   - Handles advanced ITS scenarios where intervention time is inferred
+   - **Data Preprocessing**: Uses full dataset and constrains model's search window
+   - **Data Postprocessing**: Extracts inferred treatment time from posterior samples,
+     creates probabilistic pre/post splits, handles uncertainty propagation
+   - **Plotting**: Draws intervention line with uncertainty bands (HDI), shows
+     "treated counterfactual" predictions
+   - **Use Case**: Exploratory analysis, natural experiments, detecting unknown
+     structural breaks
+
+The handler pattern ensures that:
+
+- The main `InterruptedTimeSeries` class maintains a clean, unified API
+- Different treatment time scenarios are handled with appropriate algorithms
+- New handler types can be easily added (e.g., multiple intervention times)
+- Code is maintainable and testable with clear separation of concerns
+
+Usage Examples
+--------------
+Known treatment time (traditional approach):
+
+>>> result = cp.InterruptedTimeSeries(
+...     data=df,
+...     treatment_time=pd.to_datetime("2017-01-01"),  # Known intervention
+...     formula="y ~ 1 + t + C(month)",
+...     model=cp.pymc_models.LinearRegression(),
+... )
+
+Unknown treatment time (inference approach):
+
+>>> model = cp.pymc_models.InterventionTimeEstimator(treatment_effect_type="level")
+>>> result = cp.InterruptedTimeSeries(
+...     data=df,
+...     treatment_time=None,  # Let model infer the time
+...     formula="y ~ 1 + t + C(month)",
+...     model=model,
+... )
+
+The module automatically selects the appropriate handler based on the treatment_time
+parameter and model type, providing a seamless user experience while maintaining
+the flexibility to handle diverse analytical scenarios.
 """
 
 from abc import ABC, abstractmethod
