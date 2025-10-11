@@ -1426,7 +1426,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
 class StateSpaceTimeSeries(PyMCModel):
     """
-    State-space time series model using pymc_extras.statespace.structural.
+    State-space time series model using :class:`pymc-extras.statespace.structural`.
 
     Parameters
     ----------
