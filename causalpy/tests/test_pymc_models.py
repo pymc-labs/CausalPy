@@ -17,9 +17,10 @@ import pandas as pd
 import pymc as pm
 import pytest
 import xarray as xr
+from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import PyMCModel, WeightedSumFitter
+from causalpy.pymc_models import LinearRegression, PyMCModel, WeightedSumFitter
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -45,7 +46,7 @@ class MyToyModel(PyMCModel):
             X_ = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
             y_ = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
             beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
-            sigma = pm.HalfNormal("sigma", sigma=1, dims="treated_units")
+            sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
             mu = pm.Deterministic(
                 "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
             )
@@ -159,7 +160,7 @@ class TestPyMCModel:
             2,
             2 * 2,
         )  # (treated_units, coeffs, sample)
-        assert az.extract(data=model.idata, var_names=["sigma"]).shape == (
+        assert az.extract(data=model.idata, var_names=["y_hat_sigma"]).shape == (
             1,
             2 * 2,
         )  # (treated_units, sample)
@@ -402,7 +403,7 @@ class TestWeightedSumFitterMultiUnit:
 
         # Extract coefficients
         beta = az.extract(wsf.idata.posterior, var_names="beta")
-        sigma = az.extract(wsf.idata.posterior, var_names="sigma")
+        sigma = az.extract(wsf.idata.posterior, var_names="y_hat_sigma")
 
         # Check beta dimensions: should be (sample, treated_units, coeffs)
         assert "treated_units" in beta.dims
@@ -461,7 +462,7 @@ class TestWeightedSumFitterMultiUnit:
             assert control in output
 
         # Check that sigma is printed for each unit
-        assert output.count("sigma") == len(treated_units)
+        assert output.count("y_hat_sigma") == len(treated_units)
 
     def test_scoring_multi_unit(self, synthetic_control_data):
         """Test that scoring works with multiple treated units."""
@@ -592,3 +593,249 @@ class TestWeightedSumFitterMultiUnit:
             f"R² standard deviation is too low ({r2_std}), suggesting insufficient variation "
             "between treated units. This might indicate a scoring implementation issue."
         )
+
+
+@pytest.fixture(scope="module")
+def prior_test_data():
+    """Generate test data for Prior integration tests (shared across all tests)."""
+    rng = np.random.default_rng(42)
+    X = xr.DataArray(
+        rng.normal(loc=0, scale=1, size=(20, 2)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(20), "coeffs": ["x1", "x2"]},
+    )
+    y = xr.DataArray(
+        rng.normal(loc=0, scale=1, size=(20, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+    )
+    coords = {
+        "obs_ind": np.arange(20),
+        "coeffs": ["x1", "x2"],
+        "treated_units": ["unit_0"],
+    }
+    return X, y, coords
+
+
+class TestPriorIntegration:
+    """
+    Test suite for Prior class integration with PyMC models.
+    Tests the precedence system, data-driven priors, and Prior class usage.
+    """
+
+    def test_default_priors_property(self):
+        """Test that default_priors property returns correct Prior objects."""
+        model = LinearRegression()
+        defaults = model.default_priors
+
+        # Check that defaults is a dictionary with expected keys
+        assert isinstance(defaults, dict)
+        assert "beta" in defaults
+        assert "y_hat" in defaults
+
+        # Check that values are Prior objects
+        assert isinstance(defaults["beta"], Prior)
+        assert isinstance(defaults["y_hat"], Prior)
+
+        # Check Prior configuration using correct API
+        beta_prior = defaults["beta"]
+        assert beta_prior.distribution == "Normal"
+        assert beta_prior.parameters["mu"] == 0
+        assert beta_prior.parameters["sigma"] == 50
+
+    def test_priors_from_data_base_implementation(self, prior_test_data):
+        """Test that base PyMCModel.priors_from_data returns empty dict."""
+        X, y, coords = prior_test_data
+        model = PyMCModel()
+        data_priors = model.priors_from_data(X, y)
+        assert isinstance(data_priors, dict)
+        assert len(data_priors) == 0
+
+    def test_weighted_sum_fitter_priors_from_data(self, prior_test_data):
+        """Test WeightedSumFitter data-driven Dirichlet prior generation."""
+        X, y, coords = prior_test_data
+        model = WeightedSumFitter()
+        data_priors = model.priors_from_data(X, y)
+
+        # Should return beta prior based on X shape
+        assert "beta" in data_priors
+        beta_prior = data_priors["beta"]
+
+        # Check it's a Dirichlet prior using correct API
+        assert isinstance(beta_prior, Prior)
+        assert beta_prior.distribution == "Dirichlet"
+
+        # Check shape matches number of predictors
+        assert len(beta_prior.parameters["a"]) == X.shape[1]  # 2 predictors
+        assert np.allclose(beta_prior.parameters["a"], np.ones(2))
+
+    def test_prior_precedence_system(self, prior_test_data):
+        """Test that user priors override data-driven priors override defaults."""
+        X, y, coords = prior_test_data
+        # Create custom user prior
+        user_beta_prior = Prior(
+            "Normal", mu=100, sigma=10, dims=("treated_units", "coeffs")
+        )
+
+        model = LinearRegression(priors={"beta": user_beta_prior})
+
+        # Before fit, should have user prior + defaults
+        assert model.priors["beta"] == user_beta_prior
+        assert "y_hat" in model.priors  # From defaults
+
+        # After calling priors_from_data, user prior should remain
+        data_priors = model.priors_from_data(X, y)
+        merged_priors = {**data_priors, **model.priors}
+
+        # User prior should override any data-driven prior
+        assert merged_priors["beta"] == user_beta_prior
+
+    def test_prior_precedence_integration_in_fit(self, prior_test_data):
+        """Test the complete prior precedence system during fit()."""
+        X, y, coords = prior_test_data
+        # Create model with custom user prior
+        custom_prior = Prior("Normal", mu=5, sigma=2, dims=("treated_units", "coeffs"))
+        model = LinearRegression(
+            priors={"beta": custom_prior},
+            sample_kwargs={"tune": 5, "draws": 5, "chains": 1, "progressbar": False},
+        )
+
+        # Fit the model
+        model.fit(X, y, coords=coords)
+
+        # Check that the model was built with the custom prior
+        # We can verify this by checking the model context
+        assert model.idata is not None
+        assert "beta" in model.idata.posterior
+
+    def test_prior_dimensions_consistency(self):
+        """Test that Prior dimensions are consistent with model expectations."""
+        model = LinearRegression()
+
+        # Check default priors have correct dimensions (tuples, not lists)
+        beta_prior = model.default_priors["beta"]
+        assert beta_prior.dims == ("treated_units", "coeffs")
+
+        y_hat_prior = model.default_priors["y_hat"]
+        assert y_hat_prior.dims == ("obs_ind", "treated_units")
+
+        # Check that sigma component has correct dims
+        sigma_prior = y_hat_prior.parameters["sigma"]
+        assert isinstance(sigma_prior, Prior)
+        assert sigma_prior.dims == ("treated_units",)
+
+    def test_custom_prior_with_build_model(self, prior_test_data):
+        """Test that custom priors work correctly in build_model."""
+        # Create a custom Prior with different parameters
+        custom_beta = Prior(
+            "Normal",
+            mu=0,
+            sigma=10,  # Different from default (50)
+            dims=("treated_units", "coeffs"),
+        )
+        custom_sigma = Prior(
+            "HalfNormal",
+            sigma=2,  # Different from default (1)
+            dims=("treated_units",),
+        )
+        custom_y_hat = Prior(
+            "Normal", sigma=custom_sigma, dims=("obs_ind", "treated_units")
+        )
+
+        model = LinearRegression(priors={"beta": custom_beta, "y_hat": custom_y_hat})
+
+        # Build the model to ensure priors work
+        X, y, coords = prior_test_data
+        model.build_model(X, y, coords)
+
+        # Check that variables were created in the model context
+        with model:
+            assert "beta" in model.named_vars
+            assert "y_hat" in model.named_vars
+
+    def test_prior_create_variable_integration(self, prior_test_data):
+        """Test that Prior.create_variable works in model context."""
+        X, y, coords = prior_test_data
+        model = LinearRegression()
+        model.build_model(X, y, coords)
+
+        # Verify that Prior.create_variable was called successfully
+        # by checking the created variables exist and have expected names
+        with model:
+            beta_var = model.named_vars["beta"]
+            # Check that the variable exists and is a PyMC variable
+            assert beta_var is not None
+            assert hasattr(beta_var, "name")
+            assert beta_var.name == "beta"
+
+    def test_weighted_sum_fitter_dirichlet_prior_shape(self, prior_test_data):
+        """Test that WeightedSumFitter creates correct Dirichlet shape."""
+        _, y, _ = prior_test_data
+        rng = np.random.default_rng(42)
+        # Test with different numbers of control units
+        for n_controls in [3, 5, 10]:
+            X = xr.DataArray(
+                rng.normal(size=(20, n_controls)),
+                dims=["obs_ind", "coeffs"],
+                coords={
+                    "obs_ind": np.arange(20),
+                    "coeffs": [f"control_{i}" for i in range(n_controls)],
+                },
+            )
+
+            model = WeightedSumFitter()
+            data_priors = model.priors_from_data(X, y)
+
+            beta_prior = data_priors["beta"]
+            assert len(beta_prior.parameters["a"]) == n_controls
+            assert np.allclose(beta_prior.parameters["a"], np.ones(n_controls))
+
+    def test_prior_none_handling(self):
+        """Test that models handle None priors parameter correctly."""
+        model = LinearRegression(priors=None)
+
+        # Should still have default priors
+        assert len(model.priors) > 0
+        assert "beta" in model.priors
+        assert "y_hat" in model.priors
+
+    def test_empty_priors_dict(self):
+        """Test that models handle empty priors dict correctly."""
+        model = LinearRegression(priors={})
+
+        # Should still have default priors
+        assert len(model.priors) > 0
+        assert "beta" in model.priors
+        assert "y_hat" in model.priors
+
+    def test_priors_from_data_called_during_fit(self, prior_test_data):
+        """Test that priors_from_data is called and integrated during fit."""
+
+        # Create a mock model that tracks priors_from_data calls
+        class TrackingWeightedSumFitter(WeightedSumFitter):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.priors_from_data_called = False
+                self.priors_from_data_args = None
+
+            def priors_from_data(self, X, y):
+                self.priors_from_data_called = True
+                self.priors_from_data_args = (X, y)
+                return super().priors_from_data(X, y)
+
+        model = TrackingWeightedSumFitter(
+            sample_kwargs={"tune": 2, "draws": 2, "chains": 1, "progressbar": False}
+        )
+
+        # Fit the model
+        X, y, coords = prior_test_data
+        model.fit(X, y, coords=coords)
+
+        # Verify priors_from_data was called with correct arguments
+        assert model.priors_from_data_called
+        assert model.priors_from_data_args is not None
+
+        # Verify the model has the Dirichlet prior after fitting
+        assert "beta" in model.priors
+        beta_prior = model.priors["beta"]
+        assert beta_prior.distribution == "Dirichlet"
