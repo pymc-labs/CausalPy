@@ -888,7 +888,7 @@ class PropensityScore(PyMCModel):
         return idata_outcome, model_outcome
 
 
-class InterventionTimeEstimator(PyMCModel):
+class LinearChangePointDetection(PyMCModel):
     r"""
     Custom PyMC model to estimate the time an intervention took place.
 
@@ -967,8 +967,8 @@ class InterventionTimeEstimator(PyMCModel):
 
     def __init__(
         self,
-        treatment_effect_type: str | list[str],
-        treatment_effect_param=None,
+        cp_effect_type: str | list[str],
+        cp_effect_param=None,
         sample_kwargs=None,
     ):
         """
@@ -993,48 +993,40 @@ class InterventionTimeEstimator(PyMCModel):
         self.DEFAULT_IMPULSE_PRIOR = (0, 5, 5)
 
         # Make sure we get a list of all expected effects
-        if isinstance(treatment_effect_type, str):
-            self.treatment_effect_type = [treatment_effect_type]
+        if isinstance(cp_effect_type, str):
+            self.cp_effect_type = [cp_effect_type]
         else:
-            self.treatment_effect_type = treatment_effect_type
+            self.cp_effect_type = cp_effect_type
 
         # Defining the priors here
-        self.treatment_effect_param = (
-            {} if treatment_effect_param is None else treatment_effect_param
-        )
+        self.cp_effect_param = {} if cp_effect_param is None else cp_effect_param
 
-        if "level" in self.treatment_effect_type:
+        if "level" in self.cp_effect_type:
             if (
-                "level" not in self.treatment_effect_param
-                or len(self.treatment_effect_param["level"]) != 2
+                "level" not in self.cp_effect_param
+                or len(self.cp_effect_param["level"]) != 2
             ):
-                self.treatment_effect_param["level"] = self.DEFAULT_LEVEL_PRIOR
+                self.cp_effect_param["level"] = self.DEFAULT_LEVEL_PRIOR
             else:
-                self.treatment_effect_param["level"] = self.treatment_effect_param[
-                    "level"
-                ]
+                self.cp_effect_param["level"] = self.cp_effect_param["level"]
 
-        if "trend" in self.treatment_effect_type:
+        if "trend" in self.cp_effect_type:
             if (
-                "trend" not in self.treatment_effect_param
-                or len(self.treatment_effect_param["trend"]) != 2
+                "trend" not in self.cp_effect_param
+                or len(self.cp_effect_param["trend"]) != 2
             ):
-                self.treatment_effect_param["trend"] = self.DEFAULT_TREND_PRIOR
+                self.cp_effect_param["trend"] = self.DEFAULT_TREND_PRIOR
             else:
-                self.treatment_effect_param["trend"] = self.treatment_effect_param[
-                    "trend"
-                ]
+                self.cp_effect_param["trend"] = self.cp_effect_param["trend"]
 
-        if "impulse" in self.treatment_effect_type:
+        if "impulse" in self.cp_effect_type:
             if (
-                "impulse" not in self.treatment_effect_param
-                or len(self.treatment_effect_param["impulse"]) != 3
+                "impulse" not in self.cp_effect_param
+                or len(self.cp_effect_param["impulse"]) != 3
             ):
-                self.treatment_effect_param["impulse"] = self.DEFAULT_IMPULSE_PRIOR
+                self.cp_effect_param["impulse"] = self.DEFAULT_IMPULSE_PRIOR
             else:
-                self.treatment_effect_param["impulse"] = self.treatment_effect_param[
-                    "impulse"
-                ]
+                self.cp_effect_param["impulse"] = self.cp_effect_param["impulse"]
 
     def build_model(self, X, y, coords):
         """
@@ -1061,12 +1053,12 @@ class InterventionTimeEstimator(PyMCModel):
             upper_bound = pm.Data("upper_bound", self.time_range[1])
 
             # --- Priors ---
-            treatment_time = pm.Uniform(
-                "treatment_time", lower=lower_bound, upper=upper_bound
+            change_point = pm.Uniform(
+                "change_point", lower=lower_bound, upper=upper_bound
             )
             delta_t = pm.Deterministic(
                 name="delta_t",
-                var=(t - treatment_time),
+                var=(t - change_point),
                 dims=["obs_ind"],
             )
             beta = pm.Normal(
@@ -1079,29 +1071,29 @@ class InterventionTimeEstimator(PyMCModel):
             # --- Intervention effect ---
             mu_in_components = []
 
-            if "level" in self.treatment_effect_param:
+            if "level" in self.cp_effect_param:
                 level = pm.Normal(
                     "level",
-                    mu=self.treatment_effect_param["level"][0],
-                    sigma=self.treatment_effect_param["level"][1],
+                    mu=self.cp_effect_param["level"][0],
+                    sigma=self.cp_effect_param["level"][1],
                 )
                 mu_in_components.append(level)
-            if "trend" in self.treatment_effect_param:
+            if "trend" in self.cp_effect_param:
                 trend = pm.Normal(
                     "trend",
-                    mu=self.treatment_effect_param["trend"][0],
-                    sigma=self.treatment_effect_param["trend"][1],
+                    mu=self.cp_effect_param["trend"][0],
+                    sigma=self.cp_effect_param["trend"][1],
                 )
                 mu_in_components.append(trend * delta_t)
-            if "impulse" in self.treatment_effect_param:
+            if "impulse" in self.cp_effect_param:
                 impulse_amplitude = pm.Normal(
                     "impulse_amplitude",
-                    mu=self.treatment_effect_param["impulse"][0],
-                    sigma=self.treatment_effect_param["impulse"][1],
+                    mu=self.cp_effect_param["impulse"][0],
+                    sigma=self.cp_effect_param["impulse"][1],
                 )
                 decay_rate = pm.HalfNormal(
                     "decay_rate",
-                    sigma=self.treatment_effect_param["impulse"][2],
+                    sigma=self.cp_effect_param["impulse"][2],
                 )
                 impulse = pm.Deterministic(
                     "impulse",
