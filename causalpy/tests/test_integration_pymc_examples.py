@@ -404,13 +404,13 @@ def test_its(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_its_no_treatment_time():
+def test_cp_covid():
     """
-    Test Interrupted Time-Series experiment on COVID data with an unknown treatment time.
+    Test ChangePoint experiment on COVID data.
 
     Loads data and checks:
     1. data is a dataframe
-    2. causalpy.InterruptedtimeSeries returns correct type
+    2. causalpy.ChangePoint returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
@@ -421,26 +421,23 @@ def test_its_no_treatment_time():
         .assign(date=lambda x: pd.to_datetime(x["date"]))
         .set_index("date")
     )
-    treatment_time = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
+    time_range = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
 
     # Assert that we correctfully raise a ModelException if the given model can't predict InterventionTime
     with pytest.raises(cp.custom_exceptions.ModelException) as exc_info:
-        cp.InterruptedTimeSeries(
+        cp.ChangePointDetection(
             df,
-            treatment_time,
+            time_range=time_range,
             formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
-    assert (
-        "If treatment_time is a tuple, provided model must have a 'set_time_range' method"
-        in str(exc_info.value)
-    )
+    assert "Provided model must have a 'set_time_range' method" in str(exc_info.value)
 
-    result = cp.InterruptedTimeSeries(
+    result = cp.ChangePointDetection(
         df,
-        treatment_time,
+        time_range=time_range,
         formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
-        model=cp.pymc_models.InterventionTimeEstimator(
+        model=cp.pymc_models.LinearChangePointDetection(
             treatment_effect_type=["impulse", "level", "trend"],
             sample_kwargs=sample_kwargs,
         ),

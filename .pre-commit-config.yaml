@@ -22,7 +22,7 @@ repos:
         exclude_types: [svg]
       - id: check-yaml
       - id: check-added-large-files
-        exclude: &exclude_pattern 'iv_weak_instruments.ipynb'
+        exclude: &exclude_pattern '(iv_weak_instruments\.ipynb|cp_covid\.ipynb)'
         args: ["--maxkb=1500"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0

@@ -86,21 +86,11 @@ Usage Examples
 --------------
 Known treatment time (traditional approach):
 
->>> result = cp.InterruptedTimeSeries(
+>>> result = cp.ChangePointDetection(
 ...     data=df,
-...     treatment_time=pd.to_datetime("2017-01-01"),  # Known intervention
+...     time_range=None
 ...     formula="y ~ 1 + t + C(month)",
-...     model=cp.pymc_models.LinearRegression(),
-... )
-
-Unknown treatment time (inference approach):
-
->>> model = cp.pymc_models.InterventionTimeEstimator(treatment_effect_type="level")
->>> result = cp.InterruptedTimeSeries(
-...     data=df,
-...     treatment_time=None,  # Let model infer the time
-...     formula="y ~ 1 + t + C(month)",
-...     model=model,
+...     model=cp.pymc_models.LinearChangePointDetection(),
 ... )
 
 The module automatically selects the appropriate handler based on the treatment_time
@@ -164,7 +154,7 @@ class ChangePointDetection(BaseExperiment):
     ... )
     """
 
-    expt_type = "Interrupted Time Series"
+    expt_type = "Change Point Detection"
     supports_ols = False
     supports_bayes = True
 
@@ -172,7 +162,7 @@ class ChangePointDetection(BaseExperiment):
         self,
         data: pd.DataFrame,
         formula: str,
-        treatment_time_range: Union[Iterable, None] = None,
+        time_range: Union[Iterable, None] = None,
         model=None,
         **kwargs,
     ) -> None:
@@ -180,19 +170,19 @@ class ChangePointDetection(BaseExperiment):
 
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
-        self.input_validation(data, treatment_time_range, model)
+        self.input_validation(data, time_range, model)
 
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
 
-        self.treatment_time_range = treatment_time_range
+        self.time_range = time_range
         self.formula = formula
 
         # Define the time interval over which the model will perform inference
-        model.set_time_range(self.treatment_time_range, data)
+        model.set_time_range(self.time_range, data)
 
         # Preprocess the data according to the given formula
-        y, X = dmatrices(formula, self.datapre)
+        y, X = dmatrices(formula, data)
 
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
@@ -205,14 +195,14 @@ class ChangePointDetection(BaseExperiment):
             self.X,
             dims=["obs_ind", "coeffs"],
             coords={
-                "obs_ind": self.datapre.index,
+                "obs_ind": data.index,
                 "coeffs": self.labels,
             },
         )
         self.y = xr.DataArray(
             self.y,  # Keep 2D shape
             dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapre.index, "treated_units": ["unit_0"]},
+            coords={"obs_ind": data.index, "treated_units": ["unit_0"]},
         )
 
         # fit the model to the observed data
@@ -266,34 +256,40 @@ class ChangePointDetection(BaseExperiment):
         timeline_broadcast = np.array(timeline)
         tt_broadcast = cp_samples[:, :, None].astype(int)
         mask = (timeline_broadcast >= tt_broadcast).astype(int)
+        mask = mask[:, :, np.newaxis, :]
+        post_impact_masked = impact * mask
 
-        # --- Compute cumulative post-treatment impact ---
+        # --- Compute cumulative post-change point impact ---
         post_impact_masked = impact * mask
         self.post_impact_cumulative = model.calculate_cumulative_impact(
             post_impact_masked
         )
 
-    def input_validation(self, data, treatment_time_range, model):
+    def input_validation(self, data, time_range, model):
         """Validate the input data and model formula for correctness"""
         if not hasattr(model, "set_time_range"):
             raise ModelException("Provided model must have a 'set_time_range' method")
-        if treatment_time_range is not None and len(treatment_time_range) != 2:
+        if time_range is not None and len(time_range) != 2:
             raise BadIndexException(
-                "Provided treatment_time_range must be of length 2 : (start, end)"
+                "Provided time_range must be of length 2 : (start, end)"
             )
         if isinstance(data.index, pd.DatetimeIndex) and not (
-            treatment_time_range is None
-            or isinstance(treatment_time_range, Iterable[pd.Timestamp])
+            time_range is None
+            or (
+                isinstance(time_range, Iterable)
+                and all(isinstance(t, pd.Timestamp) for t in time_range)
+            )
         ):
             raise BadIndexException(
-                "If data.index is DatetimeIndex, treatment_time_range must "
+                "If data.index is DatetimeIndex, time_range must "
                 "be of type Iterable[pd.Timestamp]."
             )
-        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
-            treatment_time_range, Iterable[pd.Timestamp]
+        if not isinstance(data.index, pd.DatetimeIndex) and (
+            isinstance(time_range, Iterable)
+            and all(isinstance(t, pd.Timestamp) for t in time_range)
         ):
             raise BadIndexException(
-                "If data.index is not DatetimeIndex, treatment_time_range must"
+                "If data.index is not DatetimeIndex, time_range must"
                 "not be of type Iterable[pd.Timestamp]."  # noqa: E501
             )
 
@@ -324,7 +320,7 @@ class ChangePointDetection(BaseExperiment):
         labels = []
 
         # Treated counterfactual
-        # Plot predicted values under treatment (with HDI)
+        # Plot predicted values after change point (with HDI)
         h_line, h_patch = plot_xY(
             self.datapre.index,
             self.pre_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
@@ -440,17 +436,17 @@ class ChangePointDetection(BaseExperiment):
         )
         ax[2].axhline(y=0, c="k")
 
-        # Plot vertical line marking treatment time (with HDI if it's inferred)
+        # Plot vertical line marking change point (with HDI if it's inferred)
         data = pd.concat([self.datapre, self.datapost])
-        # Extract the HDI (uncertainty interval) of the treatment time
-        hdi = az.hdi(self.idata, var_names=["treatment_time"])["treatment_time"].values
+        # Extract the HDI (uncertainty interval) of the change point
+        hdi = az.hdi(self.idata, var_names=["change_point"])["change_point"].values
         x1 = data.index[int(hdi[0])]
         x2 = data.index[int(hdi[1])]
 
         for i in [0, 1, 2]:
             ymin, ymax = ax[i].get_ylim()
 
-            # Vertical line for inferred treatment time
+            # Vertical line for inferred change point
             ax[i].plot(
                 [self.changepoint, self.changepoint],
                 [ymin, ymax],
@@ -460,7 +456,7 @@ class ChangePointDetection(BaseExperiment):
                 solid_capstyle="butt",
             )
 
-            # Shaded region for HDI of treatment time
+            # Shaded region for HDI of change point
             ax[i].fill_betweenx(
                 y=[ymin, ymax],
                 x1=x1,
@@ -545,13 +541,13 @@ class ChangePointDetection(BaseExperiment):
         else:
             raise ValueError("Unsupported model type")
 
-    def plot_treatment_time(self):
+    def plot_change_point(self):
         """
-        display the posterior estimates of the treatment time
+        display the posterior estimates of the change point
         """
-        if "treatment_time" not in self.idata.posterior.data_vars:
+        if "change_point" not in self.idata.posterior.data_vars:
             raise ValueError(
-                "Variable 'treatment_time' not found in inference data (idata)."
+                "Variable 'change_point' not found in inference data (idata)."
             )
 
-        az.plot_trace(self.idata, var_names="treatment_time")
+        az.plot_trace(self.idata, var_names="change_point")

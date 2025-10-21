@@ -931,7 +931,7 @@ class LinearChangePointDetection(PyMCModel):
         >>> import causalpy as cp
         >>> import numpy as np
         >>> from patsy import build_design_matrices, dmatrices
-        >>> from causalpy.pymc_models import InterventionTimeEstimator as ITE
+        >>> from causalpy.pymc_models import LinearChangePointDetection
         >>> data = cp.load_data("its")
         >>> formula="y ~ 1 + t + C(month)"
         >>> y, X = dmatrices(formula, data)
@@ -959,7 +959,7 @@ class LinearChangePointDetection(PyMCModel):
         ...     "obs_ind": np.arange(X.shape[0]),
         ...     "treated_units": ["unit_0"],
         ... }
-        >>> model = ITE(treatment_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model = LinearChangePointDetection(cp_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
         >>> model.set_time_range(None, data)
         >>> model.fit(X=_X, y=_y, coords=COORDS)
         Inference ...
@@ -974,7 +974,7 @@ class LinearChangePointDetection(PyMCModel):
         """
         Initializes the InterventionTimeEstimator model.
 
-        :param treatment_effect_type: Optional dictionary that specifies prior parameters for the
+        :param cp_effect_type: Optional dictionary that specifies prior parameters for the
             intervention effects. Expected keys are:
                 - "level": [mu, sigma]
                 - "trend": [mu, sigma]
@@ -1039,7 +1039,7 @@ class LinearChangePointDetection(PyMCModel):
         Assumes the following attributes are already defined in self:
             - self.timeline: the index of the column in X representing time.
             - self.time_range: a tuple (lower_bound, upper_bound) for the intervention time.
-            - self.treatment_effect_type: a dictionary specifying which intervention effects to include and their priors.
+            - self.cp_effect_type: a dictionary specifying which intervention effects to include and their priors.
         """
 
         with self:
