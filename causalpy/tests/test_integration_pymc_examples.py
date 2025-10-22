@@ -443,7 +443,7 @@ def test_cp_covid():
         ),
     )
     assert isinstance(df, pd.DataFrame)
-    assert isinstance(result, cp.InterruptedTimeSeries)
+    assert isinstance(result, cp.ChangePointDetection)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
