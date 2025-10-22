@@ -86,23 +86,6 @@ Usage Examples
 --------------
 Known treatment time (traditional approach):
 
->>> result = cp.InterruptedTimeSeries(
-...     data=df,
-...     treatment_time=pd.to_datetime("2017-01-01"),  # Known intervention
-...     formula="y ~ 1 + t + C(month)",
-...     model=cp.pymc_models.LinearRegression(),
-... )
-
-Unknown treatment time (inference approach):
-
->>> model = cp.pymc_models.InterventionTimeEstimator(treatment_effect_type="level")
->>> result = cp.InterruptedTimeSeries(
-...     data=df,
-...     treatment_time=None,  # Let model infer the time
-...     formula="y ~ 1 + t + C(month)",
-...     model=model,
-... )
-
 The module automatically selects the appropriate handler based on the treatment_time
 parameter and model type, providing a seamless user experience while maintaining
 the flexibility to handle diverse analytical scenarios.

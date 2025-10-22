@@ -82,17 +82,6 @@ The handler pattern ensures that:
 - New handler types can be easily added (e.g., multiple intervention times)
 - Code is maintainable and testable with clear separation of concerns
 
-Usage Examples
---------------
-Known treatment time (traditional approach):
-
->>> result = cp.ChangePointDetection(
-...     data=df,
-...     time_range=None
-...     formula="y ~ 1 + t + C(month)",
-...     model=cp.pymc_models.LinearChangePointDetection(),
-... )
-
 The module automatically selects the appropriate handler based on the treatment_time
 parameter and model type, providing a seamless user experience while maintaining
 the flexibility to handle diverse analytical scenarios.
@@ -138,18 +127,18 @@ class ChangePointDetection(BaseExperiment):
     ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
     ...     .set_index("date")
     ... )
-    >>> treatment_time = pd.to_datetime("2017-01-01")
     >>> seed = 42
-    >>> result = cp.InterruptedTimeSeries(
+    >>> result = cp.experiments.change_point_detection.ChangePointDetection(
     ...     df,
-    ...     treatment_time,
+    ...     time_range=None,
     ...     formula="y ~ 1 + t + C(month)",
-    ...     model=cp.pymc_models.LinearRegression(
+    ...     model=cp.pymc_models.LinearChangePointDetection(
+    ...         cp_effect_type="level",
     ...         sample_kwargs={
     ...             "target_accept": 0.95,
     ...             "random_seed": seed,
     ...             "progressbar": False,
-    ...         }
+    ...         },
     ...     ),
     ... )
     """
