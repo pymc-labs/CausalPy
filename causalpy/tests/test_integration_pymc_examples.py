@@ -454,7 +454,7 @@ def test_cp_covid():
     # - time_range is not None
     # - time_range is not of type Iterable[pd.TimeStamp]
     # - DataIndex is of type pd.DatetimeIndex
-    with pytest.raises(cp.custom_exceptions.DataException) as exc_info:
+    with pytest.raises(cp.custom_exceptions.BadIndexException) as exc_info:
         cp.ChangePointDetection(
             df,
             time_range=[0, 0],
