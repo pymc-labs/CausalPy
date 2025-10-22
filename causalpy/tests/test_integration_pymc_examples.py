@@ -441,7 +441,10 @@ def test_cp_covid():
             df,
             time_range=[0, 0, 0],
             formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            model=cp.pymc_models.LinearChangePointDetection(
+                cp_effect_type=["impulse", "level", "trend"],
+                sample_kwargs=sample_kwargs,
+            ),
         )
     assert "Provided time_range must be of length 2 : (start, end)" in str(
         exc_info.value
