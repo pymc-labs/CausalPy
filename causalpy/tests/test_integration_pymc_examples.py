@@ -438,7 +438,7 @@ def test_cp_covid():
         time_range=time_range,
         formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.LinearChangePointDetection(
-            treatment_effect_type=["impulse", "level", "trend"],
+            cp_effect_type=["impulse", "level", "trend"],
             sample_kwargs=sample_kwargs,
         ),
     )
