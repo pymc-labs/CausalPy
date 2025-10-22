@@ -96,7 +96,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import dmatrices
 
-from causalpy.custom_exceptions import BadIndexException, ModelException
+from causalpy.custom_exceptions import BadIndexException, DataException, ModelException
 from causalpy.experiments.base import BaseExperiment
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
@@ -259,7 +259,7 @@ class ChangePointDetection(BaseExperiment):
         if not hasattr(model, "set_time_range"):
             raise ModelException("Provided model must have a 'set_time_range' method")
         if time_range is not None and len(time_range) != 2:
-            raise BadIndexException(
+            raise DataException(
                 "Provided time_range must be of length 2 : (start, end)"
             )
         if isinstance(data.index, pd.DatetimeIndex) and not (
