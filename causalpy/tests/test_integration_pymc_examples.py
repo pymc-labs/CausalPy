@@ -450,6 +450,25 @@ def test_cp_covid():
         exc_info.value
     )
 
+    # Assert that we correctfully raise a BadIndexException if
+    # - time_range is not None
+    # - time_range is not of type Iterable[pd.TimeStamp]
+    # - DataIndex is of type pd.DatetimeIndex
+    with pytest.raises(cp.custom_exceptions.DataException) as exc_info:
+        cp.ChangePointDetection(
+            df,
+            time_range=[0, 0],
+            formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+            model=cp.pymc_models.LinearChangePointDetection(
+                cp_effect_type=["impulse", "level", "trend"],
+                sample_kwargs=sample_kwargs,
+            ),
+        )
+    assert (
+        "If data.index is DatetimeIndex, time_range must be of type Iterable[pd.Timestamp]."
+        in str(exc_info.value)
+    )
+
     result = cp.ChangePointDetection(
         df,
         time_range=time_range,
