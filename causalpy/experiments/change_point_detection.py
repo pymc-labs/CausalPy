@@ -128,7 +128,7 @@ class ChangePointDetection(BaseExperiment):
     ...     .set_index("date")
     ... )
     >>> seed = 42
-    >>> result = cp.experiments.change_point_detection.ChangePointDetection(
+    >>> result = cp.ChangePointDetection(
     ...     df,
     ...     time_range=None,
     ...     formula="y ~ 1 + t + C(month)",
