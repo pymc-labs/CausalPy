@@ -436,7 +436,7 @@ def test_cp_covid():
     # Assert that we correctfully raise a DataException if
     # - time_range is not None
     # - and len(time_range) is not 2
-    with pytest.raises(cp.custom_exceptions.DataExveption) as exc_info:
+    with pytest.raises(cp.custom_exceptions.DataException) as exc_info:
         cp.ChangePointDetection(
             df,
             time_range=[0, 0, 0],
