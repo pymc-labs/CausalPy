@@ -312,14 +312,14 @@ class ChangePointDetection(BaseExperiment):
         # Plot predicted values after change point (with HDI)
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
+            self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "yellowgreen"},
         )
 
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            self.post_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
+            self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "yellowgreen"},
         )
@@ -330,7 +330,7 @@ class ChangePointDetection(BaseExperiment):
         # pre-intervention period
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pre_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -351,7 +351,7 @@ class ChangePointDetection(BaseExperiment):
         # post intervention period
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.post_pred["posterior_predictive"].mu_ts.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -367,7 +367,7 @@ class ChangePointDetection(BaseExperiment):
         )
         # Shaded causal effect
         post_pred_mu = (
-            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+            az.extract(self.post_pred, group="posterior_predictive", var_names="mu_ts")
             .isel(treated_units=0)
             .mean("sample")
         )  # Add .mean("sample") to get 1D array

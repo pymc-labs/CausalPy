@@ -890,7 +890,7 @@ class PropensityScore(PyMCModel):
 
 class LinearChangePointDetection(PyMCModel):
     r"""
-    Custom PyMC model to estimate the time an intervention took place.
+    Custom PyMC model to estimate one ChangePoint in time series.
 
     This model implements three types of changepoints: level shift, trend change, and impulse response.
     While the underlying mathematical framework could theoretically be applied to other changepoint
@@ -965,6 +965,14 @@ class LinearChangePointDetection(PyMCModel):
         Inference ...
     """
 
+    default_priors = {
+        "beta": Prior("Normal", mu=0, sigma=5, dims=["treated_units", "coeffs"]),
+        "level": Prior("Normal", mu=0, sigma=5),
+        "trend": Prior("Normal", mu=0, sigma=0.5),
+        "impulse_amplitude": Prior("Normal", mu=0, sigma=5),
+        "impulse_decay_rate": Prior("HalfNormal", sigma=5),
+    }
+
     def __init__(
         self,
         cp_effect_type: str | list[str],
@@ -984,49 +992,13 @@ class LinearChangePointDetection(PyMCModel):
         :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
         """
 
-        super().__init__(sample_kwargs)
-
-        # Hardcoded default priors
-        self.DEFAULT_BETA_PRIOR = (0, 5)
-        self.DEFAULT_LEVEL_PRIOR = (0, 5)
-        self.DEFAULT_TREND_PRIOR = (0, 0.5)
-        self.DEFAULT_IMPULSE_PRIOR = (0, 5, 5)
+        super().__init__(sample_kwargs, cp_effect_param)
 
         # Make sure we get a list of all expected effects
         if isinstance(cp_effect_type, str):
             self.cp_effect_type = [cp_effect_type]
         else:
             self.cp_effect_type = cp_effect_type
-
-        # Defining the priors here
-        self.cp_effect_param = {} if cp_effect_param is None else cp_effect_param
-
-        if "level" in self.cp_effect_type:
-            if (
-                "level" not in self.cp_effect_param
-                or len(self.cp_effect_param["level"]) != 2
-            ):
-                self.cp_effect_param["level"] = self.DEFAULT_LEVEL_PRIOR
-            else:
-                self.cp_effect_param["level"] = self.cp_effect_param["level"]
-
-        if "trend" in self.cp_effect_type:
-            if (
-                "trend" not in self.cp_effect_param
-                or len(self.cp_effect_param["trend"]) != 2
-            ):
-                self.cp_effect_param["trend"] = self.DEFAULT_TREND_PRIOR
-            else:
-                self.cp_effect_param["trend"] = self.cp_effect_param["trend"]
-
-        if "impulse" in self.cp_effect_type:
-            if (
-                "impulse" not in self.cp_effect_param
-                or len(self.cp_effect_param["impulse"]) != 3
-            ):
-                self.cp_effect_param["impulse"] = self.DEFAULT_IMPULSE_PRIOR
-            else:
-                self.cp_effect_param["impulse"] = self.cp_effect_param["impulse"]
 
     def build_model(self, X, y, coords):
         """
@@ -1061,39 +1033,25 @@ class LinearChangePointDetection(PyMCModel):
                 var=(t - change_point),
                 dims=["obs_ind"],
             )
-            beta = pm.Normal(
-                name="beta",
-                mu=self.DEFAULT_BETA_PRIOR[0],
-                sigma=self.DEFAULT_BETA_PRIOR[1],
-                dims=["treated_units", "coeffs"],
-            )
+            beta = self.priors["beta"].create_variable("beta")
 
             # --- Intervention effect ---
             mu_in_components = []
 
-            if "level" in self.cp_effect_param:
-                level = pm.Normal(
-                    "level",
-                    mu=self.cp_effect_param["level"][0],
-                    sigma=self.cp_effect_param["level"][1],
-                )
+            if "level" in self.cp_effect_type:
+                level = self.priors["level"].create_variable("level")
                 mu_in_components.append(level)
-            if "trend" in self.cp_effect_param:
-                trend = pm.Normal(
-                    "trend",
-                    mu=self.cp_effect_param["trend"][0],
-                    sigma=self.cp_effect_param["trend"][1],
-                )
+
+            if "trend" in self.cp_effect_type:
+                trend = self.priors["trend"].create_variable("trend")
                 mu_in_components.append(trend * delta_t)
-            if "impulse" in self.cp_effect_param:
-                impulse_amplitude = pm.Normal(
-                    "impulse_amplitude",
-                    mu=self.cp_effect_param["impulse"][0],
-                    sigma=self.cp_effect_param["impulse"][1],
+
+            if "impulse" in self.cp_effect_type:
+                impulse_amplitude = self.priors["impulse_amplitude"].create_variable(
+                    "impulse_amplitude"
                 )
-                decay_rate = pm.HalfNormal(
-                    "decay_rate",
-                    sigma=self.cp_effect_param["impulse"][2],
+                decay_rate = self.priors["impulse_decay_rate"].create_variable(
+                    "impulse_decay_rate"
                 )
                 impulse = pm.Deterministic(
                     "impulse",
@@ -1104,8 +1062,8 @@ class LinearChangePointDetection(PyMCModel):
             # --- Parameterization ---
             weight = pm.math.sigmoid(delta_t)
             # Compute and store the base time series
-            mu = pm.Deterministic(
-                name="mu", var=pm.math.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            mu_ts = pm.Deterministic(
+                name="mu_ts", var=pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
             )
             # Compute and store the modelled intervention effect
             mu_in = (
@@ -1120,20 +1078,20 @@ class LinearChangePointDetection(PyMCModel):
                 )
             )
             # Compute and store the sum of the base time series and the intervention's effect
-            mu_ts = pm.Deterministic(
-                "mu_ts",
-                mu + (weight * mu_in)[:, None],
+            mu = pm.Deterministic(
+                "mu",
+                mu_ts + (weight * mu_in)[:, None],
                 dims=["obs_ind", "treated_units"],
             )
-            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
 
             # --- Likelihood ---
+            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
             # Likelihood of the base time series
-            pm.Normal("y_hat", mu=mu, sigma=sigma, dims=["obs_ind", "treated_units"])
+            pm.Normal("y_ts", mu=mu_ts, sigma=sigma, dims=["obs_ind", "treated_units"])
             # Likelihodd of the base time series and the intervention's effect
             pm.Normal(
-                "y_ts",
-                mu=mu_ts,
+                "y_hat",
+                mu=mu,
                 sigma=sigma,
                 observed=y,
                 dims=["obs_ind", "treated_units"],
@@ -1193,8 +1151,8 @@ class LinearChangePointDetection(PyMCModel):
         """
         Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
         """
-        mu_ts = self.predict(X)
-        mu_data = az.extract(mu_ts, group="posterior_predictive", var_names="mu_ts")
+        mu = self.predict(X)
+        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
 
         scores = {}
 
@@ -1207,6 +1165,12 @@ class LinearChangePointDetection(PyMCModel):
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
 
         return pd.Series(scores)
+
+    def calculate_impact(
+        self, y_true: xr.DataArray, y_pred: az.InferenceData
+    ) -> xr.DataArray:
+        impact = y_true - y_pred["posterior_predictive"]["y_ts"]
+        return impact.transpose(..., "obs_ind")
 
     def set_time_range(self, time_range, data):
         """
