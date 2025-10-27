@@ -18,7 +18,7 @@ description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # This field lists other packages that your project depends on to run.
 # Any package you put here will be installed by pip when your project is
@@ -40,6 +40,7 @@ dependencies = [
     "seaborn>=0.11.2",
     "statsmodels",
     "xarray>=v2022.11.0",
+    "pymc-extras>=0.3.0",
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
@@ -52,7 +53,7 @@ dependencies = [
 dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell", "nbformat", "nbconvert"]
 docs = [
     "ipykernel",
-    "daft",
+    "daft-pgm",
     "linkify-it-py",
     "myst-nb<=1.0.0",
     "pathlib",
