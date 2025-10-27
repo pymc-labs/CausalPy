@@ -13,10 +13,10 @@ check_lint:
 	interrogate .
 
 doctest:
-	pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
+	python -m pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
 
 test:
-	pytest
+	python -m pytest
 
 uml:
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
