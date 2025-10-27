@@ -94,30 +94,16 @@ def get_hdi_to_df(
         The size of the HDI, default is 0.94
     """
     hdi_result = az.hdi(x, hdi_prob=hdi_prob)
-    hdi_df = hdi_result.to_dataframe().unstack(level="hdi")
 
-    # Handle MultiIndex columns from unstack operation
-    # After unstack, we may have MultiIndex like: [('mu', 'lower'), ('mu', 'higher'), ('coord', 'lower'), ('coord', 'higher')]
-    # We need to extract only the data variable columns (first level), not coordinate columns
-    if isinstance(hdi_df.columns, pd.MultiIndex):
-        # Get the name of the data variable (should be at level 0)
-        # For xarray DataArrays, the variable name is typically at index 0
-        data_var_names = hdi_df.columns.get_level_values(0).unique()
+    # Get the data variable name (typically 'mu' or 'x')
+    # We select only the data variable column to exclude coordinates like 'treated_units'
+    data_var = list(hdi_result.data_vars)[0]
 
-        # Filter to include only actual data variables (excluding coordinate names that became columns)
-        # The data variable is typically the one that was originally in the DataArray/Dataset
-        # For simple cases, it's often just the first unique value
-        if len(data_var_names) > 1:
-            # Find the numeric data variable (not string coordinates)
-            for var_name in data_var_names:
-                if (
-                    hdi_df[(var_name, hdi_df.columns.get_level_values(1)[0])].dtype
-                    != "object"
-                ):
-                    hdi_df = hdi_df[var_name]
-                    break
-        else:
-            # Only one variable, select it
-            hdi_df = hdi_df[data_var_names[0]]
+    # Convert to DataFrame, select only the data variable column, then unstack
+    # This prevents coordinate values (like 'treated_agg') from appearing as columns
+    hdi_df = hdi_result[data_var].to_dataframe()[[data_var]].unstack(level="hdi")
+
+    # Remove the top level of column MultiIndex to get just 'lower' and 'higher'
+    hdi_df.columns = hdi_df.columns.droplevel(0)
 
     return hdi_df
