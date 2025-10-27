@@ -15,6 +15,7 @@
 Utility functions
 """
 
+import re
 from typing import Union
 
 import numpy as np
@@ -84,3 +85,49 @@ def convert_to_string(x: Union[float, xr.DataArray], round_to: int = 2) -> str:
         raise ValueError(
             "Type not supported. Please provide a float or an xarray object."
         )
+
+
+def get_interaction_terms(formula: str) -> list[str]:
+    """
+    Extract interaction terms from a statistical model formula.
+
+    Parameters
+    ----------
+    formula : str
+        A statistical model formula string (e.g., "y ~ x1 + x2*x3")
+
+    Returns
+    -------
+    list[str]
+        A list of interaction terms (those containing '*' or ':')
+
+    Examples
+    --------
+    >>> get_interaction_terms("y ~ 1 + x1 + x2*x3")
+    ['x2*x3']
+    >>> get_interaction_terms("y ~ x1:x2 + x3")
+    ['x1:x2']
+    >>> get_interaction_terms("y ~ x1 + x2 + x3")
+    []
+    """
+    # Define interaction indicators
+    INTERACTION_INDICATORS = ["*", ":"]
+
+    # Remove whitespace
+    formula_clean = formula.replace(" ", "")
+
+    # Extract right-hand side of the formula
+    rhs = formula_clean.split("~")[1]
+
+    # Split terms by '+' or '-' while keeping them intact
+    terms = re.split(r"(?=[+-])", rhs)
+
+    # Clean up terms and get interaction terms (those with '*' or ':')
+    interaction_terms = []
+    for term in terms:
+        # Remove leading + or - for processing
+        clean_term = term.lstrip("+-")
+        if any(indicator in clean_term for indicator in INTERACTION_INDICATORS):
+            interaction_terms.append(clean_term)
+
+    return interaction_terms

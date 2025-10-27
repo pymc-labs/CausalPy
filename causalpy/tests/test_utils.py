@@ -17,7 +17,12 @@ Tests for utility functions
 
 import pandas as pd
 
-from causalpy.utils import _is_variable_dummy_coded, _series_has_2_levels, round_num
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    _series_has_2_levels,
+    get_interaction_terms,
+    round_num,
+)
 
 
 def test_dummy_coding():
@@ -57,3 +62,43 @@ def test_round_num():
     assert round_num(123.456, 5) == "123.46"
     assert round_num(123.456, 6) == "123.456"
     assert round_num(123.456, 7) == "123.456"
+
+
+def test_get_interaction_terms():
+    """Test if the function to extract interaction terms from formulas works correctly"""
+    # No interaction terms
+    assert get_interaction_terms("y ~ x1 + x2 + x3") == []
+    assert get_interaction_terms("y ~ 1 + x1 + x2") == []
+
+    # Single interaction term with '*'
+    assert get_interaction_terms("y ~ x1 + x2*x3") == ["x2*x3"]
+    assert get_interaction_terms("y ~ 1 + group*post_treatment") == [
+        "group*post_treatment"
+    ]
+
+    # Single interaction term with ':'
+    assert get_interaction_terms("y ~ x1 + x2:x3") == ["x2:x3"]
+    assert get_interaction_terms("y ~ 1 + group:post_treatment") == [
+        "group:post_treatment"
+    ]
+
+    # Multiple interaction terms
+    assert get_interaction_terms("y ~ x1*x2 + x3*x4") == ["x1*x2", "x3*x4"]
+    assert get_interaction_terms("y ~ a:b + c*d") == ["a:b", "c*d"]
+
+    # Three-way interaction
+    assert get_interaction_terms("y ~ x1*x2*x3") == ["x1*x2*x3"]
+    assert get_interaction_terms("y ~ a:b:c") == ["a:b:c"]
+
+    # Formula with spaces (should be handled correctly)
+    assert get_interaction_terms("y ~ x1 + x2 * x3") == ["x2*x3"]
+    assert get_interaction_terms("y ~ 1 + group * post_treatment") == [
+        "group*post_treatment"
+    ]
+
+    # Mixed main effects and interactions
+    assert get_interaction_terms("y ~ 1 + x1 + x2 + x1*x2") == ["x1*x2"]
+    assert get_interaction_terms("y ~ x1 + x2*x3 + x4") == ["x2*x3"]
+
+    # Formula with subtraction (edge case)
+    assert get_interaction_terms("y ~ x1*x2 - x3") == ["x1*x2"]

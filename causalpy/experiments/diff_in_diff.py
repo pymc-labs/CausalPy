@@ -15,8 +15,6 @@
 Difference in differences
 """
 
-import re
-
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -32,7 +30,12 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    convert_to_string,
+    get_interaction_terms,
+    round_num,
+)
 
 from .base import BaseExperiment
 
@@ -54,6 +57,8 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column for the time variable
     :param group_variable_name:
         Name of the data column for the group variable
+    :param post_treatment_variable_name:
+        Name of the data column indicating post-treatment period (default: "post_treatment")
     :param model:
         A PyMC model for difference in differences
 
@@ -262,33 +267,6 @@ class DifferenceInDifferences(BaseExperiment):
                 coded. Consisting of 0's and 1's only."""
             )
 
-    def _get_interaction_terms(self):
-        """
-        Extract interaction terms from the formula.
-        Returns a list of interaction terms (those with '*' or ':').
-        """
-        # Define interaction indicators
-        INTERACTION_INDICATORS = ["*", ":"]
-
-        # Remove whitespace
-        formula = self.formula.replace(" ", "")
-
-        # Extract right-hand side of the formula
-        rhs = formula.split("~")[1]
-
-        # Split terms by '+' or '-' while keeping them intact
-        terms = re.split(r"(?=[+-])", rhs)
-
-        # Clean up terms and get interaction terms (those with '*' or ':')
-        interaction_terms = []
-        for term in terms:
-            # Remove leading + or - for processing
-            clean_term = term.lstrip("+-")
-            if any(indicator in clean_term for indicator in INTERACTION_INDICATORS):
-                interaction_terms.append(clean_term)
-
-        return interaction_terms
-
     def _validate_formula_interaction_terms(self):
         """
         Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
@@ -298,7 +276,7 @@ class DifferenceInDifferences(BaseExperiment):
         INTERACTION_INDICATORS = ["*", ":"]
 
         # Get interaction terms
-        interaction_terms = self._get_interaction_terms()
+        interaction_terms = get_interaction_terms(self.formula)
 
         # Check for interaction terms with more than 2 variables (more than one '*' or ':')
         for term in interaction_terms:
