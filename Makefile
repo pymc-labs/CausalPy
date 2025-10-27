@@ -13,7 +13,7 @@ check_lint:
 	interrogate .
 
 doctest:
-	pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
+	python -m pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
 
 test:
 	python -m pytest
