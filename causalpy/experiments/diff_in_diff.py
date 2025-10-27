@@ -292,7 +292,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         if len(interaction_terms) > 1:
             raise FormulaException(
-                f"Formula contains more than 1 interaction term: {interaction_terms}. Maximum of 1 allowed."
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. Multiple interaction terms are not currently supported."
             )
 
     def summary(self, round_to=None) -> None:
