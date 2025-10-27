@@ -17,6 +17,8 @@ Base class for quasi experimental designs.
 
 from abc import abstractmethod
 
+import arviz as az
+import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.base import RegressorMixin
 
@@ -63,9 +65,6 @@ class BaseExperiment:
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
         depending on the model type.
         """
-        import arviz as az
-        import matplotlib.pyplot as plt
-
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
