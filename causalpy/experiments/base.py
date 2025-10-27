@@ -63,12 +63,17 @@ class BaseExperiment:
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
         depending on the model type.
         """
-        if isinstance(self.model, PyMCModel):
-            return self._bayesian_plot(*args, **kwargs)
-        elif isinstance(self.model, RegressorMixin):
-            return self._ols_plot(*args, **kwargs)
-        else:
-            raise ValueError("Unsupported model type")
+        import arviz as az
+        import matplotlib.pyplot as plt
+
+        # Apply arviz-darkgrid style only during plotting, then revert
+        with plt.style.context(az.style.library["arviz-darkgrid"]):
+            if isinstance(self.model, PyMCModel):
+                return self._bayesian_plot(*args, **kwargs)
+            elif isinstance(self.model, RegressorMixin):
+                return self._ols_plot(*args, **kwargs)
+            else:
+                raise ValueError("Unsupported model type")
 
     @abstractmethod
     def _bayesian_plot(self, *args, **kwargs):

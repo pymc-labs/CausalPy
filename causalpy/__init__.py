@@ -11,7 +11,6 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-import arviz as az
 
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
@@ -27,8 +26,6 @@ from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.synthetic_control import SyntheticControl
-
-az.style.use("arviz-darkgrid")
 
 __all__ = [
     "__version__",
