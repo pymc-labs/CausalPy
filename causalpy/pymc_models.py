@@ -305,7 +305,7 @@ class PyMCModel(pm.Model):
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
-        impact = y_true - y_pred["posterior_predictive"]["y_hat"]
+        impact = y_true - y_pred["posterior_predictive"]["mu"]
         return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact):
