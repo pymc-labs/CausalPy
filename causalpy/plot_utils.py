@@ -93,10 +93,31 @@ def get_hdi_to_df(
     :param hdi_prob:
         The size of the HDI, default is 0.94
     """
-    hdi = (
-        az.hdi(x, hdi_prob=hdi_prob)
-        .to_dataframe()
-        .unstack(level="hdi")
-        .droplevel(0, axis=1)
-    )
-    return hdi
+    hdi_result = az.hdi(x, hdi_prob=hdi_prob)
+    hdi_df = hdi_result.to_dataframe().unstack(level="hdi")
+
+    # Handle MultiIndex columns from unstack operation
+    # After unstack, we may have MultiIndex like: [('mu', 'lower'), ('mu', 'higher'), ('coord', 'lower'), ('coord', 'higher')]
+    # We need to extract only the data variable columns (first level), not coordinate columns
+    if isinstance(hdi_df.columns, pd.MultiIndex):
+        # Get the name of the data variable (should be at level 0)
+        # For xarray DataArrays, the variable name is typically at index 0
+        data_var_names = hdi_df.columns.get_level_values(0).unique()
+
+        # Filter to include only actual data variables (excluding coordinate names that became columns)
+        # The data variable is typically the one that was originally in the DataArray/Dataset
+        # For simple cases, it's often just the first unique value
+        if len(data_var_names) > 1:
+            # Find the numeric data variable (not string coordinates)
+            for var_name in data_var_names:
+                if (
+                    hdi_df[(var_name, hdi_df.columns.get_level_values(1)[0])].dtype
+                    != "object"
+                ):
+                    hdi_df = hdi_df[var_name]
+                    break
+        else:
+            # Only one variable, select it
+            hdi_df = hdi_df[data_var_names[0]]
+
+    return hdi_df
