@@ -305,6 +305,43 @@ class PyMCModel(pm.Model):
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
+        """
+        Calculate the causal impact as the difference between observed and predicted values.
+
+        The impact is calculated using the posterior expectation (`mu`) rather than the
+        posterior predictive (`y_hat`). This means the causal impact represents the
+        difference from the expected value of the model, excluding observation noise.
+        This approach provides a cleaner measure of the causal effect by focusing on
+        the systematic difference rather than including sampling variability from the
+        observation noise term.
+
+        Parameters
+        ----------
+        y_true : xr.DataArray
+            The observed outcome values with dimensions ["obs_ind", "treated_units"].
+        y_pred : az.InferenceData
+            The posterior predictive samples containing the "mu" variable, which
+            represents the expected value (mean) of the outcome.
+
+        Returns
+        -------
+        xr.DataArray
+            The causal impact with dimensions ending in "obs_ind". The impact includes
+            posterior uncertainty from the model parameters but excludes observation noise.
+
+        Notes
+        -----
+        By using `mu` (the posterior expectation) rather than `y_hat` (the posterior
+        predictive with observation noise), the uncertainty in the impact reflects:
+        - Parameter uncertainty in the fitted model
+        - Uncertainty in the counterfactual prediction
+
+        But excludes:
+        - Observation-level noise (sigma)
+
+        This makes the impact plots focus on the systematic causal effect rather than
+        individual observation variability.
+        """
         impact = y_true - y_pred["posterior_predictive"]["mu"]
         return impact.transpose(..., "obs_ind")
 
