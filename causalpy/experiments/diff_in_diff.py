@@ -30,7 +30,12 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    convert_to_string,
+    get_interaction_terms,
+    round_num,
+)
 
 from .base import BaseExperiment
 
@@ -52,6 +57,8 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column for the time variable
     :param group_variable_name:
         Name of the data column for the group variable
+    :param post_treatment_variable_name:
+        Name of the data column indicating post-treatment period (default: "post_treatment")
     :param model:
         A PyMC model for difference in differences
 
@@ -84,6 +91,7 @@ class DifferenceInDifferences(BaseExperiment):
         formula: str,
         time_variable_name: str,
         group_variable_name: str,
+        post_treatment_variable_name: str = "post_treatment",
         model=None,
         **kwargs,
     ) -> None:
@@ -95,6 +103,7 @@ class DifferenceInDifferences(BaseExperiment):
         self.formula = formula
         self.time_variable_name = time_variable_name
         self.group_variable_name = group_variable_name
+        self.post_treatment_variable_name = post_treatment_variable_name
         self.input_validation()
 
         y, X = dmatrices(formula, self.data)
@@ -128,6 +137,12 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
+            # For scikit-learn models, automatically set fit_intercept=False
+            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
+            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
+            # TODO: later, this should be handled in ScikitLearnAdaptor itself
+            if hasattr(self.model, "fit_intercept"):
+                self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")
@@ -173,7 +188,7 @@ class DifferenceInDifferences(BaseExperiment):
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
             # just the treatment period(s)
-            .query("post_treatment == True")
+            .query(f"{self.post_treatment_variable_name} == True")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
@@ -189,7 +204,10 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if "post_treatment" in label and self.group_variable_name in label:
+            if (
+                self.post_treatment_variable_name in label
+                and self.group_variable_name in label
+            ):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
 
@@ -198,31 +216,44 @@ class DifferenceInDifferences(BaseExperiment):
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
-                if "post_treatment" in label and self.group_variable_name in label:
+                if (
+                    self.post_treatment_variable_name in label
+                    and self.group_variable_name in label
+                ):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
         elif isinstance(self.model, RegressorMixin):
             # This is the coefficient on the interaction term
-            # TODO: CHECK FOR CORRECTNESS
-            self.causal_impact = (
-                self.y_pred_treatment[1] - self.y_pred_counterfactual[0]
-            ).item()
+            # Store the coefficient into dictionary {intercept:value}
+            coef_map = dict(zip(self.labels, self.model.get_coeffs()))
+            # Create and find the interaction term based on the values user provided
+            interaction_term = (
+                f"{self.group_variable_name}:{self.post_treatment_variable_name}"
+            )
+            matched_key = next((k for k in coef_map if interaction_term in k), None)
+            att = coef_map.get(matched_key)
+            self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
 
         return
 
     def input_validation(self):
+        # Validate formula structure and interaction interaction terms
+        self._validate_formula_interaction_terms()
+
         """Validate the input data and model formula for correctness"""
-        if "post_treatment" not in self.formula:
+        # Check if post_treatment_variable_name is in formula
+        if self.post_treatment_variable_name not in self.formula:
             raise FormulaException(
-                "A predictor called `post_treatment` should be in the formula"
+                f"Missing required variable '{self.post_treatment_variable_name}' in formula"
             )
 
-        if "post_treatment" not in self.data.columns:
+        # Check if post_treatment_variable_name is in data columns
+        if self.post_treatment_variable_name not in self.data.columns:
             raise DataException(
-                "Require a boolean column labelling observations which are `treated`"
+                f"Missing required column '{self.post_treatment_variable_name}' in dataset"
             )
 
         if "unit" not in self.data.columns:
@@ -234,6 +265,36 @@ class DifferenceInDifferences(BaseExperiment):
             raise DataException(
                 f"""The grouping variable {self.group_variable_name} should be dummy
                 coded. Consisting of 0's and 1's only."""
+            )
+
+    def _validate_formula_interaction_terms(self):
+        """
+        Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
+        Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
+        """
+        # Define interaction indicators
+        INTERACTION_INDICATORS = ["*", ":"]
+
+        # Get interaction terms
+        interaction_terms = get_interaction_terms(self.formula)
+
+        # Check for interaction terms with more than 2 variables (more than one '*' or ':')
+        for term in interaction_terms:
+            total_indicators = sum(
+                term.count(indicator) for indicator in INTERACTION_INDICATORS
+            )
+            if (
+                total_indicators >= 2
+            ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
+                raise FormulaException(
+                    f"Formula contains interaction term with more than 2 variables: {term}. "
+                    "Three-way or higher-order interactions are not supported as they complicate interpretation of the causal effect."
+                )
+
+        if len(interaction_terms) > 1:
+            raise FormulaException(
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
+                "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
 
     def summary(self, round_to=None) -> None:
