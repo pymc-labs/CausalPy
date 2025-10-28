@@ -287,12 +287,14 @@ class DifferenceInDifferences(BaseExperiment):
                 total_indicators >= 2
             ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
                 raise FormulaException(
-                    f"Formula contains interaction term with more than 2 variables: {term}. Only two-way interactions are allowed."
+                    f"Formula contains interaction term with more than 2 variables: {term}. "
+                    "Three-way or higher-order interactions are not supported as they complicate interpretation of the causal effect."
                 )
 
         if len(interaction_terms) > 1:
             raise FormulaException(
-                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. Multiple interaction terms are not currently supported."
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
+                "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
 
     def summary(self, round_to=None) -> None:
