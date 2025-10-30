@@ -968,9 +968,14 @@ class LinearChangePointDetection(PyMCModel):
     default_priors = {
         "beta": Prior("Normal", mu=0, sigma=5, dims=["treated_units", "coeffs"]),
         "level": Prior("Normal", mu=0, sigma=5),
-        "trend": Prior("Normal", mu=0, sigma=0.5),
+        "trend": Prior("Normal", mu=0, sigma=5),
         "impulse_amplitude": Prior("Normal", mu=0, sigma=5),
         "impulse_decay_rate": Prior("HalfNormal", sigma=5),
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=5),
+            dims=["obs_ind", "treated_units"],
+        ),
     }
 
     def __init__(
@@ -1025,9 +1030,13 @@ class LinearChangePointDetection(PyMCModel):
             upper_bound = pm.Data("upper_bound", self.time_range[1])
 
             # --- Priors ---
-            change_point = pm.Uniform(
-                "change_point", lower=lower_bound, upper=upper_bound
+            # --- change_point unconstrained mapping ---
+            tau_un = pm.Normal("tau_un", 0, 1)
+            change_point = pm.Deterministic(
+                "change_point",
+                lower_bound + (upper_bound - 1 - lower_bound) * pm.math.sigmoid(tau_un),
             )
+
             delta_t = pm.Deterministic(
                 name="delta_t",
                 var=(t - change_point),
@@ -1077,7 +1086,7 @@ class LinearChangePointDetection(PyMCModel):
                     vars=0,
                 )
             )
-            # Compute and store the sum of the base time series and the intervention's effect
+
             mu = pm.Deterministic(
                 "mu",
                 mu_ts + (weight * mu_in)[:, None],
@@ -1085,17 +1094,9 @@ class LinearChangePointDetection(PyMCModel):
             )
 
             # --- Likelihood ---
-            sigma = pm.HalfNormal("sigma", 1, dims="treated_units")
-            # Likelihood of the base time series
-            pm.Normal("y_ts", mu=mu_ts, sigma=sigma, dims=["obs_ind", "treated_units"])
+
             # Likelihodd of the base time series and the intervention's effect
-            pm.Normal(
-                "y_hat",
-                mu=mu,
-                sigma=sigma,
-                observed=y,
-                dims=["obs_ind", "treated_units"],
-            )
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
     def predict(self, X):
         """
@@ -1112,7 +1113,7 @@ class LinearChangePointDetection(PyMCModel):
         with self:  # sample with new input data
             pp = pm.sample_posterior_predictive(
                 self.idata,
-                var_names=["y_hat", "y_ts", "mu", "mu_ts", "mu_in"],
+                var_names=["y_hat", "mu", "mu_ts", "mu_in"],
                 progressbar=False,
                 random_seed=random_seed,
             )
@@ -1169,7 +1170,7 @@ class LinearChangePointDetection(PyMCModel):
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
-        impact = y_true - y_pred["posterior_predictive"]["y_ts"]
+        impact = y_true - y_pred["posterior_predictive"]["mu_ts"]
         return impact.transpose(..., "obs_ind")
 
     def set_time_range(self, time_range, data):
