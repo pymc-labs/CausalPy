@@ -18,6 +18,7 @@ from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.version import __version__
 
 from .data import load_data
+from .experiments.change_point_detection import ChangePointDetection
 from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
@@ -30,6 +31,7 @@ from .experiments.synthetic_control import SyntheticControl
 __all__ = [
     "__version__",
     "DifferenceInDifferences",
+    "ChangePointDetection",
     "create_causalpy_compatible_class",
     "InstrumentalVariable",
     "InterruptedTimeSeries",

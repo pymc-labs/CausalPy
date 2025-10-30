@@ -404,6 +404,110 @@ def test_its(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_cp_covid():
+    """
+    Test ChangePoint experiment on COVID data.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. causalpy.ChangePoint returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    5. the method get_plot_data returns a DataFrame with expected columns
+    """
+
+    df = (
+        cp.load_data("covid")
+        .assign(date=lambda x: pd.to_datetime(x["date"]))
+        .set_index("date")
+    )
+    time_range = (pd.to_datetime("2014-01-01"), pd.to_datetime("2022-01-01"))
+
+    # Assert that we correctfully raise a ModelException if the given model can't predict InterventionTime
+    with pytest.raises(cp.custom_exceptions.ModelException) as exc_info:
+        cp.ChangePointDetection(
+            df,
+            time_range=time_range,
+            formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+    assert "Provided model must have a 'set_time_range' method" in str(exc_info.value)
+
+    # Assert that we correctfully raise a DataException if
+    # - time_range is not None
+    # - and len(time_range) is not 2
+    with pytest.raises(cp.custom_exceptions.DataException) as exc_info:
+        cp.ChangePointDetection(
+            df,
+            time_range=[0, 0, 0],
+            formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+            model=cp.pymc_models.LinearChangePointDetection(
+                cp_effect_type=["impulse", "level", "trend"],
+                sample_kwargs=sample_kwargs,
+            ),
+        )
+    assert "Provided time_range must be of length 2 : (start, end)" in str(
+        exc_info.value
+    )
+
+    # Assert that we correctfully raise a BadIndexException if
+    # - time_range is not None
+    # - time_range is not of type Iterable[pd.TimeStamp]
+    # - DataIndex is of type pd.DatetimeIndex
+    with pytest.raises(cp.custom_exceptions.BadIndexException) as exc_info:
+        cp.ChangePointDetection(
+            df,
+            time_range=[0, 0],
+            formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+            model=cp.pymc_models.LinearChangePointDetection(
+                cp_effect_type=["impulse", "level", "trend"],
+                sample_kwargs=sample_kwargs,
+            ),
+        )
+    assert (
+        "If data.index is DatetimeIndex, time_range must be of type Iterable[pd.Timestamp]."
+        in str(exc_info.value)
+    )
+
+    result = cp.ChangePointDetection(
+        df,
+        time_range=time_range,
+        formula="standardize(deaths) ~ 0 + t + C(month) + standardize(temp)",  # noqa E501
+        model=cp.pymc_models.LinearChangePointDetection(
+            cp_effect_type=["impulse", "level", "trend"],
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.ChangePointDetection)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    # For multi-panel plots, ax should be an array of axes
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+    # Test get_plot_data with default parameters
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), (
+        "The returned object is not a pandas DataFrame"
+    )
+    expected_columns = [
+        "prediction",
+        "pred_hdi_lower_94",
+        "pred_hdi_upper_94",
+        "impact",
+        "impact_hdi_lower_94",
+        "impact_hdi_upper_94",
+    ]
+    assert set(expected_columns).issubset(set(plot_data.columns)), (
+        f"DataFrame is missing expected columns {expected_columns}"
+    )
+
+
+@pytest.mark.integration
 def test_its_covid(mock_pymc_sample):
     """
     Test Interrupted Time-Series experiment on COVID data.

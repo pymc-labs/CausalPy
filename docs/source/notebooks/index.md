@@ -40,6 +40,7 @@ did_pymc_banks.ipynb
 its_skl.ipynb
 its_pymc.ipynb
 its_covid.ipynb
+its_no_treatment_time.ipynb
 :::
 
 :::{toctree}
