@@ -34,7 +34,7 @@ def _smoothed_gaussian_random_walk(
     lowess_kwargs: dict[str, Any],
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Generates Gaussian random walk data and applies LOWESS
+    Generates Gaussian random walk data and applies LOWESS.
 
     :param gaussian_random_walk_mu:
         Mean of the random walk
@@ -133,7 +133,7 @@ def generate_time_series_data(
     :param beta_linear:
         The linear coefficient
     :param beta_intercept:
-        The intercept.
+        The intercept
 
     """
     x = np.arange(0, N, 1)
