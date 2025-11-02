@@ -133,7 +133,7 @@ def generate_time_series_data(
     :param beta_linear:
         The linear coefficient
     :param beta_intercept:
-        The intercept
+        The intercept.
 
     """
     x = np.arange(0, N, 1)
