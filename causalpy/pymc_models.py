@@ -973,7 +973,7 @@ class LinearChangePointDetection(PyMCModel):
         "impulse_decay_rate": Prior("HalfNormal", sigma=5),
         "y_hat": Prior(
             "Normal",
-            sigma=Prior("HalfNormal", sigma=5),
+            sigma=Prior("HalfNormal", sigma=5, dims=["treated_units"]),
             dims=["obs_ind", "treated_units"],
         ),
     }
