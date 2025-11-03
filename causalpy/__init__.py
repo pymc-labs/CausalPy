@@ -26,19 +26,26 @@ from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.synthetic_control import SyntheticControl
+from .experiments.transfer_function_its import TransferFunctionITS
+from .transforms import Adstock, Lag, Saturation, Treatment
 
 __all__ = [
     "__version__",
+    "Adstock",
     "DifferenceInDifferences",
     "create_causalpy_compatible_class",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "Lag",
     "load_data",
     "PrePostNEGD",
     "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "Saturation",
     "skl_models",
     "SyntheticControl",
+    "TransferFunctionITS",
+    "Treatment",
 ]
