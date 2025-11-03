@@ -43,6 +43,13 @@ its_covid.ipynb
 :::
 
 :::{toctree}
+:caption: Transfer Function Interrupted Time Series
+:maxdepth: 1
+
+tfits_single_channel.ipynb
+:::
+
+:::{toctree}
 :caption: Regression Discontinuity
 :maxdepth: 1
 
