@@ -27,23 +27,38 @@ from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.synthetic_control import SyntheticControl
 from .experiments.transfer_function_its import TransferFunctionITS
-from .transforms import Adstock, Lag, Saturation, Treatment
+from .transforms import (
+    AdstockTransform,
+    DiscreteLag,
+    GeometricAdstock,
+    HillSaturation,
+    LagTransform,
+    LogisticSaturation,
+    MichaelisMentenSaturation,
+    SaturationTransform,
+    Treatment,
+)
 
 __all__ = [
     "__version__",
-    "Adstock",
+    "AdstockTransform",
     "DifferenceInDifferences",
     "create_causalpy_compatible_class",
+    "DiscreteLag",
+    "GeometricAdstock",
+    "HillSaturation",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
-    "Lag",
+    "LagTransform",
     "load_data",
+    "LogisticSaturation",
+    "MichaelisMentenSaturation",
     "PrePostNEGD",
     "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
-    "Saturation",
+    "SaturationTransform",
     "skl_models",
     "SyntheticControl",
     "TransferFunctionITS",

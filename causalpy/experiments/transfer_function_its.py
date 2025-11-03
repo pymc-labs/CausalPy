@@ -30,7 +30,7 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.transforms import Adstock, Treatment, apply_treatment_transforms
+from causalpy.transforms import Treatment
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -228,6 +228,218 @@ class TransferFunctionITS(BaseExperiment):
         # Store score (R-squared)
         self.score = self.ols_result.rsquared
 
+        # Transform estimation metadata (set by with_estimated_transforms)
+        self.transform_estimation_method = None  # "grid", "optimize", or None
+        self.transform_estimation_results = None  # Full results dict
+        self.transform_search_space = None  # Grid or bounds that were searched
+
+    @classmethod
+    def with_estimated_transforms(
+        cls,
+        data: pd.DataFrame,
+        y_column: str,
+        treatment_name: str,
+        base_formula: str,
+        estimation_method: str = "grid",
+        saturation_type: str = "hill",
+        coef_constraint: str = "nonnegative",
+        hac_maxlags: Optional[int] = None,
+        **estimation_kwargs,
+    ) -> "TransferFunctionITS":
+        """
+        Create a TransferFunctionITS with transform parameters estimated from data.
+
+        This method estimates optimal saturation and adstock parameters via grid
+        search or continuous optimization, then creates a TransferFunctionITS
+        instance with those estimated transforms.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Time series data with datetime or numeric index.
+        y_column : str
+            Name of the outcome variable column in data.
+        treatment_name : str
+            Name of the treatment variable column in data.
+        base_formula : str
+            Patsy formula for the baseline model (trend, seasonality, controls).
+        estimation_method : str, default="grid"
+            Method for parameter estimation: "grid" or "optimize".
+            - "grid": Grid search over discrete parameter values
+            - "optimize": Continuous optimization using scipy.optimize
+        saturation_type : str, default="hill"
+            Type of saturation function: "hill", "logistic", or "michaelis_menten".
+        coef_constraint : str, default="nonnegative"
+            Constraint on treatment coefficient ("nonnegative" or "unconstrained").
+        hac_maxlags : int, optional
+            Maximum lags for HAC standard errors. If None, uses rule of thumb.
+        **estimation_kwargs
+            Additional keyword arguments for the estimation method:
+
+            For grid search (estimation_method="grid"):
+            - saturation_grid : dict
+                Dictionary mapping parameter names to lists of values.
+                E.g., {"slope": [1.0, 2.0], "kappa": [3, 5, 7]}
+            - adstock_grid : dict
+                Dictionary mapping parameter names to lists of values.
+                E.g., {"half_life": [2, 3, 4]}
+
+            For optimization (estimation_method="optimize"):
+            - saturation_bounds : dict
+                Dictionary mapping parameter names to (min, max) tuples.
+                E.g., {"slope": (0.5, 5.0), "kappa": (2, 10)}
+            - adstock_bounds : dict
+                Dictionary mapping parameter names to (min, max) tuples.
+                E.g., {"half_life": (1, 10)}
+            - initial_params : dict, optional
+                Initial parameter values for optimization.
+            - method : str, default="L-BFGS-B"
+                Scipy optimization method.
+
+        Returns
+        -------
+        TransferFunctionITS
+            Fitted model with estimated transform parameters.
+
+        Examples
+        --------
+        >>> # Grid search example
+        >>> result = TransferFunctionITS.with_estimated_transforms(
+        ...     data=df,
+        ...     y_column="water_consumption",
+        ...     treatment_name="comm_intensity",
+        ...     base_formula="1 + t + temperature + rainfall",
+        ...     estimation_method="grid",
+        ...     saturation_type="hill",
+        ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+        ...     adstock_grid={"half_life": [2, 3, 4, 5]},
+        ... )
+        >>> print(f"Best RMSE: {result.transform_estimation_results['best_score']:.2f}")
+
+        >>> # Optimization example
+        >>> result = TransferFunctionITS.with_estimated_transforms(
+        ...     data=df,
+        ...     y_column="water_consumption",
+        ...     treatment_name="comm_intensity",
+        ...     base_formula="1 + t + temperature + rainfall",
+        ...     estimation_method="optimize",
+        ...     saturation_type="hill",
+        ...     saturation_bounds={"slope": (0.5, 5.0), "kappa": (2, 10)},
+        ...     adstock_bounds={"half_life": (1, 10)},
+        ...     initial_params={"slope": 2.0, "kappa": 5.0, "half_life": 4.0},
+        ... )
+
+        Notes
+        -----
+        This method performs nested optimization:
+        - Outer loop: Search over transform parameters
+        - Inner loop: Fit OLS for each set of transform parameters
+        - Objective: Minimize RMSE
+
+        Grid search is exhaustive but can be slow for large grids. Continuous
+        optimization is faster but may find local optima. Consider using grid
+        search first to find good starting points for optimization.
+        """
+        from causalpy.transform_optimization import (
+            estimate_transform_params_grid,
+            estimate_transform_params_optimize,
+        )
+
+        # Run parameter estimation
+        if estimation_method == "grid":
+            if "saturation_grid" not in estimation_kwargs:
+                raise ValueError(
+                    "saturation_grid is required for grid search method. "
+                    "E.g., saturation_grid={'slope': [1.0, 2.0], 'kappa': [3, 5]}"
+                )
+            if "adstock_grid" not in estimation_kwargs:
+                raise ValueError(
+                    "adstock_grid is required for grid search method. "
+                    "E.g., adstock_grid={'half_life': [2, 3, 4]}"
+                )
+
+            est_results = estimate_transform_params_grid(
+                data=data,
+                y_column=y_column,
+                treatment_name=treatment_name,
+                base_formula=base_formula,
+                saturation_type=saturation_type,
+                saturation_grid=estimation_kwargs["saturation_grid"],
+                adstock_grid=estimation_kwargs["adstock_grid"],
+                coef_constraint=coef_constraint,
+                hac_maxlags=hac_maxlags,
+            )
+
+            search_space = {
+                "saturation_grid": estimation_kwargs["saturation_grid"],
+                "adstock_grid": estimation_kwargs["adstock_grid"],
+            }
+
+        elif estimation_method == "optimize":
+            if "saturation_bounds" not in estimation_kwargs:
+                raise ValueError(
+                    "saturation_bounds is required for optimize method. "
+                    "E.g., saturation_bounds={'slope': (0.5, 5.0), 'kappa': (2, 10)}"
+                )
+            if "adstock_bounds" not in estimation_kwargs:
+                raise ValueError(
+                    "adstock_bounds is required for optimize method. "
+                    "E.g., adstock_bounds={'half_life': (1, 10)}"
+                )
+
+            est_results = estimate_transform_params_optimize(
+                data=data,
+                y_column=y_column,
+                treatment_name=treatment_name,
+                base_formula=base_formula,
+                saturation_type=saturation_type,
+                saturation_bounds=estimation_kwargs["saturation_bounds"],
+                adstock_bounds=estimation_kwargs["adstock_bounds"],
+                initial_params=estimation_kwargs.get("initial_params"),
+                coef_constraint=coef_constraint,
+                hac_maxlags=hac_maxlags,
+                method=estimation_kwargs.get("method", "L-BFGS-B"),
+            )
+
+            search_space = {
+                "saturation_bounds": estimation_kwargs["saturation_bounds"],
+                "adstock_bounds": estimation_kwargs["adstock_bounds"],
+                "initial_params": estimation_kwargs.get("initial_params"),
+                "method": estimation_kwargs.get("method", "L-BFGS-B"),
+            }
+
+        else:
+            raise ValueError(
+                f"Unknown estimation_method: {estimation_method}. "
+                "Use 'grid' or 'optimize'."
+            )
+
+        # Create Treatment with best transforms
+        from causalpy.transforms import Treatment
+
+        treatment = Treatment(
+            name=treatment_name,
+            saturation=est_results["best_saturation"],
+            adstock=est_results["best_adstock"],
+            coef_constraint=coef_constraint,
+        )
+
+        # Create TransferFunctionITS with estimated transforms
+        result = cls(
+            data=data,
+            y_column=y_column,
+            base_formula=base_formula,
+            treatments=[treatment],
+            hac_maxlags=hac_maxlags,
+        )
+
+        # Store estimation metadata
+        result.transform_estimation_method = estimation_method
+        result.transform_estimation_results = est_results
+        result.transform_search_space = search_space
+
+        return result
+
     def _validate_inputs(
         self,
         data: pd.DataFrame,
@@ -303,8 +515,15 @@ class TransferFunctionITS(BaseExperiment):
             # Get raw exposure series
             x_raw = data[treatment.name].values
 
-            # Apply transform pipeline
-            x_transformed = apply_treatment_transforms(x_raw, treatment)
+            # Apply transform pipeline using strategy pattern
+            # Transforms are applied in order: Saturation → Adstock → Lag
+            x_transformed = x_raw
+            if treatment.saturation is not None:
+                x_transformed = treatment.saturation.apply(x_transformed)
+            if treatment.adstock is not None:
+                x_transformed = treatment.adstock.apply(x_transformed)
+            if treatment.lag is not None:
+                x_transformed = treatment.lag.apply(x_transformed)
 
             Z_columns.append(x_transformed)
             labels.append(treatment.name)
@@ -540,19 +759,18 @@ class TransferFunctionITS(BaseExperiment):
         if treatment is None:
             raise ValueError(f"Channel '{channel}' not found in treatments")
 
-        # Extract adstock parameters
-        adstock = None
-        for transform in treatment.transforms:
-            if isinstance(transform, Adstock):
-                adstock = transform
-                break
+        # Extract adstock transform (now directly accessible via treatment.adstock)
+        adstock = treatment.adstock
 
         if adstock is None:
             print(f"No adstock transform found for channel '{channel}'")
             return None
 
-        # Verify alpha is set (should be set by __post_init__)
-        if adstock.alpha is None:
+        # Get alpha parameter from adstock transform
+        adstock_params = adstock.get_params()
+        alpha = adstock_params.get("alpha")
+
+        if alpha is None:
             raise ValueError(
                 f"Adstock transform for channel '{channel}' has alpha=None. "
                 "This should not happen if half_life or alpha was provided."
@@ -560,12 +778,13 @@ class TransferFunctionITS(BaseExperiment):
 
         # Generate IRF (adstock weights)
         if max_lag is None:
-            max_lag = adstock.l_max
+            max_lag = adstock_params.get("l_max", 12)
 
         lags = np.arange(max_lag + 1)
-        weights = adstock.alpha**lags
+        weights = alpha**lags
 
-        if adstock.normalize:
+        normalize = adstock_params.get("normalize", True)
+        if normalize:
             weights = weights / weights.sum()
 
         # Plot
@@ -575,12 +794,12 @@ class TransferFunctionITS(BaseExperiment):
         ax.set_ylabel("Weight")
 
         # Calculate half-life: alpha^h = 0.5, so h = log(0.5) / log(alpha)
-        half_life_calc = np.log(0.5) / np.log(adstock.alpha)
+        half_life_calc = np.log(0.5) / np.log(alpha)
 
         ax.set_title(
             f"Impulse Response Function: {channel}\n"
-            f"(alpha={adstock.alpha:.3f}, half_life={half_life_calc:.2f}, "
-            f"normalize={adstock.normalize})"
+            f"(alpha={alpha:.3f}, half_life={half_life_calc:.2f}, "
+            f"normalize={normalize})"
         )
         ax.grid(True, alpha=0.3, axis="y")
 
