@@ -293,7 +293,11 @@ class TransferFunctionITS(BaseExperiment):
         coef_constraint : str, default="nonnegative"
             Constraint on treatment coefficient ("nonnegative" or "unconstrained").
         hac_maxlags : int, optional
-            Maximum lags for HAC standard errors. If None, uses rule of thumb.
+            Maximum lags for HAC (Newey-West) standard errors, which correct for
+            autocorrelation and heteroskedasticity in residuals. Higher values account
+            for longer-range dependencies but reduce degrees of freedom. If None, uses
+            the Newey-West rule of thumb: floor(4*(n/100)^(2/9)). For example, with
+            n=104 observations, the default is hac_maxlags=4.
         **estimation_kwargs
             Additional keyword arguments for the estimation method:
 
@@ -936,7 +940,10 @@ class TransferFunctionITS(BaseExperiment):
         print(f"Outcome variable: {self.y_column}")
         print(f"Number of observations: {len(self.y)}")
         print(f"R-squared: {round_num(self.score, round_to)}")
-        print(f"HAC max lags: {self.hac_maxlags}")
+        print(
+            f"HAC max lags: {self.hac_maxlags} "
+            f"(robust SEs accounting for {self.hac_maxlags} periods of autocorrelation)"
+        )
         print("-" * 80)
         print("Baseline coefficients:")
         for label, coef, se in zip(
