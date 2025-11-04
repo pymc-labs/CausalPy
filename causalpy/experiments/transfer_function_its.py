@@ -17,6 +17,27 @@ Transfer Function Interrupted Time Series Analysis
 This module implements Transfer-Function ITS for estimating the causal effects
 of graded interventions in single-market time series using saturation and
 adstock transforms.
+
+Parameter Estimation
+--------------------
+Transform parameters (saturation and adstock) are estimated via nested optimization:
+
+1. **Outer Loop**: Search over transform parameters (saturation slope/kappa,
+   adstock half-life) using either:
+   - Grid search: Exhaustive evaluation of discrete parameter combinations
+   - Continuous optimization: scipy.optimize.minimize for faster convergence
+
+2. **Inner Loop**: For each candidate set of transform parameters:
+   - Apply transforms to the treatment variable
+   - Fit OLS model with HAC standard errors
+   - Compute RMSE as the optimization metric
+
+3. **Selection**: The transform parameters that yield the lowest RMSE are selected
+   as the final estimates. These parameters, along with the OLS coefficients from
+   the best-fitting model, define the complete fitted model.
+
+This nested approach is efficient because OLS has a closed-form solution, making
+the inner loop fast even when evaluating many parameter combinations.
 """
 
 from typing import Dict, List, Optional, Tuple, Union
@@ -46,26 +67,8 @@ class TransferFunctionITS(BaseExperiment):
     spend, policy intensity) in a single market using transfer functions that model
     saturation and adstock (carryover) effects.
 
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Time series data with datetime or numeric index. Must contain the outcome
-        variable and treatment exposure columns.
-    y_column : str
-        Name of the outcome variable column in data.
-    base_formula : str
-        Patsy formula for the baseline model (trend, seasonality, controls).
-        Example: "1 + t + np.sin(2*np.pi*t/52) + np.cos(2*np.pi*t/52)"
-        where t is a time index. FUTURE: Custom helpers like trend(),
-        season_fourier(), holidays() can be added.
-    treatments : List[Treatment]
-        List of Treatment objects specifying channels and their transforms.
-    hac_maxlags : int, optional
-        Maximum lags for Newey-West HAC covariance estimation. Default is
-        int(4 * (n / 100) ** (2/9)) as suggested by Newey & West.
-    model : None
-        Not used in MVP (OLS only), but parameter kept for future Bayesian
-        extension compatibility with CausalPy architecture.
+    Transform parameters (saturation and adstock) are estimated from the data via
+    grid search or continuous optimization to find the best fit.
 
     Attributes
     ----------
@@ -78,7 +81,7 @@ class TransferFunctionITS(BaseExperiment):
     base_formula : str
         Baseline model formula.
     treatments : List[Treatment]
-        Treatment specifications.
+        Treatment specifications with estimated transforms.
     ols_result : statsmodels.regression.linear_model.RegressionResultsWrapper
         Fitted OLS model with HAC standard errors.
     beta_baseline : np.ndarray
@@ -89,6 +92,12 @@ class TransferFunctionITS(BaseExperiment):
         Fitted values.
     residuals : np.ndarray
         Model residuals.
+    transform_estimation_method : str
+        Method used for parameter estimation ("grid" or "optimize").
+    transform_estimation_results : dict
+        Full results from parameter estimation including best_score, best_params.
+    transform_search_space : dict
+        Parameter grids or bounds that were searched.
 
     Examples
     --------
@@ -96,52 +105,57 @@ class TransferFunctionITS(BaseExperiment):
     >>> import pandas as pd
     >>> import numpy as np
     >>> # Create sample data
-    >>> dates = pd.date_range("2020-01-01", periods=104, freq="W")
+    >>> dates = pd.date_range("2022-01-01", periods=104, freq="W")
     >>> df = pd.DataFrame(
     ...     {
     ...         "date": dates,
-    ...         "sales": np.random.normal(1000, 100, 104),
-    ...         "tv_spend": np.random.uniform(0, 10000, 104),
+    ...         "water_consumption": np.random.normal(5000, 500, 104),
+    ...         "comm_intensity": np.random.uniform(0, 10, 104),
+    ...         "temperature": 25 + 10 * np.sin(2 * np.pi * np.arange(104) / 52),
+    ...         "rainfall": 8 - 8 * np.sin(2 * np.pi * np.arange(104) / 52),
     ...     }
     ... )
     >>> df = df.set_index("date")
-    >>> # Add time index for formula
     >>> df["t"] = np.arange(len(df))
-    >>> # Define treatment with saturation and adstock
-    >>> treatment = cp.Treatment(
-    ...     name="tv_spend",
-    ...     transforms=[
-    ...         cp.Saturation(kind="hill", slope=2.0, kappa=5000),
-    ...         cp.Adstock(half_life=3, normalize=True),
-    ...     ],
-    ... )
-    >>> # Fit model
-    >>> result = cp.TransferFunctionITS(
+    >>>
+    >>> # Estimate transform parameters via grid search
+    >>> result = cp.TransferFunctionITS.with_estimated_transforms(
     ...     data=df,
-    ...     y_column="sales",
-    ...     base_formula="1 + t",
-    ...     treatments=[treatment],
-    ...     hac_maxlags=8,
+    ...     y_column="water_consumption",
+    ...     treatment_name="comm_intensity",
+    ...     base_formula="1 + t + temperature + rainfall",
+    ...     estimation_method="grid",
+    ...     saturation_type="hill",
+    ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+    ...     adstock_grid={"half_life": [2, 3, 4, 5]},
     ... )
-    >>> # Estimate effect of zeroing TV spend in weeks 50-60
+    >>>
+    >>> # View estimated parameters
+    >>> print(result.transform_estimation_results["best_params"])
+    >>>
+    >>> # Estimate effect of policy over entire period
     >>> effect_result = result.effect(
-    ...     window=(df.index[50], df.index[60]), channels=["tv_spend"], scale=0.0
+    ...     window=(df.index[0], df.index[-1]), channels=["comm_intensity"], scale=0.0
     ... )
-    >>> # Plot results
+    >>> print(f"Total effect: {effect_result['total_effect']:.2f}")
+    >>>
+    >>> # Visualize results
     >>> result.plot()
-    >>> # Show diagnostics
     >>> result.diagnostics()
 
     Notes
     -----
-    **MVP Limitations:**
-    - OLS with HAC standard errors only (no Bayesian inference)
-    - Point estimates only (no bootstrap uncertainty intervals)
-    - Fixed transform parameters (no grid search)
-    - Basic diagnostics only
+    **Instantiation:**
+    Models are created via the `with_estimated_transforms()` class method, which
+    estimates optimal transform parameters from the data. Direct instantiation
+    is not supported.
+
+    **Transform Estimation:**
+    Two methods are available:
+    - Grid search: Exhaustive search over discrete parameter values (slower, guaranteed best)
+    - Continuous optimization: Uses scipy.optimize (faster, may find local optima)
 
     **Future Extensions:**
-    - Grid search for optimal transform parameters (estimate_transforms=True)
     - Bootstrap or asymptotic confidence intervals for effects
     - Additional error models (GLSAR, ARIMAX)
     - Bayesian inference via PyMC model (reusing transform pipeline)
@@ -158,7 +172,7 @@ class TransferFunctionITS(BaseExperiment):
     supports_ols = True
     supports_bayes = False  # FUTURE: Will be True when PyMC model is implemented
 
-    def __init__(
+    def _init_from_treatments(
         self,
         data: pd.DataFrame,
         y_column: str,
@@ -168,7 +182,11 @@ class TransferFunctionITS(BaseExperiment):
         model=None,
         **kwargs,
     ) -> None:
-        """Initialize and fit the Transfer Function ITS model."""
+        """Initialize and fit the Transfer Function ITS model with given treatments.
+
+        This is a private method called by with_estimated_transforms().
+        Users should not call this directly - use with_estimated_transforms() instead.
+        """
         # For MVP, we only support OLS. The model parameter is kept for future
         # compatibility with CausalPy's architecture.
         if model is not None:
@@ -424,8 +442,9 @@ class TransferFunctionITS(BaseExperiment):
             coef_constraint=coef_constraint,
         )
 
-        # Create TransferFunctionITS with estimated transforms
-        result = cls(
+        # Create TransferFunctionITS instance and initialize with estimated transforms
+        result = cls.__new__(cls)
+        result._init_from_treatments(
             data=data,
             y_column=y_column,
             base_formula=base_formula,
