@@ -198,17 +198,27 @@ class TestTransformOptimization:
         t = np.arange(n)
         dates = pd.date_range("2020-01-01", periods=n, freq="W")
 
-        # Generate treatment with known transforms
-        treatment_raw = np.random.uniform(0, 100, n)
+        # Generate treatment with known transforms - use more varied signal
+        treatment_raw = (
+            50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+        )
+        treatment_raw = np.maximum(treatment_raw, 0)  # Keep non-negative
+
         sat = HillSaturation(slope=2.0, kappa=50)
         treatment_sat = sat.apply(treatment_raw)
         adstock = GeometricAdstock(half_life=3.0, normalize=True)
         treatment_transformed = adstock.apply(treatment_sat)
 
-        # Generate outcome
+        # Generate outcome with stronger signal and time trend
         beta_0 = 100.0
-        theta = 5.0
-        y = beta_0 + theta * treatment_transformed + np.random.normal(0, 2, n)
+        beta_t = 0.5
+        theta = 50.0  # Stronger treatment effect
+        y = (
+            beta_0
+            + beta_t * t
+            + theta * treatment_transformed
+            + np.random.normal(0, 5, n)
+        )
 
         df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
         df = df.set_index("date")
@@ -219,7 +229,7 @@ class TestTransformOptimization:
             data=df,
             y_column="y",
             treatment_name="treatment",
-            base_formula="1",
+            base_formula="1 + t",  # Include time trend
             estimation_method="grid",
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
@@ -249,17 +259,27 @@ class TestTransformOptimization:
         t = np.arange(n)
         dates = pd.date_range("2020-01-01", periods=n, freq="W")
 
-        # Generate treatment with known transforms
-        treatment_raw = np.random.uniform(0, 100, n)
+        # Generate treatment with known transforms - use more varied signal
+        treatment_raw = (
+            50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+        )
+        treatment_raw = np.maximum(treatment_raw, 0)  # Keep non-negative
+
         sat = HillSaturation(slope=2.0, kappa=50)
         treatment_sat = sat.apply(treatment_raw)
         adstock = GeometricAdstock(half_life=3.0, normalize=True)
         treatment_transformed = adstock.apply(treatment_sat)
 
-        # Generate outcome
+        # Generate outcome with stronger signal and time trend
         beta_0 = 100.0
-        theta = 5.0
-        y = beta_0 + theta * treatment_transformed + np.random.normal(0, 2, n)
+        beta_t = 0.5
+        theta = 50.0  # Stronger treatment effect
+        y = (
+            beta_0
+            + beta_t * t
+            + theta * treatment_transformed
+            + np.random.normal(0, 5, n)
+        )
 
         df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
         df = df.set_index("date")
@@ -269,7 +289,7 @@ class TestTransformOptimization:
             data=df,
             y_column="y",
             treatment_name="treatment",
-            base_formula="1",
+            base_formula="1 + t",  # Include time trend
             estimation_method="optimize",
             saturation_type="hill",
             saturation_bounds={"slope": (1.0, 4.0), "kappa": (20, 100)},
