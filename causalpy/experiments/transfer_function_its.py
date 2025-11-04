@@ -101,47 +101,50 @@ class TransferFunctionITS(BaseExperiment):
 
     Examples
     --------
-    >>> import causalpy as cp
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> # Create sample data
-    >>> dates = pd.date_range("2022-01-01", periods=104, freq="W")
-    >>> df = pd.DataFrame(
-    ...     {
-    ...         "date": dates,
-    ...         "water_consumption": np.random.normal(5000, 500, 104),
-    ...         "comm_intensity": np.random.uniform(0, 10, 104),
-    ...         "temperature": 25 + 10 * np.sin(2 * np.pi * np.arange(104) / 52),
-    ...         "rainfall": 8 - 8 * np.sin(2 * np.pi * np.arange(104) / 52),
-    ...     }
-    ... )
-    >>> df = df.set_index("date")
-    >>> df["t"] = np.arange(len(df))
-    >>>
-    >>> # Estimate transform parameters via grid search
-    >>> result = cp.TransferFunctionITS.with_estimated_transforms(
-    ...     data=df,
-    ...     y_column="water_consumption",
-    ...     treatment_name="comm_intensity",
-    ...     base_formula="1 + t + temperature + rainfall",
-    ...     estimation_method="grid",
-    ...     saturation_type="hill",
-    ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
-    ...     adstock_grid={"half_life": [2, 3, 4, 5]},
-    ... )
-    >>>
-    >>> # View estimated parameters
-    >>> print(result.transform_estimation_results["best_params"])
-    >>>
-    >>> # Estimate effect of policy over entire period
-    >>> effect_result = result.effect(
-    ...     window=(df.index[0], df.index[-1]), channels=["comm_intensity"], scale=0.0
-    ... )
-    >>> print(f"Total effect: {effect_result['total_effect']:.2f}")
-    >>>
-    >>> # Visualize results
-    >>> result.plot()
-    >>> result.diagnostics()
+    .. code-block:: python
+
+        import causalpy as cp
+        import pandas as pd
+        import numpy as np
+
+        # Create sample data
+        dates = pd.date_range("2022-01-01", periods=104, freq="W")
+        df = pd.DataFrame(
+            {
+                "date": dates,
+                "water_consumption": np.random.normal(5000, 500, 104),
+                "comm_intensity": np.random.uniform(0, 10, 104),
+                "temperature": 25 + 10 * np.sin(2 * np.pi * np.arange(104) / 52),
+                "rainfall": 8 - 8 * np.sin(2 * np.pi * np.arange(104) / 52),
+            }
+        )
+        df = df.set_index("date")
+        df["t"] = np.arange(len(df))
+
+        # Estimate transform parameters via grid search
+        result = cp.TransferFunctionITS.with_estimated_transforms(
+            data=df,
+            y_column="water_consumption",
+            treatment_name="comm_intensity",
+            base_formula="1 + t + temperature + rainfall",
+            estimation_method="grid",
+            saturation_type="hill",
+            saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+            adstock_grid={"half_life": [2, 3, 4, 5]},
+        )
+
+        # View estimated parameters
+        print(result.transform_estimation_results["best_params"])
+
+        # Estimate effect of policy over entire period
+        effect_result = result.effect(
+            window=(df.index[0], df.index[-1]), channels=["comm_intensity"], scale=0.0
+        )
+        print(f"Total effect: {effect_result['total_effect']:.2f}")
+
+        # Visualize results
+        result.plot()
+        result.diagnostics()
 
     Notes
     -----
@@ -321,31 +324,33 @@ class TransferFunctionITS(BaseExperiment):
 
         Examples
         --------
-        >>> # Grid search example
-        >>> result = TransferFunctionITS.with_estimated_transforms(
-        ...     data=df,
-        ...     y_column="water_consumption",
-        ...     treatment_name="comm_intensity",
-        ...     base_formula="1 + t + temperature + rainfall",
-        ...     estimation_method="grid",
-        ...     saturation_type="hill",
-        ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
-        ...     adstock_grid={"half_life": [2, 3, 4, 5]},
-        ... )
-        >>> print(f"Best RMSE: {result.transform_estimation_results['best_score']:.2f}")
+        .. code-block:: python
 
-        >>> # Optimization example
-        >>> result = TransferFunctionITS.with_estimated_transforms(
-        ...     data=df,
-        ...     y_column="water_consumption",
-        ...     treatment_name="comm_intensity",
-        ...     base_formula="1 + t + temperature + rainfall",
-        ...     estimation_method="optimize",
-        ...     saturation_type="hill",
-        ...     saturation_bounds={"slope": (0.5, 5.0), "kappa": (2, 10)},
-        ...     adstock_bounds={"half_life": (1, 10)},
-        ...     initial_params={"slope": 2.0, "kappa": 5.0, "half_life": 4.0},
-        ... )
+            # Grid search example
+            result = TransferFunctionITS.with_estimated_transforms(
+                data=df,
+                y_column="water_consumption",
+                treatment_name="comm_intensity",
+                base_formula="1 + t + temperature + rainfall",
+                estimation_method="grid",
+                saturation_type="hill",
+                saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+                adstock_grid={"half_life": [2, 3, 4, 5]},
+            )
+            print(f"Best RMSE: {result.transform_estimation_results['best_score']:.2f}")
+
+            # Optimization example
+            result = TransferFunctionITS.with_estimated_transforms(
+                data=df,
+                y_column="water_consumption",
+                treatment_name="comm_intensity",
+                base_formula="1 + t + temperature + rainfall",
+                estimation_method="optimize",
+                saturation_type="hill",
+                saturation_bounds={"slope": (0.5, 5.0), "kappa": (2, 10)},
+                adstock_bounds={"half_life": (1, 10)},
+                initial_params={"slope": 2.0, "kappa": 5.0, "half_life": 4.0},
+            )
 
         Notes
         -----
@@ -587,12 +592,14 @@ class TransferFunctionITS(BaseExperiment):
 
         Examples
         --------
-        >>> # Estimate effect of completely removing TV spend in weeks 50-60
-        >>> effect = result.effect(
-        ...     window=(df.index[50], df.index[60]), channels=["tv_spend"], scale=0.0
-        ... )
-        >>> print(f"Total effect: {effect['total_effect']:.2f}")
-        >>> print(f"Mean weekly effect: {effect['mean_effect']:.2f}")
+        .. code-block:: python
+
+            # Estimate effect of completely removing TV spend in weeks 50-60
+            effect = result.effect(
+                window=(df.index[50], df.index[60]), channels=["tv_spend"], scale=0.0
+            )
+            print(f"Total effect: {effect['total_effect']:.2f}")
+            print(f"Mean weekly effect: {effect['mean_effect']:.2f}")
 
         Notes
         -----
@@ -760,7 +767,9 @@ class TransferFunctionITS(BaseExperiment):
 
         Examples
         --------
-        >>> result.plot_irf("tv_spend")
+        .. code-block:: python
+
+            result.plot_irf("tv_spend")
 
         Notes
         -----

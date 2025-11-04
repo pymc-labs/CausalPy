@@ -186,17 +186,19 @@ def estimate_transform_params_grid(
 
     Examples
     --------
-    >>> result = estimate_transform_params_grid(
-    ...     data=df,
-    ...     y_column="water_consumption",
-    ...     treatment_name="comm_intensity",
-    ...     base_formula="1 + t + temperature + rainfall",
-    ...     saturation_type="hill",
-    ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
-    ...     adstock_grid={"half_life": [2, 3, 4, 5]},
-    ... )
-    >>> print(f"Best RMSE: {result['best_score']:.2f}")
-    >>> print(f"Best params: {result['best_params']}")
+    .. code-block:: python
+
+        result = estimate_transform_params_grid(
+            data=df,
+            y_column="water_consumption",
+            treatment_name="comm_intensity",
+            base_formula="1 + t + temperature + rainfall",
+            saturation_type="hill",
+            saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+            adstock_grid={"half_life": [2, 3, 4, 5]},
+        )
+        print(f"Best RMSE: {result['best_score']:.2f}")
+        print(f"Best params: {result['best_params']}")
 
     Notes
     -----
@@ -359,17 +361,19 @@ def estimate_transform_params_optimize(
 
     Examples
     --------
-    >>> result = estimate_transform_params_optimize(
-    ...     data=df,
-    ...     y_column="water_consumption",
-    ...     treatment_name="comm_intensity",
-    ...     base_formula="1 + t + temperature + rainfall",
-    ...     saturation_type="hill",
-    ...     saturation_bounds={"slope": (0.5, 5.0), "kappa": (2, 10)},
-    ...     adstock_bounds={"half_life": (1, 10)},
-    ...     initial_params={"slope": 2.0, "kappa": 5.0, "half_life": 4.0},
-    ... )
-    >>> print(f"Optimized RMSE: {result['best_score']:.2f}")
+    .. code-block:: python
+
+        result = estimate_transform_params_optimize(
+            data=df,
+            y_column="water_consumption",
+            treatment_name="comm_intensity",
+            base_formula="1 + t + temperature + rainfall",
+            saturation_type="hill",
+            saturation_bounds={"slope": (0.5, 5.0), "kappa": (2, 10)},
+            adstock_bounds={"half_life": (1, 10)},
+            initial_params={"slope": 2.0, "kappa": 5.0, "half_life": 4.0},
+        )
+        print(f"Optimized RMSE: {result['best_score']:.2f}")
 
     Notes
     -----
