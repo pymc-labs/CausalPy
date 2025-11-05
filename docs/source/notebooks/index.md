@@ -43,7 +43,7 @@ its_covid.ipynb
 :::
 
 :::{toctree}
-:caption: Transfer Function Interrupted Time Series
+:caption: Graded Intervention Time Series
 :maxdepth: 1
 
 tfits_single_channel.ipynb

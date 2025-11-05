@@ -20,7 +20,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from causalpy.experiments.transfer_function_its import TransferFunctionITS
+from causalpy.experiments.graded_intervention_its import GradedInterventionTimeSeries
+from causalpy.skl_models import TransferFunctionOLS
 from causalpy.transforms import (
     DiscreteLag,
     GeometricAdstock,
@@ -225,7 +226,7 @@ class TestTransformOptimization:
 
         # Estimate parameters with grid search
         # Use a coarse grid for speed
-        result = TransferFunctionITS.with_estimated_transforms(
+        model = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -234,6 +235,16 @@ class TestTransformOptimization:
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+        )
+
+        # Create experiment with fitted model
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model.treatments,
+            model=model,
         )
 
         # Check that estimation metadata is stored
@@ -285,7 +296,7 @@ class TestTransformOptimization:
         df = df.set_index("date")
 
         # Estimate parameters with optimization
-        result = TransferFunctionITS.with_estimated_transforms(
+        model = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -295,6 +306,16 @@ class TestTransformOptimization:
             saturation_bounds={"slope": (1.0, 4.0), "kappa": (20, 100)},
             adstock_bounds={"half_life": (1, 10)},
             initial_params={"slope": 2.0, "kappa": 50, "half_life": 3.0},
+        )
+
+        # Create experiment with fitted model
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model.treatments,
+            model=model,
         )
 
         # Check that estimation metadata is stored
@@ -319,7 +340,7 @@ class TestTransformOptimization:
 
         # Missing saturation_grid for grid search
         with pytest.raises(ValueError, match="saturation_grid is required"):
-            TransferFunctionITS.with_estimated_transforms(
+            TransferFunctionOLS.with_estimated_transforms(
                 data=df,
                 y_column="y",
                 treatment_name="x",
@@ -331,7 +352,7 @@ class TestTransformOptimization:
 
         # Missing saturation_bounds for optimize
         with pytest.raises(ValueError, match="saturation_bounds is required"):
-            TransferFunctionITS.with_estimated_transforms(
+            TransferFunctionOLS.with_estimated_transforms(
                 data=df,
                 y_column="y",
                 treatment_name="x",
@@ -343,7 +364,7 @@ class TestTransformOptimization:
 
         # Invalid estimation method
         with pytest.raises(ValueError, match="Unknown estimation_method"):
-            TransferFunctionITS.with_estimated_transforms(
+            TransferFunctionOLS.with_estimated_transforms(
                 data=df,
                 y_column="y",
                 treatment_name="x",
@@ -392,7 +413,7 @@ class TestARIMAX:
         df = df.set_index("date")
 
         # Fit with ARIMAX
-        result = TransferFunctionITS.with_estimated_transforms(
+        model = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -405,12 +426,22 @@ class TestARIMAX:
             arima_order=(1, 0, 0),
         )
 
+        # Create experiment with fitted model
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model.treatments,
+            model=model,
+        )
+
         # Check that model was fitted
         assert result.error_model == "arimax"
         assert result.arima_order == (1, 0, 0)
         assert result.ols_result is not None
         assert result.score > 0.8
-        assert hasattr(result, "arimax_model")
+        assert hasattr(result.model, "arimax_model")
 
     def test_arimax_grid_search(self):
         """Test parameter estimation works with ARIMAX."""
@@ -447,7 +478,7 @@ class TestARIMAX:
         df = df.set_index("date")
 
         # Test that parameter recovery works
-        result = TransferFunctionITS.with_estimated_transforms(
+        model = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -458,6 +489,16 @@ class TestARIMAX:
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
             error_model="arimax",
             arima_order=(1, 0, 0),
+        )
+
+        # Create experiment with fitted model
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model.treatments,
+            model=model,
         )
 
         # Check that parameters are reasonable
@@ -472,7 +513,7 @@ class TestARIMAX:
 
         # Missing arima_order
         with pytest.raises(ValueError, match="arima_order must be provided"):
-            TransferFunctionITS.with_estimated_transforms(
+            TransferFunctionOLS.with_estimated_transforms(
                 data=df,
                 y_column="y",
                 treatment_name="x",
@@ -487,7 +528,7 @@ class TestARIMAX:
 
         # Invalid error_model
         with pytest.raises(ValueError, match="error_model must be"):
-            TransferFunctionITS.with_estimated_transforms(
+            TransferFunctionOLS.with_estimated_transforms(
                 data=df,
                 y_column="y",
                 treatment_name="x",
@@ -534,7 +575,7 @@ class TestARIMAX:
         df = df.set_index("date")
 
         # Fit with HAC
-        result_hac = TransferFunctionITS.with_estimated_transforms(
+        model_hac = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -546,8 +587,17 @@ class TestARIMAX:
             error_model="hac",
         )
 
+        result_hac = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model_hac.treatments,
+            model=model_hac,
+        )
+
         # Fit with ARIMAX
-        result_arimax = TransferFunctionITS.with_estimated_transforms(
+        model_arimax = TransferFunctionOLS.with_estimated_transforms(
             data=df,
             y_column="y",
             treatment_name="treatment",
@@ -560,6 +610,15 @@ class TestARIMAX:
             arima_order=(1, 0, 0),
         )
 
+        result_arimax = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_name="treatment",
+            base_formula="1 + t",
+            treatments=model_arimax.treatments,
+            model=model_arimax,
+        )
+
         # Coefficients should be similar
         np.testing.assert_allclose(
             result_hac.theta_treatment, result_arimax.theta_treatment, rtol=0.2
@@ -568,7 +627,10 @@ class TestARIMAX:
         # ARIMAX should have smaller standard errors (more efficient)
         n_baseline = len(result_hac.baseline_labels)
         se_hac = result_hac.ols_result.bse[n_baseline]
+
+        # For ARIMAX, extract standard error at same position (within exog range)
         se_arimax = result_arimax.ols_result.bse[n_baseline]
+
         # ARIMAX should be more efficient (smaller SE) when correctly specified
         # Note: This might not always hold in small samples, so we just check they're positive
         assert se_hac > 0
