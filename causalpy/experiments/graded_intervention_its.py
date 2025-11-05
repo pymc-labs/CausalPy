@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from patsy import dmatrix
+from sklearn.base import RegressorMixin
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
@@ -47,13 +48,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     This experiment class handles causal inference for time series with graded
     (non-binary) interventions, incorporating saturation and adstock effects.
-    It works with a pre-fitted TransferFunctionOLS model to provide visualization,
-    diagnostics, and counterfactual effect estimation.
+    Following the standard CausalPy pattern, it takes data and an unfitted model,
+    performs transform parameter estimation, fits the model, and provides
+    visualization, diagnostics, and counterfactual effect estimation.
 
     Typical workflow:
-    1. Create and fit a TransferFunctionOLS model using the with_estimated_transforms() method
-    2. Pass the fitted model to this experiment class
-    3. Use experiment methods for visualization and effect estimation
+    1. Create an UNFITTED TransferFunctionOLS model with configuration
+    2. Pass data + model to this experiment class
+    3. Experiment estimates transforms, fits model, and provides results
+    4. Use experiment methods for visualization and effect estimation
 
     Parameters
     ----------
@@ -61,14 +64,12 @@ class GradedInterventionTimeSeries(BaseExperiment):
         Time series data with datetime or numeric index.
     y_column : str
         Name of the outcome variable column.
-    treatment_name : str
-        Name of the treatment variable column.
+    treatment_names : List[str]
+        List of treatment variable names (e.g., ["comm_intensity"]).
     base_formula : str
-        Patsy formula for baseline model.
-    treatments : List[Treatment]
-        List of Treatment objects with configured transforms.
+        Patsy formula for baseline model (e.g., "1 + t + temperature").
     model : TransferFunctionOLS
-        Pre-fitted model instance.
+        UNFITTED model with configuration for transform parameter estimation.
 
     Attributes
     ----------
@@ -92,24 +93,20 @@ class GradedInterventionTimeSeries(BaseExperiment):
     Examples
     --------
     >>> import causalpy as cp
-    >>> # Step 1: Create and fit model
-    >>> model = cp.skl_models.TransferFunctionOLS.with_estimated_transforms(
-    ...     data=df,
-    ...     y_column="water_consumption",
-    ...     treatment_name="comm_intensity",
-    ...     base_formula="1 + t + temperature + rainfall",
-    ...     estimation_method="grid",
+    >>> # Step 1: Create UNFITTED model with configuration
+    >>> model = cp.skl_models.TransferFunctionOLS(
+    ...     saturation_type="hill",
     ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
     ...     adstock_grid={"half_life": [2, 3, 4, 5]},
+    ...     estimation_method="grid",
     ...     error_model="hac",
     ... )
-    >>> # Step 2: Create experiment with fitted model
+    >>> # Step 2: Pass to experiment (experiment estimates transforms and fits model)
     >>> result = cp.GradedInterventionTimeSeries(
     ...     data=df,
     ...     y_column="water_consumption",
-    ...     treatment_name="comm_intensity",
+    ...     treatment_names=["comm_intensity"],
     ...     base_formula="1 + t + temperature + rainfall",
-    ...     treatments=model.treatments,
     ...     model=model,
     ... )
     >>> # Step 3: Use experiment methods
@@ -127,63 +124,152 @@ class GradedInterventionTimeSeries(BaseExperiment):
         self,
         data: pd.DataFrame,
         y_column: str,
-        treatment_name: str,
+        treatment_names: List[str],
         base_formula: str,
-        treatments: List[Treatment],
         model=None,
         **kwargs,
     ):
         """
-        Initialize experiment with pre-configured treatments and fitted model.
+        Initialize experiment with data and unfitted model (standard CausalPy pattern).
 
-        The model should be a fitted TransferFunctionOLS instance. For most use cases,
-        create the model using TransferFunctionOLS.with_estimated_transforms() first.
+        This method:
+        1. Validates inputs and builds baseline design matrix
+        2. Estimates transform parameters for each treatment
+        3. Applies transforms and builds full design matrix
+        4. Calls model.fit(X_full, y)
+        5. Extracts results for visualization and analysis
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Time series data.
+        y_column : str
+            Name of outcome variable.
+        treatment_names : List[str]
+            List of treatment variable names (e.g., ["comm_intensity"]).
+        base_formula : str
+            Patsy formula for baseline model.
+        model : TransferFunctionOLS
+            UNFITTED model with configuration for transform estimation.
         """
         super().__init__(model=model)
 
-        # Validate model
-        if model is None:
-            raise ValueError(
-                "A fitted model is required. Use TransferFunctionOLS.with_estimated_transforms() "
-                "to create and fit a model, then pass it to this experiment class."
-            )
-
         # Validate inputs
-        self._validate_inputs(data, y_column, treatments)
+        self._validate_inputs(data, y_column, treatment_names)
 
         # Store attributes
         self.data = data.copy()
         self.y_column = y_column
-        self.treatment_name = treatment_name  # Store for backwards compatibility
+        self.treatment_names = treatment_names
         self.base_formula = base_formula
-        self.treatments = treatments
-        self.treatment_names = [t.name for t in treatments]
 
         # Extract outcome variable
         self.y = data[y_column].values
 
-        # Build baseline design matrix
+        # Build baseline design matrix (like other experiments do)
         self.X_baseline = np.asarray(dmatrix(base_formula, data))
         self.baseline_labels = dmatrix(base_formula, data).design_info.column_names
 
-        # Build treatment design matrix
-        self.Z_treatment, self.treatment_labels = self._build_treatment_matrix(
-            data, treatments
+        # Estimate transform parameters for each treatment
+        from causalpy.transform_optimization import (
+            estimate_transform_params_grid,
+            estimate_transform_params_optimize,
         )
+        from causalpy.transforms import Treatment
 
-        # Combine matrices
+        self.treatments = []
+        Z_columns = []
+        self.treatment_labels = []
+
+        for name in treatment_names:
+            # Run parameter estimation using model configuration
+            if self.model.estimation_method == "grid":
+                est_results = estimate_transform_params_grid(
+                    data=data,
+                    y_column=y_column,
+                    treatment_name=name,
+                    base_formula=base_formula,
+                    saturation_type=self.model.saturation_type,
+                    saturation_grid=self.model.saturation_grid,
+                    adstock_grid=self.model.adstock_grid,
+                    coef_constraint=self.model.coef_constraint,
+                    hac_maxlags=self.model.hac_maxlags,
+                    error_model=self.model.error_model,
+                    arima_order=self.model.arima_order,
+                )
+                search_space = {
+                    "saturation_grid": self.model.saturation_grid,
+                    "adstock_grid": self.model.adstock_grid,
+                }
+            elif self.model.estimation_method == "optimize":
+                est_results = estimate_transform_params_optimize(
+                    data=data,
+                    y_column=y_column,
+                    treatment_name=name,
+                    base_formula=base_formula,
+                    saturation_type=self.model.saturation_type,
+                    saturation_bounds=self.model.saturation_bounds,
+                    adstock_bounds=self.model.adstock_bounds,
+                    initial_params=None,
+                    coef_constraint=self.model.coef_constraint,
+                    hac_maxlags=self.model.hac_maxlags,
+                    method="L-BFGS-B",
+                    error_model=self.model.error_model,
+                    arima_order=self.model.arima_order,
+                )
+                search_space = {
+                    "saturation_bounds": self.model.saturation_bounds,
+                    "adstock_bounds": self.model.adstock_bounds,
+                }
+
+            # Store estimation metadata on model
+            self.model.transform_estimation_results = est_results
+            self.model.transform_search_space = search_space
+
+            # Create Treatment with estimated transforms
+            treatment = Treatment(
+                name=name,
+                saturation=est_results["best_saturation"],
+                adstock=est_results["best_adstock"],
+                coef_constraint=self.model.coef_constraint,
+            )
+            self.treatments.append(treatment)
+
+            # Apply transforms
+            x_raw = data[name].values
+            x_transformed = x_raw
+            if treatment.saturation is not None:
+                x_transformed = treatment.saturation.apply(x_transformed)
+            if treatment.adstock is not None:
+                x_transformed = treatment.adstock.apply(x_transformed)
+            if treatment.lag is not None:
+                x_transformed = treatment.lag.apply(x_transformed)
+
+            Z_columns.append(x_transformed)
+            self.treatment_labels.append(name)
+
+        # Build full design matrix
+        self.Z_treatment = np.column_stack(Z_columns)
         self.X_full = np.column_stack([self.X_baseline, self.Z_treatment])
         self.all_labels = self.baseline_labels + self.treatment_labels
 
-        # Extract information from fitted model
-        self.model = model
-        self.ols_result = model.ols_result
-        self.predictions = model.ols_result.fittedvalues
-        self.residuals = model.ols_result.resid
-        self.score = model.score
+        # Store treatments on model for later use
+        self.model.treatments = self.treatments
+
+        # Fit the model (standard CausalPy pattern)
+        if isinstance(self.model, RegressorMixin):
+            self.model.fit(X=self.X_full, y=self.y)
+        else:
+            raise ValueError("Model type not recognized")
+
+        # Extract results from fitted model
+        self.ols_result = self.model.ols_result
+        self.predictions = self.model.ols_result.fittedvalues
+        self.residuals = self.model.ols_result.resid
+        self.score = self.model.score
 
         # Extract coefficients (handling ARIMAX correctly)
-        if hasattr(model, "error_model") and model.error_model == "arimax":
+        if self.model.error_model == "arimax":
             # ARIMAX: extract only exogenous coefficients
             n_exog = self.ols_result.model.k_exog
             exog_params = self.ols_result.params[:n_exog]
@@ -197,22 +283,18 @@ class GradedInterventionTimeSeries(BaseExperiment):
             self.theta_treatment = self.ols_result.params[n_baseline:]
 
         # Store model metadata for summary output
-        self.error_model = getattr(model, "error_model", "hac")
-        self.hac_maxlags = getattr(model, "hac_maxlags", None)
-        self.arima_order = getattr(model, "arima_order", None)
-        self.transform_estimation_method = getattr(
-            model, "transform_estimation_method", None
-        )
-        self.transform_estimation_results = getattr(
-            model, "transform_estimation_results", None
-        )
-        self.transform_search_space = getattr(model, "transform_search_space", None)
+        self.error_model = self.model.error_model
+        self.hac_maxlags = self.model.hac_maxlags
+        self.arima_order = self.model.arima_order
+        self.transform_estimation_method = self.model.estimation_method
+        self.transform_estimation_results = self.model.transform_estimation_results
+        self.transform_search_space = self.model.transform_search_space
 
     def _validate_inputs(
         self,
         data: pd.DataFrame,
         y_column: str,
-        treatments: List[Treatment],
+        treatment_names: List[str],
     ) -> None:
         """Validate input data and parameters."""
         # Check that y_column exists
@@ -220,21 +302,19 @@ class GradedInterventionTimeSeries(BaseExperiment):
             raise ValueError(f"y_column '{y_column}' not found in data columns")
 
         # Check that treatment columns exist
-        for treatment in treatments:
-            if treatment.name not in data.columns:
-                raise ValueError(
-                    f"Treatment column '{treatment.name}' not found in data columns"
-                )
+        for name in treatment_names:
+            if name not in data.columns:
+                raise ValueError(f"Treatment column '{name}' not found in data columns")
 
         # Check for missing values in outcome
         if data[y_column].isna().any():
             raise ValueError("Outcome variable contains missing values")
 
         # Warn about missing values in treatment columns
-        for treatment in treatments:
-            if data[treatment.name].isna().any():
+        for name in treatment_names:
+            if data[name].isna().any():
                 print(
-                    f"Warning: Treatment column '{treatment.name}' contains missing values. "
+                    f"Warning: Treatment column '{name}' contains missing values. "
                     f"Consider forward-filling if justified by the context."
                 )
 

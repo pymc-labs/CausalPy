@@ -224,26 +224,21 @@ class TestTransformOptimization:
         df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
         df = df.set_index("date")
 
-        # Estimate parameters with grid search
-        # Use a coarse grid for speed
-        model = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",  # Include time trend
-            estimation_method="grid",
+        # Create unfitted model with configuration
+        model = TransferFunctionOLS(
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
         )
 
-        # Create experiment with fitted model
+        # Pass to experiment (experiment estimates transforms and fits model)
         result = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            treatments=model.treatments,
+            treatment_names=["treatment"],
+            base_formula="1 + t",  # Include time trend
             model=model,
         )
 
@@ -295,26 +290,21 @@ class TestTransformOptimization:
         df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
         df = df.set_index("date")
 
-        # Estimate parameters with optimization
-        model = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",  # Include time trend
-            estimation_method="optimize",
+        # Create unfitted model with configuration
+        model = TransferFunctionOLS(
             saturation_type="hill",
             saturation_bounds={"slope": (1.0, 4.0), "kappa": (20, 100)},
             adstock_bounds={"half_life": (1, 10)},
-            initial_params={"slope": 2.0, "kappa": 50, "half_life": 3.0},
+            estimation_method="optimize",
+            error_model="hac",
         )
 
-        # Create experiment with fitted model
+        # Pass to experiment (experiment estimates transforms and fits model)
         result = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            treatments=model.treatments,
+            treatment_names=["treatment"],
+            base_formula="1 + t",  # Include time trend
             model=model,
         )
 
@@ -336,41 +326,29 @@ class TestTransformOptimization:
 
     def test_estimation_validation(self):
         """Test that parameter estimation validates inputs."""
-        df = pd.DataFrame({"y": [1, 2, 3], "x": [1, 2, 3]})
-
         # Missing saturation_grid for grid search
         with pytest.raises(ValueError, match="saturation_grid is required"):
-            TransferFunctionOLS.with_estimated_transforms(
-                data=df,
-                y_column="y",
-                treatment_name="x",
-                base_formula="1",
-                estimation_method="grid",
+            _model = TransferFunctionOLS(
                 saturation_type="hill",
                 adstock_grid={"half_life": [2, 3]},
+                estimation_method="grid",
             )
 
         # Missing saturation_bounds for optimize
         with pytest.raises(ValueError, match="saturation_bounds is required"):
-            TransferFunctionOLS.with_estimated_transforms(
-                data=df,
-                y_column="y",
-                treatment_name="x",
-                base_formula="1",
-                estimation_method="optimize",
+            _model = TransferFunctionOLS(
                 saturation_type="hill",
                 adstock_bounds={"half_life": (1, 10)},
+                estimation_method="optimize",
             )
 
         # Invalid estimation method
-        with pytest.raises(ValueError, match="Unknown estimation_method"):
-            TransferFunctionOLS.with_estimated_transforms(
-                data=df,
-                y_column="y",
-                treatment_name="x",
-                base_formula="1",
-                estimation_method="invalid",
+        with pytest.raises(ValueError, match="estimation_method must be"):
+            _model = TransferFunctionOLS(
                 saturation_type="hill",
+                saturation_grid={"slope": [1.0, 2.0]},
+                adstock_grid={"half_life": [2, 3]},
+                estimation_method="invalid",
             )
 
 
@@ -412,27 +390,22 @@ class TestARIMAX:
         df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
         df = df.set_index("date")
 
-        # Fit with ARIMAX
-        model = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            estimation_method="grid",
+        # Create unfitted model with ARIMAX configuration
+        model = TransferFunctionOLS(
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
             error_model="arimax",
             arima_order=(1, 0, 0),
         )
 
-        # Create experiment with fitted model
+        # Pass to experiment
         result = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
+            treatment_names=["treatment"],
             base_formula="1 + t",
-            treatments=model.treatments,
             model=model,
         )
 
@@ -478,26 +451,22 @@ class TestARIMAX:
         df = df.set_index("date")
 
         # Test that parameter recovery works
-        model = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            estimation_method="grid",
+        # Create unfitted model with ARIMAX and grid search configuration
+        model = TransferFunctionOLS(
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
             error_model="arimax",
             arima_order=(1, 0, 0),
         )
 
-        # Create experiment with fitted model
+        # Pass to experiment
         result = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
+            treatment_names=["treatment"],
             base_formula="1 + t",
-            treatments=model.treatments,
             model=model,
         )
 
@@ -509,34 +478,24 @@ class TestARIMAX:
 
     def test_arimax_validation(self):
         """Test that ARIMAX validates inputs properly."""
-        df = pd.DataFrame({"y": [1, 2, 3], "x": [1, 2, 3]})
-
         # Missing arima_order
         with pytest.raises(ValueError, match="arima_order must be provided"):
-            TransferFunctionOLS.with_estimated_transforms(
-                data=df,
-                y_column="y",
-                treatment_name="x",
-                base_formula="1",
-                estimation_method="grid",
+            _model = TransferFunctionOLS(
                 saturation_type="hill",
                 saturation_grid={"slope": [1.0, 2.0], "kappa": [3, 5]},
                 adstock_grid={"half_life": [2, 3]},
+                estimation_method="grid",
                 error_model="arimax",
                 # arima_order is missing!
             )
 
         # Invalid error_model
         with pytest.raises(ValueError, match="error_model must be"):
-            TransferFunctionOLS.with_estimated_transforms(
-                data=df,
-                y_column="y",
-                treatment_name="x",
-                base_formula="1",
-                estimation_method="grid",
+            _model = TransferFunctionOLS(
                 saturation_type="hill",
                 saturation_grid={"slope": [1.0, 2.0], "kappa": [3, 5]},
                 adstock_grid={"half_life": [2, 3]},
+                estimation_method="grid",
                 error_model="invalid",
             )
 
@@ -575,37 +534,28 @@ class TestARIMAX:
         df = df.set_index("date")
 
         # Fit with HAC
-        model_hac = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            estimation_method="grid",
+        model_hac = TransferFunctionOLS(
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
             error_model="hac",
         )
 
         result_hac = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
+            treatment_names=["treatment"],
             base_formula="1 + t",
-            treatments=model_hac.treatments,
             model=model_hac,
         )
 
         # Fit with ARIMAX
-        model_arimax = TransferFunctionOLS.with_estimated_transforms(
-            data=df,
-            y_column="y",
-            treatment_name="treatment",
-            base_formula="1 + t",
-            estimation_method="grid",
+        model_arimax = TransferFunctionOLS(
             saturation_type="hill",
             saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
             adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
             error_model="arimax",
             arima_order=(1, 0, 0),
         )
@@ -613,9 +563,8 @@ class TestARIMAX:
         result_arimax = GradedInterventionTimeSeries(
             data=df,
             y_column="y",
-            treatment_name="treatment",
+            treatment_names=["treatment"],
             base_formula="1 + t",
-            treatments=model_arimax.treatments,
             model=model_arimax,
         )
 
