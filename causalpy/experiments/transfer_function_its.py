@@ -29,15 +29,36 @@ Transform parameters (saturation and adstock) are estimated via nested optimizat
 
 2. **Inner Loop**: For each candidate set of transform parameters:
    - Apply transforms to the treatment variable
-   - Fit OLS model with HAC standard errors
+   - Fit regression model (OLS with HAC or ARIMAX)
    - Compute RMSE as the optimization metric
 
 3. **Selection**: The transform parameters that yield the lowest RMSE are selected
-   as the final estimates. These parameters, along with the OLS coefficients from
-   the best-fitting model, define the complete fitted model.
+   as the final estimates. These parameters, along with the regression coefficients
+   from the best-fitting model, define the complete fitted model.
 
 This nested approach is efficient because OLS has a closed-form solution, making
 the inner loop fast even when evaluating many parameter combinations.
+
+Error Models
+------------
+Two error model options are available:
+
+**HAC (Heteroskedasticity and Autocorrelation Consistent) Standard Errors:**
+- Default and recommended for most applications
+- Uses Newey-West robust standard errors
+- No specification required - automatically robust to autocorrelation
+- Works with any autocorrelation pattern
+- More conservative (wider confidence intervals)
+
+**ARIMAX (ARIMA with eXogenous variables):**
+- Explicitly models ARIMA(p,d,q) structure of residuals
+- More efficient (narrower confidence intervals) when correctly specified
+- Requires manual specification of (p,d,q) orders
+- Sensitive to misspecification
+- Follows classical Box & Tiao (1975) intervention analysis
+
+Choose HAC for robust, specification-free inference. Use ARIMAX when you have
+strong evidence for a specific ARIMA structure and want maximum efficiency.
 """
 
 from typing import Dict, List, Optional, Tuple, Union
@@ -83,7 +104,7 @@ class TransferFunctionITS(BaseExperiment):
     treatments : List[Treatment]
         Treatment specifications with estimated transforms.
     ols_result : statsmodels.regression.linear_model.RegressionResultsWrapper
-        Fitted OLS model with HAC standard errors.
+        Fitted regression model (OLS with HAC standard errors or ARIMAX).
     beta_baseline : np.ndarray
         Baseline model coefficients.
     theta_treatment : np.ndarray
@@ -98,9 +119,17 @@ class TransferFunctionITS(BaseExperiment):
         Full results from parameter estimation including best_score, best_params.
     transform_search_space : dict
         Parameter grids or bounds that were searched.
+    error_model : str
+        Error model type: "hac" (default) or "arimax".
+    arima_order : Optional[Tuple[int, int, int]]
+        ARIMA(p,d,q) order when error_model="arimax". None for HAC.
+    hac_maxlags : Optional[int]
+        Maximum lags for HAC standard errors. None for ARIMAX.
 
     Examples
     --------
+    **Example 1: HAC Standard Errors (Default)**
+
     .. code-block:: python
 
         import causalpy as cp
@@ -121,8 +150,8 @@ class TransferFunctionITS(BaseExperiment):
         df = df.set_index("date")
         df["t"] = np.arange(len(df))
 
-        # Estimate transform parameters via grid search
-        result = cp.TransferFunctionITS.with_estimated_transforms(
+        # Estimate transform parameters via grid search with HAC errors
+        result_hac = cp.TransferFunctionITS.with_estimated_transforms(
             data=df,
             y_column="water_consumption",
             treatment_name="comm_intensity",
@@ -131,20 +160,45 @@ class TransferFunctionITS(BaseExperiment):
             saturation_type="hill",
             saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
             adstock_grid={"half_life": [2, 3, 4, 5]},
+            error_model="hac",  # HAC standard errors (default)
         )
 
-        # View estimated parameters
-        print(result.transform_estimation_results["best_params"])
+        # View estimated parameters and summary
+        print(result_hac.transform_estimation_results["best_params"])
+        result_hac.summary()
 
         # Estimate effect of policy over entire period
-        effect_result = result.effect(
+        effect_result = result_hac.effect(
             window=(df.index[0], df.index[-1]), channels=["comm_intensity"], scale=0.0
         )
         print(f"Total effect: {effect_result['total_effect']:.2f}")
 
         # Visualize results
-        result.plot()
-        result.diagnostics()
+        result_hac.plot()
+        result_hac.diagnostics()
+
+    **Example 2: ARIMAX Error Model**
+
+    .. code-block:: python
+
+        # Fit with ARIMAX errors if you know the error structure
+        # (use ACF/PACF plots to determine p, d, q)
+        result_arimax = cp.TransferFunctionITS.with_estimated_transforms(
+            data=df,
+            y_column="water_consumption",
+            treatment_name="comm_intensity",
+            base_formula="1 + t + temperature + rainfall",
+            estimation_method="grid",
+            saturation_type="hill",
+            saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+            adstock_grid={"half_life": [2, 3, 4, 5]},
+            error_model="arimax",  # Use ARIMAX
+            arima_order=(1, 0, 0),  # AR(1) errors: p=1 (AR), d=0 (no diff), q=0 (no MA)
+        )
+
+        # ARIMAX typically gives narrower confidence intervals
+        # when the ARIMA structure is correctly specified
+        result_arimax.summary()  # Shows ARIMA order details
 
     Notes
     -----
@@ -158,9 +212,13 @@ class TransferFunctionITS(BaseExperiment):
     - Grid search: Exhaustive search over discrete parameter values (slower, guaranteed best)
     - Continuous optimization: Uses scipy.optimize (faster, may find local optima)
 
+    **Error Model Selection:**
+    - HAC (default): Robust standard errors, no specification required
+    - ARIMAX: More efficient when ARIMA structure is known, requires (p,d,q) specification
+
     **Future Extensions:**
     - Bootstrap or asymptotic confidence intervals for effects
-    - Additional error models (GLSAR, ARIMAX)
+    - Additional error models (GLSAR for known autocorrelation structure)
     - Bayesian inference via PyMC model (reusing transform pipeline)
     - Custom formula helpers (trend(), season_fourier(), holidays())
     - Multi-channel collinearity diagnostics
@@ -182,6 +240,8 @@ class TransferFunctionITS(BaseExperiment):
         base_formula: str,
         treatments: List[Treatment],
         hac_maxlags: Optional[int] = None,
+        error_model: str = "hac",
+        arima_order: Optional[Tuple[int, int, int]] = None,
         model=None,
         **kwargs,
     ) -> None:
@@ -190,11 +250,11 @@ class TransferFunctionITS(BaseExperiment):
         This is a private method called by with_estimated_transforms().
         Users should not call this directly - use with_estimated_transforms() instead.
         """
-        # For MVP, we only support OLS. The model parameter is kept for future
+        # For MVP, we only support OLS or ARIMAX. The model parameter is kept for future
         # compatibility with CausalPy's architecture.
         if model is not None:
             raise NotImplementedError(
-                "Custom models not yet supported. MVP uses OLS with HAC standard errors only."
+                "Custom models not yet supported. Use error_model='hac' or 'arimax'."
             )
 
         # Validate inputs
@@ -224,30 +284,76 @@ class TransferFunctionITS(BaseExperiment):
         self.X_full = np.column_stack([self.X_baseline, self.Z_treatment])
         self.all_labels = self.baseline_labels + self.treatment_labels
 
-        # Fit OLS with HAC standard errors
-        if hac_maxlags is None:
-            # Newey & West (1994) rule of thumb
-            n = len(self.y)
-            hac_maxlags = int(np.floor(4 * (n / 100) ** (2 / 9)))
+        # Store error model metadata
+        self.error_model = error_model
+        self.arima_order = arima_order
 
-        self.hac_maxlags = hac_maxlags
+        # Fit model with chosen error structure
+        if error_model == "hac":
+            # Fit OLS with HAC standard errors
+            if hac_maxlags is None:
+                # Newey & West (1994) rule of thumb
+                n = len(self.y)
+                hac_maxlags = int(np.floor(4 * (n / 100) ** (2 / 9)))
 
-        # Fit the model
-        self.ols_result = sm.OLS(self.y, self.X_full).fit(
-            cov_type="HAC", cov_kwds={"maxlags": hac_maxlags}
-        )
+            self.hac_maxlags = hac_maxlags
+
+            # Fit the model
+            self.ols_result = sm.OLS(self.y, self.X_full).fit(
+                cov_type="HAC", cov_kwds={"maxlags": hac_maxlags}
+            )
+        elif error_model == "arimax":
+            # Fit ARIMAX model
+            import warnings
+
+            from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+            self.hac_maxlags = None  # Not used for ARIMAX
+
+            # Suppress convergence warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                arimax_model = SARIMAX(self.y, exog=self.X_full, order=arima_order)
+                self.ols_result = arimax_model.fit(
+                    disp=0,
+                    maxiter=200,
+                    method="lbfgs",
+                )
+            self.arimax_model = arimax_model
+        else:
+            raise ValueError(
+                f"error_model must be 'hac' or 'arimax', got '{error_model}'"
+            )
 
         # Extract coefficients
-        n_baseline = self.X_baseline.shape[1]
-        self.beta_baseline = self.ols_result.params[:n_baseline]
-        self.theta_treatment = self.ols_result.params[n_baseline:]
+        # For ARIMAX, params includes both exog coefficients and ARIMA parameters
+        # We need to extract only the exogenous variable coefficients
+        if self.error_model == "arimax":
+            # ARIMAX: params = [exog_coefs..., arima_params...]
+            # Use k_exog to get only the exogenous coefficients
+            n_exog = self.ols_result.model.k_exog
+            exog_params = self.ols_result.params[:n_exog]
+            n_baseline = self.X_baseline.shape[1]
+            self.beta_baseline = exog_params[:n_baseline]
+            self.theta_treatment = exog_params[n_baseline:]
+        else:
+            # OLS: params are just the regression coefficients
+            n_baseline = self.X_baseline.shape[1]
+            self.beta_baseline = self.ols_result.params[:n_baseline]
+            self.theta_treatment = self.ols_result.params[n_baseline:]
 
         # Store predictions and residuals
         self.predictions = self.ols_result.fittedvalues
         self.residuals = self.ols_result.resid
 
-        # Store score (R-squared)
-        self.score = self.ols_result.rsquared
+        # Store score (R-squared if available, otherwise compute from residuals)
+        if hasattr(self.ols_result, "rsquared"):
+            self.score = self.ols_result.rsquared
+        else:
+            # For ARIMAX, compute R-squared manually
+            ss_res = np.sum(self.residuals**2)
+            ss_tot = np.sum((self.y - np.mean(self.y)) ** 2)
+            self.score = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
         # Transform estimation metadata (set by with_estimated_transforms)
         self.transform_estimation_method = None  # "grid", "optimize", or None
@@ -265,6 +371,8 @@ class TransferFunctionITS(BaseExperiment):
         saturation_type: str = "hill",
         coef_constraint: str = "nonnegative",
         hac_maxlags: Optional[int] = None,
+        error_model: str = "hac",
+        arima_order: Optional[Tuple[int, int, int]] = None,
         **estimation_kwargs,
     ) -> "TransferFunctionITS":
         """
@@ -297,7 +405,19 @@ class TransferFunctionITS(BaseExperiment):
             autocorrelation and heteroskedasticity in residuals. Higher values account
             for longer-range dependencies but reduce degrees of freedom. If None, uses
             the Newey-West rule of thumb: floor(4*(n/100)^(2/9)). For example, with
-            n=104 observations, the default is hac_maxlags=4.
+            n=104 observations, the default is hac_maxlags=4. Ignored if error_model="arimax".
+        error_model : str, default="hac"
+            Error model specification: "hac" or "arimax".
+            - "hac": HAC (Newey-West) standard errors. Robust to any autocorrelation
+              pattern, requires no specification of error structure.
+            - "arimax": ARIMA(p,d,q) errors with exogenous variables (Box & Tiao 1975).
+              More efficient when correctly specified, but requires choosing p, d, q orders.
+        arima_order : tuple of (int, int, int), optional
+            ARIMA order (p, d, q) when error_model="arimax". Required if error_model="arimax".
+            - p: Autoregressive order (number of lagged values of the dependent variable)
+            - d: Differencing order (usually 0 for stationary data; use 1 for trending data)
+            - q: Moving average order (number of lagged forecast errors)
+            Example: (1, 0, 0) for AR(1) errors, (1, 0, 1) for ARMA(1,1) errors.
         **estimation_kwargs
             Additional keyword arguments for the estimation method:
 
@@ -372,6 +492,17 @@ class TransferFunctionITS(BaseExperiment):
             estimate_transform_params_optimize,
         )
 
+        # Validate error model parameters
+        if error_model not in ["hac", "arimax"]:
+            raise ValueError(
+                f"error_model must be 'hac' or 'arimax', got '{error_model}'"
+            )
+        if error_model == "arimax" and arima_order is None:
+            raise ValueError(
+                "arima_order must be provided when error_model='arimax'. "
+                "E.g., arima_order=(1, 0, 0) for AR(1) errors"
+            )
+
         # Run parameter estimation
         if estimation_method == "grid":
             if "saturation_grid" not in estimation_kwargs:
@@ -395,6 +526,8 @@ class TransferFunctionITS(BaseExperiment):
                 adstock_grid=estimation_kwargs["adstock_grid"],
                 coef_constraint=coef_constraint,
                 hac_maxlags=hac_maxlags,
+                error_model=error_model,
+                arima_order=arima_order,
             )
 
             search_space = {
@@ -426,6 +559,8 @@ class TransferFunctionITS(BaseExperiment):
                 coef_constraint=coef_constraint,
                 hac_maxlags=hac_maxlags,
                 method=estimation_kwargs.get("method", "L-BFGS-B"),
+                error_model=error_model,
+                arima_order=arima_order,
             )
 
             search_space = {
@@ -459,6 +594,8 @@ class TransferFunctionITS(BaseExperiment):
             base_formula=base_formula,
             treatments=[treatment],
             hac_maxlags=hac_maxlags,
+            error_model=error_model,
+            arima_order=arima_order,
         )
 
         # Store estimation metadata
@@ -940,10 +1077,16 @@ class TransferFunctionITS(BaseExperiment):
         print(f"Outcome variable: {self.y_column}")
         print(f"Number of observations: {len(self.y)}")
         print(f"R-squared: {round_num(self.score, round_to)}")
-        print(
-            f"HAC max lags: {self.hac_maxlags} "
-            f"(robust SEs accounting for {self.hac_maxlags} periods of autocorrelation)"
-        )
+        print(f"Error model: {self.error_model.upper()}")
+        if self.error_model == "hac":
+            print(
+                f"  HAC max lags: {self.hac_maxlags} "
+                f"(robust SEs accounting for {self.hac_maxlags} periods of autocorrelation)"
+            )
+        elif self.error_model == "arimax":
+            p, d, q = self.arima_order
+            print(f"  ARIMA order: ({p}, {d}, {q})")
+            print(f"    p={p}: AR order, d={d}: differencing, q={q}: MA order")
         print("-" * 80)
         print("Baseline coefficients:")
         for label, coef, se in zip(

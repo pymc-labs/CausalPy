@@ -59,6 +59,8 @@ def _fit_ols_with_transforms(
     adstock,
     lag=None,
     hac_maxlags: Optional[int] = None,
+    error_model: str = "hac",
+    arima_order: Optional[Tuple[int, int, int]] = None,
 ) -> Tuple[float, sm.regression.linear_model.RegressionResultsWrapper]:
     """
     Fit OLS model with specific transform parameters.
@@ -83,14 +85,18 @@ def _fit_ols_with_transforms(
     lag : LagTransform or None
         Lag transform object.
     hac_maxlags : int, optional
-        Maximum lags for HAC standard errors.
+        Maximum lags for HAC standard errors (ignored if error_model="arimax").
+    error_model : str, default="hac"
+        Error model: "hac" for HAC standard errors or "arimax" for ARIMAX.
+    arima_order : tuple of (int, int, int), optional
+        ARIMA order (p, d, q) when error_model="arimax".
 
     Returns
     -------
     rmse : float
         Root mean squared error of the fit.
     ols_result : RegressionResultsWrapper
-        Fitted OLS model object.
+        Fitted OLS or ARIMAX model object.
     """
     # Build baseline design matrix
     X_baseline = np.asarray(dmatrix(base_formula, data))
@@ -112,14 +118,42 @@ def _fit_ols_with_transforms(
     # Get outcome
     y = data[y_column].values
 
-    # Fit OLS with HAC standard errors
-    if hac_maxlags is None:
-        n = len(y)
-        hac_maxlags = int(np.floor(4 * (n / 100) ** (2 / 9)))
+    # Fit model with chosen error structure
+    if error_model == "hac":
+        # Fit OLS with HAC standard errors
+        if hac_maxlags is None:
+            n = len(y)
+            hac_maxlags = int(np.floor(4 * (n / 100) ** (2 / 9)))
 
-    ols_result = sm.OLS(y, X_full).fit(
-        cov_type="HAC", cov_kwds={"maxlags": hac_maxlags}
-    )
+        ols_result = sm.OLS(y, X_full).fit(
+            cov_type="HAC", cov_kwds={"maxlags": hac_maxlags}
+        )
+    elif error_model == "arimax":
+        # Fit ARIMAX model
+        import warnings
+
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+        # ARIMAX requires at least as many observations as parameters
+        # Quick validation
+        n_obs = len(y)
+        n_params = X_full.shape[1] + sum(arima_order)  # exog params + ARIMA params
+        if n_obs < n_params + 10:  # Need some degrees of freedom
+            raise ValueError(
+                f"ARIMAX requires more observations. Have {n_obs}, need at least {n_params + 10}"
+            )
+
+        # Suppress convergence warnings during grid search
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            arimax_model = SARIMAX(y, exog=X_full, order=arima_order)
+            ols_result = arimax_model.fit(
+                disp=0,
+                maxiter=200,
+                method="lbfgs",
+            )
+    else:
+        raise ValueError(f"error_model must be 'hac' or 'arimax', got '{error_model}'")
 
     # Compute RMSE
     residuals = ols_result.resid
@@ -139,12 +173,14 @@ def estimate_transform_params_grid(
     coef_constraint: str = "nonnegative",
     hac_maxlags: Optional[int] = None,
     metric: str = "rmse",
+    error_model: str = "hac",
+    arima_order: Optional[Tuple[int, int, int]] = None,
 ) -> Dict[str, Any]:
     """
     Estimate transform parameters via grid search.
 
     Searches over all combinations of saturation and adstock parameters,
-    fitting OLS for each combination and selecting the one with lowest RMSE.
+    fitting OLS or ARIMAX for each combination and selecting the one with lowest RMSE.
 
     Parameters
     ----------
@@ -170,9 +206,14 @@ def estimate_transform_params_grid(
         Constraint on treatment coefficient.
     hac_maxlags : int, optional
         Maximum lags for HAC standard errors. If None, uses rule of thumb.
+        Ignored if error_model="arimax".
     metric : str, default="rmse"
         Optimization metric. Currently only "rmse" is supported.
         FUTURE: "aicc", "oos_rmse"
+    error_model : str, default="hac"
+        Error model: "hac" for HAC standard errors or "arimax" for ARIMAX.
+    arima_order : tuple of (int, int, int), optional
+        ARIMA order (p, d, q) when error_model="arimax". Required if error_model="arimax".
 
     Returns
     -------
@@ -256,6 +297,8 @@ def estimate_transform_params_grid(
                     adstock=adstock,
                     lag=None,
                     hac_maxlags=hac_maxlags,
+                    error_model=error_model,
+                    arima_order=arima_order,
                 )
 
                 # Store result
@@ -263,8 +306,10 @@ def estimate_transform_params_grid(
                     **{f"sat_{k}": v for k, v in sat_kwargs.items()},
                     **{f"adstock_{k}": v for k, v in adstock_kwargs.items()},
                     "score": score,
-                    "r_squared": ols_result.rsquared,
                 }
+                # Add R-squared if available (OLS has it, ARIMAX doesn't)
+                if hasattr(ols_result, "rsquared"):
+                    result_dict["r_squared"] = ols_result.rsquared
                 results.append(result_dict)
 
                 # Update best if this is better
@@ -274,13 +319,24 @@ def estimate_transform_params_grid(
                     best_adstock = adstock
                     best_params = {**sat_kwargs, **adstock_kwargs}
 
-            except Exception as e:
-                # If fitting fails (e.g., singular matrix), skip this combination
-                print(f"Skipping parameters {sat_kwargs}, {adstock_kwargs}: {e}")
+            except Exception:
+                # If fitting fails (e.g., singular matrix, ARIMAX convergence), skip this combination
+                # Silently continue - grid search tries many combinations and some may fail
                 continue
 
     if best_saturation is None:
-        raise ValueError("Grid search failed: no valid parameter combinations found.")
+        # Provide more helpful error message
+        if error_model == "arimax":
+            raise ValueError(
+                "Grid search failed: no valid ARIMAX parameter combinations found. "
+                "This often happens when ARIMAX cannot converge for any parameter combination. "
+                "Try: (1) using error_model='hac' instead, (2) increasing sample size, "
+                "(3) simplifying the grid (fewer parameters), or (4) checking data quality."
+            )
+        else:
+            raise ValueError(
+                "Grid search failed: no valid parameter combinations found."
+            )
 
     # Convert results to DataFrame
     grid_results = pd.DataFrame(results)
@@ -309,6 +365,8 @@ def estimate_transform_params_optimize(
     hac_maxlags: Optional[int] = None,
     method: str = "L-BFGS-B",
     metric: str = "rmse",
+    error_model: str = "hac",
+    arima_order: Optional[Tuple[int, int, int]] = None,
 ) -> Dict[str, Any]:
     """
     Estimate transform parameters via continuous optimization.
@@ -343,11 +401,16 @@ def estimate_transform_params_optimize(
         Constraint on treatment coefficient.
     hac_maxlags : int, optional
         Maximum lags for HAC standard errors. If None, uses rule of thumb.
+        Ignored if error_model="arimax".
     method : str, default="L-BFGS-B"
         Scipy optimization method. Must support bounds (e.g., "L-BFGS-B", "TNC").
     metric : str, default="rmse"
         Optimization metric. Currently only "rmse" is supported.
         FUTURE: "aicc", "oos_rmse"
+    error_model : str, default="hac"
+        Error model: "hac" for HAC standard errors or "arimax" for ARIMAX.
+    arima_order : tuple of (int, int, int), optional
+        ARIMA order (p, d, q) when error_model="arimax". Required if error_model="arimax".
 
     Returns
     -------
@@ -439,6 +502,8 @@ def estimate_transform_params_optimize(
                 adstock=adstock,
                 lag=None,
                 hac_maxlags=hac_maxlags,
+                error_model=error_model,
+                arima_order=arima_order,
             )
             return score
         except Exception as e:
