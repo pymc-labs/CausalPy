@@ -46,7 +46,7 @@ its_covid.ipynb
 :caption: Graded Intervention Time Series
 :maxdepth: 1
 
-tfits_single_channel.ipynb
+graded_intervention_time_series_single_channel_ols.ipynb
 :::
 
 :::{toctree}
