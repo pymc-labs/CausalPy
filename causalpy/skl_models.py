@@ -135,22 +135,25 @@ class TransferFunctionOLS(ScikitLearnAdaptor, LinearModel, RegressorMixin):
 
     Examples
     --------
-    >>> # Create unfitted model with configuration
-    >>> model = cp.skl_models.TransferFunctionOLS(
-    ...     saturation_type="hill",
-    ...     saturation_grid={"slope": [1.0, 2.0], "kappa": [3, 5]},
-    ...     adstock_grid={"half_life": [2, 3, 4]},
-    ...     estimation_method="grid",
-    ...     error_model="hac",
-    ... )
-    >>> # Use with experiment class (experiment calls fit())
-    >>> result = cp.GradedInterventionTimeSeries(
-    ...     data=df,
-    ...     y_column="outcome",
-    ...     treatment_names=["exposure"],
-    ...     base_formula="1 + t",
-    ...     model=model,
-    ... )
+    .. code-block:: python
+
+        # Create unfitted model with configuration
+        model = cp.skl_models.TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [1.0, 2.0], "kappa": [3, 5]},
+            adstock_grid={"half_life": [2, 3, 4]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        # Use with experiment class (experiment calls fit())
+        result = cp.GradedInterventionTimeSeries(
+            data=df,
+            y_column="outcome",
+            treatment_names=["exposure"],
+            base_formula="1 + t",
+            model=model,
+        )
     """
 
     def __init__(

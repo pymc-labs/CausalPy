@@ -117,28 +117,33 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     Examples
     --------
-    >>> import causalpy as cp
-    >>> # Step 1: Create UNFITTED model with configuration
-    >>> model = cp.skl_models.TransferFunctionOLS(
-    ...     saturation_type="hill",
-    ...     saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
-    ...     adstock_grid={"half_life": [2, 3, 4, 5]},
-    ...     estimation_method="grid",
-    ...     error_model="hac",
-    ... )
-    >>> # Step 2: Pass to experiment (experiment estimates transforms and fits model)
-    >>> result = cp.GradedInterventionTimeSeries(
-    ...     data=df,
-    ...     y_column="water_consumption",
-    ...     treatment_names=["comm_intensity"],
-    ...     base_formula="1 + t + temperature + rainfall",
-    ...     model=model,
-    ... )
-    >>> # Step 3: Use experiment methods
-    >>> result.summary()
-    >>> result.plot()
-    >>> result.plot_diagnostics()
-    >>> effect = result.effect(window=(df.index[0], df.index[-1]), scale=0.0)
+    .. code-block:: python
+
+        import causalpy as cp
+
+        # Step 1: Create UNFITTED model with configuration
+        model = cp.skl_models.TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [3, 5, 7]},
+            adstock_grid={"half_life": [2, 3, 4, 5]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        # Step 2: Pass to experiment (experiment estimates transforms and fits model)
+        result = cp.GradedInterventionTimeSeries(
+            data=df,
+            y_column="water_consumption",
+            treatment_names=["comm_intensity"],
+            base_formula="1 + t + temperature + rainfall",
+            model=model,
+        )
+
+        # Step 3: Use experiment methods
+        result.summary()
+        result.plot()
+        result.plot_diagnostics()
+        effect = result.effect(window=(df.index[0], df.index[-1]), scale=0.0)
     """
 
     expt_type = "Graded Intervention Time Series"
@@ -427,13 +432,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         Examples
         --------
-        >>> # Estimate effect of removing treatment completely
-        >>> effect = result.effect(
-        ...     window=(df.index[0], df.index[-1]),
-        ...     channels=["comm_intensity"],
-        ...     scale=0.0,
-        ... )
-        >>> print(f"Total effect: {effect['total_effect']:.2f}")
+        .. code-block:: python
+
+            # Estimate effect of removing treatment completely
+            effect = result.effect(
+                window=(df.index[0], df.index[-1]),
+                channels=["comm_intensity"],
+                scale=0.0,
+            )
+            print(f"Total effect: {effect['total_effect']:.2f}")
         """
         # Default to all channels if not specified
         if channels is None:
@@ -530,13 +537,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         Examples
         --------
-        >>> # Estimate effect of removing treatment
-        >>> effect_result = result.effect(
-        ...     window=(df.index[0], df.index[-1]),
-        ...     channels=["comm_intensity"],
-        ...     scale=0.0,
-        ... )
-        >>> fig, ax = result.plot_effect(effect_result)
+        .. code-block:: python
+
+            # Estimate effect of removing treatment
+            effect_result = result.effect(
+                window=(df.index[0], df.index[-1]),
+                channels=["comm_intensity"],
+                scale=0.0,
+            )
+            fig, ax = result.plot_effect(effect_result)
         """
         # Extract data from effect result
         effect_df = effect_result["effect_df"]
@@ -687,7 +696,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         Examples
         --------
-        >>> result.plot_irf("comm_intensity", max_lag=12)
+        .. code-block:: python
+
+            fig = result.plot_irf("comm_intensity", max_lag=12)
         """
         # Find the treatment
         treatment = None
@@ -778,14 +789,16 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         Examples
         --------
-        >>> # Plot estimated transforms only
-        >>> fig, ax = result.plot_transforms()
-        >>>
-        >>> # Compare to true transforms (simulation study)
-        >>> fig, ax = result.plot_transforms(
-        ...     true_saturation=HillSaturation(slope=2.0, kappa=50),
-        ...     true_adstock=GeometricAdstock(half_life=3.0, normalize=True),
-        ... )
+        .. code-block:: python
+
+            # Plot estimated transforms only
+            fig, ax = result.plot_transforms()
+
+            # Compare to true transforms (simulation study)
+            fig, ax = result.plot_transforms(
+                true_saturation=HillSaturation(slope=2.0, kappa=50),
+                true_adstock=GeometricAdstock(half_life=3.0, normalize=True),
+            )
         """
         # Currently only supports single treatment
         if len(self.treatments) != 1:
