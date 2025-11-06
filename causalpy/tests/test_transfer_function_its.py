@@ -16,6 +16,7 @@
 import matplotlib
 
 matplotlib.use("Agg")  # Use non-interactive backend for testing
+import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np
 import pandas as pd
 import pytest
@@ -584,3 +585,165 @@ class TestARIMAX:
         # Note: This might not always hold in small samples, so we just check they're positive
         assert se_hac > 0
         assert se_arimax > 0
+
+
+class TestPlotting:
+    """Test plotting methods for GradedInterventionTimeSeries."""
+
+    def setup_method(self):
+        """Create a simple fitted experiment for testing plots."""
+        np.random.seed(42)
+        n = 100
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        # Generate treatment with known transforms
+        treatment_raw = (
+            50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+        )
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        # Create transforms for data generation
+        sat = HillSaturation(slope=2.0, kappa=50)
+        treatment_sat = sat.apply(treatment_raw)
+        adstock = GeometricAdstock(half_life=3.0, normalize=True)
+        treatment_transformed = adstock.apply(treatment_sat)
+
+        # Generate outcome with stronger signal and time trend
+        beta_0 = 100.0
+        beta_t = 0.5
+        theta = 50.0
+        y = (
+            beta_0
+            + beta_t * t
+            + theta * treatment_transformed
+            + np.random.normal(0, 5, n)
+        )
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        # Create unfitted model with configuration
+        model = TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [1.5, 2.0, 2.5], "kappa": [40, 50, 60]},
+            adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        # Pass to experiment
+        self.result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Store true transforms for testing
+        self.true_saturation = sat
+        self.true_adstock = adstock
+        self.df = df
+
+    def test_plot_returns_figure_axes(self):
+        """Test that plot() returns matplotlib objects."""
+        fig, ax = self.result.plot()
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        assert len(ax) == 2
+        assert all(isinstance(item, plt.Axes) for item in ax)
+        plt.close(fig)
+
+    def test_plot_transforms(self):
+        """Test plot_transforms() method."""
+        fig, ax = self.result.plot_transforms()
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        assert len(ax) == 2
+        assert all(isinstance(item, plt.Axes) for item in ax)
+        plt.close(fig)
+
+    def test_plot_transforms_with_true_values(self):
+        """Test plot_transforms() with true transforms for comparison."""
+        fig, ax = self.result.plot_transforms(
+            true_saturation=self.true_saturation, true_adstock=self.true_adstock
+        )
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        assert len(ax) == 2
+        # Check that both axes have multiple lines/bars (true + estimated)
+        assert len(ax[0].get_lines()) >= 2  # At least true and estimated saturation
+        plt.close(fig)
+
+    def test_plot_transforms_with_x_range(self):
+        """Test plot_transforms() with custom x_range."""
+        fig, ax = self.result.plot_transforms(x_range=(0, 100))
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        plt.close(fig)
+
+    def test_plot_effect(self):
+        """Test plot_effect() method."""
+        # First run effect()
+        effect_result = self.result.effect(
+            window=(self.df.index[0], self.df.index[-1]),
+            channels=["treatment"],
+            scale=0.0,
+        )
+
+        # Then plot it
+        fig, ax = self.result.plot_effect(effect_result)
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        assert len(ax) == 2
+        assert all(isinstance(item, plt.Axes) for item in ax)
+
+        # Check that plot has lines
+        assert len(ax[0].get_lines()) >= 2  # observed + counterfactual
+        assert len(ax[1].get_lines()) >= 1  # cumulative effect
+
+        plt.close(fig)
+
+    def test_plot_effect_partial_window(self):
+        """Test plot_effect() with partial window."""
+        # Effect on last 50 periods
+        window_start = self.df.index[50]
+        window_end = self.df.index[-1]
+
+        effect_result = self.result.effect(
+            window=(window_start, window_end), channels=["treatment"], scale=0.5
+        )
+
+        fig, ax = self.result.plot_effect(effect_result)
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, np.ndarray)
+        plt.close(fig)
+
+    def test_plot_diagnostics_runs_without_error(self):
+        """Test plot_diagnostics() method runs without error."""
+        # Capture output to avoid cluttering test output
+        import io
+        import sys
+
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+
+        try:
+            # This should not raise an exception
+            self.result.plot_diagnostics(lags=10)
+        finally:
+            sys.stdout = old_stdout
+            plt.close("all")
+
+    def test_plot_irf(self):
+        """Test plot_irf() method."""
+        fig = self.result.plot_irf("treatment", max_lag=10)
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_irf_default_max_lag(self):
+        """Test plot_irf() with default max_lag."""
+        fig = self.result.plot_irf("treatment")
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)

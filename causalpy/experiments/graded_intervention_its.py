@@ -58,6 +58,31 @@ class GradedInterventionTimeSeries(BaseExperiment):
     3. Experiment estimates transforms, fits model, and provides results
     4. Use experiment methods for visualization and effect estimation
 
+    Fitting Procedure
+    -----------------
+    The experiment uses a nested optimization approach to estimate transform parameters
+    and fit the regression model:
+
+    **Outer Loop (Transform Parameter Estimation):**
+    The experiment searches for optimal saturation and adstock parameters either via
+    grid search (exhaustive evaluation of discrete parameter combinations) or continuous
+    optimization (gradient-based search). For grid search with N saturation parameter
+    combinations and M adstock parameter combinations, all N × M combinations are
+    evaluated.
+
+    **Inner Loop (Model Fitting):**
+    For each candidate set of transform parameters, the raw treatment variable is
+    transformed by applying saturation (diminishing returns) and adstock (carryover
+    effects). The transformed treatment is combined with baseline predictors to create
+    a full design matrix, and an OLS or ARIMAX model is fitted. The model that achieves
+    the lowest root mean squared error (RMSE) determines the selected parameters.
+
+    This nested approach is computationally efficient because OLS has a closed-form
+    solution requiring only matrix operations, making each individual model fit very
+    fast. For ARIMAX error models, numerical optimization is required for each fit,
+    increasing computational cost but providing explicit modeling of autocorrelation
+    structure.
+
     Parameters
     ----------
     data : pd.DataFrame
@@ -112,7 +137,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
     >>> # Step 3: Use experiment methods
     >>> result.summary()
     >>> result.plot()
-    >>> result.diagnostics()
+    >>> result.plot_diagnostics()
     >>> effect = result.effect(window=(df.index[0], df.index[-1]), scale=0.0)
     """
 
@@ -436,7 +461,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         # Predict counterfactual
         X_cf_full = np.column_stack([self.X_baseline, Z_cf])
-        y_cf = X_cf_full @ self.ols_result.params
+
+        # For ARIMAX, extract only exogenous coefficients (exclude ARIMA params)
+        if hasattr(self.ols_result.model, "k_exog"):
+            # ARIMAX: params includes exog coefficients + ARIMA params
+            exog_params = self.ols_result.params[: self.ols_result.model.k_exog]
+            y_cf = X_cf_full @ exog_params
+        else:
+            # OLS: all params are regression coefficients
+            y_cf = X_cf_full @ self.ols_result.params
 
         # Compute effect
         effect = self.y - y_cf
@@ -466,6 +499,119 @@ class GradedInterventionTimeSeries(BaseExperiment):
         }
 
         return result
+
+    def plot_effect(
+        self,
+        effect_result: Dict,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot counterfactual effect analysis results.
+
+        Creates a 2-panel figure showing:
+        1. Observed vs counterfactual outcome
+        2. Cumulative effect over time
+
+        Parameters
+        ----------
+        effect_result : dict
+            Result dictionary from effect() method containing:
+            - effect_df: DataFrame with observed, counterfactual, effect columns
+            - window_start, window_end: Effect window boundaries
+            - channels: List of scaled channels
+            - scale: Scaling factor used
+            - total_effect: Total effect in window
+            - mean_effect: Mean effect per period in window
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+        ax : array of matplotlib.axes.Axes
+            Array of 2 axes objects (top: observed vs counterfactual, bottom: cumulative effect).
+
+        Examples
+        --------
+        >>> # Estimate effect of removing treatment
+        >>> effect_result = result.effect(
+        ...     window=(df.index[0], df.index[-1]),
+        ...     channels=["comm_intensity"],
+        ...     scale=0.0,
+        ... )
+        >>> fig, ax = result.plot_effect(effect_result)
+        """
+        # Extract data from effect result
+        effect_df = effect_result["effect_df"]
+        window_start = effect_result.get("window_start")
+        window_end = effect_result.get("window_end")
+
+        # Create 2-panel subplot
+        fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+        # ============================================================================
+        # TOP PANEL: Observed vs Counterfactual
+        # ============================================================================
+        axes[0].plot(
+            effect_df.index,
+            effect_df["observed"],
+            label="Observed",
+            linewidth=1.5,
+        )
+        axes[0].plot(
+            effect_df.index,
+            effect_df["counterfactual"],
+            label="Counterfactual",
+            linewidth=1.5,
+            linestyle="--",
+        )
+
+        # Shade the effect region
+        axes[0].fill_between(
+            effect_df.index,
+            effect_df["observed"],
+            effect_df["counterfactual"],
+            alpha=0.3,
+            color="C2",
+            label="Effect",
+        )
+
+        axes[0].set_ylabel(self.y_column, fontsize=11)
+        axes[0].set_title("Observed vs Counterfactual", fontsize=12, fontweight="bold")
+        axes[0].legend(fontsize=LEGEND_FONT_SIZE)
+        axes[0].grid(True, alpha=0.3)
+
+        # Add window boundaries if specified
+        if window_start is not None and window_end is not None:
+            axes[0].axvline(x=window_start, color="red", linestyle=":", alpha=0.5)
+            axes[0].axvline(x=window_end, color="red", linestyle=":", alpha=0.5)
+
+        # ============================================================================
+        # BOTTOM PANEL: Cumulative effect
+        # ============================================================================
+        axes[1].plot(
+            effect_df.index,
+            effect_df["effect_cumulative"],
+            linewidth=2,
+            color="C2",
+        )
+        axes[1].fill_between(
+            effect_df.index,
+            0,
+            effect_df["effect_cumulative"],
+            alpha=0.3,
+            color="C2",
+        )
+        axes[1].axhline(y=0, color="k", linestyle="--", linewidth=1)
+        axes[1].set_ylabel("Cumulative Effect", fontsize=11)
+        axes[1].set_xlabel("Time", fontsize=11)
+        axes[1].set_title("Cumulative Effect Over Time", fontsize=12, fontweight="bold")
+        axes[1].grid(True, alpha=0.3)
+
+        # Add window boundaries
+        if window_start is not None and window_end is not None:
+            axes[1].axvline(x=window_start, color="red", linestyle=":", alpha=0.5)
+            axes[1].axvline(x=window_end, color="red", linestyle=":", alpha=0.5)
+
+        plt.tight_layout()
+        return fig, axes
 
     def plot(
         self, round_to: Optional[int] = 2, **kwargs
@@ -600,7 +746,222 @@ class GradedInterventionTimeSeries(BaseExperiment):
         plt.tight_layout()
         return fig
 
-    def diagnostics(self, lags: int = 20) -> None:
+    def plot_transforms(
+        self,
+        true_saturation=None,
+        true_adstock=None,
+        x_range=None,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot estimated saturation and adstock transformation curves.
+
+        Creates a 2-panel figure showing:
+        1. Saturation curve (input exposure -> saturated exposure)
+        2. Adstock weights over time (lag distribution)
+
+        Parameters
+        ----------
+        true_saturation : SaturationTransform, optional
+            True saturation transform for comparison (e.g., from simulation).
+            If provided, will be overlaid as a dashed line.
+        true_adstock : AdstockTransform, optional
+            True adstock transform for comparison (e.g., from simulation).
+            If provided, will be overlaid as gray bars.
+        x_range : tuple of (min, max), optional
+            Range for saturation curve x-axis. If None, uses data range.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+        ax : array of matplotlib.axes.Axes
+            Array of 2 axes objects (left: saturation, right: adstock).
+
+        Examples
+        --------
+        >>> # Plot estimated transforms only
+        >>> fig, ax = result.plot_transforms()
+        >>>
+        >>> # Compare to true transforms (simulation study)
+        >>> fig, ax = result.plot_transforms(
+        ...     true_saturation=HillSaturation(slope=2.0, kappa=50),
+        ...     true_adstock=GeometricAdstock(half_life=3.0, normalize=True),
+        ... )
+        """
+        # Currently only supports single treatment
+        if len(self.treatments) != 1:
+            raise NotImplementedError(
+                "plot_transforms() currently only supports single treatment analysis"
+            )
+
+        treatment = self.treatments[0]
+        est_saturation = treatment.saturation
+        est_adstock = treatment.adstock
+
+        # Create 2-panel subplot
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        # ============================================================================
+        # LEFT PLOT: Saturation curves
+        # ============================================================================
+        if est_saturation is not None:
+            # Determine x range
+            if x_range is None:
+                # Use range from data
+                x_raw = self.data[treatment.name].values
+                x_min, x_max = x_raw.min(), x_raw.max()
+                # Add some padding
+                x_padding = (x_max - x_min) * 0.1
+                x_range = (max(0, x_min - x_padding), x_max + x_padding)
+
+            x_sat = np.linspace(x_range[0], x_range[1], 100)
+
+            # Plot true saturation if provided
+            if true_saturation is not None:
+                y_true_sat = true_saturation.apply(x_sat)
+                axes[0].plot(
+                    x_sat,
+                    y_true_sat,
+                    "k--",
+                    linewidth=2.5,
+                    label="True",
+                    alpha=0.8,
+                )
+
+            # Plot estimated saturation
+            y_est_sat = est_saturation.apply(x_sat)
+            axes[0].plot(x_sat, y_est_sat, "C0-", linewidth=2.5, label="Estimated")
+
+            axes[0].set_xlabel(f"{treatment.name} (raw)", fontsize=11)
+            axes[0].set_ylabel("Saturated Value", fontsize=11)
+            axes[0].set_title("Saturation Function", fontsize=12, fontweight="bold")
+            axes[0].legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
+            axes[0].grid(True, alpha=0.3)
+
+            # Add parameter text
+            est_params = est_saturation.get_params()
+            param_text = "Estimated:\n"
+            for key, val in est_params.items():
+                if key not in ["alpha", "l_max", "normalize"]:  # Skip adstock params
+                    param_text += f"  {key}={val:.2f}\n"
+
+            if true_saturation is not None:
+                true_params = true_saturation.get_params()
+                param_text += "\nTrue:\n"
+                for key, val in true_params.items():
+                    if key not in ["alpha", "l_max", "normalize"]:
+                        param_text += f"  {key}={val:.2f}\n"
+
+            axes[0].text(
+                0.05,
+                0.95,
+                param_text.strip(),
+                transform=axes[0].transAxes,
+                fontsize=9,
+                verticalalignment="top",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+            )
+        else:
+            axes[0].text(
+                0.5,
+                0.5,
+                "No saturation transform",
+                ha="center",
+                va="center",
+                transform=axes[0].transAxes,
+            )
+            axes[0].set_title("Saturation Function", fontsize=12, fontweight="bold")
+
+        # ============================================================================
+        # RIGHT PLOT: Adstock weights
+        # ============================================================================
+        if est_adstock is not None:
+            est_adstock_params = est_adstock.get_params()
+            l_max = est_adstock_params.get("l_max", 12)
+            lags = np.arange(l_max + 1)
+
+            # Compute estimated adstock weights
+            est_alpha = est_adstock_params["alpha"]
+            est_weights = est_alpha**lags
+            normalize = est_adstock_params.get("normalize", True)
+            if normalize:
+                est_weights = est_weights / est_weights.sum()
+
+            # Plot true adstock if provided
+            if true_adstock is not None:
+                true_adstock_params = true_adstock.get_params()
+                true_alpha = true_adstock_params["alpha"]
+                true_weights = true_alpha**lags
+                if true_adstock_params.get("normalize", True):
+                    true_weights = true_weights / true_weights.sum()
+
+                width = 0.35
+                axes[1].bar(
+                    lags - width / 2,
+                    true_weights,
+                    width,
+                    alpha=0.8,
+                    label="True",
+                    color="gray",
+                )
+                axes[1].bar(
+                    lags + width / 2,
+                    est_weights,
+                    width,
+                    alpha=0.8,
+                    label="Estimated",
+                    color="C0",
+                )
+            else:
+                axes[1].bar(lags, est_weights, alpha=0.7, color="C0", label="Estimated")
+
+            axes[1].set_xlabel("Lag (periods)", fontsize=11)
+            axes[1].set_ylabel("Adstock Weight", fontsize=11)
+            axes[1].set_title(
+                "Adstock Function (Carryover Effect)", fontsize=12, fontweight="bold"
+            )
+            axes[1].legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
+            axes[1].grid(True, alpha=0.3, axis="y")
+
+            # Add parameter text
+            param_text = "Estimated:\n"
+            half_life_est = np.log(0.5) / np.log(est_alpha)
+            param_text += f"  half_life={half_life_est:.2f}\n"
+            param_text += f"  alpha={est_alpha:.3f}\n"
+
+            if true_adstock is not None:
+                true_alpha = true_adstock_params["alpha"]
+                half_life_true = np.log(0.5) / np.log(true_alpha)
+                param_text += "\nTrue:\n"
+                param_text += f"  half_life={half_life_true:.2f}\n"
+                param_text += f"  alpha={true_alpha:.3f}\n"
+
+            axes[1].text(
+                0.95,
+                0.95,
+                param_text.strip(),
+                transform=axes[1].transAxes,
+                fontsize=9,
+                verticalalignment="top",
+                horizontalalignment="right",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+            )
+        else:
+            axes[1].text(
+                0.5,
+                0.5,
+                "No adstock transform",
+                ha="center",
+                va="center",
+                transform=axes[1].transAxes,
+            )
+            axes[1].set_title(
+                "Adstock Function (Carryover Effect)", fontsize=12, fontweight="bold"
+            )
+
+        plt.tight_layout()
+        return fig, axes
+
+    def plot_diagnostics(self, lags: int = 20) -> None:
         """Display diagnostic plots and tests for model residuals.
 
         Shows:
