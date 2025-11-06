@@ -53,7 +53,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
     visualization, diagnostics, and counterfactual effect estimation.
 
     Typical workflow:
-    1. Create an UNFITTED TransferFunctionOLS model with configuration
+    1. Create an unfitted TransferFunctionOLS model with configuration
     2. Pass data + model to this experiment class
     3. Experiment estimates transforms, fits model, and provides results
     4. Use experiment methods for visualization and effect estimation
@@ -67,7 +67,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
     The experiment searches for optimal saturation and adstock parameters either via
     grid search (exhaustive evaluation of discrete parameter combinations) or continuous
     optimization (gradient-based search). For grid search with N saturation parameter
-    combinations and M adstock parameter combinations, all N × M combinations are
+    combinations and M adstock parameter combinations, all N x M combinations are
     evaluated.
 
     **Inner Loop (Model Fitting):**
