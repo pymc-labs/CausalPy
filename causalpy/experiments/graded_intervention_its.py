@@ -764,11 +764,11 @@ class GradedInterventionTimeSeries(BaseExperiment):
         x_range=None,
         **kwargs,
     ) -> Tuple[plt.Figure, np.ndarray]:
-        """Plot estimated saturation and adstock transformation curves.
+        """Plot estimated transformation curves (saturation and/or adstock).
 
-        Creates a 2-panel figure showing:
-        1. Saturation curve (input exposure -> saturated exposure)
-        2. Adstock weights over time (lag distribution)
+        Creates a figure with 1-2 panels depending on which transforms are present:
+        - Saturation curve (input exposure -> saturated exposure) if saturation exists
+        - Adstock weights over time (lag distribution) if adstock exists
 
         Parameters
         ----------
@@ -784,8 +784,8 @@ class GradedInterventionTimeSeries(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-        ax : array of matplotlib.axes.Axes
-            Array of 2 axes objects (left: saturation, right: adstock).
+        ax : list of matplotlib.axes.Axes
+            List of axes objects (1 or 2 panels depending on which transforms exist).
 
         Examples
         --------
@@ -810,13 +810,33 @@ class GradedInterventionTimeSeries(BaseExperiment):
         est_saturation = treatment.saturation
         est_adstock = treatment.adstock
 
-        # Create 2-panel subplot
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        # Check which transforms exist
+        has_saturation = est_saturation is not None
+        has_adstock = est_adstock is not None
+
+        if not has_saturation and not has_adstock:
+            raise ValueError(
+                "No transforms to plot (both saturation and adstock are None). "
+                "At least one transform must be specified."
+            )
+
+        # Determine number of panels based on available transforms
+        n_panels = int(has_saturation) + int(has_adstock)
+
+        # Create subplot with appropriate number of panels
+        fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 5))
+
+        # Make axes a list for consistent indexing
+        if n_panels == 1:
+            axes = [axes]
+
+        panel_idx = 0
 
         # ============================================================================
-        # LEFT PLOT: Saturation curves
+        # SATURATION PLOT (if present)
         # ============================================================================
         if est_saturation is not None:
+            ax = axes[panel_idx]
             # Determine x range
             if x_range is None:
                 # Use range from data
@@ -831,7 +851,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
             # Plot true saturation if provided
             if true_saturation is not None:
                 y_true_sat = true_saturation.apply(x_sat)
-                axes[0].plot(
+                ax.plot(
                     x_sat,
                     y_true_sat,
                     "k--",
@@ -842,13 +862,13 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
             # Plot estimated saturation
             y_est_sat = est_saturation.apply(x_sat)
-            axes[0].plot(x_sat, y_est_sat, "C0-", linewidth=2.5, label="Estimated")
+            ax.plot(x_sat, y_est_sat, "C0-", linewidth=2.5, label="Estimated")
 
-            axes[0].set_xlabel(f"{treatment.name} (raw)", fontsize=11)
-            axes[0].set_ylabel("Saturated Value", fontsize=11)
-            axes[0].set_title("Saturation Function", fontsize=12, fontweight="bold")
-            axes[0].legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
-            axes[0].grid(True, alpha=0.3)
+            ax.set_xlabel(f"{treatment.name} (raw)", fontsize=11)
+            ax.set_ylabel("Saturated Value", fontsize=11)
+            ax.set_title("Saturation Function", fontsize=12, fontweight="bold")
+            ax.legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
+            ax.grid(True, alpha=0.3)
 
             # Add parameter text
             est_params = est_saturation.get_params()
@@ -864,30 +884,22 @@ class GradedInterventionTimeSeries(BaseExperiment):
                     if key not in ["alpha", "l_max", "normalize"]:
                         param_text += f"  {key}={val:.2f}\n"
 
-            axes[0].text(
+            ax.text(
                 0.05,
                 0.95,
                 param_text.strip(),
-                transform=axes[0].transAxes,
+                transform=ax.transAxes,
                 fontsize=9,
                 verticalalignment="top",
                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
             )
-        else:
-            axes[0].text(
-                0.5,
-                0.5,
-                "No saturation transform",
-                ha="center",
-                va="center",
-                transform=axes[0].transAxes,
-            )
-            axes[0].set_title("Saturation Function", fontsize=12, fontweight="bold")
+            panel_idx += 1
 
         # ============================================================================
-        # RIGHT PLOT: Adstock weights
+        # ADSTOCK PLOT (if present)
         # ============================================================================
         if est_adstock is not None:
+            ax = axes[panel_idx]
             est_adstock_params = est_adstock.get_params()
             l_max = est_adstock_params.get("l_max", 12)
             lags = np.arange(l_max + 1)
@@ -908,7 +920,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                     true_weights = true_weights / true_weights.sum()
 
                 width = 0.35
-                axes[1].bar(
+                ax.bar(
                     lags - width / 2,
                     true_weights,
                     width,
@@ -916,7 +928,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                     label="True",
                     color="gray",
                 )
-                axes[1].bar(
+                ax.bar(
                     lags + width / 2,
                     est_weights,
                     width,
@@ -925,15 +937,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
                     color="C0",
                 )
             else:
-                axes[1].bar(lags, est_weights, alpha=0.7, color="C0", label="Estimated")
+                ax.bar(lags, est_weights, alpha=0.7, color="C0", label="Estimated")
 
-            axes[1].set_xlabel("Lag (periods)", fontsize=11)
-            axes[1].set_ylabel("Adstock Weight", fontsize=11)
-            axes[1].set_title(
+            ax.set_xlabel("Lag (periods)", fontsize=11)
+            ax.set_ylabel("Adstock Weight", fontsize=11)
+            ax.set_title(
                 "Adstock Function (Carryover Effect)", fontsize=12, fontweight="bold"
             )
-            axes[1].legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
-            axes[1].grid(True, alpha=0.3, axis="y")
+            ax.legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
+            ax.grid(True, alpha=0.3, axis="y")
 
             # Add parameter text
             param_text = "Estimated:\n"
@@ -948,27 +960,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 param_text += f"  half_life={half_life_true:.2f}\n"
                 param_text += f"  alpha={true_alpha:.3f}\n"
 
-            axes[1].text(
+            ax.text(
                 0.95,
                 0.95,
                 param_text.strip(),
-                transform=axes[1].transAxes,
+                transform=ax.transAxes,
                 fontsize=9,
                 verticalalignment="top",
                 horizontalalignment="right",
                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-            )
-        else:
-            axes[1].text(
-                0.5,
-                0.5,
-                "No adstock transform",
-                ha="center",
-                va="center",
-                transform=axes[1].transAxes,
-            )
-            axes[1].set_title(
-                "Adstock Function (Carryover Effect)", fontsize=12, fontweight="bold"
             )
 
         plt.tight_layout()

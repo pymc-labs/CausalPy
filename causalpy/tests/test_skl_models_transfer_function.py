@@ -362,3 +362,272 @@ class TestModelConfiguration:
         )
 
         assert model_unconstrained.coef_constraint == "unconstrained"
+
+
+class TestOptionalTransforms:
+    """Test optional transform configurations (adstock-only, saturation-only)."""
+
+    def test_adstock_only_grid(self):
+        """Test model with only adstock transform (no saturation)."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        # Apply only adstock (no saturation)
+        adstock = GeometricAdstock(half_life=3.0, normalize=True)
+        treatment_transformed = adstock.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,  # No saturation
+            adstock_grid={"half_life": [3], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Check that saturation is None and adstock exists
+        assert result.treatments[0].saturation is None
+        assert result.treatments[0].adstock is not None
+        assert result.score > 0.5
+
+    def test_saturation_only_grid(self):
+        """Test model with only saturation transform (no adstock)."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = (
+            50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+        )
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        # Apply only saturation (no adstock)
+        sat = HillSaturation(slope=2.0, kappa=50)
+        treatment_transformed = sat.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [2.0], "kappa": [50]},
+            adstock_grid=None,  # No adstock
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Check that saturation exists and adstock is None
+        assert result.treatments[0].saturation is not None
+        assert result.treatments[0].adstock is None
+        assert result.score > 0.5
+
+    def test_neither_transform_raises_error(self):
+        """Test that model raises error if neither transform is specified."""
+        with pytest.raises(
+            ValueError, match="At least one of saturation_grid or adstock_grid"
+        ):
+            TransferFunctionOLS(
+                saturation_type=None,
+                saturation_grid=None,
+                adstock_grid=None,
+                estimation_method="grid",
+                error_model="hac",
+            )
+
+    def test_saturation_type_without_grid_raises_error(self):
+        """Test that specifying saturation_type without saturation_grid raises error."""
+        with pytest.raises(
+            ValueError, match="saturation_grid is required when saturation_type"
+        ):
+            TransferFunctionOLS(
+                saturation_type="hill",
+                saturation_grid=None,  # Missing grid
+                adstock_grid={"half_life": [3]},
+                estimation_method="grid",
+                error_model="hac",
+            )
+
+    def test_adstock_only_optimize(self):
+        """Test model with only adstock using optimize method."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        adstock = GeometricAdstock(half_life=3.0, normalize=True)
+        treatment_transformed = adstock.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,  # No saturation
+            adstock_bounds={"half_life": (1, 10)},
+            estimation_method="optimize",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Check that saturation is None and adstock exists
+        assert result.treatments[0].saturation is None
+        assert result.treatments[0].adstock is not None
+        assert result.score > 0.5
+
+    def test_saturation_only_optimize(self):
+        """Test model with only saturation using optimize method."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = (
+            50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+        )
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        sat = HillSaturation(slope=2.0, kappa=50)
+        treatment_transformed = sat.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_bounds={"slope": (1, 5), "kappa": (30, 80)},
+            adstock_bounds=None,  # No adstock
+            estimation_method="optimize",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Check that saturation exists and adstock is None
+        assert result.treatments[0].saturation is not None
+        assert result.treatments[0].adstock is None
+        assert result.score > 0.5
+
+    def test_plot_transforms_with_adstock_only(self):
+        """Test plot_transforms() with only adstock (single panel)."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        adstock = GeometricAdstock(half_life=3.0, normalize=True)
+        treatment_transformed = adstock.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Should create single-panel plot
+        fig, axes = result.plot_transforms()
+
+        assert len(axes) == 1  # Only one panel
+        assert fig is not None
+
+    def test_plot_transforms_with_saturation_only(self):
+        """Test plot_transforms() with only saturation (single panel)."""
+        np.random.seed(42)
+        n = 80
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        sat = HillSaturation(slope=2.0, kappa=50)
+        treatment_transformed = sat.apply(treatment_raw)
+
+        y = 100.0 + 0.5 * t + 50.0 * treatment_transformed + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [2.0], "kappa": [50]},
+            adstock_grid=None,
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Should create single-panel plot
+        fig, axes = result.plot_transforms()
+
+        assert len(axes) == 1  # Only one panel
+        assert fig is not None

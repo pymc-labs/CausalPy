@@ -195,26 +195,32 @@ class TransferFunctionOLS(ScikitLearnAdaptor, LinearModel, RegressorMixin):
 
         # Validate estimation method and required parameters
         if estimation_method == "grid":
-            if saturation_grid is None:
+            # At least one transform must be specified
+            if saturation_grid is None and adstock_grid is None:
                 raise ValueError(
-                    "saturation_grid is required for grid search method. "
-                    "E.g., saturation_grid={'slope': [1.0, 2.0], 'kappa': [3, 5]}"
+                    "At least one of saturation_grid or adstock_grid must be provided for grid search. "
+                    "To use only adstock: set saturation_type=None and provide adstock_grid. "
+                    "To use only saturation: provide saturation_grid and set adstock_grid=None."
                 )
-            if adstock_grid is None:
+            # If saturation_type is specified, grid must be provided
+            if saturation_type is not None and saturation_grid is None:
                 raise ValueError(
-                    "adstock_grid is required for grid search method. "
-                    "E.g., adstock_grid={'half_life': [2, 3, 4]}"
+                    f"saturation_grid is required when saturation_type='{saturation_type}'. "
+                    "E.g., saturation_grid={'lam': [0.2, 0.5, 0.8]}"
                 )
         elif estimation_method == "optimize":
-            if saturation_bounds is None:
+            # At least one transform must be specified
+            if saturation_bounds is None and adstock_bounds is None:
                 raise ValueError(
-                    "saturation_bounds is required for optimize method. "
-                    "E.g., saturation_bounds={'slope': (0.5, 5.0), 'kappa': (2, 10)}"
+                    "At least one of saturation_bounds or adstock_bounds must be provided for optimize method. "
+                    "To use only adstock: set saturation_type=None and provide adstock_bounds. "
+                    "To use only saturation: provide saturation_bounds and set adstock_bounds=None."
                 )
-            if adstock_bounds is None:
+            # If saturation_type is specified, bounds must be provided
+            if saturation_type is not None and saturation_bounds is None:
                 raise ValueError(
-                    "adstock_bounds is required for optimize method. "
-                    "E.g., adstock_bounds={'half_life': (1, 10)}"
+                    f"saturation_bounds is required when saturation_type='{saturation_type}'. "
+                    "E.g., saturation_bounds={'lam': (0.1, 1.0)}"
                 )
         else:
             raise ValueError(

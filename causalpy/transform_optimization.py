@@ -167,9 +167,9 @@ def estimate_transform_params_grid(
     y_column: str,
     treatment_name: str,
     base_formula: str,
-    saturation_type: str,
-    saturation_grid: Dict[str, List[float]],
-    adstock_grid: Dict[str, List[float]],
+    saturation_type: Optional[str],
+    saturation_grid: Optional[Dict[str, List[float]]],
+    adstock_grid: Optional[Dict[str, List[float]]],
     coef_constraint: str = "nonnegative",
     hac_maxlags: Optional[int] = None,
     metric: str = "rmse",
@@ -250,15 +250,23 @@ def estimate_transform_params_grid(
     if metric != "rmse":
         raise NotImplementedError(f"Metric '{metric}' not yet implemented. Use 'rmse'.")
 
-    # Generate all parameter combinations for saturation
-    sat_param_names = list(saturation_grid.keys())
-    sat_param_values = list(saturation_grid.values())
-    sat_combinations = list(product(*sat_param_values))
+    # Generate saturation combinations (or single None if not used)
+    if saturation_type is not None and saturation_grid is not None:
+        sat_param_names = list(saturation_grid.keys())
+        sat_param_values = list(saturation_grid.values())
+        sat_combinations = list(product(*sat_param_values))
+    else:
+        sat_param_names = []
+        sat_combinations = [None]  # Single "no saturation" combination
 
-    # Generate all parameter combinations for adstock
-    adstock_param_names = list(adstock_grid.keys())
-    adstock_param_values = list(adstock_grid.values())
-    adstock_combinations = list(product(*adstock_param_values))
+    # Generate adstock combinations (or single None if not used)
+    if adstock_grid is not None:
+        adstock_param_names = list(adstock_grid.keys())
+        adstock_param_values = list(adstock_grid.values())
+        adstock_combinations = list(product(*adstock_param_values))
+    else:
+        adstock_param_names = []
+        adstock_combinations = [None]  # Single "no adstock" combination
 
     # Store results
     results = []
@@ -269,22 +277,30 @@ def estimate_transform_params_grid(
 
     # Grid search over all combinations
     for sat_params in sat_combinations:
-        # Create saturation object
-        sat_kwargs = dict(zip(sat_param_names, sat_params))
+        # Create saturation object or None
+        if sat_params is not None:
+            sat_kwargs = dict(zip(sat_param_names, sat_params))
 
-        if saturation_type == "hill":
-            saturation = HillSaturation(**sat_kwargs)
-        elif saturation_type == "logistic":
-            saturation = LogisticSaturation(**sat_kwargs)
-        elif saturation_type == "michaelis_menten":
-            saturation = MichaelisMentenSaturation(**sat_kwargs)
+            if saturation_type == "hill":
+                saturation = HillSaturation(**sat_kwargs)
+            elif saturation_type == "logistic":
+                saturation = LogisticSaturation(**sat_kwargs)
+            elif saturation_type == "michaelis_menten":
+                saturation = MichaelisMentenSaturation(**sat_kwargs)
+            else:
+                raise ValueError(f"Unknown saturation type: {saturation_type}")
         else:
-            raise ValueError(f"Unknown saturation type: {saturation_type}")
+            saturation = None
+            sat_kwargs = {}
 
         for adstock_params in adstock_combinations:
-            # Create adstock object
-            adstock_kwargs = dict(zip(adstock_param_names, adstock_params))
-            adstock = GeometricAdstock(**adstock_kwargs)
+            # Create adstock object or None
+            if adstock_params is not None:
+                adstock_kwargs = dict(zip(adstock_param_names, adstock_params))
+                adstock = GeometricAdstock(**adstock_kwargs)
+            else:
+                adstock = None
+                adstock_kwargs = {}
 
             # Fit OLS with these transforms
             try:
@@ -324,7 +340,9 @@ def estimate_transform_params_grid(
                 # Silently continue - grid search tries many combinations and some may fail
                 continue
 
-    if best_saturation is None:
+    # Check if we found any valid combinations
+    # Note: best_saturation can be None if using adstock-only, so check results instead
+    if len(results) == 0 or best_params is None:
         # Provide more helpful error message
         if error_model == "arimax":
             raise ValueError(
@@ -357,9 +375,9 @@ def estimate_transform_params_optimize(
     y_column: str,
     treatment_name: str,
     base_formula: str,
-    saturation_type: str,
-    saturation_bounds: Dict[str, Tuple[float, float]],
-    adstock_bounds: Dict[str, Tuple[float, float]],
+    saturation_type: Optional[str],
+    saturation_bounds: Optional[Dict[str, Tuple[float, float]]],
+    adstock_bounds: Optional[Dict[str, Tuple[float, float]]],
     initial_params: Optional[Dict[str, float]] = None,
     coef_constraint: str = "nonnegative",
     hac_maxlags: Optional[int] = None,
@@ -448,19 +466,30 @@ def estimate_transform_params_optimize(
         raise NotImplementedError(f"Metric '{metric}' not yet implemented. Use 'rmse'.")
 
     # Determine parameter names and bounds
-    sat_param_names = list(saturation_bounds.keys())
-    adstock_param_names = list(adstock_bounds.keys())
+    sat_param_names = (
+        list(saturation_bounds.keys()) if saturation_bounds is not None else []
+    )
+    adstock_param_names = (
+        list(adstock_bounds.keys()) if adstock_bounds is not None else []
+    )
     all_param_names = sat_param_names + adstock_param_names
 
-    bounds_list = [saturation_bounds[k] for k in sat_param_names] + [
-        adstock_bounds[k] for k in adstock_param_names
-    ]
+    bounds_list = []
+    if saturation_bounds is not None:
+        bounds_list.extend([saturation_bounds[k] for k in sat_param_names])
+    if adstock_bounds is not None:
+        bounds_list.extend([adstock_bounds[k] for k in adstock_param_names])
 
     # Set initial parameters
     if initial_params is None:
         # Use midpoint of bounds
         initial_params = {}
-        for k, (lo, hi) in {**saturation_bounds, **adstock_bounds}.items():
+        all_bounds = {}
+        if saturation_bounds is not None:
+            all_bounds.update(saturation_bounds)
+        if adstock_bounds is not None:
+            all_bounds.update(adstock_bounds)
+        for k, (lo, hi) in all_bounds.items():
             initial_params[k] = (lo + hi) / 2
 
     x0 = np.array([initial_params[k] for k in all_param_names])
@@ -473,23 +502,29 @@ def estimate_transform_params_optimize(
         sat_kwargs = {k: param_dict[k] for k in sat_param_names}
         adstock_kwargs = {k: param_dict[k] for k in adstock_param_names}
 
-        # Create transform objects
-        if saturation_type == "hill":
-            saturation = HillSaturation(**sat_kwargs)
-        elif saturation_type == "logistic":
-            saturation = LogisticSaturation(**sat_kwargs)
-        elif saturation_type == "michaelis_menten":
-            saturation = MichaelisMentenSaturation(**sat_kwargs)
+        # Create saturation transform object or None
+        if saturation_type is not None and len(sat_kwargs) > 0:
+            if saturation_type == "hill":
+                saturation = HillSaturation(**sat_kwargs)
+            elif saturation_type == "logistic":
+                saturation = LogisticSaturation(**sat_kwargs)
+            elif saturation_type == "michaelis_menten":
+                saturation = MichaelisMentenSaturation(**sat_kwargs)
+            else:
+                raise ValueError(f"Unknown saturation type: {saturation_type}")
         else:
-            raise ValueError(f"Unknown saturation type: {saturation_type}")
+            saturation = None
 
-        # Adstock always uses half_life, add defaults if not provided
-        if "l_max" not in adstock_kwargs:
-            adstock_kwargs["l_max"] = 12
-        if "normalize" not in adstock_kwargs:
-            adstock_kwargs["normalize"] = True
-
-        adstock = GeometricAdstock(**adstock_kwargs)
+        # Create adstock transform object or None
+        if len(adstock_kwargs) > 0:
+            # Adstock always uses half_life, add defaults if not provided
+            if "l_max" not in adstock_kwargs:
+                adstock_kwargs["l_max"] = 12
+            if "normalize" not in adstock_kwargs:
+                adstock_kwargs["normalize"] = True
+            adstock = GeometricAdstock(**adstock_kwargs)
+        else:
+            adstock = None
 
         # Fit OLS and return RMSE
         try:
@@ -532,22 +567,29 @@ def estimate_transform_params_optimize(
     sat_kwargs = {k: best_params[k] for k in sat_param_names}
     adstock_kwargs = {k: best_params[k] for k in adstock_param_names}
 
-    # Add defaults for adstock if not optimized
-    if "l_max" not in adstock_kwargs:
-        adstock_kwargs["l_max"] = 12
-    if "normalize" not in adstock_kwargs:
-        adstock_kwargs["normalize"] = True
-
-    if saturation_type == "hill":
-        best_saturation = HillSaturation(**sat_kwargs)
-    elif saturation_type == "logistic":
-        best_saturation = LogisticSaturation(**sat_kwargs)
-    elif saturation_type == "michaelis_menten":
-        best_saturation = MichaelisMentenSaturation(**sat_kwargs)
+    # Create best saturation transform or None
+    if saturation_type is not None and len(sat_kwargs) > 0:
+        if saturation_type == "hill":
+            best_saturation = HillSaturation(**sat_kwargs)
+        elif saturation_type == "logistic":
+            best_saturation = LogisticSaturation(**sat_kwargs)
+        elif saturation_type == "michaelis_menten":
+            best_saturation = MichaelisMentenSaturation(**sat_kwargs)
+        else:
+            raise ValueError(f"Unknown saturation type: {saturation_type}")
     else:
-        raise ValueError(f"Unknown saturation type: {saturation_type}")
+        best_saturation = None
 
-    best_adstock = GeometricAdstock(**adstock_kwargs)
+    # Create best adstock transform or None
+    if len(adstock_kwargs) > 0:
+        # Add defaults for adstock if not optimized
+        if "l_max" not in adstock_kwargs:
+            adstock_kwargs["l_max"] = 12
+        if "normalize" not in adstock_kwargs:
+            adstock_kwargs["normalize"] = True
+        best_adstock = GeometricAdstock(**adstock_kwargs)
+    else:
+        best_adstock = None
 
     return {
         "best_saturation": best_saturation,
