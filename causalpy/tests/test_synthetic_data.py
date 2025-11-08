@@ -39,3 +39,24 @@ def test_generate_geolift_data():
     df = generate_geolift_data()
     assert isinstance(df, pd.DataFrame)
     assert np.all(df >= 0), "Found negative values in dataset"
+
+
+def test_generate_regression_discontinuity_data():
+    """
+    Test the generate_regression_discontinuity_data function.
+    """
+    from causalpy.data.simulate_data import generate_regression_discontinuity_data
+
+    df = generate_regression_discontinuity_data()
+    assert isinstance(df, pd.DataFrame)
+    assert "x" in df.columns
+    assert "y" in df.columns
+    assert "treated" in df.columns
+    assert len(df) == 100  # default N value
+    assert df["treated"].dtype == bool or df["treated"].dtype == np.bool_
+
+    # Test with custom parameters
+    df_custom = generate_regression_discontinuity_data(
+        N=50, true_causal_impact=1.0, true_treatment_threshold=0.5
+    )
+    assert len(df_custom) == 50
