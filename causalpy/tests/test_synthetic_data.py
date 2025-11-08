@@ -60,3 +60,22 @@ def test_generate_regression_discontinuity_data():
         N=50, true_causal_impact=1.0, true_treatment_threshold=0.5
     )
     assert len(df_custom) == 50
+
+
+def test_generate_synthetic_control_data():
+    """
+    Test the generate_synthetic_control_data function.
+    """
+    from causalpy.data.simulate_data import generate_synthetic_control_data
+
+    # Test with default parameters (lowess_kwargs=None)
+    df, weightings = generate_synthetic_control_data()
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(weightings, np.ndarray)
+    assert len(df) == 100  # default N value
+
+    # Test with explicit lowess_kwargs
+    df_custom, weightings_custom = generate_synthetic_control_data(
+        N=50, lowess_kwargs={"frac": 0.3, "it": 5}
+    )
+    assert len(df_custom) == 50
