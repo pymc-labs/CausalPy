@@ -21,8 +21,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
@@ -106,18 +106,15 @@ class InterruptedTimeSeries(BaseExperiment):
         self.formula = formula
 
         # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+        dm = model_matrix(self.formula, self.datapre)
+        self.labels = list(dm.rhs.columns)
+        self.matrix_spec = dm.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
+        self.pre_y, self.pre_X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
+        new_dm = model_matrix(spec=self.matrix_spec, data=self.datapost)
+        self.post_X = new_dm.rhs.to_numpy()
+        self.post_y = new_dm.lhs.to_numpy()
         # turn into xarray.DataArray's
         self.pre_X = xr.DataArray(
             self.pre_X,
