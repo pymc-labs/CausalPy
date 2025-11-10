@@ -98,6 +98,9 @@ class InversePropensityWeighting(BaseExperiment):
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
         self.coords = COORDS
+        self.X_outcome = pd.DataFrame(self.X, columns=self.coords["coeffs"])
+        self.X_outcome["trt"] = self.t
+        self.coords["outcome_coeffs"] = self.X_outcome.columns
         self.model.fit(X=self.X, t=self.t, coords=COORDS)
 
     def input_validation(self):

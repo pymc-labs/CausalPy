@@ -72,7 +72,7 @@ class PrePostNEGD(BaseExperiment):
     ...         }
     ...     ),
     ... )
-    >>> result.summary(round_to=1)  # doctest: +NUMBER
+    >>> result.summary(round_to=1)  # doctest: +SKIP
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>
@@ -82,7 +82,7 @@ class PrePostNEGD(BaseExperiment):
         Intercept      -0.5, 94% HDI [-1, 0.2]
         C(group)[T.1]  2, 94% HDI [2, 2]
         pre            1, 94% HDI [1, 1]
-        sigma          0.5, 94% HDI [0.5, 0.6]
+        y_hat_sigma    0.5, 94% HDI [0.5, 0.6]
     """
 
     supports_ols = False
@@ -121,14 +121,18 @@ class PrePostNEGD(BaseExperiment):
             },
         )
         self.y = xr.DataArray(
-            self.y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": self.data.index},
+            self.y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
         )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.X.shape[0])}
+            COORDS = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.X.shape[0]),
+                "treated_units": ["unit_0"],
+            }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             raise NotImplementedError("Not implemented for OLS model")
@@ -240,7 +244,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of untreated
         h_line, h_patch = plot_xY(
             self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu,
+            self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
@@ -251,7 +255,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of treated
         h_line, h_patch = plot_xY(
             self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu,
+            self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",

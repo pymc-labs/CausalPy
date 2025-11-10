@@ -62,6 +62,7 @@ extensions = [
     "notfound.extension",
     "sphinx_copybutton",
     "sphinx_design",
+    "sphinx_togglebutton",
 ]
 
 nb_execution_mode = "off"

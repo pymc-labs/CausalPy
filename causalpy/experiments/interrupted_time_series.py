@@ -70,6 +70,14 @@ class InterruptedTimeSeries(BaseExperiment):
     ...         }
     ...     ),
     ... )
+
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
     """
 
     expt_type = "Interrupted Time Series"
@@ -117,9 +125,9 @@ class InterruptedTimeSeries(BaseExperiment):
             },
         )
         self.pre_y = xr.DataArray(
-            self.pre_y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": self.datapre.index},
+            self.pre_y,  # Keep 2D shape
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": self.datapre.index, "treated_units": ["unit_0"]},
         )
         self.post_X = xr.DataArray(
             self.post_X,
@@ -130,17 +138,22 @@ class InterruptedTimeSeries(BaseExperiment):
             },
         )
         self.post_y = xr.DataArray(
-            self.post_y[:, 0],
-            dims=["obs_ind"],
-            coords={"obs_ind": self.datapost.index},
+            self.post_y,  # Keep 2D shape
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
         )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {"coeffs": self.labels, "obs_ind": np.arange(self.pre_X.shape[0])}
+            COORDS = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.pre_X.shape[0]),
+                "treated_units": ["unit_0"],
+            }
             self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.pre_X, y=self.pre_y)
+            # For OLS models, use 1D y data
+            self.model.fit(X=self.pre_X, y=self.pre_y.isel(treated_units=0))
         else:
             raise ValueError("Model type not recognized")
 
@@ -152,8 +165,21 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self.model.predict(X=self.post_X)
-        self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-        self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
+
+        # calculate impact - use appropriate y data format for each model type
+        if isinstance(self.model, PyMCModel):
+            # PyMC models work with 2D data
+            self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
+            self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
+        elif isinstance(self.model, RegressorMixin):
+            # SKL models work with 1D data
+            self.pre_impact = self.model.calculate_impact(
+                self.pre_y.isel(treated_units=0), self.pre_pred
+            )
+            self.post_impact = self.model.calculate_impact(
+                self.post_y.isel(treated_units=0), self.post_pred
+            )
+
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
             self.post_impact
         )
@@ -199,35 +225,53 @@ class InterruptedTimeSeries(BaseExperiment):
         # pre-intervention period
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu,
+            self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
         labels = ["Pre-intervention period"]
 
-        (h,) = ax[0].plot(self.datapre.index, self.pre_y, "k.", label="Observations")
+        (h,) = ax[0].plot(
+            self.datapre.index,
+            self.pre_y.isel(treated_units=0)
+            if hasattr(self.pre_y, "isel")
+            else self.pre_y[:, 0],
+            "k.",
+            label="Observations",
+        )
         handles.append(h)
         labels.append("Observations")
 
         # post intervention period
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            self.post_pred["posterior_predictive"].mu,
+            self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
         labels.append(counterfactual_label)
 
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(
+            self.datapost.index,
+            self.post_y.isel(treated_units=0)
+            if hasattr(self.post_y, "isel")
+            else self.post_y[:, 0],
+            "k.",
+        )
         # Shaded causal effect
+        post_pred_mu = (
+            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
+            .isel(treated_units=0)
+            .mean("sample")
+        )  # Add .mean("sample") to get 1D array
         h = ax[0].fill_between(
             self.datapost.index,
-            y1=az.extract(
-                self.post_pred, group="posterior_predictive", var_names="mu"
-            ).mean("sample"),
-            y2=np.squeeze(self.post_y),
+            y1=post_pred_mu,
+            y2=self.post_y.isel(treated_units=0)
+            if hasattr(self.post_y, "isel")
+            else self.post_y[:, 0],
             color="C0",
             alpha=0.25,
         )
@@ -236,28 +280,28 @@ class InterruptedTimeSeries(BaseExperiment):
 
         ax[0].set(
             title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score.r2, round_to)}
-            (std = {round_num(self.score.r2_std, round_to)})
+            Pre-intervention Bayesian $R^2$: {round_num(self.score["unit_0_r2"], round_to)}
+            (std = {round_num(self.score["unit_0_r2_std"], round_to)})
             """
         )
 
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
-            self.pre_impact,
+            self.pre_impact.isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact,
+            self.post_impact.isel(treated_units=0),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]),
+            y1=self.post_impact.mean(["chain", "draw"]).isel(treated_units=0),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -268,7 +312,7 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative,
+            self.post_impact_cumulative.isel(treated_units=0),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -384,27 +428,45 @@ class InterruptedTimeSeries(BaseExperiment):
             pre_data["prediction"] = (
                 az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
+                .isel(treated_units=0)
                 .values
             )
             post_data["prediction"] = (
                 az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
                 .mean("sample")
+                .isel(treated_units=0)
                 .values
             )
-            pre_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            hdi_pre_pred = get_hdi_to_df(
                 self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            ).set_index(pre_data.index)
-            post_data[[pred_lower_col, pred_upper_col]] = get_hdi_to_df(
+            )
+            hdi_post_pred = get_hdi_to_df(
                 self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            )
+            # Select the single unit from the MultiIndex results
+            pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
+                "unit_0", level="treated_units"
+            ).set_index(pre_data.index)
+            post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
+                "unit_0", level="treated_units"
             ).set_index(post_data.index)
 
-            pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
-            post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
-            pre_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.pre_impact, hdi_prob=hdi_prob
+            pre_data["impact"] = (
+                self.pre_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+            )
+            post_data["impact"] = (
+                self.post_impact.mean(dim=["chain", "draw"])
+                .isel(treated_units=0)
+                .values
+            )
+            hdi_pre_impact = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
+            hdi_post_impact = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
+            # Select the single unit from the MultiIndex results
+            pre_data[[impact_lower_col, impact_upper_col]] = hdi_pre_impact.xs(
+                "unit_0", level="treated_units"
             ).set_index(pre_data.index)
-            post_data[[impact_lower_col, impact_upper_col]] = get_hdi_to_df(
-                self.post_impact, hdi_prob=hdi_prob
+            post_data[[impact_lower_col, impact_upper_col]] = hdi_post_impact.xs(
+                "unit_0", level="treated_units"
             ).set_index(post_data.index)
 
             self.plot_data = pd.concat([pre_data, post_data])

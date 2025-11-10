@@ -93,10 +93,17 @@ def get_hdi_to_df(
     :param hdi_prob:
         The size of the HDI, default is 0.94
     """
-    hdi = (
-        az.hdi(x, hdi_prob=hdi_prob)
-        .to_dataframe()
-        .unstack(level="hdi")
-        .droplevel(0, axis=1)
-    )
-    return hdi
+    hdi_result = az.hdi(x, hdi_prob=hdi_prob)
+
+    # Get the data variable name (typically 'mu' or 'x')
+    # We select only the data variable column to exclude coordinates like 'treated_units'
+    data_var = list(hdi_result.data_vars)[0]
+
+    # Convert to DataFrame, select only the data variable column, then unstack
+    # This prevents coordinate values (like 'treated_agg') from appearing as columns
+    hdi_df = hdi_result[data_var].to_dataframe()[[data_var]].unstack(level="hdi")
+
+    # Remove the top level of column MultiIndex to get just 'lower' and 'higher'
+    hdi_df.columns = hdi_df.columns.droplevel(0)
+
+    return hdi_df
