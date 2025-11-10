@@ -1203,6 +1203,14 @@ def test_transfer_function_ar_bayesian(mock_pymc_sample):
     )
 
     # Fit Bayesian AR(1) model
+    # Note: AR models need more sampling than independent errors models due to complexity
+    ar_sample_kwargs = {
+        "tune": 50,
+        "draws": 50,
+        "chains": 2,
+        "cores": 2,
+        "random_seed": 42,
+    }
     model = cp.pymc_models.TransferFunctionARRegression(
         saturation_type=None,
         adstock_config={
@@ -1210,7 +1218,7 @@ def test_transfer_function_ar_bayesian(mock_pymc_sample):
             "l_max": 8,
             "normalize": True,
         },
-        sample_kwargs=sample_kwargs,
+        sample_kwargs=ar_sample_kwargs,
     )
 
     result = cp.GradedInterventionTimeSeries(
@@ -1224,8 +1232,10 @@ def test_transfer_function_ar_bayesian(mock_pymc_sample):
     # Test basic properties
     assert isinstance(result, cp.GradedInterventionTimeSeries)
     assert hasattr(result.model, "idata")
-    assert len(result.model.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
-    assert len(result.model.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    assert (
+        len(result.model.idata.posterior.coords["chain"]) == ar_sample_kwargs["chains"]
+    )
+    assert len(result.model.idata.posterior.coords["draw"]) == ar_sample_kwargs["draws"]
 
     # Test that transform parameters are in posterior
     assert "half_life" in result.model.idata.posterior
