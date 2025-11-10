@@ -962,6 +962,14 @@ class TransferFunctionLinearRegression(PyMCModel):
     The current implementation uses independent Normal errors. Future versions may
     include AR(1) autocorrelation modeling for residuals.
 
+    **Priors**: The model uses data-informed priors that scale with the outcome variable:
+
+    - Baseline coefficients: ``Normal(0, 5 * std(y))``
+    - Treatment coefficients: ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std: ``HalfNormal(2 * std(y))``
+
+    This adaptive approach ensures priors are reasonable regardless of data scale.
+
     Examples
     --------
     >>> import causalpy as cp
@@ -1030,6 +1038,9 @@ class TransferFunctionLinearRegression(PyMCModel):
             [f"treatment_{i}" for i in range(treatment_data.shape[1])],
         ).values.tolist()
         self.n_treatments = treatment_data.shape[1]
+
+        # Compute data scale BEFORE entering model context (for data-informed priors)
+        y_scale = float(np.std(y))
 
         with self:
             self.add_coords(coords)
@@ -1175,23 +1186,27 @@ class TransferFunctionLinearRegression(PyMCModel):
             treatment_transformed = pt.stack(treatment_transformed_list, axis=1)
 
             # ==================================================================
-            # Regression Coefficients
+            # Regression Coefficients (with data-informed priors)
             # ==================================================================
-            # Baseline coefficients
-            beta = pm.Normal("beta", mu=0, sigma=50, dims=["treated_units", "coeffs"])
+            # Baseline coefficients: prior std = 5 * outcome scale
+            # This allows intercept to range widely while keeping some regularization
+            beta = pm.Normal(
+                "beta", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+            )
 
-            # Treatment coefficients
+            # Treatment coefficients: prior std = 2 * outcome scale
+            # Treatments typically have smaller effects than baseline level
             if self.coef_constraint == "nonnegative":
                 theta_treatment = pm.HalfNormal(
                     "theta_treatment",
-                    sigma=100,
+                    sigma=2 * y_scale,
                     dims=["treated_units", "treatment_names"],
                 )
             else:
                 theta_treatment = pm.Normal(
                     "theta_treatment",
                     mu=0,
-                    sigma=100,
+                    sigma=2 * y_scale,
                     dims=["treated_units", "treatment_names"],
                 )
 
@@ -1214,7 +1229,8 @@ class TransferFunctionLinearRegression(PyMCModel):
             # ==================================================================
             # Likelihood
             # ==================================================================
-            sigma = pm.HalfNormal("sigma", sigma=100, dims=["treated_units"])
+            # Error std: prior centered on outcome scale with wide support
+            sigma = pm.HalfNormal("sigma", sigma=2 * y_scale, dims=["treated_units"])
 
             # For now, use independent Normal errors
             # Note: AR(1) errors in regression context require more complex implementation
@@ -1351,6 +1367,15 @@ class TransferFunctionARRegression(PyMCModel):
     - Posterior predictive sampling requires forward simulation of the AR process
     - Convergence can be slower than the independent errors model; consider increasing tune/draws
 
+    **Priors**: The model uses data-informed priors that scale with the outcome variable:
+
+    - Baseline coefficients: ``Normal(0, 5 * std(y))``
+    - Treatment coefficients: ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std: ``HalfNormal(2 * std(y))``
+    - AR(1) coefficient: ``Uniform(-0.99, 0.99)``
+
+    This adaptive approach ensures priors are reasonable regardless of data scale.
+
     Examples
     --------
     >>> import causalpy as cp
@@ -1431,6 +1456,9 @@ class TransferFunctionARRegression(PyMCModel):
             [f"treatment_{i}" for i in range(treatment_data.shape[1])],
         ).values.tolist()
         self.n_treatments = treatment_data.shape[1]
+
+        # Compute data scale BEFORE entering model context (for data-informed priors)
+        y_scale = float(np.std(y))
 
         with self:
             self.add_coords(coords)
@@ -1581,23 +1609,27 @@ class TransferFunctionARRegression(PyMCModel):
             treatment_transformed = pt.stack(treatment_transformed_list, axis=1)
 
             # ==================================================================
-            # Regression Coefficients
+            # Regression Coefficients (with data-informed priors)
             # ==================================================================
-            # Baseline coefficients
-            beta = pm.Normal("beta", mu=0, sigma=50, dims=["treated_units", "coeffs"])
+            # Baseline coefficients: prior std = 5 * outcome scale
+            # This allows intercept to range widely while keeping some regularization
+            beta = pm.Normal(
+                "beta", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+            )
 
-            # Treatment coefficients
+            # Treatment coefficients: prior std = 2 * outcome scale
+            # Treatments typically have smaller effects than baseline level
             if self.coef_constraint == "nonnegative":
                 theta_treatment = pm.HalfNormal(
                     "theta_treatment",
-                    sigma=100,
+                    sigma=2 * y_scale,
                     dims=["treated_units", "treatment_names"],
                 )
             else:
                 theta_treatment = pm.Normal(
                     "theta_treatment",
                     mu=0,
-                    sigma=100,
+                    sigma=2 * y_scale,
                     dims=["treated_units", "treatment_names"],
                 )
 
@@ -1623,8 +1655,8 @@ class TransferFunctionARRegression(PyMCModel):
             # AR(1) parameter: rho (constrained to ensure stationarity)
             rho = pm.Uniform("rho", lower=-0.99, upper=0.99, dims=["treated_units"])
 
-            # Innovation standard deviation
-            sigma = pm.HalfNormal("sigma", sigma=100, dims=["treated_units"])
+            # Innovation standard deviation: prior centered on outcome scale
+            sigma = pm.HalfNormal("sigma", sigma=2 * y_scale, dims=["treated_units"])
 
             # Quasi-differencing approach using manual log-likelihood
             # We can't use y_diff as observed data because it depends on rho
@@ -1637,11 +1669,12 @@ class TransferFunctionARRegression(PyMCModel):
 
             # Compute log-likelihood for t > 0 (Gaussian log-likelihood formula)
             # log p(y[t] | y[t-1], params) = -0.5 * ((y_diff - mu_diff) / sigma)^2 - log(sigma) - 0.5 * log(2π)
-            n_diff = y_data.shape[0] - 1
+            n_diff = y_data.shape[0] - 1  # Number of differenced observations
+            n_units = y_data.shape[1]  # Number of units
             logp_diff = (
                 -0.5 * pt.sum((residuals_diff / sigma) ** 2)
                 - n_diff * pt.sum(pt.log(sigma))
-                - 0.5 * n_diff * pt.log(2 * np.pi)
+                - 0.5 * n_diff * n_units * pt.log(2 * np.pi)
             )
             pm.Potential("logp_diff", logp_diff)
 
@@ -1654,7 +1687,7 @@ class TransferFunctionARRegression(PyMCModel):
             logp_0 = (
                 -0.5 * pt.sum((residuals_0 / sigma_0) ** 2)
                 - pt.sum(pt.log(sigma_0))
-                - 0.5 * pt.log(2 * np.pi)
+                - 0.5 * n_units * pt.log(2 * np.pi)
             )
             pm.Potential("logp_0", logp_0)
 
