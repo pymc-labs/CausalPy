@@ -962,11 +962,28 @@ class TransferFunctionLinearRegression(PyMCModel):
     The current implementation uses independent Normal errors. Future versions may
     include AR(1) autocorrelation modeling for residuals.
 
-    **Priors**: The model uses data-informed priors that scale with the outcome variable:
+    **Prior Customization**:
 
-    - Baseline coefficients: ``Normal(0, 5 * std(y))``
-    - Treatment coefficients: ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
-    - Error std: ``HalfNormal(2 * std(y))``
+    Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
+    customized via the ``priors`` parameter:
+
+    >>> from pymc_extras.prior import Prior
+    >>> model = cp.pymc_models.TransferFunctionLinearRegression(
+    ...     saturation_type=None,
+    ...     adstock_config={...},
+    ...     priors={
+    ...         "beta": Prior(
+    ...             "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+    ...         ),
+    ...         "sigma": Prior("HalfNormal", sigma=50, dims=["treated_units"]),
+    ...     },
+    ... )
+
+    By default, data-informed priors are set automatically via ``priors_from_data()``:
+
+    - Baseline coefficients (``beta``): ``Normal(0, 5 * std(y))``
+    - Treatment coefficients (``theta_treatment``): ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std (``sigma``): ``HalfNormal(2 * std(y))``
 
     This adaptive approach ensures priors are reasonable regardless of data scale.
 
@@ -1011,6 +1028,78 @@ class TransferFunctionLinearRegression(PyMCModel):
         self.treatment_names = None
         self.n_treatments = None
 
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        """
+        Generate data-informed priors that scale with outcome variable.
+
+        Computes priors for baseline coefficients, treatment coefficients,
+        and error standard deviation based on the standard deviation of y.
+        This ensures priors are reasonable regardless of data scale.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+
+        Returns
+        -------
+        Dict[str, Prior]
+            Dictionary with Prior objects for beta, theta_treatment, and sigma.
+
+        Notes
+        -----
+        The returned dictionary contains Prior objects with the following structure::
+
+            {
+                "beta": Prior(
+                    "Normal", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+                ),
+                "theta_treatment": Prior(
+                    "Normal",
+                    mu=0,
+                    sigma=2 * y_scale,
+                    dims=["treated_units", "treatment_names"],
+                ),
+                "sigma": Prior("HalfNormal", sigma=2 * y_scale, dims=["treated_units"]),
+            }
+
+        where ``y_scale = std(y)``.
+        """
+        y_scale = float(np.std(y))
+
+        priors = {
+            "beta": Prior(
+                "Normal",
+                mu=0,
+                sigma=5 * y_scale,
+                dims=["treated_units", "coeffs"],
+            ),
+            "sigma": Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units"],
+            ),
+        }
+
+        # Treatment coefficient prior depends on constraint
+        if self.coef_constraint == "nonnegative":
+            priors["theta_treatment"] = Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+        else:
+            priors["theta_treatment"] = Prior(
+                "Normal",
+                mu=0,
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+
+        return priors
+
     def build_model(self, X, y, coords, treatment_data):
         """
         Build the PyMC model with transforms.
@@ -1038,9 +1127,6 @@ class TransferFunctionLinearRegression(PyMCModel):
             [f"treatment_{i}" for i in range(treatment_data.shape[1])],
         ).values.tolist()
         self.n_treatments = treatment_data.shape[1]
-
-        # Compute data scale BEFORE entering model context (for data-informed priors)
-        y_scale = float(np.std(y))
 
         with self:
             self.add_coords(coords)
@@ -1188,27 +1274,13 @@ class TransferFunctionLinearRegression(PyMCModel):
             # ==================================================================
             # Regression Coefficients (with data-informed priors)
             # ==================================================================
-            # Baseline coefficients: prior std = 5 * outcome scale
-            # This allows intercept to range widely while keeping some regularization
-            beta = pm.Normal(
-                "beta", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
-            )
+            # Baseline coefficients: data-informed priors set via priors_from_data()
+            beta = self.priors["beta"].create_variable("beta")
 
-            # Treatment coefficients: prior std = 2 * outcome scale
-            # Treatments typically have smaller effects than baseline level
-            if self.coef_constraint == "nonnegative":
-                theta_treatment = pm.HalfNormal(
-                    "theta_treatment",
-                    sigma=2 * y_scale,
-                    dims=["treated_units", "treatment_names"],
-                )
-            else:
-                theta_treatment = pm.Normal(
-                    "theta_treatment",
-                    mu=0,
-                    sigma=2 * y_scale,
-                    dims=["treated_units", "treatment_names"],
-                )
+            # Treatment coefficients: data-informed priors set via priors_from_data()
+            theta_treatment = self.priors["theta_treatment"].create_variable(
+                "theta_treatment"
+            )
 
             # ==================================================================
             # Mean Function
@@ -1229,8 +1301,8 @@ class TransferFunctionLinearRegression(PyMCModel):
             # ==================================================================
             # Likelihood
             # ==================================================================
-            # Error std: prior centered on outcome scale with wide support
-            sigma = pm.HalfNormal("sigma", sigma=2 * y_scale, dims=["treated_units"])
+            # Error std: data-informed prior set via priors_from_data()
+            sigma = self.priors["sigma"].create_variable("sigma")
 
             # For now, use independent Normal errors
             # Note: AR(1) errors in regression context require more complex implementation
@@ -1269,6 +1341,10 @@ class TransferFunctionLinearRegression(PyMCModel):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
+
+        # Merge priors with precedence: user-specified > data-driven > defaults
+        # Data-driven priors are computed first, then user-specified priors override them
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
 
         # Build the model with treatment data
         self.build_model(X, y, coords, treatment_data)
@@ -1367,12 +1443,31 @@ class TransferFunctionARRegression(PyMCModel):
     - Posterior predictive sampling requires forward simulation of the AR process
     - Convergence can be slower than the independent errors model; consider increasing tune/draws
 
-    **Priors**: The model uses data-informed priors that scale with the outcome variable:
+    **Prior Customization**:
 
-    - Baseline coefficients: ``Normal(0, 5 * std(y))``
-    - Treatment coefficients: ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
-    - Error std: ``HalfNormal(2 * std(y))``
-    - AR(1) coefficient: ``Uniform(-0.99, 0.99)``
+    Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
+    customized via the ``priors`` parameter:
+
+    >>> from pymc_extras.prior import Prior
+    >>> model = cp.pymc_models.TransferFunctionARRegression(
+    ...     saturation_type=None,
+    ...     adstock_config={...},
+    ...     priors={
+    ...         "beta": Prior(
+    ...             "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+    ...         ),
+    ...         "rho": Prior(
+    ...             "Uniform", lower=-0.95, upper=0.95, dims=["treated_units"]
+    ...         ),
+    ...     },
+    ... )
+
+    By default, data-informed priors are set automatically via ``priors_from_data()``:
+
+    - Baseline coefficients (``beta``): ``Normal(0, 5 * std(y))``
+    - Treatment coefficients (``theta_treatment``): ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std (``sigma``): ``HalfNormal(2 * std(y))``
+    - AR(1) coefficient (``rho``): ``Uniform(-0.99, 0.99)``
 
     This adaptive approach ensures priors are reasonable regardless of data scale.
 
@@ -1429,6 +1524,86 @@ class TransferFunctionARRegression(PyMCModel):
         self.treatment_names = None
         self.n_treatments = None
 
+    def priors_from_data(self, X, y) -> Dict[str, Any]:
+        """
+        Generate data-informed priors including AR(1) coefficient.
+
+        Similar to TransferFunctionLinearRegression but also includes
+        a prior for the AR(1) coefficient rho.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix.
+        y : xr.DataArray
+            Outcome variable.
+
+        Returns
+        -------
+        Dict[str, Prior]
+            Dictionary with Prior objects for beta, theta_treatment, sigma, and rho.
+
+        Notes
+        -----
+        The returned dictionary contains Prior objects with the following structure::
+
+            {
+                "beta": Prior(
+                    "Normal", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+                ),
+                "theta_treatment": Prior(
+                    "Normal",
+                    mu=0,
+                    sigma=2 * y_scale,
+                    dims=["treated_units", "treatment_names"],
+                ),
+                "sigma": Prior("HalfNormal", sigma=2 * y_scale, dims=["treated_units"]),
+                "rho": Prior(
+                    "Uniform", lower=-0.99, upper=0.99, dims=["treated_units"]
+                ),
+            }
+
+        where ``y_scale = std(y)``.
+        """
+        y_scale = float(np.std(y))
+
+        priors = {
+            "beta": Prior(
+                "Normal",
+                mu=0,
+                sigma=5 * y_scale,
+                dims=["treated_units", "coeffs"],
+            ),
+            "sigma": Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units"],
+            ),
+            "rho": Prior(
+                "Uniform",
+                lower=-0.99,
+                upper=0.99,
+                dims=["treated_units"],
+            ),
+        }
+
+        # Treatment coefficient prior depends on constraint
+        if self.coef_constraint == "nonnegative":
+            priors["theta_treatment"] = Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+        else:
+            priors["theta_treatment"] = Prior(
+                "Normal",
+                mu=0,
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+
+        return priors
+
     def build_model(self, X, y, coords, treatment_data):
         """
         Build the PyMC model with transforms and AR(1) errors using quasi-differencing.
@@ -1456,9 +1631,6 @@ class TransferFunctionARRegression(PyMCModel):
             [f"treatment_{i}" for i in range(treatment_data.shape[1])],
         ).values.tolist()
         self.n_treatments = treatment_data.shape[1]
-
-        # Compute data scale BEFORE entering model context (for data-informed priors)
-        y_scale = float(np.std(y))
 
         with self:
             self.add_coords(coords)
@@ -1611,27 +1783,13 @@ class TransferFunctionARRegression(PyMCModel):
             # ==================================================================
             # Regression Coefficients (with data-informed priors)
             # ==================================================================
-            # Baseline coefficients: prior std = 5 * outcome scale
-            # This allows intercept to range widely while keeping some regularization
-            beta = pm.Normal(
-                "beta", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
-            )
+            # Baseline coefficients: data-informed priors set via priors_from_data()
+            beta = self.priors["beta"].create_variable("beta")
 
-            # Treatment coefficients: prior std = 2 * outcome scale
-            # Treatments typically have smaller effects than baseline level
-            if self.coef_constraint == "nonnegative":
-                theta_treatment = pm.HalfNormal(
-                    "theta_treatment",
-                    sigma=2 * y_scale,
-                    dims=["treated_units", "treatment_names"],
-                )
-            else:
-                theta_treatment = pm.Normal(
-                    "theta_treatment",
-                    mu=0,
-                    sigma=2 * y_scale,
-                    dims=["treated_units", "treatment_names"],
-                )
+            # Treatment coefficients: data-informed priors set via priors_from_data()
+            theta_treatment = self.priors["theta_treatment"].create_variable(
+                "theta_treatment"
+            )
 
             # ==================================================================
             # Mean Function
@@ -1652,11 +1810,11 @@ class TransferFunctionARRegression(PyMCModel):
             # ==================================================================
             # AR(1) Likelihood via Quasi-Differencing
             # ==================================================================
-            # AR(1) parameter: rho (constrained to ensure stationarity)
-            rho = pm.Uniform("rho", lower=-0.99, upper=0.99, dims=["treated_units"])
+            # AR(1) parameter: data-informed prior set via priors_from_data()
+            rho = self.priors["rho"].create_variable("rho")
 
-            # Innovation standard deviation: prior centered on outcome scale
-            sigma = pm.HalfNormal("sigma", sigma=2 * y_scale, dims=["treated_units"])
+            # Innovation standard deviation: data-informed prior set via priors_from_data()
+            sigma = self.priors["sigma"].create_variable("sigma")
 
             # Quasi-differencing approach using manual log-likelihood
             # We can't use y_diff as observed data because it depends on rho
@@ -1716,6 +1874,10 @@ class TransferFunctionARRegression(PyMCModel):
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
+
+        # Merge priors with precedence: user-specified > data-driven > defaults
+        # Data-driven priors are computed first, then user-specified priors override them
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
 
         # Build the model with treatment data
         self.build_model(X, y, coords, treatment_data)
