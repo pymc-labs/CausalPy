@@ -919,25 +919,35 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 if true_adstock_params.get("normalize", True):
                     true_weights = true_weights / true_weights.sum()
 
-                width = 0.35
-                ax.bar(
-                    lags - width / 2,
+                # Line plot instead of bars
+                ax.plot(
+                    lags,
                     true_weights,
-                    width,
-                    alpha=0.8,
+                    "k--",
+                    linewidth=2.5,
                     label="True",
-                    color="gray",
-                )
-                ax.bar(
-                    lags + width / 2,
-                    est_weights,
-                    width,
                     alpha=0.8,
+                )
+
+                # Estimated adstock line
+                ax.plot(
+                    lags,
+                    est_weights,
+                    "C0-",
+                    linewidth=2.5,
                     label="Estimated",
-                    color="C0",
+                    alpha=0.8,
                 )
             else:
-                ax.bar(lags, est_weights, alpha=0.7, color="C0", label="Estimated")
+                # Single line for estimated only
+                ax.plot(
+                    lags,
+                    est_weights,
+                    "C0-",
+                    linewidth=2.5,
+                    label="Estimated",
+                    alpha=0.8,
+                )
 
             ax.set_xlabel("Lag (periods)", fontsize=11)
             ax.set_ylabel("Adstock Weight", fontsize=11)
