@@ -977,11 +977,11 @@ class TransferFunctionLinearRegression(PyMCModel):
         \epsilon[t] = \rho \cdot \epsilon[t-1] + \nu[t]
 
     But ``\epsilon[t] = y[t] - \mu[t]`` depends on ``\mu`` (which depends on ``\beta``,
-    ``\theta``, ``half_life``, etc.), so this fails:
+    ``\theta``, ``half_life``, etc.), so this fails::
 
-    >>> # This FAILS with TypeError
-    >>> residuals = y - mu  # depends on parameters!
-    >>> pm.AR("epsilon", rho, observed=residuals)  # ❌
+        # This FAILS with TypeError
+        residuals = y - mu  # depends on parameters!
+        pm.AR("epsilon", rho, observed=residuals)  # ❌
 
     *Implemented Solution (TransferFunctionARRegression):*
 
@@ -1003,12 +1003,12 @@ class TransferFunctionLinearRegression(PyMCModel):
         ar[t] = \rho \cdot ar[t-1] + \eta[t]
         \epsilon_{obs}[t] \sim N(0, \sigma^2_{obs})
 
-    This could use PyMC's built-in ``pm.AR`` since ``ar[t]`` is latent (unobserved):
+    This could use PyMC's built-in ``pm.AR`` since ``ar[t]`` is latent (unobserved)::
 
-    >>> # This WOULD work (but changes model interpretation)
-    >>> ar = pm.AR("ar", rho=[rho_param], sigma=sigma_ar, shape=n_obs)
-    >>> mu_total = mu_baseline + ar
-    >>> pm.Normal("y", mu=mu_total, sigma=sigma_obs, observed=y_data)  # ✅
+        # This WOULD work (but changes model interpretation)
+        ar = pm.AR("ar", rho=[rho_param], sigma=sigma_ar, shape=n_obs)
+        mu_total = mu_baseline + ar
+        pm.Normal("y", mu=mu_total, sigma=sigma_obs, observed=y_data)  # ✅
 
     **Why We Don't Use This Approach:**
 
@@ -1037,19 +1037,20 @@ class TransferFunctionLinearRegression(PyMCModel):
     **Prior Customization**:
 
     Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
-    customized via the ``priors`` parameter:
+    customized via the ``priors`` parameter::
 
-    >>> from pymc_extras.prior import Prior
-    >>> model = cp.pymc_models.TransferFunctionLinearRegression(
-    ...     saturation_type=None,
-    ...     adstock_config={...},
-    ...     priors={
-    ...         "beta": Prior(
-    ...             "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
-    ...         ),
-    ...         "sigma": Prior("HalfNormal", sigma=50, dims=["treated_units"]),
-    ...     },
-    ... )
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.TransferFunctionLinearRegression(
+            saturation_type=None,
+            adstock_config={...},
+            priors={
+                "beta": Prior(
+                    "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+                ),
+                "sigma": Prior("HalfNormal", sigma=50, dims=["treated_units"]),
+            },
+        )
 
     By default, data-informed priors are set automatically via ``priors_from_data()``:
 
@@ -1061,16 +1062,19 @@ class TransferFunctionLinearRegression(PyMCModel):
 
     Examples
     --------
-    >>> import causalpy as cp
-    >>> model = cp.pymc_models.TransferFunctionLinearRegression(
-    ...     saturation_type=None,
-    ...     adstock_config={
-    ...         "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
-    ...         "l_max": 8,
-    ...         "normalize": True,
-    ...     },
-    ...     sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
-    ... )
+    Basic usage::
+
+        import causalpy as cp
+
+        model = cp.pymc_models.TransferFunctionLinearRegression(
+            saturation_type=None,
+            adstock_config={
+                "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+                "l_max": 8,
+                "normalize": True,
+            },
+            sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
+        )
     """
 
     def __init__(
@@ -1518,21 +1522,22 @@ class TransferFunctionARRegression(PyMCModel):
     **Prior Customization**:
 
     Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
-    customized via the ``priors`` parameter:
+    customized via the ``priors`` parameter::
 
-    >>> from pymc_extras.prior import Prior
-    >>> model = cp.pymc_models.TransferFunctionARRegression(
-    ...     saturation_type=None,
-    ...     adstock_config={...},
-    ...     priors={
-    ...         "beta": Prior(
-    ...             "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
-    ...         ),
-    ...         "rho": Prior(
-    ...             "Uniform", lower=-0.95, upper=0.95, dims=["treated_units"]
-    ...         ),
-    ...     },
-    ... )
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.TransferFunctionARRegression(
+            saturation_type=None,
+            adstock_config={...},
+            priors={
+                "beta": Prior(
+                    "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+                ),
+                "rho": Prior(
+                    "Uniform", lower=-0.95, upper=0.95, dims=["treated_units"]
+                ),
+            },
+        )
 
     By default, data-informed priors are set automatically via ``priors_from_data()``:
 
@@ -1545,23 +1550,26 @@ class TransferFunctionARRegression(PyMCModel):
 
     Examples
     --------
-    >>> import causalpy as cp
-    >>> model = cp.pymc_models.TransferFunctionARRegression(
-    ...     saturation_type=None,
-    ...     adstock_config={
-    ...         "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
-    ...         "l_max": 8,
-    ...         "normalize": True,
-    ...     },
-    ...     sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
-    ... )
-    >>> result = cp.GradedInterventionTimeSeries(
-    ...     data=df,
-    ...     y_column="outcome",
-    ...     treatment_names=["treatment"],
-    ...     base_formula="1 + time + covariate",
-    ...     model=model,
-    ... )
+    Basic usage::
+
+        import causalpy as cp
+
+        model = cp.pymc_models.TransferFunctionARRegression(
+            saturation_type=None,
+            adstock_config={
+                "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+                "l_max": 8,
+                "normalize": True,
+            },
+            sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
+        )
+        result = cp.GradedInterventionTimeSeries(
+            data=df,
+            y_column="outcome",
+            treatment_names=["treatment"],
+            base_formula="1 + time + covariate",
+            model=model,
+        )
 
     References
     ----------
