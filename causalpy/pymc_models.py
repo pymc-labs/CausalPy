@@ -26,6 +26,7 @@ from patsy import dmatrix
 from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
+from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
 class PyMCModel(pm.Model):
@@ -604,7 +605,9 @@ class InstrumentalVariableRegression(PyMCModel):
     Inference data...
     """
 
-    def build_model(self, X, Z, y, t, coords, priors):
+    def build_model(
+        self, X, Z, y, t, coords, priors, vs_prior_type=None, vs_hyperparams=None
+    ):
         """Specify model with treatment regression and focal regression data and priors
 
         :param X: A pandas dataframe used to predict our outcome y
@@ -618,23 +621,47 @@ class InstrumentalVariableRegression(PyMCModel):
                       sigmas of both regressions
                       :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
                       "eta": 2, "lkj_sd": 2}`
+        :param vs_prior_type: An optional string. Can be "spike_and_slab"
+                              or "horseshoe" or "normal
+        :param vs_hyperparams: An optional dictionary of priors for the
+                               variable selection hyperparameters
+
         """
 
         # --- Priors ---
         with self:
             self.add_coords(coords)
-            beta_t = pm.Normal(
-                name="beta_t",
-                mu=priors["mus"][0],
-                sigma=priors["sigmas"][0],
-                dims="instruments",
-            )
-            beta_z = pm.Normal(
-                name="beta_z",
-                mu=priors["mus"][1],
-                sigma=priors["sigmas"][1],
-                dims="covariates",
-            )
+
+            # Create coefficient priors
+            if vs_prior_type:
+                # Use variable selection priors
+                vs_prior_treatment = VariableSelectionPrior(
+                    vs_prior_type, vs_hyperparams
+                )
+                vs_prior_outcome = VariableSelectionPrior(vs_prior_type, vs_hyperparams)
+
+                beta_t = vs_prior_treatment.create_prior(
+                    name="beta_t", n_params=Z.shape[1], dims="instruments", X=Z
+                )
+
+                beta_z = vs_prior_outcome.create_prior(
+                    name="beta_z", n_params=X.shape[1], dims="covariates", X=X
+                )
+            else:
+                # Use standard normal priors
+                beta_t = pm.Normal(
+                    name="beta_t",
+                    mu=priors["mus"][0],
+                    sigma=priors["sigmas"][0],
+                    dims="instruments",
+                )
+                beta_z = pm.Normal(
+                    name="beta_z",
+                    mu=priors["mus"][1],
+                    sigma=priors["sigmas"][1],
+                    dims="covariates",
+                )
+
             sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
             chol, corr, sigmas = pm.LKJCholeskyCov(
                 name="chol_cov",
@@ -689,7 +716,18 @@ class InstrumentalVariableRegression(PyMCModel):
                     )
                 )
 
-    def fit(self, X, Z, y, t, coords, priors, ppc_sampler=None):
+    def fit(
+        self,
+        X,
+        Z,
+        y,
+        t,
+        coords,
+        priors,
+        ppc_sampler=None,
+        vs_prior_type=None,
+        vs_hyperparams=None,
+    ):
         """Draw samples from posterior distribution and potentially
         from the prior and posterior predictive distributions. The
         fit call can take values for the
@@ -703,7 +741,7 @@ class InstrumentalVariableRegression(PyMCModel):
         # sample_posterior_predictive() if provided in sample_kwargs.
         # Use JAX for ppc sampling of multivariate likelihood
 
-        self.build_model(X, Z, y, t, coords, priors)
+        self.build_model(X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
         self.sample_predictive_distribution(ppc_sampler=ppc_sampler)

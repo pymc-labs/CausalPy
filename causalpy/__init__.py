@@ -41,4 +41,5 @@ __all__ = [
     "RegressionKink",
     "skl_models",
     "SyntheticControl",
+    "variable_selection_priors",
 ]

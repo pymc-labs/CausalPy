@@ -52,6 +52,12 @@ class InstrumentalVariable(BaseExperiment):
                                     "eta": 2,
                                     "lkj_sd": 2,
                                     }
+    :param vs_prior_type : str or None, default=None
+        Type of variable selection prior: 'spike_and_slab', 'horseshoe', or None.
+        If None, uses standard normal priors.
+    :param vs_hyperparams : dict, optional
+        Hyperparameters for variable selection priors. Only used if vs_prior_type
+        is not None.
 
     Example
     --------
@@ -99,6 +105,8 @@ class InstrumentalVariable(BaseExperiment):
         formula: str,
         model=None,
         priors=None,
+        vs_prior_type=None,
+        vs_hyperparams=None,
         **kwargs,
     ):
         super().__init__(model=model)
@@ -108,6 +116,8 @@ class InstrumentalVariable(BaseExperiment):
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.model = model
+        self.vs_prior_type = (vs_prior_type,)
+        self.vs_hyperparams = vs_hyperparams or {}
         self.input_validation()
 
         y, X = dmatrices(formula, self.data)
@@ -139,7 +149,14 @@ class InstrumentalVariable(BaseExperiment):
             }
         self.priors = priors
         self.model.fit(
-            X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            t=self.t,
+            coords=COORDS,
+            priors=self.priors,
+            vs_prior_type=vs_prior_type,
+            vs_hyperparams=vs_hyperparams,
         )
 
     def input_validation(self):
