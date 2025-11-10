@@ -1143,3 +1143,124 @@ def test_transfer_function_bayesian_adstock_only(mock_pymc_sample):
     half_life_samples = az.extract(result.model.idata, var_names=["half_life"])
     assert (half_life_samples > 0).all(), "Half-life should be positive"
     assert half_life_samples.mean() < 10, "Half-life should be reasonable"
+
+
+@pytest.mark.integration
+def test_transfer_function_ar_bayesian(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function ITS with AR(1) errors.
+
+    Creates synthetic data with AR(1) errors and checks:
+    1. GradedInterventionTimeSeries works with TransferFunctionARRegression
+    2. Correct number of MCMC chains and draws
+    3. Transform parameters (half_life) and AR parameter (rho) are in posterior
+    4. Plot and summary methods work
+    5. Convergence diagnostics are reasonable
+    """
+    # Generate synthetic data with AR(1) errors
+    np.random.seed(42)
+    n_weeks = 100
+    t = np.arange(n_weeks)
+
+    # Simple baseline with trend
+    baseline = 1000 + 2 * t
+
+    # Treatment: on/off pattern
+    treatment = np.zeros(n_weeks)
+    treatment[30:50] = np.random.uniform(5, 10, 20)
+    treatment[70:90] = np.random.uniform(5, 10, 20)
+
+    # Apply adstock transform for data generation
+    half_life_true = 2.0
+    alpha = np.power(0.5, 1 / half_life_true)
+    l_max = 8
+    adstock_weights = np.power(alpha, np.arange(l_max + 1))
+    adstock_weights = adstock_weights / adstock_weights.sum()
+
+    treatment_transformed = np.zeros_like(treatment)
+    for t_idx in range(n_weeks):
+        for lag in range(min(l_max + 1, t_idx + 1)):
+            treatment_transformed[t_idx] += (
+                adstock_weights[lag] * treatment[t_idx - lag]
+            )
+
+    # Generate outcome with AR(1) errors
+    rho_true = 0.7
+    errors = np.zeros(n_weeks)
+    errors[0] = np.random.normal(0, 30)
+    for t_idx in range(1, n_weeks):
+        errors[t_idx] = rho_true * errors[t_idx - 1] + np.random.normal(0, 30)
+
+    outcome = baseline - 100 * treatment_transformed + errors
+
+    # Create dataframe
+    df = pd.DataFrame(
+        {
+            "t": t,
+            "y": outcome,
+            "treatment": treatment,
+        }
+    )
+
+    # Fit Bayesian AR(1) model
+    model = cp.pymc_models.TransferFunctionARRegression(
+        saturation_type=None,
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Test basic properties
+    assert isinstance(result, cp.GradedInterventionTimeSeries)
+    assert hasattr(result.model, "idata")
+    assert len(result.model.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.model.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+    # Test that transform parameters are in posterior
+    assert "half_life" in result.model.idata.posterior
+    assert "alpha_adstock" in result.model.idata.posterior
+
+    # Test that AR parameter is in posterior
+    assert "rho" in result.model.idata.posterior, (
+        "AR(1) parameter rho should be in posterior"
+    )
+
+    # Test that regression coefficients are in posterior
+    assert "beta" in result.model.idata.posterior
+    assert "theta_treatment" in result.model.idata.posterior
+
+    # Test convergence (r_hat should be close to 1)
+    summary = az.summary(
+        result.model.idata, var_names=["half_life", "theta_treatment", "rho"]
+    )
+    assert all(summary["r_hat"] < 1.1), "R-hat values suggest poor convergence"
+
+    # Test plotting
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert len(ax) == 2  # Should have 2 subplots
+
+    # Test summary (should not raise)
+    result.summary()
+
+    # Test that half_life posterior is reasonable (should be positive)
+    half_life_samples = az.extract(result.model.idata, var_names=["half_life"])
+    assert (half_life_samples > 0).all(), "Half-life should be positive"
+    assert half_life_samples.mean() < 10, "Half-life should be reasonable"
+
+    # Test that rho is bounded between -1 and 1 (stationarity constraint)
+    rho_samples = az.extract(result.model.idata, var_names=["rho"])
+    assert (rho_samples > -1).all() and (rho_samples < 1).all(), (
+        "Rho should be between -1 and 1"
+    )
