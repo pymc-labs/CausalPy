@@ -477,6 +477,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
         treatment channels in the given window, reapplying all transforms with
         the same parameters, and comparing to the observed outcome.
 
+        For Bayesian models, returns posterior distributions of effects with credible intervals.
+        For OLS models, returns point estimates.
+
         Parameters
         ----------
         window : Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]]
@@ -491,8 +494,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
         result : Dict
             Dictionary containing:
             - "effect_df": DataFrame with observed, counterfactual, effect, cumulative effect
-            - "total_effect": Total effect in window
+            - "total_effect": Total effect in window (mean for Bayesian)
             - "mean_effect": Mean effect per period in window
+            For Bayesian models, also includes HDI bounds for counterfactual and effect.
 
         Examples
         --------
@@ -506,6 +510,19 @@ class GradedInterventionTimeSeries(BaseExperiment):
             )
             print(f"Total effect: {effect['total_effect']:.2f}")
         """
+        # Route to appropriate method based on model type
+        if isinstance(self.model, PyMCModel):
+            return self._bayesian_effect(window=window, channels=channels, scale=scale)
+        else:
+            return self._ols_effect(window=window, channels=channels, scale=scale)
+
+    def _ols_effect(
+        self,
+        window: Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]],
+        channels: Optional[List[str]] = None,
+        scale: float = 0.0,
+    ) -> Dict[str, Union[pd.DataFrame, float]]:
+        """Estimate the causal effect for OLS models (point estimates)."""
         # Default to all channels if not specified
         if channels is None:
             channels = self.treatment_names
@@ -582,6 +599,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
         1. Observed vs counterfactual outcome
         2. Cumulative effect over time
 
+        For Bayesian models, shows posterior mean with 94% credible intervals.
+        For OLS models, shows point estimates.
+
         Parameters
         ----------
         effect_result : dict
@@ -611,6 +631,18 @@ class GradedInterventionTimeSeries(BaseExperiment):
             )
             fig, ax = result.plot_effect(effect_result)
         """
+        # Route to appropriate plot method based on model type
+        if isinstance(self.model, PyMCModel):
+            return self._bayesian_plot_effect(effect_result=effect_result, **kwargs)
+        else:
+            return self._ols_plot_effect(effect_result=effect_result, **kwargs)
+
+    def _ols_plot_effect(
+        self,
+        effect_result: Dict,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot counterfactual effect analysis for OLS models."""
         # Extract data from effect result
         effect_df = effect_result["effect_df"]
         window_start = effect_result.get("window_start")
@@ -868,6 +900,30 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 true_adstock=GeometricAdstock(half_life=3.0, normalize=True),
             )
         """
+        # Route to appropriate plot method based on model type
+        if isinstance(self.model, PyMCModel):
+            return self._bayesian_plot_transforms(
+                true_saturation=true_saturation,
+                true_adstock=true_adstock,
+                x_range=x_range,
+                **kwargs,
+            )
+        else:
+            return self._ols_plot_transforms(
+                true_saturation=true_saturation,
+                true_adstock=true_adstock,
+                x_range=x_range,
+                **kwargs,
+            )
+
+    def _ols_plot_transforms(
+        self,
+        true_saturation=None,
+        true_adstock=None,
+        x_range=None,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot estimated transformation curves for OLS models."""
         # Currently only supports single treatment
         if len(self.treatments) != 1:
             raise NotImplementedError(
@@ -1379,6 +1435,429 @@ class GradedInterventionTimeSeries(BaseExperiment):
             },
             index=self.data.index,
         )
+
+    def _bayesian_plot_transforms(
+        self,
+        true_saturation=None,
+        true_adstock=None,
+        x_range=None,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot estimated transformation curves for Bayesian models with credible intervals."""
+        import arviz as az
+
+        # Check which transforms are present in the posterior
+        has_saturation = (
+            "slope" in self.model.idata.posterior
+            or "kappa" in self.model.idata.posterior
+        )
+        has_adstock = "half_life" in self.model.idata.posterior
+
+        if not has_saturation and not has_adstock:
+            raise ValueError(
+                "No transforms to plot (no transform parameters found in posterior). "
+                "At least one transform must be specified."
+            )
+
+        # Determine number of panels
+        n_panels = int(has_saturation) + int(has_adstock)
+
+        # Create subplot
+        fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 5))
+
+        # Make axes a list for consistent indexing
+        if n_panels == 1:
+            axes = [axes]
+
+        panel_idx = 0
+
+        # ============================================================================
+        # SATURATION PLOT (if present)
+        # ============================================================================
+        if has_saturation:
+            ax = axes[panel_idx]
+            # TODO: Implement Bayesian saturation plotting when needed
+            # For now, skip saturation (since the current example uses adstock only)
+            ax.text(
+                0.5,
+                0.5,
+                "Bayesian saturation\nplotting not yet\nimplemented",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=12,
+            )
+            panel_idx += 1
+
+        # ============================================================================
+        # ADSTOCK PLOT (if present)
+        # ============================================================================
+        if has_adstock:
+            ax = axes[panel_idx]
+
+            # Extract posterior samples of half_life
+            half_life_post = az.extract(self.model.idata, var_names=["half_life"])
+            l_max = self.model.adstock_config.get("l_max", 8)
+            lags = np.arange(l_max + 1)
+
+            # Compute adstock weights for all posterior samples
+            weights_posterior = []
+            for half_life_sample in half_life_post.values:
+                alpha_sample = np.power(0.5, 1 / half_life_sample)
+                weights_sample = alpha_sample**lags
+                # Normalize if needed
+                if self.model.adstock_config.get("normalize", True):
+                    weights_sample = weights_sample / weights_sample.sum()
+                weights_posterior.append(weights_sample)
+            weights_posterior = np.array(
+                weights_posterior
+            )  # Shape: (n_samples, n_lags)
+
+            # Compute 94% credible interval bounds at each lag
+            weights_lower = np.percentile(weights_posterior, 3, axis=0)
+            weights_upper = np.percentile(weights_posterior, 97, axis=0)
+
+            # Compute posterior mean
+            half_life_mean = float(half_life_post.mean())
+            alpha_mean = np.power(0.5, 1 / half_life_mean)
+            weights_mean = alpha_mean**lags
+            if self.model.adstock_config.get("normalize", True):
+                weights_mean = weights_mean / weights_mean.sum()
+
+            # Plot true adstock if provided
+            if true_adstock is not None:
+                true_adstock_params = true_adstock.get_params()
+                true_alpha = true_adstock_params["alpha"]
+                true_weights = true_alpha**lags
+                if true_adstock_params.get("normalize", True):
+                    true_weights = true_weights / true_weights.sum()
+
+                ax.plot(
+                    lags,
+                    true_weights,
+                    "k--",
+                    linewidth=2.5,
+                    label="True",
+                    alpha=0.8,
+                    zorder=10,
+                )
+
+            # Plot Bayesian uncertainty as shaded region
+            ax.fill_between(
+                lags,
+                weights_lower,
+                weights_upper,
+                color="C2",
+                alpha=0.25,
+                label="Bayesian 94% HDI",
+                zorder=1,
+            )
+
+            # Plot Bayesian posterior mean
+            ax.plot(
+                lags,
+                weights_mean,
+                "C2-",
+                linewidth=3,
+                label="Bayesian Mean",
+                alpha=1.0,
+                zorder=11,
+            )
+
+            ax.set_xlabel("Lag (periods)", fontsize=11)
+            ax.set_ylabel("Adstock Weight", fontsize=11)
+            ax.set_title(
+                "Adstock Function (Carryover Effect)", fontsize=12, fontweight="bold"
+            )
+            ax.legend(fontsize=LEGEND_FONT_SIZE, framealpha=0.9)
+            ax.grid(True, alpha=0.3, axis="y")
+
+            # Add parameter text with posterior summary
+            param_text = "Bayesian Posterior:\n"
+            half_life_hdi = az.hdi(
+                self.model.idata, var_names=["half_life"], hdi_prob=0.94
+            )["half_life"]
+            param_text += f"  half_life={half_life_mean:.2f}\n"
+            param_text += f"    [94% HDI: {float(half_life_hdi.sel(hdi='lower').values):.2f}, {float(half_life_hdi.sel(hdi='higher').values):.2f}]\n"
+
+            if true_adstock is not None:
+                true_half_life = np.log(0.5) / np.log(true_alpha)
+                param_text += "\nTrue:\n"
+                param_text += f"  half_life={true_half_life:.2f}\n"
+
+            ax.text(
+                0.95,
+                0.95,
+                param_text.strip(),
+                transform=ax.transAxes,
+                fontsize=9,
+                verticalalignment="top",
+                horizontalalignment="right",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+            )
+
+        plt.tight_layout()
+        return fig, axes
+
+    def _bayesian_effect(
+        self,
+        window: Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]],
+        channels: Optional[List[str]] = None,
+        scale: float = 0.0,
+    ) -> Dict[str, Union[pd.DataFrame, float]]:
+        """Estimate the causal effect for Bayesian models with posterior uncertainty."""
+        import arviz as az
+
+        # Default to all channels if not specified
+        if channels is None:
+            channels = self.treatment_labels
+
+        # Validate channels
+        for ch in channels:
+            if ch not in self.treatment_labels:
+                raise ValueError(f"Channel '{ch}' not found in treatments")
+
+        # Get window mask
+        window_start, window_end = window
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            mask = (self.data.index >= window_start) & (self.data.index <= window_end)
+        else:
+            mask = (self.data.index >= window_start) & (self.data.index <= window_end)
+
+        # Create counterfactual data by scaling specified channels in the window
+        data_cf = self.data.copy()
+        for channel in channels:
+            data_cf.loc[mask, channel] = scale * data_cf.loc[mask, channel]
+
+        # Get counterfactual treatment data
+        treatment_raw_cf = np.column_stack(
+            [data_cf[name].values for name in self.treatment_labels]
+        )
+
+        # Extract posterior samples
+        beta_post = az.extract(
+            self.model.idata, var_names=["beta"]
+        )  # (sample, units, features)
+        theta_post = az.extract(
+            self.model.idata, var_names=["theta_treatment"]
+        )  # (sample, units, treatments)
+
+        # Extract transform parameter samples
+        n_samples = len(beta_post.sample)
+        y_cf_samples = []
+
+        # For each posterior sample, compute counterfactual prediction
+        for i in range(n_samples):
+            # Get parameter values for this sample
+            if "half_life" in self.model.idata.posterior:
+                half_life_sample = float(
+                    az.extract(self.model.idata, var_names=["half_life"]).isel(sample=i)
+                )
+            else:
+                half_life_sample = None
+
+            # Apply transforms with posterior sample parameters
+            treatment_transformed_cf = treatment_raw_cf.copy().astype(np.float64)
+            if half_life_sample is not None:
+                # Apply adstock with this sample's half_life (numpy implementation)
+                alpha_sample = np.power(0.5, 1 / half_life_sample)
+                l_max = self.model.adstock_config.get("l_max", 8)
+                normalize = self.model.adstock_config.get("normalize", True)
+
+                # Compute adstock weights
+                lags = np.arange(l_max + 1)
+                weights = alpha_sample**lags
+                if normalize:
+                    weights = weights / weights.sum()
+
+                # Apply convolution for each treatment column
+                treatment_transformed_cf = np.zeros_like(
+                    treatment_raw_cf, dtype=np.float64
+                )
+                for col_idx in range(treatment_raw_cf.shape[1]):
+                    treatment_transformed_cf[:, col_idx] = np.convolve(
+                        treatment_raw_cf[:, col_idx], weights, mode="same"
+                    )
+
+            # Get coefficients for this sample (first unit only for single-unit case)
+            if beta_post.ndim > 2:
+                beta_sample = beta_post.isel(sample=i, treated_units=0).values.astype(
+                    np.float64
+                )
+            else:
+                beta_sample = beta_post.isel(sample=i).values.astype(np.float64)
+
+            if theta_post.ndim > 2:
+                theta_sample = theta_post.isel(sample=i, treated_units=0).values.astype(
+                    np.float64
+                )
+            else:
+                theta_sample = theta_post.isel(sample=i).values.astype(np.float64)
+
+            # Compute counterfactual prediction (ensure float64)
+            baseline_pred = np.asarray(self.X.values, dtype=np.float64) @ beta_sample
+            treatment_pred = treatment_transformed_cf @ theta_sample
+            y_cf_sample = baseline_pred + treatment_pred
+            y_cf_samples.append(y_cf_sample.flatten())
+
+        y_cf_samples = np.array(y_cf_samples)  # Shape: (n_samples, n_obs)
+
+        # Compute posterior mean and HDI
+        y_cf_mean = y_cf_samples.mean(axis=0)
+        y_cf_lower = np.percentile(y_cf_samples, 3, axis=0)
+        y_cf_upper = np.percentile(y_cf_samples, 97, axis=0)
+
+        # Get observed data
+        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+
+        # Compute effect
+        effect_samples = (
+            y_obs[np.newaxis, :] - y_cf_samples
+        )  # Shape: (n_samples, n_obs)
+        effect_mean = effect_samples.mean(axis=0)
+        effect_lower = np.percentile(effect_samples, 3, axis=0)
+        effect_upper = np.percentile(effect_samples, 97, axis=0)
+
+        # Cumulative effect
+        effect_cumulative_samples = np.cumsum(effect_samples, axis=1)
+        effect_cumulative_mean = effect_cumulative_samples.mean(axis=0)
+        effect_cumulative_lower = np.percentile(effect_cumulative_samples, 3, axis=0)
+        effect_cumulative_upper = np.percentile(effect_cumulative_samples, 97, axis=0)
+
+        # Create result DataFrame
+        effect_df = pd.DataFrame(
+            {
+                "observed": y_obs,
+                "counterfactual": y_cf_mean,
+                "counterfactual_lower": y_cf_lower,
+                "counterfactual_upper": y_cf_upper,
+                "effect": effect_mean,
+                "effect_lower": effect_lower,
+                "effect_upper": effect_upper,
+                "effect_cumulative": effect_cumulative_mean,
+                "effect_cumulative_lower": effect_cumulative_lower,
+                "effect_cumulative_upper": effect_cumulative_upper,
+            },
+            index=self.data.index,
+        )
+
+        # Filter to window for summary statistics
+        window_effect_samples = effect_samples[:, mask]
+
+        result = {
+            "effect_df": effect_df,
+            "total_effect": float(window_effect_samples.sum(axis=1).mean()),
+            "total_effect_lower": float(
+                np.percentile(window_effect_samples.sum(axis=1), 3)
+            ),
+            "total_effect_upper": float(
+                np.percentile(window_effect_samples.sum(axis=1), 97)
+            ),
+            "mean_effect": float(window_effect_samples.mean(axis=1).mean()),
+            "window_start": window_start,
+            "window_end": window_end,
+            "channels": channels,
+            "scale": scale,
+        }
+
+        return result
+
+    def _bayesian_plot_effect(
+        self,
+        effect_result: Dict,
+        **kwargs,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """Plot counterfactual effect analysis for Bayesian models with credible intervals."""
+        # Extract data from effect result
+        effect_df = effect_result["effect_df"]
+        window_start = effect_result.get("window_start")
+        window_end = effect_result.get("window_end")
+
+        # Create 2-panel subplot
+        fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+        # ============================================================================
+        # TOP PANEL: Observed vs Counterfactual with credible intervals
+        # ============================================================================
+        # Plot counterfactual with uncertainty
+        axes[0].plot(
+            effect_df.index,
+            effect_df["counterfactual"],
+            label="Counterfactual (Posterior Mean)",
+            linewidth=1.5,
+            linestyle="--",
+            color="C1",
+        )
+        axes[0].fill_between(
+            effect_df.index,
+            effect_df["counterfactual_lower"],
+            effect_df["counterfactual_upper"],
+            alpha=0.2,
+            color="C1",
+            label="Counterfactual 94% HDI",
+        )
+
+        # Plot observed
+        axes[0].plot(
+            effect_df.index,
+            effect_df["observed"],
+            label="Observed",
+            linewidth=1.5,
+            color="C0",
+        )
+
+        # Shade the effect region
+        axes[0].fill_between(
+            effect_df.index,
+            effect_df["observed"],
+            effect_df["counterfactual"],
+            alpha=0.3,
+            color="C2",
+            label="Effect",
+        )
+
+        axes[0].set_ylabel(self.y_column, fontsize=11)
+        axes[0].set_title("Observed vs Counterfactual", fontsize=12, fontweight="bold")
+        axes[0].legend(fontsize=LEGEND_FONT_SIZE)
+        axes[0].grid(True, alpha=0.3)
+
+        # Add window boundaries if specified
+        if window_start is not None and window_end is not None:
+            axes[0].axvline(x=window_start, color="red", linestyle=":", alpha=0.5)
+            axes[0].axvline(x=window_end, color="red", linestyle=":", alpha=0.5)
+
+        # ============================================================================
+        # BOTTOM PANEL: Cumulative effect with credible intervals
+        # ============================================================================
+        axes[1].plot(
+            effect_df.index,
+            effect_df["effect_cumulative"],
+            linewidth=2,
+            color="C2",
+            label="Cumulative Effect (Posterior Mean)",
+        )
+        axes[1].fill_between(
+            effect_df.index,
+            effect_df["effect_cumulative_lower"],
+            effect_df["effect_cumulative_upper"],
+            alpha=0.3,
+            color="C2",
+            label="94% HDI",
+        )
+        axes[1].axhline(y=0, color="k", linestyle="--", linewidth=1)
+        axes[1].set_ylabel("Cumulative Effect", fontsize=11)
+        axes[1].set_xlabel("Time", fontsize=11)
+        axes[1].set_title("Cumulative Effect Over Time", fontsize=12, fontweight="bold")
+        axes[1].legend(fontsize=LEGEND_FONT_SIZE)
+        axes[1].grid(True, alpha=0.3)
+
+        # Add window boundaries
+        if window_start is not None and window_end is not None:
+            axes[1].axvline(x=window_start, color="red", linestyle=":", alpha=0.5)
+            axes[1].axvline(x=window_end, color="red", linestyle=":", alpha=0.5)
+
+        plt.tight_layout()
+        return fig, axes
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """Get plot data for OLS results.
