@@ -1041,3 +1041,105 @@ class TestSyntheticControlMultiUnit:
             sc.get_plot_data(treated_unit="invalid_unit")
         except (ValueError, KeyError):
             pass  # Either error type is acceptable
+
+
+@pytest.mark.integration
+def test_transfer_function_bayesian_adstock_only(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function ITS with adstock only.
+
+    Creates synthetic data and checks:
+    1. GradedInterventionTimeSeries works with PyMC model
+    2. Correct number of MCMC chains and draws
+    3. Transform parameters are estimated (half_life in posterior)
+    4. Plot and summary methods work
+    5. Convergence diagnostics are reasonable
+    """
+    # Generate synthetic data
+    np.random.seed(42)
+    n_weeks = 100
+    t = np.arange(n_weeks)
+
+    # Simple baseline with trend
+    baseline = 1000 + 2 * t + np.random.normal(0, 50, n_weeks)
+
+    # Treatment: on/off pattern
+    treatment = np.zeros(n_weeks)
+    treatment[30:50] = np.random.uniform(5, 10, 20)
+    treatment[70:90] = np.random.uniform(5, 10, 20)
+
+    # Apply adstock transform for data generation
+    half_life_true = 2.0
+    alpha = np.power(0.5, 1 / half_life_true)
+    l_max = 8
+    adstock_weights = np.power(alpha, np.arange(l_max + 1))
+    adstock_weights = adstock_weights / adstock_weights.sum()
+
+    treatment_transformed = np.zeros_like(treatment)
+    for t_idx in range(n_weeks):
+        for lag in range(min(l_max + 1, t_idx + 1)):
+            treatment_transformed[t_idx] += (
+                adstock_weights[lag] * treatment[t_idx - lag]
+            )
+
+    # Generate outcome
+    outcome = baseline - 100 * treatment_transformed + np.random.normal(0, 30, n_weeks)
+
+    # Create dataframe
+    df = pd.DataFrame(
+        {
+            "t": t,
+            "y": outcome,
+            "treatment": treatment,
+        }
+    )
+
+    # Fit Bayesian model
+    model = cp.pymc_models.TransferFunctionLinearRegression(
+        saturation_type=None,
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Test basic properties
+    assert isinstance(result, cp.GradedInterventionTimeSeries)
+    assert hasattr(result.model, "idata")
+    assert len(result.model.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.model.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+
+    # Test that transform parameters are in posterior
+    assert "half_life" in result.model.idata.posterior
+    assert "alpha_adstock" in result.model.idata.posterior
+
+    # Test that regression coefficients are in posterior
+    assert "beta" in result.model.idata.posterior
+    assert "theta_treatment" in result.model.idata.posterior
+
+    # Test convergence (r_hat should be close to 1)
+    summary = az.summary(result.model.idata, var_names=["half_life", "theta_treatment"])
+    assert all(summary["r_hat"] < 1.1), "R-hat values suggest poor convergence"
+
+    # Test plotting
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert len(ax) == 2  # Should have 2 subplots
+
+    # Test summary (should not raise)
+    result.summary()
+
+    # Test that half_life posterior is reasonable (should be positive)
+    half_life_samples = az.extract(result.model.idata, var_names=["half_life"])
+    assert (half_life_samples > 0).all(), "Half-life should be positive"
+    assert half_life_samples.mean() < 10, "Half-life should be reasonable"

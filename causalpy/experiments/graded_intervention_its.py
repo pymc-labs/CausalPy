@@ -34,6 +34,7 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 from causalpy.custom_exceptions import BadIndexException
+from causalpy.pymc_models import PyMCModel
 from causalpy.transforms import Treatment
 from causalpy.utils import round_num
 
@@ -148,7 +149,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     expt_type = "Graded Intervention Time Series"
     supports_ols = True
-    supports_bayes = False  # Future extension
+    supports_bayes = True
 
     def __init__(
         self,
@@ -200,125 +201,188 @@ class GradedInterventionTimeSeries(BaseExperiment):
         self.X_baseline = np.asarray(dmatrix(base_formula, data))
         self.baseline_labels = dmatrix(base_formula, data).design_info.column_names
 
-        # Estimate transform parameters for each treatment
-        from causalpy.transform_optimization import (
-            estimate_transform_params_grid,
-            estimate_transform_params_optimize,
-        )
-        from causalpy.transforms import Treatment
+        # ====================================================================
+        # Conditional logic: Bayesian vs OLS models
+        # ====================================================================
+        if isinstance(self.model, PyMCModel):
+            # ================================================================
+            # BAYESIAN MODEL PATH
+            # ================================================================
+            # For Bayesian models, transforms are estimated jointly within PyMC
+            # So we skip grid/optimize parameter estimation and pass raw data
 
-        self.treatments = []
-        Z_columns = []
-        self.treatment_labels = []
+            import xarray as xr
 
-        for name in treatment_names:
-            # Run parameter estimation using model configuration
-            if self.model.estimation_method == "grid":
-                est_results = estimate_transform_params_grid(
-                    data=data,
-                    y_column=y_column,
-                    treatment_name=name,
-                    base_formula=base_formula,
-                    saturation_type=self.model.saturation_type,
-                    saturation_grid=self.model.saturation_grid,
-                    adstock_grid=self.model.adstock_grid,
-                    coef_constraint=self.model.coef_constraint,
-                    hac_maxlags=self.model.hac_maxlags,
-                    error_model=self.model.error_model,
-                    arima_order=self.model.arima_order,
-                )
-                search_space = {
-                    "saturation_grid": self.model.saturation_grid,
-                    "adstock_grid": self.model.adstock_grid,
-                }
-            elif self.model.estimation_method == "optimize":
-                est_results = estimate_transform_params_optimize(
-                    data=data,
-                    y_column=y_column,
-                    treatment_name=name,
-                    base_formula=base_formula,
-                    saturation_type=self.model.saturation_type,
-                    saturation_bounds=self.model.saturation_bounds,
-                    adstock_bounds=self.model.adstock_bounds,
-                    initial_params=None,
-                    coef_constraint=self.model.coef_constraint,
-                    hac_maxlags=self.model.hac_maxlags,
-                    method="L-BFGS-B",
-                    error_model=self.model.error_model,
-                    arima_order=self.model.arima_order,
-                )
-                search_space = {
-                    "saturation_bounds": self.model.saturation_bounds,
-                    "adstock_bounds": self.model.adstock_bounds,
-                }
-
-            # Store estimation metadata on model
-            self.model.transform_estimation_results = est_results
-            self.model.transform_search_space = search_space
-
-            # Create Treatment with estimated transforms
-            treatment = Treatment(
-                name=name,
-                saturation=est_results["best_saturation"],
-                adstock=est_results["best_adstock"],
-                coef_constraint=self.model.coef_constraint,
+            # Convert to xarray format (like DifferenceInDifferences does)
+            self.X = xr.DataArray(
+                self.X_baseline,
+                dims=["obs_ind", "coeffs"],
+                coords={
+                    "obs_ind": np.arange(self.X_baseline.shape[0]),
+                    "coeffs": self.baseline_labels,
+                },
             )
-            self.treatments.append(treatment)
+            self.y = xr.DataArray(
+                self.y.reshape(-1, 1),
+                dims=["obs_ind", "treated_units"],
+                coords={
+                    "obs_ind": np.arange(len(self.y)),
+                    "treated_units": ["unit_0"],
+                },
+            )
 
-            # Apply transforms
-            x_raw = data[name].values
-            x_transformed = x_raw
-            if treatment.saturation is not None:
-                x_transformed = treatment.saturation.apply(x_transformed)
-            if treatment.adstock is not None:
-                x_transformed = treatment.adstock.apply(x_transformed)
-            if treatment.lag is not None:
-                x_transformed = treatment.lag.apply(x_transformed)
+            # Get raw treatment data
+            treatment_raw = np.column_stack(
+                [data[name].values for name in treatment_names]
+            )
+            treatment_data = xr.DataArray(
+                treatment_raw,
+                dims=["obs_ind", "treatment_names"],
+                coords={
+                    "obs_ind": np.arange(treatment_raw.shape[0]),
+                    "treatment_names": treatment_names,
+                },
+            )
 
-            Z_columns.append(x_transformed)
-            self.treatment_labels.append(name)
+            # Setup coordinates for PyMC
+            COORDS = {
+                "coeffs": self.baseline_labels,
+                "obs_ind": np.arange(self.X_baseline.shape[0]),
+                "treated_units": ["unit_0"],
+                "treatment_names": treatment_names,
+            }
 
-        # Build full design matrix
-        self.Z_treatment = np.column_stack(Z_columns)
-        self.X_full = np.column_stack([self.X_baseline, self.Z_treatment])
-        self.all_labels = self.baseline_labels + self.treatment_labels
+            # Fit Bayesian model
+            self.model.fit(
+                X=self.X, y=self.y, coords=COORDS, treatment_data=treatment_data
+            )
 
-        # Store treatments on model for later use
-        self.model.treatments = self.treatments
+            # Store for later use
+            self.treatment_labels = treatment_names
+            self.treatments = None  # Not used for Bayesian (transforms in model)
 
-        # Fit the model (standard CausalPy pattern)
-        if isinstance(self.model, RegressorMixin):
+        elif isinstance(self.model, RegressorMixin):
+            # ================================================================
+            # OLS MODEL PATH
+            # ================================================================
+            # Estimate transform parameters for each treatment
+            from causalpy.transform_optimization import (
+                estimate_transform_params_grid,
+                estimate_transform_params_optimize,
+            )
+            from causalpy.transforms import Treatment
+
+            self.treatments = []
+            Z_columns = []
+            self.treatment_labels = []
+
+            for name in treatment_names:
+                # Run parameter estimation using model configuration
+                if self.model.estimation_method == "grid":
+                    est_results = estimate_transform_params_grid(
+                        data=data,
+                        y_column=y_column,
+                        treatment_name=name,
+                        base_formula=base_formula,
+                        saturation_type=self.model.saturation_type,
+                        saturation_grid=self.model.saturation_grid,
+                        adstock_grid=self.model.adstock_grid,
+                        coef_constraint=self.model.coef_constraint,
+                        hac_maxlags=self.model.hac_maxlags,
+                        error_model=self.model.error_model,
+                        arima_order=self.model.arima_order,
+                    )
+                    search_space = {
+                        "saturation_grid": self.model.saturation_grid,
+                        "adstock_grid": self.model.adstock_grid,
+                    }
+                elif self.model.estimation_method == "optimize":
+                    est_results = estimate_transform_params_optimize(
+                        data=data,
+                        y_column=y_column,
+                        treatment_name=name,
+                        base_formula=base_formula,
+                        saturation_type=self.model.saturation_type,
+                        saturation_bounds=self.model.saturation_bounds,
+                        adstock_bounds=self.model.adstock_bounds,
+                        initial_params=None,
+                        coef_constraint=self.model.coef_constraint,
+                        hac_maxlags=self.model.hac_maxlags,
+                        method="L-BFGS-B",
+                        error_model=self.model.error_model,
+                        arima_order=self.model.arima_order,
+                    )
+                    search_space = {
+                        "saturation_bounds": self.model.saturation_bounds,
+                        "adstock_bounds": self.model.adstock_bounds,
+                    }
+
+                # Store estimation metadata on model
+                self.model.transform_estimation_results = est_results
+                self.model.transform_search_space = search_space
+
+                # Create Treatment with estimated transforms
+                treatment = Treatment(
+                    name=name,
+                    saturation=est_results["best_saturation"],
+                    adstock=est_results["best_adstock"],
+                    coef_constraint=self.model.coef_constraint,
+                )
+                self.treatments.append(treatment)
+
+                # Apply transforms
+                x_raw = data[name].values
+                x_transformed = x_raw
+                if treatment.saturation is not None:
+                    x_transformed = treatment.saturation.apply(x_transformed)
+                if treatment.adstock is not None:
+                    x_transformed = treatment.adstock.apply(x_transformed)
+                if treatment.lag is not None:
+                    x_transformed = treatment.lag.apply(x_transformed)
+
+                Z_columns.append(x_transformed)
+                self.treatment_labels.append(name)
+
+            # Build full design matrix
+            self.Z_treatment = np.column_stack(Z_columns)
+            self.X_full = np.column_stack([self.X_baseline, self.Z_treatment])
+            self.all_labels = self.baseline_labels + self.treatment_labels
+
+            # Store treatments on model for later use
+            self.model.treatments = self.treatments
+
+            # Fit the model (standard CausalPy pattern)
             self.model.fit(X=self.X_full, y=self.y)
+
+            # Extract results from fitted model
+            self.ols_result = self.model.ols_result
+            self.predictions = self.model.ols_result.fittedvalues
+            self.residuals = self.model.ols_result.resid
+            self.score = self.model.score
+
+            # Extract coefficients (handling ARIMAX correctly)
+            if self.model.error_model == "arimax":
+                # ARIMAX: extract only exogenous coefficients
+                n_exog = self.ols_result.model.k_exog
+                exog_params = self.ols_result.params[:n_exog]
+                n_baseline = self.X_baseline.shape[1]
+                self.beta_baseline = exog_params[:n_baseline]
+                self.theta_treatment = exog_params[n_baseline:]
+            else:
+                # OLS: all params are regression coefficients
+                n_baseline = self.X_baseline.shape[1]
+                self.beta_baseline = self.ols_result.params[:n_baseline]
+                self.theta_treatment = self.ols_result.params[n_baseline:]
+
+            # Store model metadata for summary output
+            self.error_model = self.model.error_model
+            self.hac_maxlags = self.model.hac_maxlags
+            self.arima_order = self.model.arima_order
+            self.transform_estimation_method = self.model.estimation_method
+            self.transform_estimation_results = self.model.transform_estimation_results
+            self.transform_search_space = self.model.transform_search_space
         else:
             raise ValueError("Model type not recognized")
-
-        # Extract results from fitted model
-        self.ols_result = self.model.ols_result
-        self.predictions = self.model.ols_result.fittedvalues
-        self.residuals = self.model.ols_result.resid
-        self.score = self.model.score
-
-        # Extract coefficients (handling ARIMAX correctly)
-        if self.model.error_model == "arimax":
-            # ARIMAX: extract only exogenous coefficients
-            n_exog = self.ols_result.model.k_exog
-            exog_params = self.ols_result.params[:n_exog]
-            n_baseline = self.X_baseline.shape[1]
-            self.beta_baseline = exog_params[:n_baseline]
-            self.theta_treatment = exog_params[n_baseline:]
-        else:
-            # OLS: all params are regression coefficients
-            n_baseline = self.X_baseline.shape[1]
-            self.beta_baseline = self.ols_result.params[:n_baseline]
-            self.theta_treatment = self.ols_result.params[n_baseline:]
-
-        # Store model metadata for summary output
-        self.error_model = self.model.error_model
-        self.hac_maxlags = self.model.hac_maxlags
-        self.arima_order = self.model.arima_order
-        self.transform_estimation_method = self.model.estimation_method
-        self.transform_estimation_results = self.model.transform_estimation_results
-        self.transform_search_space = self.model.transform_search_space
 
     def _validate_inputs(
         self,
@@ -641,7 +705,11 @@ class GradedInterventionTimeSeries(BaseExperiment):
         fig : matplotlib.figure.Figure
         ax : array of matplotlib.axes.Axes
         """
-        return self._ols_plot(round_to=round_to, **kwargs)
+        # Route to appropriate plot method based on model type
+        if isinstance(self.model, PyMCModel):
+            return self._bayesian_plot(round_to=round_to, **kwargs)
+        else:
+            return self._ols_plot(round_to=round_to, **kwargs)
 
     def _ols_plot(
         self, round_to: Optional[int] = 2, **kwargs
@@ -1054,6 +1122,8 @@ class GradedInterventionTimeSeries(BaseExperiment):
         round_to : int, optional
             Number of decimal places for rounding.
         """
+        import arviz as az
+
         if round_to is None:
             round_to = 2
 
@@ -1061,57 +1131,254 @@ class GradedInterventionTimeSeries(BaseExperiment):
         print("Graded Intervention Time Series Results")
         print("=" * 80)
         print(f"Outcome variable: {self.y_column}")
-        print(f"Number of observations: {len(self.y)}")
-        print(f"R-squared: {round_num(self.score, round_to)}")
-        print(f"Error model: {self.error_model.upper()}")
-        if self.error_model == "hac":
-            print(
-                f"  HAC max lags: {self.hac_maxlags} "
-                f"(robust SEs accounting for {self.hac_maxlags} periods of autocorrelation)"
-            )
-        elif self.error_model == "arimax":
-            p, d, q = self.arima_order
-            print(f"  ARIMA order: ({p}, {d}, {q})")
-            print(f"    p={p}: AR order, d={d}: differencing, q={q}: MA order")
-        print("-" * 80)
-        print("Baseline coefficients:")
-        for label, coef, se in zip(
-            self.baseline_labels,
-            self.beta_baseline,
-            self.ols_result.bse[: len(self.baseline_labels)],
-        ):
-            coef_rounded = round_num(coef, round_to)
-            se_rounded = round_num(se, round_to)
-            print(f"  {label:20s}: {coef_rounded:>10} (SE: {se_rounded})")
-        print("-" * 80)
-        print("Treatment coefficients:")
-        n_baseline = len(self.baseline_labels)
+        print(
+            f"Number of observations: {len(self.y) if isinstance(self.y, np.ndarray) else self.y.shape[0]}"
+        )
 
-        # For ARIMAX, we need to extract only the treatment SEs from exogenous params
-        if self.error_model == "arimax":
-            n_exog = self.ols_result.model.k_exog
-            treatment_se = self.ols_result.bse[n_baseline:n_exog]
+        if isinstance(self.model, PyMCModel):
+            # ============================================================
+            # BAYESIAN MODEL SUMMARY
+            # ============================================================
+            print("Model type: Bayesian (PyMC)")
+
+            print("-" * 80)
+            print("Transform parameters (Posterior Mean [94% HDI]):")
+
+            # Extract transform parameters
+            if "half_life" in self.model.idata.posterior:
+                half_life_post = az.extract(self.model.idata, var_names=["half_life"])
+                half_life_mean = float(half_life_post.mean())
+                half_life_hdi = az.hdi(
+                    self.model.idata, var_names=["half_life"], hdi_prob=0.94
+                )["half_life"]
+                print(
+                    f"  half_life: {round_num(half_life_mean, round_to)} [{round_num(float(half_life_hdi.sel(hdi='lower').values), round_to)}, {round_num(float(half_life_hdi.sel(hdi='higher').values), round_to)}]"
+                )
+
+            # Saturation parameters if present
+            if "slope" in self.model.idata.posterior:
+                slope_post = az.extract(self.model.idata, var_names=["slope"])
+                slope_mean = float(slope_post.mean())
+                slope_hdi = az.hdi(
+                    self.model.idata, var_names=["slope"], hdi_prob=0.94
+                )["slope"]
+                print(
+                    f"  slope: {round_num(slope_mean, round_to)} [{round_num(float(slope_hdi.sel(hdi='lower').values), round_to)}, {round_num(float(slope_hdi.sel(hdi='higher').values), round_to)}]"
+                )
+
+            if "kappa" in self.model.idata.posterior:
+                kappa_post = az.extract(self.model.idata, var_names=["kappa"])
+                kappa_mean = float(kappa_post.mean())
+                kappa_hdi = az.hdi(
+                    self.model.idata, var_names=["kappa"], hdi_prob=0.94
+                )["kappa"]
+                print(
+                    f"  kappa: {round_num(kappa_mean, round_to)} [{round_num(float(kappa_hdi.sel(hdi='lower').values), round_to)}, {round_num(float(kappa_hdi.sel(hdi='higher').values), round_to)}]"
+                )
+
+            print("-" * 80)
+            print("Baseline coefficients (Posterior Mean [94% HDI]):")
+            beta_post = az.extract(self.model.idata, var_names=["beta"]).squeeze()
+            # Compute HDI for all betas at once - HDI uses generic dimension names
+            beta_hdi_all = az.hdi(self.model.idata, var_names=["beta"], hdi_prob=0.94)[
+                "beta"
+            ]
+
+            # Determine the dimension structure of the HDI result
+            # For multi-unit case: (treated_units, coeffs, hdi)
+            # For single-unit case: (coeffs, hdi) or just (hdi)
+            for i, label in enumerate(self.baseline_labels):
+                if beta_post.ndim > 1:
+                    beta_i = beta_post[0, i]  # First treated unit
+                    # HDI for multi-dimensional: select first unit and i-th coefficient
+                    if "treated_units" in beta_hdi_all.dims:
+                        beta_hdi = beta_hdi_all.isel(treated_units=0, coeffs=i)
+                    else:
+                        beta_hdi = beta_hdi_all.isel(coeffs=i)
+                else:
+                    beta_i = beta_post[i]
+                    # Single unit case
+                    if "coeffs" in beta_hdi_all.dims:
+                        beta_hdi = beta_hdi_all.isel(coeffs=i)
+                    else:
+                        # Scalar case
+                        beta_hdi = beta_hdi_all
+                beta_mean = float(beta_i.mean())
+                print(
+                    f"  {label:20s}: {round_num(beta_mean, round_to)} [{round_num(float(beta_hdi.sel(hdi='lower').values), round_to)}, {round_num(float(beta_hdi.sel(hdi='higher').values), round_to)}]"
+                )
+
+            print("-" * 80)
+            print("Treatment coefficients (Posterior Mean [94% HDI]):")
+            theta_post = az.extract(
+                self.model.idata, var_names=["theta_treatment"]
+            ).squeeze()
+            # Compute HDI for all thetas at once - HDI uses generic dimension names
+            theta_hdi_all = az.hdi(
+                self.model.idata, var_names=["theta_treatment"], hdi_prob=0.94
+            )["theta_treatment"]
+
+            for i, label in enumerate(self.treatment_labels):
+                if theta_post.ndim > 1:
+                    theta_i = theta_post[0, i]  # First treated unit
+                    # HDI for multi-dimensional
+                    if "treated_units" in theta_hdi_all.dims:
+                        theta_hdi = theta_hdi_all.isel(treated_units=0, coeffs=i)
+                    else:
+                        theta_hdi = theta_hdi_all.isel(coeffs=i)
+                else:
+                    theta_i = theta_post[i] if theta_post.ndim > 0 else theta_post
+                    # Single unit/treatment case
+                    if (
+                        "coeffs" in theta_hdi_all.dims
+                        and theta_hdi_all.sizes["coeffs"] > 1
+                    ):
+                        theta_hdi = theta_hdi_all.isel(coeffs=i)
+                    else:
+                        # Scalar or single coefficient case
+                        theta_hdi = theta_hdi_all
+                theta_mean = float(theta_i.mean())
+                print(
+                    f"  {label:20s}: {round_num(theta_mean, round_to)} [{round_num(float(theta_hdi.sel(hdi='lower').values), round_to)}, {round_num(float(theta_hdi.sel(hdi='higher').values), round_to)}]"
+                )
+
+            print("=" * 80)
         else:
-            treatment_se = self.ols_result.bse[n_baseline:]
+            # ============================================================
+            # OLS MODEL SUMMARY
+            # ============================================================
+            print(f"R-squared: {round_num(self.score, round_to)}")
+            print(f"Error model: {self.error_model.upper()}")
+            if self.error_model == "hac":
+                print(
+                    f"  HAC max lags: {self.hac_maxlags} "
+                    f"(robust SEs accounting for {self.hac_maxlags} periods of autocorrelation)"
+                )
+            elif self.error_model == "arimax":
+                p, d, q = self.arima_order
+                print(f"  ARIMA order: ({p}, {d}, {q})")
+                print(f"    p={p}: AR order, d={d}: differencing, q={q}: MA order")
+            print("-" * 80)
+            print("Baseline coefficients:")
+            for label, coef, se in zip(
+                self.baseline_labels,
+                self.beta_baseline,
+                self.ols_result.bse[: len(self.baseline_labels)],
+            ):
+                coef_rounded = round_num(coef, round_to)
+                se_rounded = round_num(se, round_to)
+                print(f"  {label:20s}: {coef_rounded:>10} (SE: {se_rounded})")
+            print("-" * 80)
+            print("Treatment coefficients:")
+            n_baseline = len(self.baseline_labels)
 
-        for label, coef, se in zip(
-            self.treatment_labels,
-            self.theta_treatment,
-            treatment_se,
-        ):
-            coef_rounded = round_num(coef, round_to)
-            se_rounded = round_num(se, round_to)
-            print(f"  {label:20s}: {coef_rounded:>10} (SE: {se_rounded})")
-        print("=" * 80)
+            # For ARIMAX, we need to extract only the treatment SEs from exogenous params
+            if self.error_model == "arimax":
+                n_exog = self.ols_result.model.k_exog
+                treatment_se = self.ols_result.bse[n_baseline:n_exog]
+            else:
+                treatment_se = self.ols_result.bse[n_baseline:]
+
+            for label, coef, se in zip(
+                self.treatment_labels,
+                self.theta_treatment,
+                treatment_se,
+            ):
+                coef_rounded = round_num(coef, round_to)
+                se_rounded = round_num(se, round_to)
+                print(f"  {label:20s}: {coef_rounded:>10} (SE: {se_rounded})")
+            print("=" * 80)
 
     # Methods required by BaseExperiment
-    def _bayesian_plot(self, *args, **kwargs):
-        """Bayesian plotting not yet implemented."""
-        raise NotImplementedError("Bayesian inference not yet supported")
+    def _bayesian_plot(
+        self, round_to: Optional[int] = 2, **kwargs
+    ) -> Tuple[plt.Figure, plt.Axes]:
+        """Generate Bayesian-specific plots with credible intervals."""
+        import arviz as az
+
+        fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+        # Extract posterior predictions (mu is in posterior group as Deterministic)
+        mu_posterior = az.extract(self.model.idata, group="posterior", var_names="mu")
+
+        # Get mean and HDI
+        mu_mean = mu_posterior.mean(dim="sample").values.flatten()
+        # Compute HDI from posterior
+        mu_hdi = az.hdi(self.model.idata.posterior, var_names=["mu"], hdi_prob=0.94)[
+            "mu"
+        ]
+        mu_lower = mu_hdi.sel(hdi="lower").values.flatten()
+        mu_upper = mu_hdi.sel(hdi="higher").values.flatten()
+
+        # Top panel: Observed vs fitted with credible interval
+        ax[0].plot(
+            self.data.index,
+            self.y.values.flatten() if hasattr(self.y, "values") else self.y,
+            "o",
+            label="Observed",
+            alpha=0.6,
+            markersize=4,
+        )
+        ax[0].plot(
+            self.data.index,
+            mu_mean,
+            "-",
+            label="Posterior Mean",
+            linewidth=2,
+            color="C1",
+        )
+        ax[0].fill_between(
+            self.data.index,
+            mu_lower,
+            mu_upper,
+            alpha=0.3,
+            color="C1",
+            label="94% HDI",
+        )
+        ax[0].set_ylabel("Outcome")
+        ax[0].set_title("Bayesian Model Fit")
+        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+        ax[0].grid(True, alpha=0.3)
+
+        # Bottom panel: Residuals with uncertainty
+        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        residuals = y_obs - mu_mean
+        ax[1].plot(self.data.index, residuals, "o-", alpha=0.6, markersize=3)
+        ax[1].axhline(y=0, color="k", linestyle="--", linewidth=1)
+        ax[1].set_ylabel("Residuals")
+        ax[1].set_xlabel("Time")
+        ax[1].set_title("Model Residuals")
+        ax[1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig, ax
 
     def get_plot_data_bayesian(self, *args, **kwargs):
-        """Bayesian plot data not yet implemented."""
-        raise NotImplementedError("Bayesian inference not yet supported")
+        """Get plot data for Bayesian results.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with observed and posterior mean fitted values.
+        """
+        import arviz as az
+
+        # Extract posterior predictions
+        mu_posterior = az.extract(
+            self.model.idata, group="posterior_predictive", var_names="mu"
+        )
+        mu_mean = mu_posterior.mean(dim="sample").values.flatten()
+
+        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+
+        return pd.DataFrame(
+            {
+                "observed": y_obs,
+                "fitted": mu_mean,
+                "residuals": y_obs - mu_mean,
+            },
+            index=self.data.index,
+        )
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """Get plot data for OLS results.
