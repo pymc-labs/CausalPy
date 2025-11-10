@@ -1477,3 +1477,344 @@ class TestAdditionalTransforms:
         assert treatment.saturation is None
         assert treatment.adstock is not None
         assert treatment.lag is None
+
+
+class TestBuildTreatmentMatrix:
+    """Test _build_treatment_matrix internal method."""
+
+    def test_build_treatment_matrix_saturation_adstock(self):
+        """Test _build_treatment_matrix with saturation and adstock."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type="hill",
+            saturation_grid={"slope": [2.0], "kappa": [50]},
+            adstock_grid={"half_life": [3], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Test the internal method
+        treatments = result.treatments
+        Z, labels = result._build_treatment_matrix(df, treatments)
+
+        assert Z.shape == (n, 1)
+        assert labels == ["treatment"]
+        assert not np.array_equal(Z.flatten(), treatment_raw)  # Should be transformed
+
+    def test_build_treatment_matrix_single_transform(self):
+        """Test _build_treatment_matrix with only adstock."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3], "l_max": [12], "normalize": [True]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Test the internal method
+        treatments = result.treatments
+        Z, labels = result._build_treatment_matrix(df, treatments)
+
+        assert Z.shape == (n, 1)
+        assert labels == ["treatment"]
+
+
+class TestPlotIRFEdgeCases:
+    """Test plot_irf edge cases and error handling."""
+
+    def test_plot_irf_invalid_channel(self):
+        """Test plot_irf with invalid channel name."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        with pytest.raises(ValueError, match="Channel.*not found"):
+            result.plot_irf("nonexistent_channel")
+
+
+class TestSummaryMethod:
+    """Test summary() method edge cases."""
+
+    def test_summary_with_arimax(self, capsys):
+        """Test summary() with ARIMAX error model."""
+        np.random.seed(42)
+        n = 100
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="arimax",
+            arima_order=(1, 0, 0),
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        result.summary(round_to=3)
+
+        captured = capsys.readouterr()
+        assert "ARIMAX" in captured.out
+        assert "ARIMA order" in captured.out
+        assert "(1, 0, 0)" in captured.out
+
+    def test_summary_custom_round_to(self, capsys):
+        """Test summary() with custom round_to parameter."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        result.summary(round_to=4)
+
+        captured = capsys.readouterr()
+        assert "Graded Intervention Time Series Results" in captured.out
+
+
+class TestModelTypeValidation:
+    """Test validation of model types."""
+
+    def test_invalid_model_type_raises_error(self):
+        """Test that invalid model type raises ValueError."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        # Use an invalid model (just a string)
+        with pytest.raises(ValueError, match="Model type not recognized"):
+            GradedInterventionTimeSeries(
+                data=df,
+                y_column="y",
+                treatment_names=["treatment"],
+                base_formula="1 + t",
+                model="invalid_model",
+            )
+
+
+class TestRangeIndexSupport:
+    """Test that integer RangeIndex is supported."""
+
+    def test_range_index_works(self):
+        """Test that RangeIndex is accepted as valid index."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"t": t, "y": y, "treatment": treatment_raw})
+        # RangeIndex is the default for DataFrame without explicit index
+        assert isinstance(df.index, pd.RangeIndex)
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        # Should not raise an error
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        assert result.ols_result is not None
+
+    def test_integer_index_works(self):
+        """Test that explicit integer Index is accepted."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"t": t, "y": y, "treatment": treatment_raw})
+        df.index = pd.Index(range(n))  # Explicit integer Index
+        assert isinstance(df.index, pd.Index)
+        assert pd.api.types.is_integer_dtype(df.index)
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        # Should not raise an error
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        assert result.ols_result is not None
+
+
+class TestEffectWithARIMAX:
+    """Test effect() method with ARIMAX error model."""
+
+    def test_effect_with_arimax_model(self):
+        """Test that effect() works correctly with ARIMAX."""
+        np.random.seed(42)
+        n = 100
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+
+        # Create AR(1) errors
+        rho = 0.5
+        errors = np.zeros(n)
+        errors[0] = np.random.normal(0, 10 / np.sqrt(1 - rho**2))
+        for i in range(1, n):
+            errors[i] = rho * errors[i - 1] + np.random.normal(0, 10)
+
+        y = 100.0 + 0.5 * t + 50 * treatment_raw + errors
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="arimax",
+            arima_order=(1, 0, 0),
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Test effect
+        effect_result = result.effect(
+            window=(df.index[0], df.index[-1]), channels=None, scale=0.0
+        )
+
+        assert "effect_df" in effect_result
+        assert "total_effect" in effect_result
+        assert effect_result["total_effect"] != 0  # Should have nonzero effect
+
+        # Test plot_effect
+        fig, ax = result.plot_effect(effect_result)
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
