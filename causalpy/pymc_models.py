@@ -959,8 +959,80 @@ class TransferFunctionLinearRegression(PyMCModel):
 
     Notes
     -----
-    The current implementation uses independent Normal errors. Future versions may
-    include AR(1) autocorrelation modeling for residuals.
+    The current implementation uses independent Normal errors.
+
+    **Autocorrelation in Errors: Implementation Challenges**
+
+    For time series with autocorrelated residuals, see ``TransferFunctionARRegression``,
+    which implements AR(1) errors via quasi-differencing. This note explains why AR
+    errors require special handling and the design decisions made.
+
+    *Why Standard PyMC AR Approaches Fail:*
+
+    The fundamental issue is that **observed data cannot depend on model parameters**
+    in PyMC's computational graph. For AR errors, we want:
+
+    .. math::
+        y[t] = \mu[t] + \epsilon[t]
+        \epsilon[t] = \rho \cdot \epsilon[t-1] + \nu[t]
+
+    But ``\epsilon[t] = y[t] - \mu[t]`` depends on ``\mu`` (which depends on ``\beta``,
+    ``\theta``, ``half_life``, etc.), so this fails:
+
+    >>> # This FAILS with TypeError
+    >>> residuals = y - mu  # depends on parameters!
+    >>> pm.AR("epsilon", rho, observed=residuals)  # ❌
+
+    *Implemented Solution (TransferFunctionARRegression):*
+
+    Uses **quasi-differencing** following Box & Tiao (1975):
+
+    .. math::
+        y[t] - \rho \cdot y[t-1] = \mu[t] - \rho \cdot \mu[t-1] + \nu[t]
+
+    This transforms to independent innovations ``\nu[t]``, allowing manual log-likelihood
+    via ``pm.Potential``. This is the theoretically correct Box & Tiao intervention
+    analysis model where AR(1) represents the noise structure itself.
+
+    *Alternative: AR as Latent Component (Not Implemented):*
+
+    An alternative that avoids the ``observed=`` issue would be:
+
+    .. math::
+        y[t] = \mu_{baseline}[t] + ar[t] + \epsilon_{obs}[t]
+        ar[t] = \rho \cdot ar[t-1] + \eta[t]
+        \epsilon_{obs}[t] \sim N(0, \sigma^2_{obs})
+
+    This could use PyMC's built-in ``pm.AR`` since ``ar[t]`` is latent (unobserved):
+
+    >>> # This WOULD work (but changes model interpretation)
+    >>> ar = pm.AR("ar", rho=[rho_param], sigma=sigma_ar, shape=n_obs)
+    >>> mu_total = mu_baseline + ar
+    >>> pm.Normal("y", mu=mu_total, sigma=sigma_obs, observed=y_data)  # ✅
+
+    **Why We Don't Use This Approach:**
+
+    1. **Different model class**: Represents AR + white noise, not pure AR errors.
+       Has two variance parameters (``\sigma_{ar}``, ``\sigma_{obs}``) vs. one (``\sigma``).
+
+    2. **Theoretical mismatch**: Box & Tiao's intervention analysis models autocorrelation
+       in the noise process itself, not as an additional latent component. The AR process
+       IS the residual structure, not a separate mean component.
+
+    3. **Identifiability concerns**: With both AR and white noise, parameters may be
+       poorly identified unless ``\sigma_{obs} \approx 0`` (which defeats the purpose).
+
+    4. **Interpretation**: The latent AR component would represent a time-varying offset
+       rather than residual autocorrelation, changing the causal interpretation.
+
+    **When to Use Each Model:**
+
+    - **TransferFunctionLinearRegression** (this class): When residuals show minimal
+      autocorrelation, or computational efficiency is critical.
+
+    - **TransferFunctionARRegression**: When residual diagnostics show significant
+      autocorrelation (e.g., ACF plots, Durbin-Watson test), and you want to follow
+      the classical Box & Tiao specification.
 
     **Prior Customization**:
 
