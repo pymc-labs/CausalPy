@@ -22,7 +22,7 @@ import pandas as pd
 from scipy.stats import dirichlet, gamma, norm, uniform
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
-default_lowess_kwargs: dict[str, float] = {"frac": 0.2, "it": 0}
+default_lowess_kwargs: dict[str, float | int] = {"frac": 0.2, "it": 0}
 RANDOM_SEED: int = 8927
 rng: np.random.Generator = np.random.default_rng(RANDOM_SEED)
 
