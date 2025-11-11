@@ -16,6 +16,7 @@ Base class for quasi experimental designs.
 """
 
 from abc import abstractmethod
+from typing import Literal, Optional, Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -23,6 +24,16 @@ import pandas as pd
 from sklearn.base import RegressorMixin
 
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import (
+    EffectSummary,
+    _compute_statistics,
+    _detect_experiment_type,
+    _effect_summary_did,
+    _extract_counterfactual,
+    _extract_window,
+    _generate_prose,
+    _generate_table,
+)
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
@@ -106,3 +117,121 @@ class BaseExperiment:
     def get_plot_data_ols(self, *args, **kwargs):
         """Abstract method for recovering plot data."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
+
+    def effect_summary(
+        self,
+        window: Union[Literal["post"], tuple, slice] = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: Optional[float] = None,
+        treated_unit: Optional[str] = None,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects from posterior draws.
+
+        Supports Interrupted Time Series (ITS), Synthetic Control, and
+        Difference-in-Differences (DiD) experiments. Automatically detects experiment
+        type and generates appropriate summary.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Time window for analysis (ITS/SC only, ignored for DiD):
+            - "post": All post-treatment time points (default)
+            - (start, end): Tuple of start and end times (handles both datetime and integer indices)
+            - slice: Python slice object for integer indices
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation:
+            - "increase": P(effect > 0)
+            - "decrease": P(effect < 0)
+            - "two-sided": Two-sided p-value, report 1-p as "probability of effect"
+        alpha : float, default=0.05
+            Significance level for HDI intervals (1-alpha confidence level)
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD)
+        relative : bool, default=True
+            Whether to include relative effect statistics (% change vs counterfactual)
+            (ITS/SC only, ignored for DiD)
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold. If provided, reports
+            P(|effect| > min_effect) for two-sided or P(effect > min_effect) for one-sided.
+        treated_unit : str, optional
+            For multi-unit experiments (Synthetic Control), specify which treated unit
+            to analyze. If None and multiple units exist, uses first unit.
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+
+        Examples
+        --------
+        >>> import causalpy as cp
+        >>> # Interrupted Time Series
+        >>> result = cp.InterruptedTimeSeries(...)
+        >>> stats = result.effect_summary()
+        >>> print(stats.table)
+        >>> print(stats.text)
+        >>> # Difference-in-Differences
+        >>> result = cp.DifferenceInDifferences(...)
+        >>> stats = result.effect_summary()
+        >>> print(stats.table)
+        """
+        # Validate model type
+        if not isinstance(self.model, PyMCModel):
+            raise ValueError(
+                "effect_summary currently only supports PyMC models. "
+                "OLS model support is planned for future release."
+            )
+
+        # Detect experiment type
+        experiment_type = _detect_experiment_type(self)
+
+        if experiment_type == "did":
+            # Difference-in-Differences: scalar effect, no time dimension
+            return _effect_summary_did(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+            )
+        else:
+            # ITS or Synthetic Control: time-series effects
+            # Extract windowed impact data
+            windowed_impact, window_coords = _extract_window(
+                self, window, treated_unit=treated_unit
+            )
+
+            # Extract counterfactual for relative effects
+            counterfactual = _extract_counterfactual(
+                self, window_coords, treated_unit=treated_unit
+            )
+
+            # Compute statistics
+            hdi_prob = 1 - alpha
+            stats = _compute_statistics(
+                windowed_impact,
+                counterfactual,
+                hdi_prob=hdi_prob,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+            )
+
+            # Generate table
+            table = _generate_table(stats, cumulative=cumulative, relative=relative)
+
+            # Generate prose
+            text = _generate_prose(
+                stats,
+                window_coords,
+                alpha=alpha,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+            )
+
+            return EffectSummary(table=table, text=text)
