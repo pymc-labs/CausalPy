@@ -19,6 +19,7 @@ from causalpy.version import __version__
 
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.graded_intervention_its import GradedInterventionTimeSeries
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
@@ -26,19 +27,40 @@ from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.synthetic_control import SyntheticControl
+from .transforms import (
+    AdstockTransform,
+    DiscreteLag,
+    GeometricAdstock,
+    HillSaturation,
+    LagTransform,
+    LogisticSaturation,
+    MichaelisMentenSaturation,
+    SaturationTransform,
+    Treatment,
+)
 
 __all__ = [
     "__version__",
-    "DifferenceInDifferences",
+    "AdstockTransform",
     "create_causalpy_compatible_class",
+    "DifferenceInDifferences",
+    "DiscreteLag",
+    "GeometricAdstock",
+    "GradedInterventionTimeSeries",
+    "HillSaturation",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "LagTransform",
     "load_data",
+    "LogisticSaturation",
+    "MichaelisMentenSaturation",
     "PrePostNEGD",
     "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "SaturationTransform",
     "skl_models",
     "SyntheticControl",
+    "Treatment",
 ]

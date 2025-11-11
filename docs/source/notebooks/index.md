@@ -43,6 +43,13 @@ its_covid.ipynb
 :::
 
 :::{toctree}
+:caption: Graded Intervention Time Series
+:maxdepth: 1
+
+graded_intervention_time_series_single_channel_ols.ipynb
+:::
+
+:::{toctree}
 :caption: Regression Discontinuity
 :maxdepth: 1
 

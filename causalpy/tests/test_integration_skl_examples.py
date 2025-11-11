@@ -275,3 +275,114 @@ def test_rd_linear_with_gaussian_process():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
+
+
+@pytest.mark.integration
+def test_graded_intervention_time_series_end_to_end():
+    """
+    Test Graded Intervention Time Series end-to-end workflow.
+
+    This integration test exercises the full workflow:
+    1. Create data
+    2. Configure TransferFunctionOLS model
+    3. Run GradedInterventionTimeSeries experiment
+    4. Call all major methods: plot(), plot_transforms(), effect(), plot_effect(), summary()
+    5. Verify all methods work together
+    """
+    # Generate synthetic data
+    np.random.seed(42)
+    n = 80
+    t = np.arange(n)
+    dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+    # Create treatment with known transforms
+    treatment_raw = 50 + 30 * np.sin(2 * np.pi * t / 20) + np.random.uniform(-10, 10, n)
+    treatment_raw = np.maximum(treatment_raw, 0)
+
+    # Generate outcome (we don't know true transforms, model will estimate them)
+    y = 100.0 + 0.5 * t + 2.0 * treatment_raw + np.random.normal(0, 10, n)
+
+    df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+    df = df.set_index("date")
+
+    # Create TransferFunctionOLS model
+    model = cp.skl_models.TransferFunctionOLS(
+        saturation_type="hill",
+        saturation_grid={"slope": [1.0, 2.0, 3.0], "kappa": [40, 50, 60]},
+        adstock_grid={"half_life": [2, 3, 4], "l_max": [12], "normalize": [True]},
+        estimation_method="grid",
+        error_model="hac",
+    )
+
+    # Run experiment
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Verify experiment result
+    assert isinstance(result, cp.GradedInterventionTimeSeries)
+    assert result.score > 0.5  # Reasonable fit
+
+    # Test plot() method
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray)
+    assert len(ax) == 2
+    plt.close(fig)
+
+    # Test plot_transforms() method
+    fig, ax = result.plot_transforms()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray)
+    assert len(ax) == 2
+    plt.close(fig)
+
+    # Test effect() method
+    effect_result = result.effect(
+        window=(df.index[0], df.index[-1]), channels=["treatment"], scale=0.0
+    )
+    assert "effect_df" in effect_result
+    assert "total_effect" in effect_result
+    assert "mean_effect" in effect_result
+    assert isinstance(effect_result["effect_df"], pd.DataFrame)
+
+    # Test plot_effect() method
+    fig, ax = result.plot_effect(effect_result)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray)
+    assert len(ax) == 2
+    plt.close(fig)
+
+    # Test summary() method (capture output to avoid cluttering test output)
+    import io
+    import sys
+
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        result.summary()
+        output = sys.stdout.getvalue()
+        assert "Graded Intervention Time Series Results" in output
+        assert "Outcome variable" in output
+        assert "Treatment coefficients" in output
+    finally:
+        sys.stdout = old_stdout
+
+    # Test plot_diagnostics() method
+    sys.stdout = io.StringIO()
+    try:
+        result.plot_diagnostics(lags=10)
+    finally:
+        sys.stdout = old_stdout
+        plt.close("all")
+
+    # Test get_plot_data_ols() method
+    plot_data = result.get_plot_data_ols()
+    assert isinstance(plot_data, pd.DataFrame)
+    assert "observed" in plot_data.columns
+    assert "fitted" in plot_data.columns
+    assert "residuals" in plot_data.columns
