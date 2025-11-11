@@ -1298,3 +1298,264 @@ def test_transfer_function_ar_bayesian(mock_pymc_sample):
     assert (rho_samples > -1).all() and (rho_samples < 1).all(), (
         "Rho should be between -1 and 1"
     )
+
+
+@pytest.mark.integration
+def test_transfer_function_bayesian_with_saturation(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function with Hill saturation.
+
+    This test covers saturation transform code paths in build_model.
+    """
+    np.random.seed(42)
+    n_weeks = 100
+    t = np.arange(n_weeks)
+
+    # Simple baseline
+    baseline = 1000 + 2 * t + np.random.normal(0, 50, n_weeks)
+
+    # Treatment with saturation
+    treatment_raw = np.zeros(n_weeks)
+    treatment_raw[30:70] = np.random.uniform(5, 15, 40)
+
+    # Apply Hill saturation + adstock for data generation
+    from causalpy.transforms import GeometricAdstock, HillSaturation
+
+    sat = HillSaturation(slope=2.0, kappa=10)
+    treatment_sat = sat.apply(treatment_raw)
+
+    adstock = GeometricAdstock(half_life=2.0, normalize=True)
+    treatment_transformed = adstock.apply(treatment_sat)
+
+    outcome = baseline - 100 * treatment_transformed + np.random.normal(0, 30, n_weeks)
+
+    df = pd.DataFrame({"t": t, "y": outcome, "treatment": treatment_raw})
+
+    # Fit Bayesian model WITH saturation
+    model = cp.pymc_models.TransferFunctionLinearRegression(
+        saturation_type="hill",
+        saturation_config={
+            "slope_prior": {"dist": "Gamma", "alpha": 3, "beta": 1.5},
+            "kappa_prior": {"dist": "Gamma", "alpha": 10, "beta": 1},
+        },
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Test that saturation parameters are in posterior
+    assert "slope" in result.model.idata.posterior
+    assert "kappa" in result.model.idata.posterior
+    assert "half_life" in result.model.idata.posterior
+
+    # Test plotting works with saturation
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+
+
+@pytest.mark.integration
+def test_transfer_function_bayesian_halfnormal_prior(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function with HalfNormal priors.
+
+    This test covers HalfNormal prior code paths (lines 1233-1239).
+    """
+    np.random.seed(42)
+    n_weeks = 80
+    t = np.arange(n_weeks)
+
+    baseline = 1000 + 2 * t + np.random.normal(0, 50, n_weeks)
+    treatment = np.zeros(n_weeks)
+    treatment[20:60] = np.random.uniform(5, 10, 40)
+
+    outcome = baseline - 50 * treatment + np.random.normal(0, 30, n_weeks)
+    df = pd.DataFrame({"t": t, "y": outcome, "treatment": treatment})
+
+    # Use HalfNormal prior for half_life
+    model = cp.pymc_models.TransferFunctionLinearRegression(
+        saturation_type=None,
+        adstock_config={
+            "half_life_prior": {
+                "dist": "HalfNormal",
+                "sigma": 3,
+            },  # HalfNormal instead of Gamma
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Verify model fitted
+    assert "half_life" in result.model.idata.posterior
+    assert hasattr(result.model, "idata")
+
+
+@pytest.mark.integration
+def test_transfer_function_bayesian_logistic_saturation(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function with Logistic saturation.
+
+    This test covers logistic saturation code paths (lines 1277-1286).
+    """
+    np.random.seed(42)
+    n_weeks = 80
+    t = np.arange(n_weeks)
+
+    baseline = 1000 + 2 * t + np.random.normal(0, 50, n_weeks)
+    treatment = np.zeros(n_weeks)
+    treatment[20:60] = np.random.uniform(1, 5, 40)
+
+    outcome = baseline - 50 * treatment + np.random.normal(0, 30, n_weeks)
+    df = pd.DataFrame({"t": t, "y": outcome, "treatment": treatment})
+
+    # Use Logistic saturation
+    model = cp.pymc_models.TransferFunctionLinearRegression(
+        saturation_type="logistic",
+        saturation_config={
+            "lam_prior": {"dist": "HalfNormal", "sigma": 1},
+        },
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Verify logistic parameters are in posterior
+    assert "lam" in result.model.idata.posterior
+    assert "half_life" in result.model.idata.posterior
+
+
+@pytest.mark.integration
+def test_transfer_function_bayesian_michaelis_menten_saturation(mock_pymc_sample):
+    """
+    Test Bayesian Transfer Function with Michaelis-Menten saturation.
+
+    This test covers Michaelis-Menten saturation code paths (lines 1289-1313).
+    """
+    np.random.seed(42)
+    n_weeks = 80
+    t = np.arange(n_weeks)
+
+    baseline = 1000 + 2 * t + np.random.normal(0, 50, n_weeks)
+    treatment = np.zeros(n_weeks)
+    treatment[20:60] = np.random.uniform(5, 15, 40)
+
+    outcome = baseline - 50 * treatment + np.random.normal(0, 30, n_weeks)
+    df = pd.DataFrame({"t": t, "y": outcome, "treatment": treatment})
+
+    # Use Michaelis-Menten saturation
+    model = cp.pymc_models.TransferFunctionLinearRegression(
+        saturation_type="michaelis_menten",
+        saturation_config={
+            "alpha_prior": {"dist": "HalfNormal", "sigma": 1},
+            "lam_prior": {"dist": "HalfNormal", "sigma": 100},
+        },
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs=sample_kwargs,
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Verify Michaelis-Menten parameters are in posterior
+    assert "alpha_sat" in result.model.idata.posterior
+    assert "lam" in result.model.idata.posterior
+    assert "half_life" in result.model.idata.posterior
+
+
+@pytest.mark.integration
+def test_transfer_function_ar_bayesian_with_saturation(mock_pymc_sample):
+    """
+    Test Bayesian AR(1) Transfer Function with Hill saturation.
+
+    This test covers saturation transform code paths in AR model (lines 1746-1826).
+    """
+    np.random.seed(42)
+    n_weeks = 80
+    t = np.arange(n_weeks)
+
+    baseline = 1000 + 2 * t
+    treatment = np.zeros(n_weeks)
+    treatment[20:60] = np.random.uniform(5, 15, 40)
+
+    # Add AR(1) errors
+    rho = 0.6
+    errors = np.zeros(n_weeks)
+    errors[0] = np.random.normal(0, 30 / np.sqrt(1 - rho**2))
+    for i in range(1, n_weeks):
+        errors[i] = rho * errors[i - 1] + np.random.normal(0, 30)
+
+    outcome = baseline - 50 * treatment + errors
+    df = pd.DataFrame({"t": t, "y": outcome, "treatment": treatment})
+
+    # AR model WITH saturation
+    model = cp.pymc_models.TransferFunctionARRegression(
+        saturation_type="hill",
+        saturation_config={
+            "slope_prior": {"dist": "Gamma", "alpha": 3, "beta": 1.5},
+            "kappa_prior": {"dist": "Gamma", "alpha": 10, "beta": 1},
+        },
+        adstock_config={
+            "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+            "l_max": 8,
+            "normalize": True,
+        },
+        sample_kwargs={
+            "chains": 2,
+            "draws": 50,
+            "tune": 50,
+            "random_seed": 42,
+        },
+    )
+
+    result = cp.GradedInterventionTimeSeries(
+        data=df,
+        y_column="y",
+        treatment_names=["treatment"],
+        base_formula="1 + t",
+        model=model,
+    )
+
+    # Verify saturation parameters and rho are in posterior
+    assert "slope" in result.model.idata.posterior
+    assert "kappa" in result.model.idata.posterior
+    assert "rho" in result.model.idata.posterior
+    assert "half_life" in result.model.idata.posterior
