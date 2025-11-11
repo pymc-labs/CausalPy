@@ -1132,8 +1132,25 @@ def test_transfer_function_bayesian_adstock_only(mock_pymc_sample):
     assert isinstance(fig, plt.Figure)
     assert len(ax) == 2  # Should have 2 subplots
 
+    # Test plot_transforms (Bayesian-specific path)
+    fig_trans, ax_trans = result.plot_transforms()
+    assert isinstance(fig_trans, plt.Figure)
+    assert len(ax_trans) >= 1  # Should have at least 1 panel (adstock)
+
     # Test summary (should not raise)
     result.summary()
+
+    # Test effect() method (Bayesian-specific path)
+    effect_result = result.effect(
+        window=(df.index[0], df.index[-1]), channels=["treatment"], scale=0.0
+    )
+    assert "effect_df" in effect_result
+    assert "total_effect" in effect_result
+
+    # Test plot_effect() (Bayesian-specific path)
+    fig_eff, ax_eff = result.plot_effect(effect_result)
+    assert isinstance(fig_eff, plt.Figure)
+    assert len(ax_eff) == 2
 
     # Test that half_life posterior is reasonable (should be positive)
     half_life_samples = az.extract(result.model.idata, var_names=["half_life"])
@@ -1251,8 +1268,25 @@ def test_transfer_function_ar_bayesian(mock_pymc_sample):
     assert isinstance(fig, plt.Figure)
     assert len(ax) == 2  # Should have 2 subplots
 
+    # Test plot_transforms (Bayesian-specific path)
+    fig_trans, ax_trans = result.plot_transforms()
+    assert isinstance(fig_trans, plt.Figure)
+    assert len(ax_trans) >= 1  # Should have at least 1 panel (adstock)
+
     # Test summary (should not raise)
     result.summary()
+
+    # Test effect() method (Bayesian-specific path)
+    effect_result = result.effect(
+        window=(df.index[0], df.index[-1]), channels=["treatment"], scale=0.0
+    )
+    assert "effect_df" in effect_result
+    assert "total_effect" in effect_result
+
+    # Test plot_effect() (Bayesian-specific path)
+    fig_eff, ax_eff = result.plot_effect(effect_result)
+    assert isinstance(fig_eff, plt.Figure)
+    assert len(ax_eff) == 2
 
     # Test that half_life posterior is reasonable (should be positive)
     half_life_samples = az.extract(result.model.idata, var_names=["half_life"])

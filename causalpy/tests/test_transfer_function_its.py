@@ -1818,3 +1818,58 @@ class TestEffectWithARIMAX:
         fig, ax = result.plot_effect(effect_result)
         assert isinstance(fig, plt.Figure)
         plt.close(fig)
+
+
+class TestPlotTransformsEdgeCases:
+    """Test plot_transforms edge cases."""
+
+    def test_plot_transforms_with_lag(self):
+        """Test that lag transforms are applied correctly in build_treatment_matrix."""
+        np.random.seed(42)
+        n = 50
+        t = np.arange(n)
+        dates = pd.date_range("2020-01-01", periods=n, freq="W")
+
+        treatment_raw = 50 + np.random.uniform(-10, 10, n)
+        treatment_raw = np.maximum(treatment_raw, 0)
+        y = 100.0 + 0.5 * t + treatment_raw + np.random.normal(0, 5, n)
+
+        df = pd.DataFrame({"date": dates, "t": t, "y": y, "treatment": treatment_raw})
+        df = df.set_index("date")
+
+        model = TransferFunctionOLS(
+            saturation_type=None,
+            adstock_grid={"half_life": [3]},
+            estimation_method="grid",
+            error_model="hac",
+        )
+
+        result = GradedInterventionTimeSeries(
+            data=df,
+            y_column="y",
+            treatment_names=["treatment"],
+            base_formula="1 + t",
+            model=model,
+        )
+
+        # Manually add a lag to the treatment and test _build_treatment_matrix
+        from causalpy.transforms import DiscreteLag
+
+        treatments_with_lag = []
+        for treatment in result.treatments:
+            # Create a new treatment object with lag
+            treatment_lagged = Treatment(
+                name=treatment.name,
+                saturation=treatment.saturation,
+                adstock=treatment.adstock,
+                lag=DiscreteLag(k=1),  # Add 1-period lag
+            )
+            treatments_with_lag.append(treatment_lagged)
+
+        # Test _build_treatment_matrix with lag
+        Z, labels = result._build_treatment_matrix(df, treatments_with_lag)
+
+        assert Z.shape == (n, 1)
+        assert labels == ["treatment"]
+        # First value should be 0 due to lag
+        assert Z[0, 0] == 0
