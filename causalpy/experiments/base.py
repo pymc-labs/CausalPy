@@ -168,16 +168,19 @@ class BaseExperiment:
 
         Examples
         --------
-        >>> import causalpy as cp
-        >>> # Interrupted Time Series
-        >>> result = cp.InterruptedTimeSeries(...)
-        >>> stats = result.effect_summary()
-        >>> print(stats.table)
-        >>> print(stats.text)
-        >>> # Difference-in-Differences
-        >>> result = cp.DifferenceInDifferences(...)
-        >>> stats = result.effect_summary()
-        >>> print(stats.table)
+        Interrupted Time Series:
+
+            import causalpy as cp
+            result = cp.InterruptedTimeSeries(...)
+            stats = result.effect_summary()
+            print(stats.table)
+            print(stats.text)
+
+        Difference-in-Differences:
+
+            result = cp.DifferenceInDifferences(...)
+            stats = result.effect_summary()
+            print(stats.table)
         """
         # Validate model type
         if not isinstance(self.model, PyMCModel):
