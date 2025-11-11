@@ -219,13 +219,48 @@ def _extract_window(result, window, treated_unit=None):
             windowed_impact = post_impact.sel(obs_ind=window_coords)
         else:
             # Integer index
-            window_coords = result.datapost.index[
-                (result.datapost.index >= start) & (result.datapost.index <= end)
-            ]
+            # Ensure start and end are comparable with the index
+            # Convert to native Python int to avoid type issues
+            start_val = int(start)
+            end_val = int(end)
+            # Use result.datapost.index for filtering, then match with post_impact coordinates
+            mask = (result.datapost.index >= start_val) & (
+                result.datapost.index <= end_val
+            )
+            window_coords = result.datapost.index[mask]
             windowed_impact = post_impact.sel(obs_ind=window_coords)
     elif isinstance(window, slice):
-        # Integer slice
-        window_coords = result.datapost.index[window]
+        # Slice window - handle differently for datetime vs integer indices
+        if isinstance(result.datapost.index, pd.DatetimeIndex):
+            # For datetime, slice works directly
+            window_coords = result.datapost.index[window]
+        else:
+            # For integer indices, convert slice to value-based filtering
+            # slice(start, stop, step) -> get all values in [start, stop)
+            start_val = (
+                int(window.start)
+                if window.start is not None
+                else result.datapost.index.min()
+            )
+            stop_val = (
+                int(window.stop)
+                if window.stop is not None
+                else result.datapost.index.max() + 1
+            )
+            step = int(window.step) if window.step is not None else 1
+            # Create boolean mask for values in range
+            if step == 1:
+                mask = (result.datapost.index >= start_val) & (
+                    result.datapost.index < stop_val
+                )
+                window_coords = result.datapost.index[mask]
+            else:
+                # For non-unit step, filter then apply step
+                mask = (result.datapost.index >= start_val) & (
+                    result.datapost.index < stop_val
+                )
+                filtered = result.datapost.index[mask]
+                window_coords = filtered[::step]
         windowed_impact = post_impact.sel(obs_ind=window_coords)
     else:
         raise ValueError(
