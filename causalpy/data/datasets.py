@@ -43,15 +43,28 @@ DATASETS = {
 }
 
 
-def _get_data_home() -> pathlib.PosixPath:
+def _get_data_home() -> pathlib.Path:
     """Return the path of the data directory"""
     return pathlib.Path(cp.__file__).parents[1] / "causalpy" / "data"
 
 
-def load_data(dataset: str = None) -> pd.DataFrame:
-    """Loads the requested dataset and returns a pandas DataFrame.
+def load_data(dataset: str | None = None) -> pd.DataFrame:
+    """Load the requested dataset and return a pandas DataFrame.
 
-    :param dataset: The desired dataset to load
+    Parameters
+    ----------
+    dataset : str, optional
+        The desired dataset to load. If None, raises ValueError.
+
+    Returns
+    -------
+    pd.DataFrame
+        The loaded dataset as a pandas DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If the requested dataset is not found.
     """
 
     if dataset in DATASETS:

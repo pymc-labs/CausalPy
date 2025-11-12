@@ -37,3 +37,13 @@
 - **Formulas**: Use patsy for formula parsing (via `dmatrices()`)
 - **Custom exceptions**: Use project-specific exceptions from `causalpy.custom_exceptions`: `FormulaException`, `DataException`, `BadIndexException`
 - **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
+
+## Type Checking
+
+- **Tool**: MyPy
+- **Configuration**: Integrated as a pre-commit hook.
+- **Scope**: Checks Python files within the `causalpy/` directory.
+- **Settings**:
+    - `ignore-missing-imports`: Enabled to allow for gradual adoption of type hints without requiring all third-party libraries to have stubs.
+    - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
+- **Execution**: Run automatically via `pre-commit run --all-files` or on commit.

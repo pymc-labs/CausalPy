@@ -48,3 +48,10 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports]
+        files: ^causalpy/
+        additional_dependencies: [numpy>=1.20, pandas-stubs]

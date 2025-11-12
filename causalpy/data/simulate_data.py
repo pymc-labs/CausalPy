@@ -15,8 +15,6 @@
 Functions that generate data sets used in examples
 """
 
-from typing import Any
-
 import numpy as np
 import pandas as pd
 from scipy.stats import dirichlet, gamma, norm, uniform
@@ -31,7 +29,7 @@ def _smoothed_gaussian_random_walk(
     gaussian_random_walk_mu: float,
     gaussian_random_walk_sigma: float,
     N: int,
-    lowess_kwargs: dict[str, Any],
+    lowess_kwargs: dict,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generates Gaussian random walk data and applies LOWESS.
@@ -57,7 +55,7 @@ def generate_synthetic_control_data(
     treatment_time: int = 70,
     grw_mu: float = 0.25,
     grw_sigma: float = 1,
-    lowess_kwargs: dict[str, Any] | None = None,
+    lowess_kwargs: dict = default_lowess_kwargs,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Generates data for synthetic control example.
@@ -78,9 +76,6 @@ def generate_synthetic_control_data(
     >>> from causalpy.data.simulate_data import generate_synthetic_control_data
     >>> df, weightings_true = generate_synthetic_control_data(treatment_time=70)
     """
-    if lowess_kwargs is None:
-        lowess_kwargs = default_lowess_kwargs
-
     # 1. Generate non-treated variables
     df = pd.DataFrame(
         {
@@ -166,7 +161,9 @@ def generate_time_series_data(
     return df
 
 
-def generate_time_series_data_seasonal(treatment_time: pd.Timestamp) -> pd.DataFrame:
+def generate_time_series_data_seasonal(
+    treatment_time: pd.Timestamp,
+) -> pd.DataFrame:
     """
     Generates 10 years of monthly data with seasonality
     """
@@ -180,11 +177,13 @@ def generate_time_series_data_seasonal(treatment_time: pd.Timestamp) -> pd.DataF
         t=df.index,
     ).set_index("date", drop=True)
     month_effect = np.array([11, 13, 12, 15, 19, 23, 21, 28, 20, 17, 15, 12])
-    df["y"] = 0.2 * df["t"] + 2 * month_effect[df.month.values - 1]
+    df["y"] = 0.2 * df["t"] + 2 * month_effect[np.asarray(df.month.values) - 1]
 
     N = df.shape[0]
     idx = np.arange(N)[df.index > treatment_time]
-    df["causal effect"] = 100 * gamma(10).pdf(np.arange(0, N, 1) - np.min(idx))
+    df["causal effect"] = 100 * gamma(10).pdf(
+        np.array(np.arange(0, N, 1)) - int(np.min(idx))
+    )
 
     df["y"] += df["causal effect"]
     df["y"] += norm(0, 2).rvs(N)
@@ -263,13 +262,13 @@ def generate_did() -> pd.DataFrame:
     df["post_treatment"] = df["t"] > intervention_time
 
     df["y"] = outcome(
-        df["t"],
+        np.asarray(df["t"]),
         control_intercept,
         treat_intercept_delta,
         trend,
         Δ,
-        df["group"],
-        df["post_treatment"],
+        np.asarray(df["group"]),
+        np.asarray(df["post_treatment"]),
     )
     df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df
@@ -310,8 +309,8 @@ def generate_regression_discontinuity_data(
 def generate_ancova_data(
     N: int = 200,
     pre_treatment_means: np.ndarray = np.array([10, 12]),
-    treatment_effect: float = 2,
-    sigma: float = 1,
+    treatment_effect: int = 2,
+    sigma: int = 1,
 ) -> pd.DataFrame:
     """
     Generate ANCOVA example data
@@ -445,7 +444,7 @@ def generate_multicell_geolift_data() -> pd.DataFrame:
 
 
 def generate_seasonality(
-    n: int = 12, amplitude: float = 1, length_scale: float = 0.5
+    n: int = 12, amplitude: int = 1, length_scale: float = 0.5
 ) -> np.ndarray:
     """Generate monthly seasonality by sampling from a Gaussian process with a
     Gaussian kernel, using numpy code"""
@@ -463,9 +462,9 @@ def generate_seasonality(
 def periodic_kernel(
     x1: np.ndarray,
     x2: np.ndarray,
-    period: float = 1,
-    length_scale: float = 1,
-    amplitude: float = 1,
+    period: int = 1,
+    length_scale: float = 1.0,
+    amplitude: int = 1,
 ) -> np.ndarray:
     """Generate a periodic kernel for gaussian process"""
     return amplitude**2 * np.exp(
@@ -475,10 +474,10 @@ def periodic_kernel(
 
 def create_series(
     n: int = 52,
-    amplitude: float = 1,
-    length_scale: float = 2,
+    amplitude: int = 1,
+    length_scale: int = 2,
     n_years: int = 4,
-    intercept: float = 3,
+    intercept: int = 3,
 ) -> np.ndarray:
     """
     Returns numpy tile with generated seasonality data repeated over
