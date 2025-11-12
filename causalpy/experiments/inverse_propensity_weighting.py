@@ -78,9 +78,9 @@ class InversePropensityWeighting(BaseExperiment):
         formula: str,
         outcome_variable: str,
         weighting_scheme: str,
-        model=None,
-        **kwargs,
-    ):
+        model: BaseExperiment | None = None,
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
         self.expt_type = "Inverse Propensity Score Weighting"
         self.data = data
@@ -98,12 +98,12 @@ class InversePropensityWeighting(BaseExperiment):
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
         self.coords = COORDS
-        self.X_outcome = pd.DataFrame(self.X, columns=self.coords["coeffs"])
+        self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
-        self.model.fit(X=self.X, t=self.t, coords=COORDS)
+        self.model.fit(X=self.X, t=self.t, coords=COORDS)  # type: ignore[call-arg]
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         treatment = self.formula.split("~")[0]
         test = treatment.strip() in self.data.columns
@@ -125,7 +125,9 @@ class InversePropensityWeighting(BaseExperiment):
                 """
             )
 
-    def make_robust_adjustments(self, ps):
+    def make_robust_adjustments(
+        self, ps: np.ndarray
+    ) -> tuple[pd.Series, pd.Series, int, int]:
         """This estimator is discussed in Aronow
         and Miller's book as being related to the
         Horvitz Thompson method"""
@@ -145,7 +147,9 @@ class InversePropensityWeighting(BaseExperiment):
         weighted_outcome0 = outcome_ntrt * i_propensity0
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
-    def make_raw_adjustments(self, ps):
+    def make_raw_adjustments(
+        self, ps: np.ndarray
+    ) -> tuple[pd.Series, pd.Series, int, int]:
         """This estimator is discussed in Aronow and
         Miller as the simplest of base form of
         inverse propensity weighting schemes"""
@@ -164,7 +168,9 @@ class InversePropensityWeighting(BaseExperiment):
         weighted_outcome0 = outcome_ntrt * i_propensity0
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
-    def make_overlap_adjustments(self, ps):
+    def make_overlap_adjustments(
+        self, ps: np.ndarray
+    ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
         """This weighting scheme was adapted from
         Lucy D’Agostino McGowan's blog on
         Propensity Score Weights referenced in
@@ -184,7 +190,9 @@ class InversePropensityWeighting(BaseExperiment):
         weighted_outcome0 = (1 - t[t == 0]) * outcome_ntrt * i_propensity0
         return weighted_outcome0, weighted_outcome1, n_ntrt, n_trt
 
-    def make_doubly_robust_adjustment(self, ps):
+    def make_doubly_robust_adjustment(
+        self, ps: np.ndarray
+    ) -> tuple[pd.Series, pd.Series, None, None]:
         """The doubly robust weighting scheme is also
         discussed in Aronow and Miller, but a bit more generally
         than our implementation here. Here we have specified
@@ -203,7 +211,9 @@ class InversePropensityWeighting(BaseExperiment):
         weighted_outcome1 = t * (self.y - m1_pred) / X["ps"] + m1_pred
         return weighted_outcome0, weighted_outcome1, None, None
 
-    def get_ate(self, i, idata, method="doubly_robust"):
+    def get_ate(
+        self, i: int, idata: az.InferenceData, method: str = "doubly_robust"
+    ) -> list[float]:
         ### Post processing the sample posterior distribution for propensity scores
         ### One sample at a time.
         ps = idata["posterior"]["p"].stack(z=("chain", "draw"))[:, i].values
@@ -231,23 +241,27 @@ class InversePropensityWeighting(BaseExperiment):
                 weighted_outcome_trt,
                 n_ntrt,
                 n_trt,
-            ) = self.make_overlap_adjustments(ps)
-            ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)
-            trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)
+            ) = self.make_overlap_adjustments(ps)  # type: ignore[assignment]
+            ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)  # type: ignore[arg-type]
+            trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)  # type: ignore[arg-type]
         else:
             (
                 weighted_outcome_ntrt,
                 weighted_outcome_trt,
                 n_ntrt,
                 n_trt,
-            ) = self.make_doubly_robust_adjustment(ps)
+            ) = self.make_doubly_robust_adjustment(ps)  # type: ignore[assignment]
             trt = np.mean(weighted_outcome_trt)
             ntrt = np.mean(weighted_outcome_ntrt)
         ate = trt - ntrt
         return [ate, trt, ntrt]
 
     def plot_ate(
-        self, idata=None, method=None, prop_draws=100, ate_draws=300
+        self,
+        idata: az.InferenceData | None = None,
+        method: str | None = None,
+        prop_draws: int = 100,
+        ate_draws: int = 300,
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         if idata is None:
             idata = self.model.idata
@@ -376,7 +390,9 @@ class InversePropensityWeighting(BaseExperiment):
 
         return fig, axs
 
-    def weighted_percentile(self, data, weights, perc):
+    def weighted_percentile(
+        self, data: np.ndarray, weights: np.ndarray, perc: float
+    ) -> float:
         """
         perc : percentile in [0-1]!
         """
@@ -391,7 +407,10 @@ class InversePropensityWeighting(BaseExperiment):
         return np.interp(perc, cdf, data)
 
     def plot_balance_ecdf(
-        self, covariate, idata=None, weighting_scheme=None
+        self,
+        covariate: str,
+        idata: az.InferenceData | None = None,
+        weighting_scheme: str | None = None,
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plotting function takes a single covariate and shows the

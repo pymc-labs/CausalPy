@@ -17,6 +17,8 @@ Regression kink design
 """
 
 import warnings  # noqa: I001
+from typing import Union
+
 
 from matplotlib import pyplot as plt
 import numpy as np
@@ -49,12 +51,12 @@ class RegressionKink(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         kink_point: float,
-        model=None,
+        model: BaseExperiment | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs,
-    ):
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
         self.data = data
@@ -130,7 +132,7 @@ class RegressionKink(BaseExperiment):
             mu_kink_left, mu_kink, mu_kink_right, epsilon
         )
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if "treated" not in self.formula:
             raise FormulaException(
@@ -149,7 +151,12 @@ class RegressionKink(BaseExperiment):
             raise ValueError("Epsilon must be greater than zero.")
 
     @staticmethod
-    def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
+    def _eval_gradient_change(
+        mu_kink_left: xr.DataArray,
+        mu_kink: xr.DataArray,
+        mu_kink_right: xr.DataArray,
+        epsilon: float,
+    ) -> xr.DataArray:
         """Evaluate the gradient change at the kink point.
         It works by evaluating the model below the kink point, at the kink point,
         and above the kink point.
@@ -160,7 +167,7 @@ class RegressionKink(BaseExperiment):
         gradient_change = gradient_right - gradient_left
         return gradient_change
 
-    def _probe_kink_point(self):
+    def _probe_kink_point(self) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         """Probe the kink point to evaluate the predicted outcome at the kink point and
         either side."""
         # Create a dataframe to evaluate predicted outcome at the kink point and either
@@ -185,11 +192,11 @@ class RegressionKink(BaseExperiment):
         mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
         return mu_kink_left, mu_kink, mu_kink_right
 
-    def _is_treated(self, x):
+    def _is_treated(self, x: Union[np.ndarray, pd.Series]) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -203,12 +210,14 @@ class RegressionKink(BaseExperiment):
         Kink point on running variable: {self.kink_point}
 
         Results:
-        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
+        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)}
         """
         )
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -231,15 +240,15 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
         ci = (
             r"$CI_{94\%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+            + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""
-            Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
+            Change in gradient = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)},
             """
         ax.set(title=r2 + "\n" + grad_change + ci)
         # Intervention line

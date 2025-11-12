@@ -15,6 +15,8 @@
 Difference in differences
 """
 
+from typing import Union
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -92,8 +94,8 @@ class DifferenceInDifferences(BaseExperiment):
         time_variable_name: str,
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
-        model=None,
-        **kwargs,
+        model: Union[PyMCModel, RegressorMixin] | None = None,
+        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
@@ -234,14 +236,14 @@ class DifferenceInDifferences(BaseExperiment):
                 f"{self.group_variable_name}:{self.post_treatment_variable_name}"
             )
             matched_key = next((k for k in coef_map if interaction_term in k), None)
-            att = coef_map.get(matched_key)
+            att = coef_map.get(matched_key) if matched_key is not None else None
             self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
 
         return
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
 
@@ -269,7 +271,7 @@ class DifferenceInDifferences(BaseExperiment):
                 coded. Consisting of 0's and 1's only."""
             )
 
-    def _validate_formula_interaction_terms(self):
+    def _validate_formula_interaction_terms(self) -> None:
         """
         Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
         Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
@@ -299,7 +301,7 @@ class DifferenceInDifferences(BaseExperiment):
                 "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -311,11 +313,13 @@ class DifferenceInDifferences(BaseExperiment):
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
-    def _causal_impact_summary_stat(self, round_to=None) -> str:
+    def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
-    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(
+        self, round_to: int | None = None, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 
@@ -463,9 +467,10 @@ class DifferenceInDifferences(BaseExperiment):
         )
         return fig, ax
 
-    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
-        round_to = kwargs.get("round_to")
         fig, ax = plt.subplots()
 
         # Plot raw data
@@ -528,11 +533,15 @@ class DifferenceInDifferences(BaseExperiment):
             va="center",
         )
         # formatting
+        # In OLS context, causal_impact should be a float, but mypy doesn't know this
+        causal_impact_value = (
+            float(self.causal_impact) if self.causal_impact is not None else 0.0
+        )
         ax.set(
             xlim=[-0.05, 1.1],
             xticks=[0, 1],
             xticklabels=["pre", "post"],
-            title=f"Causal impact = {round_num(self.causal_impact, round_to)}",
+            title=f"Causal impact = {round_num(causal_impact_value, round_to)}",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return fig, ax

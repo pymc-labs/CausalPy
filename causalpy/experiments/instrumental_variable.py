@@ -97,10 +97,10 @@ class InstrumentalVariable(BaseExperiment):
         data: pd.DataFrame,
         instruments_formula: str,
         formula: str,
-        model=None,
-        priors=None,
-        **kwargs,
-    ):
+        model: BaseExperiment | None = None,
+        priors: dict | None = None,
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
         self.data = data
@@ -138,11 +138,11 @@ class InstrumentalVariable(BaseExperiment):
                 "lkj_sd": 1,
             }
         self.priors = priors
-        self.model.fit(
+        self.model.fit(  # type: ignore[call-arg,union-attr]
             X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
         )
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns
@@ -165,7 +165,7 @@ class InstrumentalVariable(BaseExperiment):
                 The coefficients should be interpreted appropriately."""
             )
 
-    def get_2SLS_fit(self):
+    def get_2SLS_fit(self) -> None:
         """
         Two Stage Least Squares Fit
 
@@ -187,7 +187,7 @@ class InstrumentalVariable(BaseExperiment):
         self.first_stage_reg = first_stage_reg
         self.second_stage_reg = second_stage_reg
 
-    def get_naive_OLS_fit(self):
+    def get_naive_OLS_fit(self) -> None:
         """
         Naive Ordinary Least Squares
 
@@ -199,7 +199,7 @@ class InstrumentalVariable(BaseExperiment):
         self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
         self.ols_reg = ols_reg
 
-    def plot(self, round_to=None):
+    def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
         """
         Plot the results
 
@@ -208,7 +208,7 @@ class InstrumentalVariable(BaseExperiment):
         """
         raise NotImplementedError("Plot method not implemented.")
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:

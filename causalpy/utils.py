@@ -34,7 +34,7 @@ def _series_has_2_levels(series: pd.Series) -> bool:
     return len(pd.Categorical(series).categories) == 2
 
 
-def round_num(n, round_to):
+def round_num(n: float, round_to: int | None) -> str:
     """
     Return a string representing a number with `round_to` significant figures.
 
@@ -42,14 +42,14 @@ def round_num(n, round_to):
     ----------
     n : float
         number to round
-    round_to : int
+    round_to : int, optional
         number of significant figures
     """
     sig_figs = _format_sig_figs(n, round_to)
     return f"{n:.{sig_figs}g}"
 
 
-def _format_sig_figs(value, default=None):
+def _format_sig_figs(value: float, default: int | None = None) -> int:
     """Get a default number of significant figures.
 
     Gives the integer part or `default`, whichever is bigger.
@@ -68,7 +68,7 @@ def _format_sig_figs(value, default=None):
     return max(int(np.log10(np.abs(value))) + 1, default)
 
 
-def convert_to_string(x: Union[float, xr.DataArray], round_to: int = 2) -> str:
+def convert_to_string(x: Union[float, xr.DataArray], round_to: int | None = 2) -> str:
     """Utility function which takes in numeric inputs and returns a string."""
     if isinstance(x, float):
         # In the case of a float, we return the number rounded to 2 decimal places
