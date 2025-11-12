@@ -16,6 +16,7 @@ Reporting utilities for causal inference experiments.
 """
 
 from dataclasses import dataclass
+from typing import Literal, Optional, Union
 
 import arviz as az
 import numpy as np
@@ -40,6 +41,245 @@ class EffectSummary:
     text: str
 
 
+# ==============================================================================
+# Helper functions for common operations
+# ==============================================================================
+
+
+def _extract_hdi_bounds(
+    hdi_result: Union[xr.Dataset, xr.DataArray], hdi_prob: float = 0.95
+) -> tuple[float, float]:
+    """Extract HDI lower and upper bounds from arviz.hdi result.
+
+    Handles both Dataset (when arviz returns Dataset) and DataArray formats.
+
+    Parameters
+    ----------
+    hdi_result : xr.Dataset or xr.DataArray
+        Result from arviz.hdi()
+    hdi_prob : float
+        HDI probability (not used in extraction but kept for signature consistency)
+
+    Returns
+    -------
+    tuple[float, float]
+        Lower and upper HDI bounds
+    """
+    if isinstance(hdi_result, xr.Dataset):
+        hdi_data = list(hdi_result.data_vars.values())[0]
+        lower = float(hdi_data.sel(hdi="lower").values)
+        upper = float(hdi_data.sel(hdi="higher").values)
+    else:
+        lower = float(hdi_result.sel(hdi="lower").values)
+        upper = float(hdi_result.sel(hdi="higher").values)
+    return lower, upper
+
+
+def _compute_tail_probabilities(
+    effect: xr.DataArray, direction: Literal["increase", "decrease", "two-sided"]
+) -> dict[str, float]:
+    """Compute tail probabilities based on direction.
+
+    Parameters
+    ----------
+    effect : xr.DataArray
+        Effect posterior draws
+    direction : {"increase", "decrease", "two-sided"}
+        Direction for tail probability
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
+    """
+    if direction == "increase":
+        return {"p_gt_0": float((effect > 0).mean().values)}
+    elif direction == "decrease":
+        return {"p_lt_0": float((effect < 0).mean().values)}
+    else:  # two-sided
+        p_gt = float((effect > 0).mean().values)
+        p_lt = float((effect < 0).mean().values)
+        p_two_sided = 2 * min(p_gt, p_lt)
+        return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
+
+
+def _compute_rope_probability(
+    effect: xr.DataArray,
+    min_effect: float,
+    direction: Literal["increase", "decrease", "two-sided"],
+) -> float:
+    """Compute Region of Practical Equivalence probability.
+
+    Parameters
+    ----------
+    effect : xr.DataArray
+        Effect posterior draws
+    min_effect : float
+        Minimum effect size threshold
+    direction : {"increase", "decrease", "two-sided"}
+        Direction for ROPE calculation
+
+    Returns
+    -------
+    float
+        Probability that effect exceeds min_effect threshold
+    """
+    if direction == "two-sided":
+        return float((np.abs(effect) > min_effect).mean().values)
+    else:
+        return float((effect > min_effect).mean().values)
+
+
+def _format_number(x: float, decimals: int = 2) -> str:
+    """Format number for prose output.
+
+    Parameters
+    ----------
+    x : float
+        Number to format
+    decimals : int
+        Number of decimal places
+
+    Returns
+    -------
+    str
+        Formatted number string
+    """
+    return f"{x:.{decimals}f}"
+
+
+# ==============================================================================
+# Unified scalar effect statistics (DiD, RD, RKink)
+# ==============================================================================
+
+
+def _compute_statistics_scalar(
+    effect: xr.DataArray,
+    hdi_prob: float = 0.95,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    min_effect: Optional[float] = None,
+) -> dict[str, float]:
+    """Compute statistics for scalar causal effects (DiD, RD, RKink).
+
+    Works for any scalar effect with posterior draws (chain, draw dimensions).
+
+    Parameters
+    ----------
+    effect : xr.DataArray
+        Scalar effect with posterior draws (must have chain, draw dimensions)
+    hdi_prob : float
+        Probability for HDI interval
+    direction : {"increase", "decrease", "two-sided"}
+        Direction for tail probability calculation
+    min_effect : float, optional
+        Minimum effect size for ROPE analysis
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
+    """
+    stats = {
+        "mean": float(effect.mean(dim=["chain", "draw"]).values),
+        "median": float(effect.median(dim=["chain", "draw"]).values),
+    }
+
+    # HDI using helper
+    hdi_result = az.hdi(effect, hdi_prob=hdi_prob)
+    stats["hdi_lower"], stats["hdi_upper"] = _extract_hdi_bounds(hdi_result)
+
+    # Tail probabilities using helper
+    stats.update(_compute_tail_probabilities(effect, direction))
+
+    # ROPE using helper
+    if min_effect is not None:
+        stats["p_rope"] = _compute_rope_probability(effect, min_effect, direction)
+
+    return stats
+
+
+def _generate_table_scalar(
+    stats: dict[str, float], index_name: str = "effect"
+) -> pd.DataFrame:
+    """Generate summary table for scalar effects (DiD, RD, RKink).
+
+    Parameters
+    ----------
+    stats : dict[str, float]
+        Statistics dictionary from _compute_statistics_scalar()
+    index_name : str
+        Name for the table index (e.g., "treatment_effect", "discontinuity")
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary table with one row
+    """
+    row = {
+        "mean": stats["mean"],
+        "median": stats["median"],
+        "hdi_lower": stats["hdi_lower"],
+        "hdi_upper": stats["hdi_upper"],
+    }
+
+    # Add tail probabilities (whichever are present)
+    for key in ["p_gt_0", "p_lt_0", "p_two_sided", "prob_of_effect", "p_rope"]:
+        if key in stats:
+            row[key] = stats[key]
+
+    return pd.DataFrame([row], index=[index_name])
+
+
+def _generate_prose_scalar(
+    stats: dict[str, float],
+    effect_name: str,
+    alpha: float = 0.05,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+) -> str:
+    """Generate prose summary for scalar effects.
+
+    Parameters
+    ----------
+    stats : dict[str, float]
+        Statistics dictionary from _compute_statistics_scalar()
+    effect_name : str
+        Name of the effect for prose (e.g., "average treatment effect",
+        "discontinuity at threshold", "change in gradient at the kink point")
+    alpha : float
+        Significance level for HDI interval
+    direction : {"increase", "decrease", "two-sided"}
+        Direction for tail probability
+
+    Returns
+    -------
+    str
+        Prose summary of the effect
+    """
+    hdi_pct = int((1 - alpha) * 100)
+    mean = stats["mean"]
+    lower = stats["hdi_lower"]
+    upper = stats["hdi_upper"]
+
+    # Direction-specific text
+    if direction == "increase":
+        p_val = stats.get("p_gt_0", 0.0)
+        direction_text = "increase"
+    elif direction == "decrease":
+        p_val = stats.get("p_lt_0", 0.0)
+        direction_text = "decrease"
+    else:
+        p_val = stats.get("prob_of_effect", 0.0)
+        direction_text = "effect"
+
+    prose = (
+        f"The {effect_name} was {_format_number(mean)} "
+        f"({hdi_pct}% HDI [{_format_number(lower)}, {_format_number(upper)}]), "
+        f"with a posterior probability of an {direction_text} of {_format_number(p_val, 3)}."
+    )
+
+    return prose
+
+
 def _detect_experiment_type(result):
     """Detect experiment type from result attributes."""
     if hasattr(result, "discontinuity_at_threshold"):
@@ -60,9 +300,9 @@ def _detect_experiment_type(result):
 
 def _effect_summary_did(
     result,
-    direction="increase",
-    alpha=0.05,
-    min_effect=None,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: Optional[float] = None,
 ):
     """Generate effect summary for Difference-in-Differences experiments."""
     causal_impact = result.causal_impact
@@ -75,29 +315,26 @@ def _effect_summary_did(
             "Please use a PyMC model."
         )
 
-    # Compute statistics for scalar effect
+    # Compute statistics using unified function
     hdi_prob = 1 - alpha
-    stats = _compute_statistics_did(
-        causal_impact,
-        hdi_prob=hdi_prob,
-        direction=direction,
-        min_effect=min_effect,
+    stats = _compute_statistics_scalar(
+        causal_impact, hdi_prob=hdi_prob, direction=direction, min_effect=min_effect
     )
 
-    # Generate table
-    table = _generate_table_did(stats)
-
-    # Generate prose
-    text = _generate_prose_did(stats, alpha=alpha, direction=direction)
+    # Generate table and prose using unified functions
+    table = _generate_table_scalar(stats, index_name="treatment_effect")
+    text = _generate_prose_scalar(
+        stats, "average treatment effect", alpha=alpha, direction=direction
+    )
 
     return EffectSummary(table=table, text=text)
 
 
 def _effect_summary_rd(
     result,
-    direction="increase",
-    alpha=0.05,
-    min_effect=None,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: Optional[float] = None,
 ):
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
@@ -106,16 +343,15 @@ def _effect_summary_rd(
     is_pymc = isinstance(discontinuity, xr.DataArray)
 
     if is_pymc:
-        # PyMC model: use posterior draws
+        # PyMC model: use unified scalar functions
         hdi_prob = 1 - alpha
-        stats = _compute_statistics_rd(
-            discontinuity,
-            hdi_prob=hdi_prob,
-            direction=direction,
-            min_effect=min_effect,
+        stats = _compute_statistics_scalar(
+            discontinuity, hdi_prob=hdi_prob, direction=direction, min_effect=min_effect
         )
-        table = _generate_table_rd(stats)
-        text = _generate_prose_rd(stats, alpha=alpha, direction=direction)
+        table = _generate_table_scalar(stats, index_name="discontinuity")
+        text = _generate_prose_scalar(
+            stats, "discontinuity at threshold", alpha=alpha, direction=direction
+        )
     else:
         # OLS model: calculate from model
         stats = _compute_statistics_rd_ols(result, alpha=alpha)
@@ -125,175 +361,122 @@ def _effect_summary_rd(
     return EffectSummary(table=table, text=text)
 
 
-def _compute_statistics_did(
-    causal_impact,
-    hdi_prob=0.95,
-    direction="increase",
-    min_effect=None,
-):
-    """Compute statistics for DiD scalar effect."""
-    stats = {
-        "mean": float(causal_impact.mean(dim=["chain", "draw"]).values),
-        "median": float(causal_impact.median(dim=["chain", "draw"]).values),
-    }
+# ==============================================================================
+# Window and counterfactual extraction helpers
+# ==============================================================================
 
-    # HDI
-    hdi_result = az.hdi(causal_impact, hdi_prob=hdi_prob)
-    if isinstance(hdi_result, xr.Dataset):
-        hdi_data = list(hdi_result.data_vars.values())[0]
-        stats["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+
+def _select_treated_unit(
+    data: xr.DataArray, treated_unit: Optional[str]
+) -> xr.DataArray:
+    """Select a specific treated unit from multi-unit xarray data.
+
+    Parameters
+    ----------
+    data : xr.DataArray
+        Data with treated_units dimension
+    treated_unit : str or None
+        Name of treated unit to select. If None, selects first unit.
+
+    Returns
+    -------
+    xr.DataArray
+        Data for the selected treated unit
+    """
+    # Validate coordinate/dimension size match
+    if "treated_units" in data.dims:
+        coord_len = len(data.coords["treated_units"])
+        dim_size = data.sizes["treated_units"]
+        if coord_len != dim_size:
+            # Shape mismatch - slice to match coordinates
+            data = data.isel(treated_units=slice(0, coord_len))
+
+    if treated_unit is not None:
+        return data.sel(treated_units=treated_unit)
     else:
-        stats["hdi_lower"] = float(hdi_result.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_result.sel(hdi="higher").values)
-
-    # Tail probabilities
-    if direction == "increase":
-        stats["p_gt_0"] = float((causal_impact > 0).mean().values)
-    elif direction == "decrease":
-        stats["p_lt_0"] = float((causal_impact < 0).mean().values)
-    else:  # two-sided
-        p_gt = float((causal_impact > 0).mean().values)
-        p_lt = float((causal_impact < 0).mean().values)
-        p_two_sided = 2 * min(p_gt, p_lt)
-        stats["p_two_sided"] = p_two_sided
-        stats["prob_of_effect"] = 1 - p_two_sided
-
-    # ROPE
-    if min_effect is not None:
-        if direction == "two-sided":
-            stats["p_rope"] = float((np.abs(causal_impact) > min_effect).mean().values)
-        else:
-            stats["p_rope"] = float((causal_impact > min_effect).mean().values)
-
-    return stats
+        return data.isel(treated_units=0)
 
 
-def _generate_table_did(stats):
-    """Generate DataFrame table for DiD (single row, no cumulative/relative)."""
-    row = {
-        "mean": stats["mean"],
-        "median": stats["median"],
-        "hdi_lower": stats["hdi_lower"],
-        "hdi_upper": stats["hdi_upper"],
-    }
+def _select_treated_unit_numpy(
+    data: np.ndarray, result, treated_unit: Optional[str]
+) -> np.ndarray:
+    """Select a specific treated unit from multi-dimensional numpy array.
 
-    # Add tail probabilities
-    if "p_gt_0" in stats:
-        row["p_gt_0"] = stats["p_gt_0"]
-    if "p_lt_0" in stats:
-        row["p_lt_0"] = stats["p_lt_0"]
-    if "p_two_sided" in stats:
-        row["p_two_sided"] = stats["p_two_sided"]
-        row["prob_of_effect"] = stats["prob_of_effect"]
+    Parameters
+    ----------
+    data : np.ndarray
+        Multi-dimensional array where second dimension is treated units
+    result
+        Experiment result object with treated_units attribute
+    treated_unit : str or None
+        Name of treated unit to select. If None, selects first unit.
 
-    # Add ROPE
-    if "p_rope" in stats:
-        row["p_rope"] = stats["p_rope"]
-
-    df = pd.DataFrame([row], index=["treatment_effect"])
-    return df
-
-
-def _generate_prose_did(stats, alpha=0.05, direction="increase"):
-    """Generate prose summary for DiD scalar effect."""
-    hdi_pct = int((1 - alpha) * 100)
-
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    mean = stats["mean"]
-    lower = stats["hdi_lower"]
-    upper = stats["hdi_upper"]
-
-    # Tail probability text
-    if direction == "increase":
-        p_val = stats.get("p_gt_0", 0.0)
-        direction_text = "increase"
-    elif direction == "decrease":
-        p_val = stats.get("p_lt_0", 0.0)
-        direction_text = "decrease"
-    else:  # two-sided
-        p_val = stats.get("prob_of_effect", 0.0)
-        direction_text = "effect"
-
-    prose = (
-        f"The average treatment effect was {fmt_num(mean)} "
-        f"({hdi_pct}% HDI [{fmt_num(lower)}, {fmt_num(upper)}]), "
-        f"with a posterior probability of an {direction_text} of {fmt_num(p_val, 3)}."
-    )
-
-    return prose
+    Returns
+    -------
+    np.ndarray
+        Data for the selected treated unit (1D)
+    """
+    if treated_unit is not None and hasattr(result, "treated_units"):
+        unit_idx = result.treated_units.index(treated_unit)
+        return data[:, unit_idx]
+    else:
+        return data[:, 0]
 
 
 def _extract_window(result, window, treated_unit=None):
-    """Extract windowed impact data based on window specification."""
+    """Extract windowed impact data based on window specification.
+
+    Assumes result.post_impact is properly shaped xarray or numpy array.
+
+    Parameters
+    ----------
+    result
+        Experiment result object with post_impact and datapost attributes
+    window : str, tuple, or slice
+        Window specification: "post", (start, end) tuple, or slice object
+    treated_unit : str, optional
+        For multi-unit experiments, specify which treated unit to analyze
+
+    Returns
+    -------
+    tuple
+        (windowed_impact, window_coords) where windowed_impact is the data
+        and window_coords is the corresponding index
+    """
     post_impact = result.post_impact
 
-    # Check if PyMC (xarray with chain/draw dims) or OLS (numpy array or xarray without chains)
-    # For OLS Synthetic Control, post_impact can be xarray but without chain/draw dimensions
+    # Check if PyMC (xarray with chain/draw dims) or OLS
     is_pymc = isinstance(post_impact, xr.DataArray) and (
         "chain" in post_impact.dims or "draw" in post_impact.dims
     )
 
-    if is_pymc:
-        # Handle treated_unit selection for multi-unit experiments
-        if "treated_units" in post_impact.dims:
-            if treated_unit is not None:
-                post_impact = post_impact.sel(treated_units=treated_unit)
-            else:
-                # Use first unit if multiple exist
-                post_impact = post_impact.isel(treated_units=0)
-    else:
-        # OLS model - handle treated_unit if multi-dimensional
-        # For OLS, post_impact might be xarray (from SyntheticControl) or numpy array
-        if isinstance(post_impact, xr.DataArray):
-            # OLS with xarray (e.g., SyntheticControl)
-            if "treated_units" in post_impact.dims:
-                # Check for shape mismatch between data and coordinates
-                # This can happen when post_impact is calculated incorrectly in SyntheticControl
-                treated_units_coord_len = len(post_impact.coords["treated_units"])
-                treated_units_dim_size = post_impact.sizes["treated_units"]
+    # Handle treated_unit selection using helper functions
+    if isinstance(post_impact, xr.DataArray) and "treated_units" in post_impact.dims:
+        post_impact = _select_treated_unit(post_impact, treated_unit)
+    elif (
+        not isinstance(post_impact, xr.DataArray)
+        and hasattr(post_impact, "ndim")
+        and post_impact.ndim > 1
+    ):
+        post_impact = _select_treated_unit_numpy(post_impact, result, treated_unit)
 
-                if treated_units_coord_len != treated_units_dim_size:
-                    # Shape mismatch - take only the slice that matches the coordinates
-                    # This typically means we need the first `treated_units_coord_len` elements
-                    post_impact = post_impact.isel(
-                        treated_units=slice(0, treated_units_coord_len)
-                    )
+    # Convert OLS xarray to numpy for consistent handling
+    if not is_pymc and isinstance(post_impact, xr.DataArray):
+        post_impact = np.squeeze(post_impact.values)
 
-                # Now select the specific treated_unit
-                if treated_unit is not None:
-                    post_impact = post_impact.sel(treated_units=treated_unit)
-                else:
-                    post_impact = post_impact.isel(treated_units=0)
-            # Convert to numpy for consistent handling - do this BEFORE window selection
-            # Squeeze to remove any single-element dimensions
-            post_impact = np.squeeze(post_impact.values)
-        elif hasattr(post_impact, "ndim") and post_impact.ndim > 1:
-            # OLS with numpy array (multi-dimensional)
-            if treated_unit is not None and hasattr(result, "treated_units"):
-                unit_idx = result.treated_units.index(treated_unit)
-                post_impact = post_impact[:, unit_idx]
-            else:
-                post_impact = post_impact[:, 0]
-        # Ensure post_impact is a numpy array at this point
-        if not isinstance(post_impact, np.ndarray):
-            post_impact = np.asarray(post_impact)
+    # Ensure OLS data is numpy array
+    if not is_pymc and not isinstance(post_impact, np.ndarray):
+        post_impact = np.asarray(post_impact)
 
-    # Determine window coordinates
+    # Extract window coordinates based on window specification
     if window == "post":
         # Use all post-treatment time points
         window_coords = result.datapost.index
-        if is_pymc:
-            windowed_impact = post_impact
-        else:
-            # OLS: post_impact is now a numpy array
-            windowed_impact = post_impact
     elif isinstance(window, tuple) and len(window) == 2:
+        # Handle (start, end) tuple
         start, end = window
-        # Handle datetime vs integer indices
         if isinstance(result.datapost.index, pd.DatetimeIndex):
+            # Datetime index - convert to timestamps if needed
             if not isinstance(start, pd.Timestamp):
                 start = pd.Timestamp(start)
             if not isinstance(end, pd.Timestamp):
@@ -301,43 +484,21 @@ def _extract_window(result, window, treated_unit=None):
             window_coords = result.datapost.index[
                 (result.datapost.index >= start) & (result.datapost.index <= end)
             ]
-            if is_pymc:
-                windowed_impact = post_impact.sel(obs_ind=window_coords)
-            else:
-                # OLS: convert window_coords to indices
-                # post_impact is now a numpy array
-                indices = [
-                    result.datapost.index.get_loc(coord) for coord in window_coords
-                ]
-                windowed_impact = post_impact[indices]
         else:
-            # Integer index
-            # Ensure start and end are comparable with the index
-            # Convert to native Python int to avoid type issues
+            # Integer index - filter by value
             start_val = int(start)
             end_val = int(end)
-            # Use result.datapost.index for filtering, then match with post_impact coordinates
             mask = (result.datapost.index >= start_val) & (
                 result.datapost.index <= end_val
             )
             window_coords = result.datapost.index[mask]
-            if is_pymc:
-                windowed_impact = post_impact.sel(obs_ind=window_coords)
-            else:
-                # OLS: convert window_coords to indices
-                # post_impact is now a numpy array
-                indices = [
-                    result.datapost.index.get_loc(coord) for coord in window_coords
-                ]
-                windowed_impact = post_impact[indices]
     elif isinstance(window, slice):
-        # Slice window - handle differently for datetime vs integer indices
+        # Handle slice object
         if isinstance(result.datapost.index, pd.DatetimeIndex):
             # For datetime, slice works directly
             window_coords = result.datapost.index[window]
         else:
             # For integer indices, convert slice to value-based filtering
-            # slice(start, stop, step) -> get all values in [start, stop)
             start_val = (
                 int(window.start)
                 if window.start is not None
@@ -350,28 +511,26 @@ def _extract_window(result, window, treated_unit=None):
             )
             step = int(window.step) if window.step is not None else 1
             # Create boolean mask for values in range
-            if step == 1:
-                mask = (result.datapost.index >= start_val) & (
-                    result.datapost.index < stop_val
-                )
-                window_coords = result.datapost.index[mask]
-            else:
-                # For non-unit step, filter then apply step
-                mask = (result.datapost.index >= start_val) & (
-                    result.datapost.index < stop_val
-                )
-                filtered = result.datapost.index[mask]
-                window_coords = filtered[::step]
-        if is_pymc:
-            windowed_impact = post_impact.sel(obs_ind=window_coords)
-        else:
-            # OLS: convert window_coords to indices
-            indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-            windowed_impact = post_impact[indices]
+            mask = (result.datapost.index >= start_val) & (
+                result.datapost.index < stop_val
+            )
+            window_coords = result.datapost.index[mask][::step]
     else:
         raise ValueError(
             f"window must be 'post', a tuple (start, end), or a slice. Got {type(window)}"
         )
+
+    # Apply window selection to post_impact
+    if window == "post":
+        # No filtering needed - use all data
+        windowed_impact = post_impact
+    elif is_pymc:
+        # PyMC: use xarray's named dimension selection
+        windowed_impact = post_impact.sel(obs_ind=window_coords)
+    else:
+        # OLS: convert window_coords to integer indices and select from numpy array
+        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+        windowed_impact = post_impact[indices]
 
     # Validate window is not empty
     if len(window_coords) == 0:
@@ -381,86 +540,75 @@ def _extract_window(result, window, treated_unit=None):
 
 
 def _extract_counterfactual(result, window_coords, treated_unit=None):
-    """Extract counterfactual predictions for the window."""
+    """Extract counterfactual predictions for the window.
+
+    Reuses logic from _extract_window for consistency.
+
+    Parameters
+    ----------
+    result
+        Experiment result object with post_pred attribute
+    window_coords : pd.Index
+        Window coordinates from _extract_window
+    treated_unit : str, optional
+        For multi-unit experiments, specify which treated unit to analyze
+
+    Returns
+    -------
+    xr.DataArray or np.ndarray
+        Counterfactual predictions for the window
+    """
     post_pred = result.post_pred
 
-    # Check if PyMC (InferenceData) or OLS (numpy array or xarray)
-    # PyMC models return InferenceData which has posterior_predictive attribute
+    # PyMC: Extract from InferenceData
     if hasattr(post_pred, "posterior_predictive"):
         # PyMC model - InferenceData object
-        # Extract mu (posterior expectation)
         counterfactual = post_pred.posterior_predictive["mu"]
+
+        # Handle treated_unit selection using helper
+        if "treated_units" in counterfactual.dims:
+            counterfactual = _select_treated_unit(counterfactual, treated_unit)
+
+        # Select window using named dimension
+        counterfactual = counterfactual.sel(obs_ind=window_coords)
+        return counterfactual
+
     elif isinstance(post_pred, dict) and "posterior_predictive" in post_pred:
         # PyMC model - dict format (fallback)
         counterfactual = post_pred["posterior_predictive"]["mu"]
-    else:
-        # OLS model - post_pred is numpy array or xarray
-        if isinstance(post_pred, xr.DataArray):
-            # OLS with xarray (e.g., SyntheticControl)
-            # First select the treated_unit if multi-dimensional
-            if "treated_units" in post_pred.dims:
-                # Check for shape mismatch between data and coordinates
-                treated_units_coord_len = len(post_pred.coords["treated_units"])
-                treated_units_dim_size = post_pred.sizes["treated_units"]
 
-                if treated_units_coord_len != treated_units_dim_size:
-                    # Shape mismatch - take only the slice that matches the coordinates
-                    post_pred = post_pred.isel(
-                        treated_units=slice(0, treated_units_coord_len)
-                    )
+        # Handle treated_unit selection using helper
+        if "treated_units" in counterfactual.dims:
+            counterfactual = _select_treated_unit(counterfactual, treated_unit)
 
-                # Now select the specific treated_unit
-                if treated_unit is not None:
-                    post_pred = post_pred.sel(treated_units=treated_unit)
-                else:
-                    post_pred = post_pred.isel(treated_units=0)
-
-            # Then select the window using integer indices
-            if isinstance(window_coords, pd.Index):
-                # Find indices in datapost.index that match window_coords
-                indices = [
-                    result.datapost.index.get_loc(coord) for coord in window_coords
-                ]
-                # Use isel for integer-based indexing on xarray
-                counterfactual = post_pred.isel(obs_ind=indices)
-            else:
-                # If window_coords is already indices
-                counterfactual = post_pred.isel(obs_ind=window_coords)
-
-            # Convert to numpy and squeeze to remove single-element dims
-            counterfactual = np.squeeze(counterfactual.values)
-        else:
-            # OLS with numpy array
-            # Convert window_coords to indices
-            if isinstance(window_coords, pd.Index):
-                indices = [
-                    result.datapost.index.get_loc(coord) for coord in window_coords
-                ]
-                counterfactual = post_pred[indices]
-            else:
-                counterfactual = post_pred[window_coords]
-
-            # Handle treated_unit for multi-unit numpy arrays
-            if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
-                if treated_unit is not None and hasattr(result, "treated_units"):
-                    unit_idx = result.treated_units.index(treated_unit)
-                    counterfactual = counterfactual[:, unit_idx]
-                else:
-                    counterfactual = counterfactual[:, 0]
-
+        # Select window using named dimension
+        counterfactual = counterfactual.sel(obs_ind=window_coords)
         return counterfactual
 
-    # Handle treated_unit selection (PyMC only)
-    if "treated_units" in counterfactual.dims:
-        if treated_unit is not None:
-            counterfactual = counterfactual.sel(treated_units=treated_unit)
-        else:
-            counterfactual = counterfactual.isel(treated_units=0)
+    # OLS: Handle xarray or numpy
+    if isinstance(post_pred, xr.DataArray):
+        # OLS with xarray (e.g., SyntheticControl)
+        # Select treated_unit using helper
+        if "treated_units" in post_pred.dims:
+            post_pred = _select_treated_unit(post_pred, treated_unit)
 
-    # Select window (PyMC only)
-    counterfactual = counterfactual.sel(obs_ind=window_coords)
+        # Convert window_coords to integer indices for isel
+        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+        counterfactual = post_pred.isel(obs_ind=indices).values
+        return np.squeeze(counterfactual)
+    else:
+        # OLS with numpy array
+        # Convert window_coords to indices
+        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+        counterfactual = post_pred[indices]
 
-    return counterfactual
+        # Handle treated_unit for multi-unit numpy arrays using helper
+        if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
+            counterfactual = _select_treated_unit_numpy(
+                counterfactual, result, treated_unit
+            )
+
+        return np.squeeze(counterfactual)
 
 
 def _compute_statistics(
@@ -1068,50 +1216,6 @@ def _generate_prose_did_ols(stats, alpha=0.05):
     return prose
 
 
-def _compute_statistics_rd(
-    discontinuity,
-    hdi_prob=0.95,
-    direction="increase",
-    min_effect=None,
-):
-    """Compute statistics for RD scalar effect (PyMC)."""
-    stats = {
-        "mean": float(discontinuity.mean(dim=["chain", "draw"]).values),
-        "median": float(discontinuity.median(dim=["chain", "draw"]).values),
-    }
-
-    # HDI
-    hdi_result = az.hdi(discontinuity, hdi_prob=hdi_prob)
-    if isinstance(hdi_result, xr.Dataset):
-        hdi_data = list(hdi_result.data_vars.values())[0]
-        stats["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
-    else:
-        stats["hdi_lower"] = float(hdi_result.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_result.sel(hdi="higher").values)
-
-    # Tail probabilities
-    if direction == "increase":
-        stats["p_gt_0"] = float((discontinuity > 0).mean().values)
-    elif direction == "decrease":
-        stats["p_lt_0"] = float((discontinuity < 0).mean().values)
-    else:  # two-sided
-        p_gt = float((discontinuity > 0).mean().values)
-        p_lt = float((discontinuity < 0).mean().values)
-        p_two_sided = 2 * min(p_gt, p_lt)
-        stats["p_two_sided"] = p_two_sided
-        stats["prob_of_effect"] = 1 - p_two_sided
-
-    # ROPE
-    if min_effect is not None:
-        if direction == "two-sided":
-            stats["p_rope"] = float((np.abs(discontinuity) > min_effect).mean().values)
-        else:
-            stats["p_rope"] = float((discontinuity > min_effect).mean().values)
-
-    return stats
-
-
 def _compute_statistics_rd_ols(result, alpha=0.05):
     """Compute statistics for RD scalar effect with OLS model."""
     discontinuity = result.discontinuity_at_threshold  # scalar
@@ -1163,30 +1267,6 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     return stats
 
 
-def _generate_table_rd(stats):
-    """Generate summary table for RD (PyMC)."""
-    row = {
-        "mean": stats["mean"],
-        "median": stats["median"],
-        "hdi_lower": stats["hdi_lower"],
-        "hdi_upper": stats["hdi_upper"],
-    }
-
-    # Add tail probabilities
-    if "p_gt_0" in stats:
-        row["p_gt_0"] = stats["p_gt_0"]
-    if "p_lt_0" in stats:
-        row["p_lt_0"] = stats["p_lt_0"]
-    if "p_two_sided" in stats:
-        row["p_two_sided"] = stats["p_two_sided"]
-        row["prob_of_effect"] = stats["prob_of_effect"]
-    if "p_rope" in stats:
-        row["p_rope"] = stats["p_rope"]
-
-    df = pd.DataFrame([row], index=["discontinuity"])
-    return df
-
-
 def _generate_table_rd_ols(stats):
     """Generate summary table for RD with OLS model."""
     row = {
@@ -1197,37 +1277,6 @@ def _generate_table_rd_ols(stats):
     }
     df = pd.DataFrame([row], index=["discontinuity"])
     return df
-
-
-def _generate_prose_rd(stats, alpha=0.05, direction="increase"):
-    """Generate prose summary for RD (PyMC)."""
-    hdi_pct = int((1 - alpha) * 100)
-
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    mean = stats["mean"]
-    lower = stats["hdi_lower"]
-    upper = stats["hdi_upper"]
-
-    # Tail probability text
-    if direction == "increase":
-        p_val = stats.get("p_gt_0", 0.0)
-        direction_text = "increase"
-    elif direction == "decrease":
-        p_val = stats.get("p_lt_0", 0.0)
-        direction_text = "decrease"
-    else:  # two-sided
-        p_val = stats.get("prob_of_effect", 0.0)
-        direction_text = "effect"
-
-    prose = (
-        f"The discontinuity at threshold was {fmt_num(mean)} "
-        f"({hdi_pct}% HDI [{fmt_num(lower)}, {fmt_num(upper)}]), "
-        f"with a posterior probability of an {direction_text} of {fmt_num(p_val, 3)}."
-    )
-
-    return prose
 
 
 def _generate_prose_rd_ols(stats, alpha=0.05):
@@ -1258,9 +1307,9 @@ def _generate_prose_rd_ols(stats, alpha=0.05):
 
 def _effect_summary_rkink(
     result,
-    direction="increase",
-    alpha=0.05,
-    min_effect=None,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: Optional[float] = None,
 ):
     """Generate effect summary for Regression Kink experiments."""
     gradient_change = result.gradient_change
@@ -1269,16 +1318,21 @@ def _effect_summary_rkink(
     is_pymc = isinstance(gradient_change, xr.DataArray)
 
     if is_pymc:
-        # PyMC model: use posterior draws
+        # PyMC model: use unified scalar functions
         hdi_prob = 1 - alpha
-        stats = _compute_statistics_rkink(
+        stats = _compute_statistics_scalar(
             gradient_change,
             hdi_prob=hdi_prob,
             direction=direction,
             min_effect=min_effect,
         )
-        table = _generate_table_rkink(stats)
-        text = _generate_prose_rkink(stats, alpha=alpha, direction=direction)
+        table = _generate_table_scalar(stats, index_name="gradient_change")
+        text = _generate_prose_scalar(
+            stats,
+            "change in gradient at the kink point",
+            alpha=alpha,
+            direction=direction,
+        )
     else:
         # OLS model: Not currently supported for RegressionKink, but structure is here
         stats = _compute_statistics_rkink_ols(result, alpha=alpha)
@@ -1288,90 +1342,28 @@ def _effect_summary_rkink(
     return EffectSummary(table=table, text=text)
 
 
-def _compute_statistics_rkink(
-    gradient_change,
-    hdi_prob=0.95,
-    direction="increase",
-    min_effect=None,
-):
-    """Compute statistics for Regression Kink scalar effect (PyMC)."""
-    stats = {
-        "mean": float(gradient_change.mean(dim=["chain", "draw"]).values),
-        "median": float(gradient_change.median(dim=["chain", "draw"]).values),
-    }
-
-    # HDI
-    hdi_result = az.hdi(gradient_change, hdi_prob=hdi_prob)
-    if isinstance(hdi_result, xr.Dataset):
-        hdi_data = list(hdi_result.data_vars.values())[0]
-        stats["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
-    else:
-        stats["hdi_lower"] = float(hdi_result.sel(hdi="lower").values)
-        stats["hdi_upper"] = float(hdi_result.sel(hdi="higher").values)
-
-    # Tail probabilities
-    if direction == "increase":
-        stats["p_gt_0"] = float((gradient_change > 0).mean().values)
-    elif direction == "decrease":
-        stats["p_lt_0"] = float((gradient_change < 0).mean().values)
-    else:  # two-sided
-        p_gt = float((gradient_change > 0).mean().values)
-        p_lt = float((gradient_change < 0).mean().values)
-        p_two_sided = 2 * min(p_gt, p_lt)
-        stats["p_two_sided"] = p_two_sided
-        stats["prob_of_effect"] = 1 - p_two_sided
-
-    # ROPE
-    if min_effect is not None:
-        if direction == "two-sided":
-            stats["p_rope"] = float(
-                (np.abs(gradient_change) > min_effect).mean().values
-            )
-        else:
-            stats["p_rope"] = float((gradient_change > min_effect).mean().values)
-
-    return stats
-
-
 def _compute_statistics_rkink_ols(result, alpha=0.05):
-    """Compute statistics for Regression Kink scalar effect with OLS model."""
-    # Note: RegressionKink currently only supports PyMC models
-    # This is a placeholder for future OLS support
+    """Compute statistics for Regression Kink scalar effect with OLS model.
+
+    TODO: Implement OLS support for Regression Kink
+    - Extract gradient change coefficient from model
+    - Calculate standard error from regression
+    - Compute confidence intervals and p-values
+    - Follow pattern from _compute_statistics_rd_ols()
+    """
     raise NotImplementedError(
         "OLS models are not currently supported for Regression Kink experiments. "
-        "Please use a PyMC model."
+        "Please use a PyMC model for full statistical inference. "
+        "If OLS support is needed, see _compute_statistics_rd_ols() for implementation pattern."
     )
 
 
-def _generate_table_rkink(stats):
-    """Generate DataFrame table for Regression Kink (PyMC)."""
-    data = {
-        "metric": ["gradient_change"],
-        "mean": [stats["mean"]],
-        "median": [stats["median"]],
-        "HDI_lower": [stats["hdi_lower"]],
-        "HDI_upper": [stats["hdi_upper"]],
-    }
-
-    # Add direction-specific columns
-    if "p_gt_0" in stats:
-        data["P(effect>0)"] = [stats["p_gt_0"]]
-    elif "p_lt_0" in stats:
-        data["P(effect<0)"] = [stats["p_lt_0"]]
-    elif "p_two_sided" in stats:
-        data["P(two-sided)"] = [stats["p_two_sided"]]
-        data["P(effect)"] = [stats["prob_of_effect"]]
-
-    # Add ROPE if present
-    if "p_rope" in stats:
-        data["P(|effect|>min_effect)"] = [stats["p_rope"]]
-
-    return pd.DataFrame(data)
-
-
 def _generate_table_rkink_ols(stats):
-    """Generate DataFrame table for Regression Kink with OLS model."""
+    """Generate DataFrame table for Regression Kink with OLS model.
+
+    TODO: This is a placeholder implementation.
+    Will be used when _compute_statistics_rkink_ols() is implemented.
+    """
     # Placeholder for future OLS support
     data = {
         "metric": ["gradient_change"],
@@ -1383,56 +1375,12 @@ def _generate_table_rkink_ols(stats):
     return pd.DataFrame(data)
 
 
-def _generate_prose_rkink(stats, alpha=0.05, direction="increase"):
-    """Generate prose summary for Regression Kink (PyMC)."""
-    hdi_pct = int((1 - alpha) * 100)
-
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    mean = stats["mean"]
-    median = stats["median"]
-    lower = stats["hdi_lower"]
-    upper = stats["hdi_upper"]
-
-    prose_parts = [
-        f"The change in gradient at the kink point had a mean of {fmt_num(mean)} "
-        f"(median: {fmt_num(median)}, {hdi_pct}% HDI [{fmt_num(lower)}, {fmt_num(upper)}])."
-    ]
-
-    # Add tail probability info
-    if direction == "increase":
-        prob = stats["p_gt_0"]
-        prose_parts.append(
-            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
-            f"that the gradient change is positive."
-        )
-    elif direction == "decrease":
-        prob = stats["p_lt_0"]
-        prose_parts.append(
-            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
-            f"that the gradient change is negative."
-        )
-    else:  # two-sided
-        prob = stats["prob_of_effect"]
-        prose_parts.append(
-            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
-            f"of a non-zero gradient change (two-sided test)."
-        )
-
-    # Add ROPE info
-    if "p_rope" in stats:
-        p_rope = stats["p_rope"]
-        prose_parts.append(
-            f" The probability that the absolute gradient change exceeds "
-            f"the practical significance threshold is {fmt_num(p_rope * 100, 1)}%."
-        )
-
-    return "".join(prose_parts)
-
-
 def _generate_prose_rkink_ols(stats, alpha=0.05):
-    """Generate prose summary for Regression Kink with OLS model."""
+    """Generate prose summary for Regression Kink with OLS model.
+
+    TODO: This is a placeholder implementation.
+    Will be used when _compute_statistics_rkink_ols() is implemented.
+    """
     # Placeholder for future OLS support
     ci_pct = int((1 - alpha) * 100)
 

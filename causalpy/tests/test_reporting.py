@@ -476,12 +476,12 @@ def test_effect_summary_rkink_pymc(mock_pymc_sample):
     stats = result.effect_summary()
 
     assert isinstance(stats, EffectSummary)
-    assert stats.table["metric"].iloc[0] == "gradient_change"
+    assert "gradient_change" in stats.table.index
     assert "mean" in stats.table.columns
     assert "median" in stats.table.columns
-    assert "HDI_lower" in stats.table.columns
-    assert "HDI_upper" in stats.table.columns
-    assert "P(effect>0)" in stats.table.columns
+    assert "hdi_lower" in stats.table.columns
+    assert "hdi_upper" in stats.table.columns
+    assert "p_gt_0" in stats.table.columns
 
 
 @pytest.mark.integration
@@ -513,16 +513,16 @@ def test_effect_summary_rkink_directions(mock_pymc_sample):
 
     # Test increase
     stats_increase = result.effect_summary(direction="increase")
-    assert "P(effect>0)" in stats_increase.table.columns
+    assert "p_gt_0" in stats_increase.table.columns
 
     # Test decrease
     stats_decrease = result.effect_summary(direction="decrease")
-    assert "P(effect<0)" in stats_decrease.table.columns
+    assert "p_lt_0" in stats_decrease.table.columns
 
     # Test two-sided
     stats_two_sided = result.effect_summary(direction="two-sided")
-    assert "P(two-sided)" in stats_two_sided.table.columns
-    assert "P(effect)" in stats_two_sided.table.columns
+    assert "p_two_sided" in stats_two_sided.table.columns
+    assert "prob_of_effect" in stats_two_sided.table.columns
 
 
 @pytest.mark.integration
@@ -553,7 +553,7 @@ def test_effect_summary_rkink_rope(mock_pymc_sample):
     )
 
     stats = result.effect_summary(min_effect=0.2)
-    assert "P(|effect|>min_effect)" in stats.table.columns
+    assert "p_rope" in stats.table.columns
 
 
 @pytest.mark.integration
@@ -889,3 +889,178 @@ def test_effect_summary_did_hdi_coverage(mock_pymc_sample):
         stats.table.loc["treatment_effect", "hdi_lower"]
         <= stats.table.loc["treatment_effect", "hdi_upper"]
     )
+
+
+# ==============================================================================
+# Tests for new helper functions
+# ==============================================================================
+
+
+def test_extract_hdi_bounds_dataset():
+    """Test _extract_hdi_bounds with xr.Dataset input."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_hdi_bounds
+
+    # Create a mock HDI result as Dataset
+    data = xr.DataArray([1.0, 3.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
+    hdi_dataset = xr.Dataset({"effect": data})
+
+    lower, upper = _extract_hdi_bounds(hdi_dataset)
+
+    assert lower == 1.0
+    assert upper == 3.0
+
+
+def test_extract_hdi_bounds_dataarray():
+    """Test _extract_hdi_bounds with xr.DataArray input."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_hdi_bounds
+
+    # Create a mock HDI result as DataArray
+    hdi_dataarray = xr.DataArray(
+        [1.0, 3.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+    )
+
+    lower, upper = _extract_hdi_bounds(hdi_dataarray)
+
+    assert lower == 1.0
+    assert upper == 3.0
+
+
+def test_compute_tail_probabilities_increase():
+    """Test _compute_tail_probabilities with direction='increase'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities
+
+    # Create mock effect posterior with 60% positive values
+    effect = xr.DataArray([0.5, 1.0, 1.5, -0.5, -1.0])
+
+    result = _compute_tail_probabilities(effect, "increase")
+
+    assert "p_gt_0" in result
+    assert result["p_gt_0"] == 0.6  # 3 out of 5 are positive
+
+
+def test_compute_tail_probabilities_decrease():
+    """Test _compute_tail_probabilities with direction='decrease'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities
+
+    # Create mock effect posterior with 40% negative values
+    effect = xr.DataArray([0.5, 1.0, 1.5, -0.5, -1.0])
+
+    result = _compute_tail_probabilities(effect, "decrease")
+
+    assert "p_lt_0" in result
+    assert result["p_lt_0"] == 0.4  # 2 out of 5 are negative
+
+
+def test_compute_tail_probabilities_two_sided():
+    """Test _compute_tail_probabilities with direction='two-sided'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities
+
+    # Create mock effect posterior
+    effect = xr.DataArray([0.5, 1.0, 1.5, -0.5, -1.0])
+
+    result = _compute_tail_probabilities(effect, "two-sided")
+
+    assert "p_two_sided" in result
+    assert "prob_of_effect" in result
+    # p_two_sided = 2 * min(0.6, 0.4) = 0.8
+    assert abs(result["p_two_sided"] - 0.8) < 1e-10
+    assert abs(result["prob_of_effect"] - 0.2) < 1e-10
+
+
+def test_compute_rope_probability_two_sided():
+    """Test _compute_rope_probability with direction='two-sided'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_rope_probability
+
+    # Create mock effect posterior
+    effect = xr.DataArray([0.5, 1.0, 1.5, -0.5, -1.5])
+
+    result = _compute_rope_probability(effect, min_effect=1.0, direction="two-sided")
+
+    # |effect| > 1.0 for 3 values: 1.5, -1.5, (1.0 is not > 1.0)
+    assert result == 0.4  # 2 out of 5
+
+
+def test_compute_rope_probability_one_sided():
+    """Test _compute_rope_probability with one-sided direction."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_rope_probability
+
+    # Create mock effect posterior
+    effect = xr.DataArray([0.5, 1.0, 1.5, -0.5, -1.5])
+
+    result = _compute_rope_probability(effect, min_effect=1.0, direction="increase")
+
+    # effect > 1.0 for 1 value: 1.5
+    assert result == 0.2  # 1 out of 5
+
+
+def test_format_number():
+    """Test _format_number helper."""
+    from causalpy.reporting import _format_number
+
+    assert _format_number(3.14159, decimals=2) == "3.14"
+    assert _format_number(3.14159, decimals=3) == "3.142"
+    assert _format_number(10.0, decimals=1) == "10.0"
+    assert _format_number(0.001, decimals=4) == "0.0010"
+
+
+def test_select_treated_unit():
+    """Test _select_treated_unit helper."""
+    import xarray as xr
+
+    from causalpy.reporting import _select_treated_unit
+
+    # Create mock data with multiple treated units
+    data = xr.DataArray(
+        [[1, 2], [3, 4], [5, 6]],
+        dims=["time", "treated_units"],
+        coords={"time": [0, 1, 2], "treated_units": ["unit_a", "unit_b"]},
+    )
+
+    # Select by name
+    result = _select_treated_unit(data, "unit_a")
+    # Check values and dims, not exact coordinate structure
+    np.testing.assert_array_equal(result.values, np.array([1, 3, 5]))
+    assert "time" in result.dims
+    assert "treated_units" not in result.dims
+
+    # Select first when None provided
+    result = _select_treated_unit(data, None)
+    np.testing.assert_array_equal(result.values, np.array([1, 3, 5]))
+    assert "time" in result.dims
+    assert "treated_units" not in result.dims
+
+
+def test_select_treated_unit_numpy():
+    """Test _select_treated_unit_numpy helper."""
+    from causalpy.reporting import _select_treated_unit_numpy
+
+    # Create mock result object
+    class MockResult:
+        treated_units = ["unit_a", "unit_b", "unit_c"]
+
+    result = MockResult()
+
+    # Create mock 2D numpy array (time x units)
+    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+
+    # Select by name
+    selected = _select_treated_unit_numpy(data, result, "unit_b")
+    np.testing.assert_array_equal(selected, np.array([2, 5, 8]))
+
+    # Select first when None provided
+    selected = _select_treated_unit_numpy(data, result, None)
+    np.testing.assert_array_equal(selected, np.array([1, 4, 7]))
