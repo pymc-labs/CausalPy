@@ -16,7 +16,7 @@ Base class for quasi experimental designs.
 """
 
 from abc import abstractmethod
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -53,7 +53,6 @@ class BaseExperiment:
 
     supports_bayes: bool
     supports_ols: bool
-
 
     def __init__(self, model: Union[PyMCModel, RegressorMixin] | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
@@ -147,8 +146,8 @@ class BaseExperiment:
         alpha: float = 0.05,
         cumulative: bool = True,
         relative: bool = True,
-        min_effect: Optional[float] = None,
-        treated_unit: Optional[str] = None,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects.
