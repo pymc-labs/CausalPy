@@ -397,7 +397,7 @@ class DifferenceInDifferences(BaseExperiment):
         labels = ["Control group"]
 
         # Plot model fit to treatment group
-        time_points = self.x_pred_treatment[self.time_variable_name].values
+        time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
