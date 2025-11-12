@@ -25,7 +25,7 @@ import causalpy as cp
 @pytest.mark.integration
 def test_did():
     """
-    Test Difference in Differences (DID) Sci-Kit Learn experiment.
+    Test Difference in Differences (DID) scikit-learn experiment.
 
     Loads data and checks:
     1. data is a dataframe
@@ -54,7 +54,7 @@ def test_did():
 @pytest.mark.integration
 def test_rd_drinking():
     """
-    Test Regression Discontinuity Sci-Kit Learn experiment on drinking age data.
+    Test Regression Discontinuity scikit-learn experiment on drinking age data.
 
     Loads data and checks:
     1. data is a dataframe
@@ -87,7 +87,7 @@ def test_rd_drinking():
 @pytest.mark.integration
 def test_its():
     """
-    Test Interrupted Time Series Sci-Kit Learn experiment.
+    Test Interrupted Time Series scikit-learn experiment.
 
     Loads data and checks:
     1. data is a dataframe
@@ -130,7 +130,7 @@ def test_its():
 @pytest.mark.integration
 def test_sc():
     """
-    Test Synthetic Control Sci-Kit Learn experiment.
+    Test Synthetic Control scikit-learn experiment.
 
     Loads data and checks:
     1. data is a dataframe
@@ -177,7 +177,7 @@ def test_sc():
 @pytest.mark.integration
 def test_rd_linear_main_effects():
     """
-    Test Regression Discontinuity Sci-Kit Learn experiment main effects.
+    Test Regression Discontinuity scikit-learn experiment main effects.
 
     Loads data and checks:
     1. data is a dataframe
@@ -202,7 +202,7 @@ def test_rd_linear_main_effects():
 @pytest.mark.integration
 def test_rd_linear_main_effects_bandwidth():
     """
-    Test Regression Discontinuity Sci-Kit Learn experiment, main effects with
+    Test Regression Discontinuity scikit-learn experiment, main effects with
     bandwidth parameter.
 
     Loads data and checks:
@@ -229,7 +229,7 @@ def test_rd_linear_main_effects_bandwidth():
 @pytest.mark.integration
 def test_rd_linear_with_interaction():
     """
-    Test Regression Discontinuity Sci-Kit Learn experiment with interaction.
+    Test Regression Discontinuity scikit-learn experiment with interaction.
 
     Loads data and checks:
     1. data is a dataframe
@@ -254,7 +254,7 @@ def test_rd_linear_with_interaction():
 @pytest.mark.integration
 def test_rd_linear_with_gaussian_process():
     """
-    Test Regression Discontinuity Sci-Kit Learn experiment with Gaussian process model.
+    Test Regression Discontinuity scikit-learn experiment with Gaussian process model.
 
     Loads data and checks:
     1. data is a dataframe

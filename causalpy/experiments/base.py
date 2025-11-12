@@ -52,7 +52,7 @@ class BaseExperiment:
     supports_ols: bool
 
     def __init__(self, model=None):
-        # Ensure we've made any provided Scikit Learn model (as identified as being type
+        # Ensure we've made any provided scikit-learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
