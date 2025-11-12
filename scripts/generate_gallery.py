@@ -8,6 +8,7 @@ a gallery page using sphinx-design cards.
 """
 
 import base64
+import io
 import re
 import sys
 from pathlib import Path
@@ -41,27 +42,23 @@ def load_categories_from_index(index_path: Path) -> dict[str, list[str]]:
     dict[str, list[str]]
         Mapping from category name to list of notebook names (without .ipynb)
     """
-    categories: dict[str, list[str]] = {}
-    current_category = None
-
     if not index_path.exists():
-        return categories
+        return {}
 
     try:
-        with open(index_path, "r", encoding="utf-8") as f:
-            for line in f:
-                # Check for category header (## Category Name)
-                if line.startswith("## "):
-                    current_category = line[3:].strip()
-                    if current_category and current_category != "Example Gallery":
-                        categories[current_category] = []
-                # Check for notebook links under current category
-                elif current_category and (match := re.search(r":link:\s+(\S+)", line)):
-                    categories[current_category].append(match.group(1))
+        categories: dict[str, list[str]] = {}
+        current_category = None
+        for line in index_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("## "):
+                current_category = line[3:].strip()
+                if current_category and current_category != "Example Gallery":
+                    categories[current_category] = []
+            elif current_category and (match := re.search(r":link:\s+(\S+)", line)):
+                categories[current_category].append(match.group(1))
+        return categories
     except Exception as e:
         print(f"Warning: Could not load categories from {index_path}: {e}")
-
-    return categories
+        return {}
 
 
 def get_notebook_category(filename: str, category_mapping: dict[str, list[str]]) -> str:
@@ -79,8 +76,7 @@ def get_notebook_category(filename: str, category_mapping: dict[str, list[str]])
 
 def extract_metadata(notebook_path: Path) -> str:
     """Extract title from notebook."""
-    with open(notebook_path, "r", encoding="utf-8") as f:
-        nb = nbformat.read(f, as_version=4)
+    nb = nbformat.reads(notebook_path.read_text(encoding="utf-8"), as_version=4)
 
     # Look for title in first markdown cell
     for cell in nb.cells:
@@ -109,8 +105,7 @@ def extract_first_image(notebook_path: Path, output_dir: Path) -> str | None:
         return None
 
     try:
-        with open(notebook_path, "r", encoding="utf-8") as f:
-            nb = nbformat.read(f, as_version=4)
+        nb = nbformat.reads(notebook_path.read_text(encoding="utf-8"), as_version=4)
 
         # Try to find images in existing outputs first
         if image_data := _find_image_in_notebook(nb):
@@ -145,15 +140,12 @@ def _save_thumbnail(
         thumbnail_name = f"{notebook_path.stem}.png"
         thumbnail_path = output_dir / thumbnail_name
 
-        # Decode and save image
-        thumbnail_path.write_bytes(base64.b64decode(image_data))
-
-        # Resize to uniform size (400x250) with padding
-        img = Image.open(thumbnail_path)
+        # Decode and process image in memory
+        img = Image.open(io.BytesIO(base64.b64decode(image_data)))
         target_size = (400, 250)
         img.thumbnail(target_size, Image.Resampling.LANCZOS)
 
-        # Create padded image
+        # Create padded image and save
         new_img = Image.new("RGB", target_size, (255, 255, 255))
         new_img.paste(
             img,
@@ -179,9 +171,9 @@ def generate_gallery_markdown(
         categories.setdefault(nb_data["category"], []).append(nb_data)
 
     # Sort categories maintaining order from index.md
-    sorted_categories = [
-        cat for cat in category_mapping.keys() if cat in categories
-    ] + [cat for cat in categories.keys() if cat not in category_mapping]
+    sorted_categories = list(category_mapping.keys() & categories.keys()) + list(
+        categories.keys() - category_mapping.keys()
+    )
 
     # Generate markdown
     lines = ["# Example Gallery\n"]
