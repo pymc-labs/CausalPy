@@ -13,6 +13,14 @@
 #   limitations under the License.
 """
 Reporting utilities for causal inference experiments.
+
+This module provides statistical summaries and prose reports for causal effects.
+The reporting functions automatically compute appropriate statistics based on the
+model type (Bayesian/PyMC or Frequentist/OLS).
+
+For detailed explanations of the reported statistics (HDI, ROPE, p-values, etc.)
+and their interpretation, see the documentation:
+https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.html
 """
 
 from dataclasses import dataclass
