@@ -1,4 +1,7 @@
 # Example Gallery
+
+On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
+
 ## ANCOVA
 ::::{grid} 1 2 3 3
 :gutter: 3
