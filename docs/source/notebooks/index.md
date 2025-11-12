@@ -3,6 +3,9 @@
 On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
 ## ANCOVA
+
+Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a categorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -15,6 +18,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Difference in Differences
+
+Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -39,6 +45,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Geographical lift testing
+
+Geolift (geographical lift testing) is a method for measuring the causal impact of interventions in geographic regions. It combines synthetic control methods with difference-in-differences approaches to estimate treatment effects when interventions are applied to specific geographic areas.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -57,6 +66,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Instrumental Variables Regression
+
+A quasi-experimental design to estimate a treatment effect where there is a risk of confounding between the treatment and the outcome due to endogeneity. Instrumental variables help identify causal effects by using variables that affect treatment assignment but not the outcome directly.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -75,6 +87,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Interrupted Time Series
+
+A quasi-experimental design that uses time series methods to generate counterfactuals and estimate treatment effects. A series of observations are collected before and after a treatment, and the pre-treatment trend (or any time-series model) is used to predict what would have happened in the absence of treatment.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -99,6 +114,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Inverse Propensity Score Weighting
+
+A method for estimating causal effects by weighting observations by the inverse of their probability of receiving treatment (propensity score). This helps adjust for confounding by creating a pseudo-population where treatment assignment is independent of observed covariates.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -117,6 +135,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Regression Discontinuity
+
+A quasi-experimental design where treatment assignment is determined by a cutoff point along a running variable (e.g., test score, age, income). The treatment effect is estimated by comparing outcomes just above and below the cutoff, assuming units near the cutoff are similar except for treatment status.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -147,6 +168,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Regression Kink Design
+
+A variation of regression discontinuity where treatment affects the slope (rate of change) of the outcome with respect to the running variable, rather than causing a discrete jump. The treatment effect is identified by a change in the slope at the cutoff point.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -159,6 +183,9 @@ On this page you can find a gallery of example notebooks that demonstrate the us
 ::::
 
 ## Synthetic Control
+
+The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
+
 ::::{grid} 1 2 3 3
 :gutter: 3
 

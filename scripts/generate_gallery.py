@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Generate example gallery for CausalPy documentation.
+Generate thumbnails for CausalPy documentation gallery.
 
-This script scans notebooks in docs/source/notebooks/, extracts metadata,
-generates thumbnails from the first plot in each notebook, and creates
-a gallery page using sphinx-design cards.
+This script scans notebooks in docs/source/notebooks/ and generates
+thumbnails from the first plot in each notebook. The index.md file
+should be maintained manually.
 """
 
 import base64
 import io
-import re
 import sys
 from pathlib import Path
 
@@ -27,65 +26,6 @@ try:
 except ImportError:
     print("Warning: Pillow not found. Thumbnails will not be generated.")
     Image = None  # type: ignore[assignment,misc]
-
-
-def load_categories_from_index(index_path: Path) -> dict[str, list[str]]:
-    """
-    Load category structure from existing index.md.
-
-    Reads the markdown file and extracts:
-    - Category names from ## headers
-    - Notebook names from :link: fields under each category
-
-    Returns
-    -------
-    dict[str, list[str]]
-        Mapping from category name to list of notebook names (without .ipynb)
-    """
-    if not index_path.exists():
-        return {}
-
-    try:
-        categories: dict[str, list[str]] = {}
-        current_category = None
-        for line in index_path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("## "):
-                current_category = line[3:].strip()
-                if current_category and current_category != "Example Gallery":
-                    categories[current_category] = []
-            elif current_category and (match := re.search(r":link:\s+(\S+)", line)):
-                categories[current_category].append(match.group(1))
-        return categories
-    except Exception as e:
-        print(f"Warning: Could not load categories from {index_path}: {e}")
-        return {}
-
-
-def get_notebook_category(filename: str, category_mapping: dict[str, list[str]]) -> str:
-    """Determine the category for a notebook from the loaded mapping."""
-    notebook_name = filename.replace(".ipynb", "")
-    return next(
-        (
-            cat
-            for cat, notebooks in category_mapping.items()
-            if notebook_name in notebooks
-        ),
-        "Other",
-    )
-
-
-def extract_metadata(notebook_path: Path) -> str:
-    """Extract title from notebook."""
-    nb = nbformat.reads(notebook_path.read_text(encoding="utf-8"), as_version=4)
-
-    # Look for title in first markdown cell
-    for cell in nb.cells:
-        if cell.cell_type == "markdown":
-            if match := re.search(r"^#+\s+(.+)$", cell.source.strip(), re.MULTILINE):
-                return match.group(1).strip()
-
-    # Fallback to filename-based title
-    return notebook_path.stem.replace("_", " ").title()
 
 
 def _find_image_in_notebook(nb) -> str | None:
@@ -161,59 +101,15 @@ def _save_thumbnail(
         return None
 
 
-def generate_gallery_markdown(
-    notebooks_data: list[dict],
-    output_path: Path,
-    category_mapping: dict[str, list[str]],
-):
-    """Generate gallery markdown file with sphinx-design cards."""
-    # Group notebooks by category
-    categories: dict[str, list[dict]] = {}
-    for nb_data in notebooks_data:
-        categories.setdefault(nb_data["category"], []).append(nb_data)
-
-    # Sort categories alphabetically
-    sorted_categories = sorted(categories.keys())
-
-    # Generate markdown
-    lines = ["# Example Gallery\n"]
-
-    for category in sorted_categories:
-        notebooks = sorted(categories[category], key=lambda x: x["filename"])
-
-        lines.extend([f"## {category}\n", "::::{grid} 1 2 3 3\n", ":gutter: 3\n\n"])
-
-        for nb in notebooks:
-            doc_name = nb["filename"].replace(".ipynb", "")
-            card_lines = [
-                f":::{'{grid-item-card}'} {nb['title']}\n",
-                ":class-card: sd-card-h-100\n",
-            ]
-            if nb.get("thumbnail"):
-                card_lines.append(f":img-top: {nb['thumbnail']}\n")
-            card_lines.extend([f":link: {doc_name}\n", ":link-type: doc\n", ":::\n"])
-            lines.extend(card_lines)
-
-        lines.append("::::\n\n")
-
-    output_path.write_text("".join(lines), encoding="utf-8")
-
-
 def main():
-    """Main function to generate gallery."""
+    """Main function to generate thumbnails only."""
     # Paths
     repo_root = Path(__file__).parent.parent
     notebooks_dir = repo_root / "docs" / "source" / "notebooks"
     thumbnails_dir = repo_root / "docs" / "source" / "_static" / "thumbnails"
-    output_file = notebooks_dir / "index.md"
 
     # Create thumbnails directory
     thumbnails_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load category structure from existing index.md
-    category_mapping = load_categories_from_index(output_file)
-    if category_mapping:
-        print(f"Loaded {len(category_mapping)} categories from index.md")
 
     # Find all notebooks
     notebook_files = sorted(notebooks_dir.glob("*.ipynb"))
@@ -224,25 +120,11 @@ def main():
 
     print(f"Found {len(notebook_files)} notebooks")
 
-    # Process each notebook
-    notebooks_data = []
+    # Process each notebook to generate thumbnails
     for nb_path in notebook_files:
         print(f"Processing {nb_path.name}...")
+        extract_first_image(nb_path, thumbnails_dir)
 
-        notebooks_data.append(
-            {
-                "filename": nb_path.name,
-                "title": extract_metadata(nb_path),
-                "category": get_notebook_category(nb_path.name, category_mapping),
-                "thumbnail": extract_first_image(nb_path, thumbnails_dir),
-            }
-        )
-
-    # Generate gallery markdown
-    print("Generating gallery markdown...")
-    generate_gallery_markdown(notebooks_data, output_file, category_mapping)
-
-    print(f"Gallery generated successfully at {output_file}")
     print(f"Thumbnails saved to {thumbnails_dir}")
 
 
