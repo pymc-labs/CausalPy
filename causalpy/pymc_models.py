@@ -173,8 +173,15 @@ class PyMCModel(pm.Model):
         priors: dict[str, Any] | None = None,
     ) -> None:
         """
-        :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
-            :func:`pymc.sample` function. Defaults to an empty dictionary.
+        Parameters
+        ----------
+        sample_kwargs : dict, optional
+            Dictionary of kwargs that get unpacked and passed to the
+            :func:`pymc.sample` function. Defaults to an empty dictionary
+            if None.
+        priors : dict, optional
+            Dictionary of priors for the model. Defaults to None, in which
+            case default priors are used.
         """
         super().__init__()
         self.idata = None
@@ -224,8 +231,23 @@ class PyMCModel(pm.Model):
     def fit(
         self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
     ) -> az.InferenceData:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions, placing them in the model's idata attribute.
+        """Draw samples from posterior, prior predictive, and posterior
+        predictive distributions.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features as an xarray DataArray.
+        y : xr.DataArray
+            Target variable as an xarray DataArray.
+        coords : dict, optional
+            Dictionary with coordinate names for named dimensions.
+            Defaults to None.
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData object containing the samples.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -356,6 +378,16 @@ class PyMCModel(pm.Model):
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:
+        """Print the model coefficients with their labels.
+
+        Parameters
+        ----------
+        labels : list of str
+            List of strings representing the coefficient names.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         if self.idata is None:
             raise RuntimeError("Model has not been fit")
 
@@ -627,19 +659,27 @@ class InstrumentalVariableRegression(PyMCModel):
         coords: Dict[str, Any],
         priors: Dict[str, Any],
     ) -> None:
-        """Specify model with treatment regression and focal regression data and priors
+        """Specify model with treatment regression and focal regression
+        data and priors.
 
-        :param X: A pandas dataframe used to predict our outcome y
-        :param Z: A pandas dataframe used to predict our treatment variable t
-        :param y: An array of values representing our focal outcome y
-        :param t: An array of values representing the treatment t of
-                  which we're interested in estimating the causal impact
-        :param coords: A dictionary with the coordinate names for our
-                       instruments and covariates
-        :param priors: An optional dictionary of priors for the mus and
-                      sigmas of both regressions
-                      :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
-                      "eta": 2, "lkj_sd": 2}`
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict our outcome y.
+        Z : np.ndarray
+            Array used to predict our treatment variable t.
+        y : np.ndarray
+            Array of values representing our focal outcome y.
+        t : np.ndarray
+            Array representing the treatment t of which we're interested
+            in estimating the causal impact.
+        coords : dict
+            Dictionary with the coordinate names for our instruments and
+            covariates.
+        priors : dict
+            Dictionary of priors for the mus and sigmas of both
+            regressions. Example: ``priors = {"mus": [0, 0],
+            "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
         """
 
         # --- Priors ---
@@ -725,13 +765,33 @@ class InstrumentalVariableRegression(PyMCModel):
         priors: Dict[str, Any],
         ppc_sampler: str | None = None,
     ) -> az.InferenceData:
-        """Draw samples from posterior distribution and potentially
-        from the prior and posterior predictive distributions. The
-        fit call can take values for the
-        ppc_sampler = ['jax', 'pymc', None]
-        We default to None, so the user can determine if they wish
-        to spend time sampling the posterior predictive distribution
-        independently.
+        """Draw samples from posterior distribution and potentially from
+        the prior and posterior predictive distributions.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict our outcome y.
+        Z : np.ndarray
+            Array used to predict our treatment variable t.
+        y : np.ndarray
+            Array of values representing our focal outcome y.
+        t : np.ndarray
+            Array representing the treatment variable.
+        coords : dict
+            Dictionary with coordinate names for named dimensions.
+        priors : dict
+            Dictionary of priors for the model.
+        ppc_sampler : str, optional
+            Sampler for posterior predictive distribution. Can be 'jax',
+            'pymc', or None. Defaults to None, so the user can determine
+            if they wish to spend time sampling the posterior predictive
+            distribution independently.
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData object containing the samples.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and

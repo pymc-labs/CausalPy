@@ -35,21 +35,28 @@ def plot_xY(
     hdi_prob: float = 0.94,
     label: str | None = None,
 ) -> Tuple[Line2D, PolyCollection]:
-    """
-    Utility function to plot HDI intervals.
+    """Plot HDI intervals.
 
-    :param x:
-        Pandas datetime index or numpy array of x-axis values
-    :param y:
-        Xarray data array of y-axis data
-    :param ax:
-        Matplotlib ax object
-    :param plot_hdi_kwargs:
-        Dictionary of keyword arguments passed to ax.plot()
-    :param hdi_prob:
-        The size of the HDI, default is 0.94
-    :param label:
-        The plot label
+    Parameters
+    ----------
+    x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
+        Pandas datetime index or numpy array of x-axis values.
+    Y : xr.DataArray
+        Xarray data array of y-axis data.
+    ax : plt.Axes
+        Matplotlib axes object.
+    plot_hdi_kwargs : dict, optional
+        Dictionary of keyword arguments passed to ax.plot().
+    hdi_prob : float, optional
+        The size of the HDI. Default is 0.94.
+    label : str, optional
+        The plot label.
+
+    Returns
+    -------
+    tuple
+        Tuple of (Line2D, PolyCollection) handles for the plot line and
+        HDI patch.
     """
 
     if plot_hdi_kwargs is None:
@@ -86,13 +93,20 @@ def get_hdi_to_df(
     x: xr.DataArray,
     hdi_prob: float = 0.94,
 ) -> pd.DataFrame:
-    """
-    Utility function to calculate and recover HDI intervals.
+    """Calculate and recover HDI intervals.
 
-    :param x:
-        Xarray data array
-    :param hdi_prob:
-        The size of the HDI, default is 0.94
+    Parameters
+    ----------
+    x : xr.DataArray
+        Xarray data array.
+    hdi_prob : float, optional
+        The size of the HDI. Default is 0.94.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the HDI intervals with 'lower' and 'higher'
+        columns.
     """
     hdi_result = az.hdi(x, hdi_prob=hdi_prob)
 

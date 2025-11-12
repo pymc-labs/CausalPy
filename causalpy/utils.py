@@ -35,15 +35,20 @@ def _series_has_2_levels(series: pd.Series) -> bool:
 
 
 def round_num(n: float, round_to: int | None) -> str:
-    """
-    Return a string representing a number with `round_to` significant figures.
+    """Return a string representing a number with significant figures.
 
     Parameters
     ----------
     n : float
-        number to round
+        Number to round.
     round_to : int, optional
-        number of significant figures
+        Number of significant figures. If None, defaults to 2.
+
+    Returns
+    -------
+    str
+        String representation of the number with specified significant
+        figures.
     """
     sig_figs = _format_sig_figs(n, round_to)
     return f"{n:.{sig_figs}g}"
@@ -69,7 +74,26 @@ def _format_sig_figs(value: float, default: int | None = None) -> int:
 
 
 def convert_to_string(x: Union[float, xr.DataArray], round_to: int | None = 2) -> str:
-    """Utility function which takes in numeric inputs and returns a string."""
+    """Convert numeric inputs to a formatted string representation.
+
+    Parameters
+    ----------
+    x : float or xr.DataArray
+        The numeric value or xarray DataArray to convert.
+    round_to : int, optional
+        Number of significant figures to round to. Defaults to 2.
+
+    Returns
+    -------
+    str
+        Formatted string representation. For floats, returns rounded
+        decimal. For DataArrays, returns mean with 94% credible interval.
+
+    Raises
+    ------
+    ValueError
+        If `x` is neither a float nor an xarray DataArray.
+    """
     if isinstance(x, float):
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"

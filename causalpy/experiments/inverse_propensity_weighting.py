@@ -31,22 +31,23 @@ from .base import BaseExperiment
 
 
 class InversePropensityWeighting(BaseExperiment):
-    """
-    A class to analyse inverse propensity weighting experiments.
+    """A class to analyse inverse propensity weighting experiments.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula for the propensity model
-    :param outcome_variable
-        A string denoting the outcome variable in datq to be reweighted
-    :param weighting_scheme:
-        A string denoting which weighting scheme to use among: 'raw', 'robust',
-        'doubly robust' or 'overlap'. See Aronow and Miller "Foundations
-        of Agnostic Statistics" for discussion and computation of these
-        weighting schemes.
-    :param model:
-        A PyMC model
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula for the propensity model.
+    outcome_variable : str
+        A string denoting the outcome variable in data to be reweighted.
+    weighting_scheme : str
+        A string denoting which weighting scheme to use among: 'raw',
+        'robust', 'doubly robust' or 'overlap'. See Aronow and Miller
+        "Foundations of Agnostic Statistics" for discussion and computation
+        of these weighting schemes.
+    model : BaseExperiment, optional
+        A PyMC model. Defaults to None.
 
     Example
     --------

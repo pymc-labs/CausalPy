@@ -27,31 +27,30 @@ from .base import BaseExperiment
 
 
 class InstrumentalVariable(BaseExperiment):
-    """
-    A class to analyse instrumental variable style experiments.
+    """A class to analyse instrumental variable style experiments.
 
-    :param instruments_data: A pandas dataframe of instruments
-                             for our treatment variable. Should contain
-                             instruments Z, and treatment t
-    :param data: A pandas dataframe of covariates for fitting
-                 the focal regression of interest. Should contain covariates X
-                 including treatment t and outcome y
-    :param instruments_formula: A statistical model formula for
-                                the instrumental stage regression
-                                e.g. t ~ 1 + z1 + z2 + z3
-    :param formula: A statistical model formula for the \n
-                    focal regression e.g. y ~ 1 + t + x1 + x2 + x3
-    :param model: A PyMC model
-    :param priors: An optional dictionary of priors for the
-                   mus and sigmas of both regressions. If priors are not
-                   specified we will substitute MLE estimates for the beta
-                   coefficients. Greater control can be achieved
-                   by specifying the priors directly e.g. priors = {
-                                    "mus": [0, 0],
-                                    "sigmas": [1, 1],
-                                    "eta": 2,
-                                    "lkj_sd": 2,
-                                    }
+    Parameters
+    ----------
+    instruments_data : pd.DataFrame
+        A pandas dataframe of instruments for our treatment variable.
+        Should contain instruments Z, and treatment t.
+    data : pd.DataFrame
+        A pandas dataframe of covariates for fitting the focal regression
+        of interest. Should contain covariates X including treatment t and
+        outcome y.
+    instruments_formula : str
+        A statistical model formula for the instrumental stage regression,
+        e.g. ``t ~ 1 + z1 + z2 + z3``.
+    formula : str
+        A statistical model formula for the focal regression,
+        e.g. ``y ~ 1 + t + x1 + x2 + x3``.
+    model : BaseExperiment, optional
+        A PyMC model. Defaults to None.
+    priors : dict, optional
+        Dictionary of priors for the mus and sigmas of both regressions.
+        If priors are not specified we will substitute MLE estimates for
+        the beta coefficients. Example: ``priors = {"mus": [0, 0],
+        "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
 
     Example
     --------

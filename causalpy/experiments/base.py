@@ -62,7 +62,14 @@ class BaseExperiment:
         return self.model.idata
 
     def print_coefficients(self, round_to: int | None = None) -> None:
-        """Ask the model to print its coefficients."""
+        """Ask the model to print its coefficients.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         self.model.print_coefficients(self.labels, round_to)
 
     def plot(self, *args: Any, **kwargs: Any) -> tuple:

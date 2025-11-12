@@ -39,7 +39,16 @@ class ScikitLearnAdaptor:
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:
-        """Print the coefficients of the model with the corresponding labels."""
+        """Print the coefficients of the model with the corresponding labels.
+
+        Parameters
+        ----------
+        labels : list of str
+            List of strings representing the coefficient names.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         print("Model coefficients:")
         coef_ = self.get_coeffs()
         # Determine the width of the longest label

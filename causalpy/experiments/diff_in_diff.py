@@ -49,20 +49,24 @@ class DifferenceInDifferences(BaseExperiment):
 
     .. note::
 
-        There is no pre/post intervention data distinction for DiD, we fit all the
-        data available.
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param time_variable_name:
-        Name of the data column for the time variable
-    :param group_variable_name:
-        Name of the data column for the group variable
-    :param post_treatment_variable_name:
-        Name of the data column indicating post-treatment period (default: "post_treatment")
-    :param model:
-        A PyMC model for difference in differences
+        There is no pre/post intervention data distinction for DiD, we fit
+        all the data available.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    time_variable_name : str
+        Name of the data column for the time variable.
+    group_variable_name : str
+        Name of the data column for the group variable.
+    post_treatment_variable_name : str, optional
+        Name of the data column indicating post-treatment period.
+        Defaults to "post_treatment".
+    model : PyMCModel or RegressorMixin, optional
+        A PyMC model for difference in differences. Defaults to None.
 
     Example
     --------
