@@ -236,7 +236,8 @@ class PyMCModel(pm.Model):
         self.build_model(X, y, coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            assert self.idata is not None
+            if self.idata is None:
+                raise RuntimeError("pm.sample() returned None")
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
                 pm.sample_posterior_predictive(
@@ -350,7 +351,8 @@ class PyMCModel(pm.Model):
         return impact.cumsum(dim="obs_ind")
 
     def print_coefficients(self, labels, round_to=None) -> None:
-        assert self.idata is not None
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit")
 
         def print_row(
             max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
