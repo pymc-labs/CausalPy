@@ -11,7 +11,6 @@ import base64
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 try:
     import nbformat
@@ -29,7 +28,7 @@ except ImportError:
     Image = None  # type: ignore[assignment,misc]
 
 
-def load_categories_from_index(index_path: Path) -> Dict[str, List[str]]:
+def load_categories_from_index(index_path: Path) -> dict[str, list[str]]:
     """
     Load category structure from existing index.md.
 
@@ -39,10 +38,10 @@ def load_categories_from_index(index_path: Path) -> Dict[str, List[str]]:
 
     Returns
     -------
-    Dict[str, List[str]]
+    dict[str, list[str]]
         Mapping from category name to list of notebook names (without .ipynb)
     """
-    categories: Dict[str, List[str]] = {}
+    categories: dict[str, list[str]] = {}
     current_category = None
 
     if not index_path.exists():
@@ -69,7 +68,7 @@ def load_categories_from_index(index_path: Path) -> Dict[str, List[str]]:
     return categories
 
 
-def get_notebook_category(filename: str, category_mapping: Dict[str, List[str]]) -> str:
+def get_notebook_category(filename: str, category_mapping: dict[str, list[str]]) -> str:
     """Determine the category for a notebook from the loaded mapping."""
     notebook_name = filename.replace(".ipynb", "")
     for category, notebooks in category_mapping.items():
@@ -78,7 +77,7 @@ def get_notebook_category(filename: str, category_mapping: Dict[str, List[str]])
     return "Other"
 
 
-def extract_metadata(notebook_path: Path) -> Tuple[str, str]:
+def extract_metadata(notebook_path: Path) -> tuple[str, str]:
     """Extract title and description from notebook."""
     with open(notebook_path, "r", encoding="utf-8") as f:
         nb = nbformat.read(f, as_version=4)
@@ -124,7 +123,7 @@ def extract_metadata(notebook_path: Path) -> Tuple[str, str]:
     return title, description
 
 
-def extract_first_image(notebook_path: Path, output_dir: Path) -> Optional[str]:
+def extract_first_image(notebook_path: Path, output_dir: Path) -> str | None:
     """Extract first image from notebook outputs (without executing if outputs exist)."""
     if Image is None:
         return None
@@ -188,7 +187,7 @@ def extract_first_image(notebook_path: Path, output_dir: Path) -> Optional[str]:
 
 def _save_thumbnail(
     notebook_path: Path, output_dir: Path, image_data: str
-) -> Optional[str]:
+) -> str | None:
     """Save thumbnail image from base64 data."""
     try:
         thumbnail_name = f"{notebook_path.stem}.png"
@@ -225,13 +224,13 @@ def _save_thumbnail(
 
 
 def generate_gallery_markdown(
-    notebooks_data: List[Dict],
+    notebooks_data: list[dict],
     output_path: Path,
-    category_mapping: Dict[str, List[str]],
+    category_mapping: dict[str, list[str]],
 ):
     """Generate gallery markdown file with sphinx-design cards."""
     # Group notebooks by category
-    categories: Dict[str, List[Dict]] = {}
+    categories: dict[str, list[dict]] = {}
     for nb_data in notebooks_data:
         category = nb_data["category"]
         if category not in categories:
