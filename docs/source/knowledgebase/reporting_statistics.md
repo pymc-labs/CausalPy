@@ -42,7 +42,7 @@ For symmetric posteriors, mean and median are nearly identical. For skewed poste
 ### Uncertainty Quantification
 
 **HDI (Highest Density Interval)**
-- A :term:`credible interval` containing the specified percentage of posterior probability (default: 95%)
+- A {term}`credible interval` containing the specified percentage of posterior probability (default: 95%)
 - Reported as `hdi_lower` and `hdi_upper` in summary tables
 - The narrowest interval containing the specified probability mass
 - **Interpretation:** "We can be 95% certain the true effect lies between X and Y"
@@ -63,7 +63,7 @@ mean: 2.5, 95% HDI: [1.2, 3.8]
 Bayesian hypothesis testing uses posterior probabilities directly, making the interpretation more intuitive than traditional p-values.
 
 **Directional Tests**
-- `p_gt_0`: :term:`Posterior probability` that the effect is greater than zero (positive effect)
+- `p_gt_0`: {term}`Posterior probability` that the effect is greater than zero (positive effect)
 - `p_lt_0`: Posterior probability that the effect is less than zero (negative effect)
 - **Interpretation:** Direct probability statements about the hypothesis
 - **Example:** If `p_gt_0 = 0.95`, there's a 95% probability the effect is positive
