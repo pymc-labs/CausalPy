@@ -91,7 +91,7 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    default_priors = {}
+    default_priors: Dict[str, Prior] = {}
 
     def priors_from_data(self, X, y) -> Dict[str, Any]:
         """
@@ -236,6 +236,7 @@ class PyMCModel(pm.Model):
         self.build_model(X, y, coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
+            assert self.idata is not None
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
                 pm.sample_posterior_predictive(
@@ -349,6 +350,8 @@ class PyMCModel(pm.Model):
         return impact.cumsum(dim="obs_ind")
 
     def print_coefficients(self, labels, round_to=None) -> None:
+        assert self.idata is not None
+
         def print_row(
             max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
         ) -> None:

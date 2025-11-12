@@ -98,6 +98,10 @@ class PrePostNEGD(BaseExperiment):
         **kwargs,
     ):
         super().__init__(model=model)
+        self.causal_impact: xr.DataArray
+        self.pred_xi: np.ndarray
+        self.pred_untreated: az.InferenceData
+        self.pred_treated: az.InferenceData
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
@@ -140,6 +144,7 @@ class PrePostNEGD(BaseExperiment):
         else:
             raise ValueError("Model type not recognized")
 
+        assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data

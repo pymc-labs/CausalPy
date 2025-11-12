@@ -96,6 +96,7 @@ class DifferenceInDifferences(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        self.causal_impact: xr.DataArray | float | None
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.data = data
@@ -213,6 +214,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         # calculate causal impact
         if isinstance(self.model, PyMCModel):
+            assert self.model.idata is not None
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
@@ -395,7 +397,7 @@ class DifferenceInDifferences(BaseExperiment):
         labels = ["Control group"]
 
         # Plot model fit to treatment group
-        time_points = self.x_pred_control[self.time_variable_name].values
+        time_points = self.x_pred_treatment[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),

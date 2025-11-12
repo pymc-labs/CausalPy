@@ -93,6 +93,8 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs,
     ) -> None:
         super().__init__(model=model)
+        self.pre_y: xr.DataArray
+        self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)

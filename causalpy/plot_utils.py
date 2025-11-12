@@ -24,10 +24,11 @@ import pandas as pd
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
+from pandas.api.extensions import ExtensionArray
 
 
 def plot_xY(
-    x: Union[pd.DatetimeIndex, np.array],
+    x: Union[pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, ExtensionArray],
     Y: xr.DataArray,
     ax: plt.Axes,
     plot_hdi_kwargs: Optional[Dict[str, Any]] = None,
