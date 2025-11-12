@@ -89,10 +89,12 @@ class InterruptedTimeSeries(BaseExperiment):
         data: pd.DataFrame,
         treatment_time: Union[int, float, pd.Timestamp],
         formula: str,
-        model=None,
-        **kwargs,
+        model: Union[PyMCModel, RegressorMixin] | None = None,
+        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
+        self.pre_y: xr.DataArray
+        self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
@@ -187,7 +189,9 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
-    def input_validation(self, data, treatment_time):
+    def input_validation(
+        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+    ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
@@ -202,7 +206,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -213,7 +217,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, **kwargs
+        self, round_to: int | None = 2, **kwargs: dict
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
@@ -338,7 +342,9 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return fig, ax
 
-    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _ols_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -361,7 +367,7 @@ class InterruptedTimeSeries(BaseExperiment):
             c="k",
         )
         ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+            title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"
         )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")

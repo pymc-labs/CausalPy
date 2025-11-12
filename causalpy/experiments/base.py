@@ -16,7 +16,7 @@ Base class for quasi experimental designs.
 """
 
 from abc import abstractmethod
-from typing import Literal, Optional, Union
+from typing import Any, Union
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -49,11 +49,14 @@ from causalpy.skl_models import create_causalpy_compatible_class
 class BaseExperiment:
     """Base class for quasi experimental designs."""
 
+    labels: list[str]
+
     supports_bayes: bool
     supports_ols: bool
 
-    def __init__(self, model=None):
-        # Ensure we've made any provided scikit-learn model (as identified as being type
+
+    def __init__(self, model: Union[PyMCModel, RegressorMixin] | None = None) -> None:
+        # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
@@ -70,16 +73,26 @@ class BaseExperiment:
         if self.model is None:
             raise ValueError("model not set or passed.")
 
+    def fit(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("fit method not implemented")
+
     @property
-    def idata(self):
+    def idata(self) -> az.InferenceData:
         """Return the InferenceData object of the model. Only relevant for PyMC models."""
         return self.model.idata
 
-    def print_coefficients(self, round_to=None):
-        """Ask the model to print its coefficients."""
+    def print_coefficients(self, round_to: int | None = None) -> None:
+        """Ask the model to print its coefficients.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args, **kwargs) -> tuple:
+    def plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
@@ -95,16 +108,16 @@ class BaseExperiment:
                 raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def _bayesian_plot(self, *args, **kwargs):
+    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Abstract method for plotting the model."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
     @abstractmethod
-    def _ols_plot(self, *args, **kwargs):
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Abstract method for plotting the model."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
-    def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
+    def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Recover the data of an experiment along with the prediction and causal impact information.
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
@@ -118,12 +131,12 @@ class BaseExperiment:
             raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def get_plot_data_bayesian(self, *args, **kwargs):
+    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Abstract method for recovering plot data."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     @abstractmethod
-    def get_plot_data_ols(self, *args, **kwargs):
+    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Abstract method for recovering plot data."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
