@@ -11,10 +11,39 @@
 
 import os
 import sys
+from pathlib import Path
 
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
+
+
+# Generate gallery before building docs
+# This runs after dependencies are installed but before Sphinx processes files
+def generate_gallery():
+    """Generate example gallery from notebooks."""
+    try:
+        # Import here to avoid errors if dependencies aren't available
+        import subprocess
+
+        repo_root = Path(__file__).parent.parent.parent
+        script_path = repo_root / "scripts" / "generate_gallery.py"
+
+        if script_path.exists():
+            result = subprocess.run(
+                [sys.executable, str(script_path)],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                print(f"Warning: Gallery generation failed: {result.stderr}")
+    except Exception as e:
+        print(f"Warning: Could not generate gallery: {e}")
+
+
+# Generate gallery during Sphinx setup
+generate_gallery()
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
