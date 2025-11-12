@@ -173,35 +173,6 @@ class BaseExperiment:
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
-
-        Examples
-        --------
-        Interrupted Time Series (PyMC):
-
-            import causalpy as cp
-            result = cp.InterruptedTimeSeries(..., model=cp.pymc_models.LinearRegression(...))
-            stats = result.effect_summary()
-            print(stats.table)
-            print(stats.text)
-
-        Interrupted Time Series (OLS):
-
-            from sklearn.linear_model import LinearRegression
-            result = cp.InterruptedTimeSeries(..., model=LinearRegression())
-            stats = result.effect_summary()
-            print(stats.table)
-
-        Difference-in-Differences:
-
-            result = cp.DifferenceInDifferences(...)
-            stats = result.effect_summary()
-            print(stats.table)
-
-        Regression Discontinuity:
-
-            result = cp.RegressionDiscontinuity(...)
-            stats = result.effect_summary()
-            print(stats.table)
         """
         # Detect experiment type
         experiment_type = _detect_experiment_type(self)
