@@ -83,6 +83,9 @@ Glossary
    Pretest-posttest design
       A quasi-experimental design where the treatment effect is estimated by comparing an outcome measure before and after treatment.
 
+   Probabilistic Programming
+      Probabilistic programming is the practice of expressing statistical using general-purpose programming languages extended with constructs for random variables, probability distributions, and inference. Prominent examples are `PyMC` and `Stan`
+
    Propensity scores
       An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
 
