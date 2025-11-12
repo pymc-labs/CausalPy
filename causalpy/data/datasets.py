@@ -49,9 +49,22 @@ def _get_data_home() -> pathlib.Path:
 
 
 def load_data(dataset: str | None = None) -> pd.DataFrame:
-    """Loads the requested dataset and returns a pandas DataFrame.
+    """Load the requested dataset and return a pandas DataFrame.
 
-    :param dataset: The desired dataset to load
+    Parameters
+    ----------
+    dataset : str, optional
+        The desired dataset to load. If None, raises ValueError.
+
+    Returns
+    -------
+    pd.DataFrame
+        The loaded dataset as a pandas DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If the requested dataset is not found.
     """
 
     if dataset in DATASETS:
