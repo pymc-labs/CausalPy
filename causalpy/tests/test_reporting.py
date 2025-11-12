@@ -314,8 +314,8 @@ def test_effect_summary_rope(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_error(mock_pymc_sample):
-    """Test that effect_summary raises error for OLS models."""
+def test_effect_summary_ols_its(mock_pymc_sample):
+    """Test effect_summary with OLS model for ITS."""
     from sklearn.linear_model import LinearRegression
 
     df = (
@@ -324,18 +324,126 @@ def test_effect_summary_ols_error(mock_pymc_sample):
         .set_index("date")
     )
     treatment_time = pd.to_datetime("2017-01-01")
-
-    # Create OLS model
-    ols_model = cp.skl_models.create_causalpy_compatible_class(LinearRegression)()
     result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
-        model=ols_model,
+        model=LinearRegression(),
     )
 
-    with pytest.raises(ValueError, match="PyMC models"):
-        result.effect_summary()
+    stats = result.effect_summary()
+
+    assert isinstance(stats, EffectSummary)
+    assert "average" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "ci_lower" in stats.table.columns
+    assert "ci_upper" in stats.table.columns
+    assert "p_value" in stats.table.columns
+    # OLS tables should NOT have posterior metrics
+    assert "median" not in stats.table.columns
+    assert "hdi_lower" not in stats.table.columns
+    assert "hdi_upper" not in stats.table.columns
+    assert "p_gt_0" not in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_did(mock_pymc_sample):
+    """Test effect_summary with OLS model for DiD."""
+    from sklearn.linear_model import LinearRegression
+
+    df = cp.load_data("did")
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    stats = result.effect_summary()
+
+    assert isinstance(stats, EffectSummary)
+    assert "treatment_effect" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "ci_lower" in stats.table.columns
+    assert "ci_upper" in stats.table.columns
+    assert "p_value" in stats.table.columns
+    # OLS tables should NOT have posterior metrics
+    assert "median" not in stats.table.columns
+    assert "hdi_lower" not in stats.table.columns
+    assert "hdi_upper" not in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_sc(mock_pymc_sample):
+    """Test effect_summary with OLS model for Synthetic Control."""
+    from sklearn.linear_model import LinearRegression
+
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticControl(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=LinearRegression(),
+    )
+
+    stats = result.effect_summary(treated_unit="actual")
+
+    assert isinstance(stats, EffectSummary)
+    assert "average" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "ci_lower" in stats.table.columns
+    assert "ci_upper" in stats.table.columns
+    assert "p_value" in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_rd_pymc(mock_pymc_sample):
+    """Test effect_summary with Regression Discontinuity (PyMC)."""
+    df = cp.load_data("rd")
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    stats = result.effect_summary()
+
+    assert isinstance(stats, EffectSummary)
+    assert "discontinuity" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "hdi_lower" in stats.table.columns
+    assert "hdi_upper" in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_rd_ols(mock_pymc_sample):
+    """Test effect_summary with Regression Discontinuity (OLS)."""
+    from sklearn.linear_model import LinearRegression
+
+    df = cp.load_data("rd")
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    stats = result.effect_summary()
+
+    assert isinstance(stats, EffectSummary)
+    assert "discontinuity" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "ci_lower" in stats.table.columns
+    assert "ci_upper" in stats.table.columns
+    assert "p_value" in stats.table.columns
+    # OLS tables should NOT have posterior metrics
+    assert "median" not in stats.table.columns
+    assert "hdi_lower" not in stats.table.columns
+    assert "hdi_upper" not in stats.table.columns
 
 
 @pytest.mark.integration
@@ -629,7 +737,7 @@ def test_effect_summary_did_rope(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_effect_summary_did_ols_error(mock_pymc_sample):
-    """Test that effect_summary raises error for DiD with OLS model."""
+    """Test that effect_summary works for DiD with OLS model (OLS is now supported)."""
     from sklearn.linear_model import LinearRegression
 
     df = cp.load_data("did")
@@ -642,8 +750,14 @@ def test_effect_summary_did_ols_error(mock_pymc_sample):
         model=ols_model,
     )
 
-    with pytest.raises(ValueError, match="PyMC models"):
-        result.effect_summary()
+    # OLS is now supported for DiD, so this should not raise an error
+    stats = result.effect_summary()
+    assert isinstance(stats, EffectSummary)
+    assert "treatment_effect" in stats.table.index
+    assert "mean" in stats.table.columns
+    assert "ci_lower" in stats.table.columns
+    assert "ci_upper" in stats.table.columns
+    assert "p_value" in stats.table.columns
 
 
 @pytest.mark.integration

@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.stats import t
 
 
 @dataclass
@@ -41,14 +42,16 @@ class EffectSummary:
 
 def _detect_experiment_type(result):
     """Detect experiment type from result attributes."""
-    if hasattr(result, "causal_impact") and not hasattr(result, "post_impact"):
-        return "did"
+    if hasattr(result, "discontinuity_at_threshold"):
+        return "rd"  # Regression Discontinuity
+    elif hasattr(result, "causal_impact") and not hasattr(result, "post_impact"):
+        return "did"  # Difference-in-Differences
     elif hasattr(result, "post_impact"):
         return "its_or_sc"  # ITS or Synthetic Control
     else:
         raise ValueError(
-            "Unknown experiment type. Result must have either 'causal_impact' "
-            "(DiD) or 'post_impact' (ITS/Synthetic Control) attribute."
+            "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
+            "'causal_impact' (DiD), or 'post_impact' (ITS/Synthetic Control) attribute."
         )
 
 
@@ -83,6 +86,38 @@ def _effect_summary_did(
 
     # Generate prose
     text = _generate_prose_did(stats, alpha=alpha, direction=direction)
+
+    return EffectSummary(table=table, text=text)
+
+
+def _effect_summary_rd(
+    result,
+    direction="increase",
+    alpha=0.05,
+    min_effect=None,
+):
+    """Generate effect summary for Regression Discontinuity experiments."""
+    discontinuity = result.discontinuity_at_threshold
+
+    # Check if PyMC (xarray) or OLS (scalar)
+    is_pymc = isinstance(discontinuity, xr.DataArray)
+
+    if is_pymc:
+        # PyMC model: use posterior draws
+        hdi_prob = 1 - alpha
+        stats = _compute_statistics_rd(
+            discontinuity,
+            hdi_prob=hdi_prob,
+            direction=direction,
+            min_effect=min_effect,
+        )
+        table = _generate_table_rd(stats)
+        text = _generate_prose_rd(stats, alpha=alpha, direction=direction)
+    else:
+        # OLS model: calculate from model
+        stats = _compute_statistics_rd_ols(result, alpha=alpha)
+        table = _generate_table_rd_ols(stats)
+        text = _generate_prose_rd_ols(stats, alpha=alpha)
 
     return EffectSummary(table=table, text=text)
 
@@ -192,19 +227,66 @@ def _extract_window(result, window, treated_unit=None):
     """Extract windowed impact data based on window specification."""
     post_impact = result.post_impact
 
-    # Handle treated_unit selection for multi-unit experiments
-    if "treated_units" in post_impact.dims:
-        if treated_unit is not None:
-            post_impact = post_impact.sel(treated_units=treated_unit)
-        else:
-            # Use first unit if multiple exist
-            post_impact = post_impact.isel(treated_units=0)
+    # Check if PyMC (xarray with chain/draw dims) or OLS (numpy array or xarray without chains)
+    # For OLS Synthetic Control, post_impact can be xarray but without chain/draw dimensions
+    is_pymc = isinstance(post_impact, xr.DataArray) and (
+        "chain" in post_impact.dims or "draw" in post_impact.dims
+    )
+
+    if is_pymc:
+        # Handle treated_unit selection for multi-unit experiments
+        if "treated_units" in post_impact.dims:
+            if treated_unit is not None:
+                post_impact = post_impact.sel(treated_units=treated_unit)
+            else:
+                # Use first unit if multiple exist
+                post_impact = post_impact.isel(treated_units=0)
+    else:
+        # OLS model - handle treated_unit if multi-dimensional
+        # For OLS, post_impact might be xarray (from SyntheticControl) or numpy array
+        if isinstance(post_impact, xr.DataArray):
+            # OLS with xarray (e.g., SyntheticControl)
+            if "treated_units" in post_impact.dims:
+                # Check for shape mismatch between data and coordinates
+                # This can happen when post_impact is calculated incorrectly in SyntheticControl
+                treated_units_coord_len = len(post_impact.coords["treated_units"])
+                treated_units_dim_size = post_impact.sizes["treated_units"]
+
+                if treated_units_coord_len != treated_units_dim_size:
+                    # Shape mismatch - take only the slice that matches the coordinates
+                    # This typically means we need the first `treated_units_coord_len` elements
+                    post_impact = post_impact.isel(
+                        treated_units=slice(0, treated_units_coord_len)
+                    )
+
+                # Now select the specific treated_unit
+                if treated_unit is not None:
+                    post_impact = post_impact.sel(treated_units=treated_unit)
+                else:
+                    post_impact = post_impact.isel(treated_units=0)
+            # Convert to numpy for consistent handling - do this BEFORE window selection
+            # Squeeze to remove any single-element dimensions
+            post_impact = np.squeeze(post_impact.values)
+        elif hasattr(post_impact, "ndim") and post_impact.ndim > 1:
+            # OLS with numpy array (multi-dimensional)
+            if treated_unit is not None and hasattr(result, "treated_units"):
+                unit_idx = result.treated_units.index(treated_unit)
+                post_impact = post_impact[:, unit_idx]
+            else:
+                post_impact = post_impact[:, 0]
+        # Ensure post_impact is a numpy array at this point
+        if not isinstance(post_impact, np.ndarray):
+            post_impact = np.asarray(post_impact)
 
     # Determine window coordinates
     if window == "post":
         # Use all post-treatment time points
         window_coords = result.datapost.index
-        windowed_impact = post_impact
+        if is_pymc:
+            windowed_impact = post_impact
+        else:
+            # OLS: post_impact is now a numpy array
+            windowed_impact = post_impact
     elif isinstance(window, tuple) and len(window) == 2:
         start, end = window
         # Handle datetime vs integer indices
@@ -216,7 +298,15 @@ def _extract_window(result, window, treated_unit=None):
             window_coords = result.datapost.index[
                 (result.datapost.index >= start) & (result.datapost.index <= end)
             ]
-            windowed_impact = post_impact.sel(obs_ind=window_coords)
+            if is_pymc:
+                windowed_impact = post_impact.sel(obs_ind=window_coords)
+            else:
+                # OLS: convert window_coords to indices
+                # post_impact is now a numpy array
+                indices = [
+                    result.datapost.index.get_loc(coord) for coord in window_coords
+                ]
+                windowed_impact = post_impact[indices]
         else:
             # Integer index
             # Ensure start and end are comparable with the index
@@ -228,7 +318,15 @@ def _extract_window(result, window, treated_unit=None):
                 result.datapost.index <= end_val
             )
             window_coords = result.datapost.index[mask]
-            windowed_impact = post_impact.sel(obs_ind=window_coords)
+            if is_pymc:
+                windowed_impact = post_impact.sel(obs_ind=window_coords)
+            else:
+                # OLS: convert window_coords to indices
+                # post_impact is now a numpy array
+                indices = [
+                    result.datapost.index.get_loc(coord) for coord in window_coords
+                ]
+                windowed_impact = post_impact[indices]
     elif isinstance(window, slice):
         # Slice window - handle differently for datetime vs integer indices
         if isinstance(result.datapost.index, pd.DatetimeIndex):
@@ -261,7 +359,12 @@ def _extract_window(result, window, treated_unit=None):
                 )
                 filtered = result.datapost.index[mask]
                 window_coords = filtered[::step]
-        windowed_impact = post_impact.sel(obs_ind=window_coords)
+        if is_pymc:
+            windowed_impact = post_impact.sel(obs_ind=window_coords)
+        else:
+            # OLS: convert window_coords to indices
+            indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+            windowed_impact = post_impact[indices]
     else:
         raise ValueError(
             f"window must be 'post', a tuple (start, end), or a slice. Got {type(window)}"
@@ -278,17 +381,80 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
     """Extract counterfactual predictions for the window."""
     post_pred = result.post_pred
 
-    # Extract mu (posterior expectation)
-    counterfactual = post_pred["posterior_predictive"]["mu"]
+    # Check if PyMC (InferenceData) or OLS (numpy array or xarray)
+    # PyMC models return InferenceData which has posterior_predictive attribute
+    if hasattr(post_pred, "posterior_predictive"):
+        # PyMC model - InferenceData object
+        # Extract mu (posterior expectation)
+        counterfactual = post_pred.posterior_predictive["mu"]
+    elif isinstance(post_pred, dict) and "posterior_predictive" in post_pred:
+        # PyMC model - dict format (fallback)
+        counterfactual = post_pred["posterior_predictive"]["mu"]
+    else:
+        # OLS model - post_pred is numpy array or xarray
+        if isinstance(post_pred, xr.DataArray):
+            # OLS with xarray (e.g., SyntheticControl)
+            # First select the treated_unit if multi-dimensional
+            if "treated_units" in post_pred.dims:
+                # Check for shape mismatch between data and coordinates
+                treated_units_coord_len = len(post_pred.coords["treated_units"])
+                treated_units_dim_size = post_pred.sizes["treated_units"]
 
-    # Handle treated_unit selection
+                if treated_units_coord_len != treated_units_dim_size:
+                    # Shape mismatch - take only the slice that matches the coordinates
+                    post_pred = post_pred.isel(
+                        treated_units=slice(0, treated_units_coord_len)
+                    )
+
+                # Now select the specific treated_unit
+                if treated_unit is not None:
+                    post_pred = post_pred.sel(treated_units=treated_unit)
+                else:
+                    post_pred = post_pred.isel(treated_units=0)
+
+            # Then select the window using integer indices
+            if isinstance(window_coords, pd.Index):
+                # Find indices in datapost.index that match window_coords
+                indices = [
+                    result.datapost.index.get_loc(coord) for coord in window_coords
+                ]
+                # Use isel for integer-based indexing on xarray
+                counterfactual = post_pred.isel(obs_ind=indices)
+            else:
+                # If window_coords is already indices
+                counterfactual = post_pred.isel(obs_ind=window_coords)
+
+            # Convert to numpy and squeeze to remove single-element dims
+            counterfactual = np.squeeze(counterfactual.values)
+        else:
+            # OLS with numpy array
+            # Convert window_coords to indices
+            if isinstance(window_coords, pd.Index):
+                indices = [
+                    result.datapost.index.get_loc(coord) for coord in window_coords
+                ]
+                counterfactual = post_pred[indices]
+            else:
+                counterfactual = post_pred[window_coords]
+
+            # Handle treated_unit for multi-unit numpy arrays
+            if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
+                if treated_unit is not None and hasattr(result, "treated_units"):
+                    unit_idx = result.treated_units.index(treated_unit)
+                    counterfactual = counterfactual[:, unit_idx]
+                else:
+                    counterfactual = counterfactual[:, 0]
+
+        return counterfactual
+
+    # Handle treated_unit selection (PyMC only)
     if "treated_units" in counterfactual.dims:
         if treated_unit is not None:
             counterfactual = counterfactual.sel(treated_units=treated_unit)
         else:
             counterfactual = counterfactual.isel(treated_units=0)
 
-    # Select window
+    # Select window (PyMC only)
     counterfactual = counterfactual.sel(obs_ind=window_coords)
 
     return counterfactual
@@ -592,3 +758,491 @@ def _generate_prose(
         )
 
     return " ".join(prose_parts)
+
+
+def _compute_statistics_ols(
+    impact,
+    counterfactual,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+):
+    """Compute summary statistics for OLS models (time-series experiments).
+
+    Parameters
+    ----------
+    impact : np.ndarray
+        Impact values (y_true - y_pred) as 1D numpy array
+    counterfactual : np.ndarray
+        Counterfactual predictions as 1D numpy array
+    alpha : float
+        Significance level
+    cumulative : bool
+        Whether to compute cumulative statistics
+    relative : bool
+        Whether to compute relative statistics
+
+    Returns
+    -------
+    dict
+        Dictionary of statistics
+    """
+    stats = {}
+
+    # Average effect over window
+    avg_effect = np.mean(impact)
+    n = len(impact)
+    # Calculate standard error of mean
+    se_avg = np.std(impact, ddof=1) / np.sqrt(n)
+    # Degrees of freedom
+    df = n - 1
+    # t-critical value
+    t_critical = t.ppf(1 - alpha / 2, df=df)
+    ci_lower = avg_effect - t_critical * se_avg
+    ci_upper = avg_effect + t_critical * se_avg
+    # Two-sided p-value
+    t_stat = avg_effect / se_avg
+    p_value = 2 * (1 - t.cdf(abs(t_stat), df=df))
+
+    stats["avg"] = {
+        "mean": float(avg_effect),
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "p_value": float(p_value),
+    }
+
+    # Cumulative effect
+    if cumulative:
+        cum_effect = np.sum(impact)
+        # Standard error of sum (assuming independence)
+        se_cum = np.std(impact, ddof=1) * np.sqrt(n)
+        ci_cum_lower = cum_effect - t_critical * se_cum
+        ci_cum_upper = cum_effect + t_critical * se_cum
+        t_stat_cum = cum_effect / se_cum if se_cum > 0 else 0
+        p_value_cum = 2 * (1 - t.cdf(abs(t_stat_cum), df=df))
+
+        stats["cum"] = {
+            "mean": float(cum_effect),
+            "ci_lower": float(ci_cum_lower),
+            "ci_upper": float(ci_cum_upper),
+            "p_value": float(p_value_cum),
+        }
+
+    # Relative effect
+    if relative:
+        # Relative effect as percentage change
+        relative_effect = (impact / counterfactual) * 100
+        rel_mean = np.mean(relative_effect)
+        se_rel = np.std(relative_effect, ddof=1) / np.sqrt(n)
+        ci_rel_lower = rel_mean - t_critical * se_rel
+        ci_rel_upper = rel_mean + t_critical * se_rel
+
+        stats["avg"]["relative_mean"] = float(rel_mean)
+        stats["avg"]["relative_ci_lower"] = float(ci_rel_lower)
+        stats["avg"]["relative_ci_upper"] = float(ci_rel_upper)
+
+        if cumulative:
+            # Cumulative relative effect
+            cum_relative = np.sum(relative_effect)
+            se_cum_rel = np.std(relative_effect, ddof=1) * np.sqrt(n)
+            ci_cum_rel_lower = cum_relative - t_critical * se_cum_rel
+            ci_cum_rel_upper = cum_relative + t_critical * se_cum_rel
+
+            stats["cum"]["relative_mean"] = float(cum_relative)
+            stats["cum"]["relative_ci_lower"] = float(ci_cum_rel_lower)
+            stats["cum"]["relative_ci_upper"] = float(ci_cum_rel_upper)
+
+    return stats
+
+
+def _compute_statistics_did_ols(
+    result,
+    alpha=0.05,
+):
+    """Compute statistics for DiD scalar effect with OLS model.
+
+    Parameters
+    ----------
+    result
+        Experiment result object with OLS model
+    alpha : float
+        Significance level
+
+    Returns
+    -------
+    dict
+        Dictionary of statistics
+    """
+    causal_impact = result.causal_impact  # scalar
+
+    # Calculate standard error from model residuals
+    # Get fitted values and residuals
+    y_pred = result.model.predict(result.X)
+    residuals = result.y - y_pred
+    mse = np.mean(residuals**2)
+    n, p = result.X.shape
+    df = n - p
+
+    # Find the interaction term coefficient index
+    interaction_term = (
+        f"{result.group_variable_name}:{result.post_treatment_variable_name}"
+    )
+    coeff_idx = None
+    for i, label in enumerate(result.labels):
+        if interaction_term in label:
+            coeff_idx = i
+            break
+
+    if coeff_idx is None:
+        raise ValueError(f"Could not find interaction term {interaction_term} in model")
+
+    # Calculate standard error for this coefficient
+    X = result.X
+    try:
+        # Try to get X as numpy array
+        if hasattr(X, "values"):
+            X = X.values
+        elif hasattr(X, "data"):
+            X = X.data
+        XtX_inv = np.linalg.inv(X.T @ X)
+        se = np.sqrt(mse * XtX_inv[coeff_idx, coeff_idx])
+    except (np.linalg.LinAlgError, AttributeError):
+        # Fallback: use simple approximation
+        se = np.std(residuals) / np.sqrt(n)
+
+    # t-critical value
+    t_critical = t.ppf(1 - alpha / 2, df=df)
+    ci_lower = causal_impact - t_critical * se
+    ci_upper = causal_impact + t_critical * se
+    # Two-sided p-value
+    t_stat = causal_impact / se if se > 0 else 0
+    p_value = 2 * (1 - t.cdf(abs(t_stat), df=df))
+
+    stats = {
+        "mean": float(causal_impact),
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "p_value": float(p_value),
+    }
+    return stats
+
+
+def _generate_table_ols(stats, cumulative=True, relative=True):
+    """Generate summary table for OLS models."""
+    rows = []
+    row_names = []
+
+    # Average row
+    avg_row = {
+        "mean": stats["avg"]["mean"],
+        "ci_lower": stats["avg"]["ci_lower"],
+        "ci_upper": stats["avg"]["ci_upper"],
+        "p_value": stats["avg"]["p_value"],
+    }
+
+    # Add relative
+    if relative and "relative_mean" in stats["avg"]:
+        avg_row["relative_mean"] = stats["avg"]["relative_mean"]
+        avg_row["relative_ci_lower"] = stats["avg"]["relative_ci_lower"]
+        avg_row["relative_ci_upper"] = stats["avg"]["relative_ci_upper"]
+
+    rows.append(avg_row)
+    row_names.append("average")
+
+    # Cumulative row
+    if cumulative:
+        cum_row = {
+            "mean": stats["cum"]["mean"],
+            "ci_lower": stats["cum"]["ci_lower"],
+            "ci_upper": stats["cum"]["ci_upper"],
+            "p_value": stats["cum"]["p_value"],
+        }
+
+        # Add relative
+        if relative and "relative_mean" in stats["cum"]:
+            cum_row["relative_mean"] = stats["cum"]["relative_mean"]
+            cum_row["relative_ci_lower"] = stats["cum"]["relative_ci_lower"]
+            cum_row["relative_ci_upper"] = stats["cum"]["relative_ci_upper"]
+
+        rows.append(cum_row)
+        row_names.append("cumulative")
+
+    df = pd.DataFrame(rows, index=row_names)
+    return df
+
+
+def _generate_prose_ols(
+    stats,
+    window_coords,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+):
+    """Generate prose summary for OLS models."""
+    ci_pct = int((1 - alpha) * 100)
+
+    # Format window string
+    if len(window_coords) > 0:
+        start_str = str(window_coords[0])
+        end_str = str(window_coords[-1])
+        window_str = f"{start_str} to {end_str}"
+    else:
+        window_str = "post-period"
+
+    # Format numbers
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    # Average effect prose
+    avg_mean = stats["avg"]["mean"]
+    avg_lower = stats["avg"]["ci_lower"]
+    avg_upper = stats["avg"]["ci_upper"]
+    p_val = stats["avg"]["p_value"]
+
+    prose_parts = [
+        f"Post-period ({window_str}), the average effect was {fmt_num(avg_mean)} "
+        f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]), "
+        f"with a p-value of {fmt_num(p_val, 3)}."
+    ]
+
+    # Cumulative effect prose
+    if cumulative:
+        cum_mean = stats["cum"]["mean"]
+        cum_lower = stats["cum"]["ci_lower"]
+        cum_upper = stats["cum"]["ci_upper"]
+        cum_p_val = stats["cum"]["p_value"]
+
+        prose_parts.append(
+            f"The cumulative effect was {fmt_num(cum_mean)} "
+            f"({ci_pct}% CI [{fmt_num(cum_lower)}, {fmt_num(cum_upper)}]); "
+            f"p-value {fmt_num(cum_p_val, 3)}."
+        )
+
+    # Relative effect prose
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        rel_lower = stats["avg"]["relative_ci_lower"]
+        rel_upper = stats["avg"]["relative_ci_upper"]
+
+        prose_parts.append(
+            f"Relative to the counterfactual, this equals {fmt_num(rel_mean)}% on average "
+            f"({ci_pct}% CI [{fmt_num(rel_lower)}%, {fmt_num(rel_upper)}%])."
+        )
+
+    return " ".join(prose_parts)
+
+
+def _generate_table_did_ols(stats):
+    """Generate summary table for DiD with OLS model."""
+    row = {
+        "mean": stats["mean"],
+        "ci_lower": stats["ci_lower"],
+        "ci_upper": stats["ci_upper"],
+        "p_value": stats["p_value"],
+    }
+    df = pd.DataFrame([row], index=["treatment_effect"])
+    return df
+
+
+def _generate_prose_did_ols(stats, alpha=0.05):
+    """Generate prose summary for DiD with OLS model."""
+    ci_pct = int((1 - alpha) * 100)
+
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    mean = stats["mean"]
+    lower = stats["ci_lower"]
+    upper = stats["ci_upper"]
+    p_val = stats["p_value"]
+
+    prose = (
+        f"The treatment effect was {fmt_num(mean)} "
+        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"with a p-value of {fmt_num(p_val, 3)}."
+    )
+
+    return prose
+
+
+def _compute_statistics_rd(
+    discontinuity,
+    hdi_prob=0.95,
+    direction="increase",
+    min_effect=None,
+):
+    """Compute statistics for RD scalar effect (PyMC)."""
+    stats = {
+        "mean": float(discontinuity.mean(dim=["chain", "draw"]).values),
+        "median": float(discontinuity.median(dim=["chain", "draw"]).values),
+    }
+
+    # HDI
+    hdi_result = az.hdi(discontinuity, hdi_prob=hdi_prob)
+    if isinstance(hdi_result, xr.Dataset):
+        hdi_data = list(hdi_result.data_vars.values())[0]
+        stats["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
+        stats["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+    else:
+        stats["hdi_lower"] = float(hdi_result.sel(hdi="lower").values)
+        stats["hdi_upper"] = float(hdi_result.sel(hdi="higher").values)
+
+    # Tail probabilities
+    if direction == "increase":
+        stats["p_gt_0"] = float((discontinuity > 0).mean().values)
+    elif direction == "decrease":
+        stats["p_lt_0"] = float((discontinuity < 0).mean().values)
+    else:  # two-sided
+        p_gt = float((discontinuity > 0).mean().values)
+        p_lt = float((discontinuity < 0).mean().values)
+        p_two_sided = 2 * min(p_gt, p_lt)
+        stats["p_two_sided"] = p_two_sided
+        stats["prob_of_effect"] = 1 - p_two_sided
+
+    # ROPE
+    if min_effect is not None:
+        if direction == "two-sided":
+            stats["p_rope"] = float((np.abs(discontinuity) > min_effect).mean().values)
+        else:
+            stats["p_rope"] = float((discontinuity > min_effect).mean().values)
+
+    return stats
+
+
+def _compute_statistics_rd_ols(result, alpha=0.05):
+    """Compute statistics for RD scalar effect with OLS model."""
+    discontinuity = result.discontinuity_at_threshold  # scalar
+
+    # Calculate standard error from model
+    y_pred = result.model.predict(result.X)
+    residuals = result.y - y_pred
+    mse = np.mean(residuals**2)
+    n, p = result.X.shape
+    df = n - p
+
+    # Find the treated coefficient index
+    coeff_idx = None
+    for i, label in enumerate(result.labels):
+        if "treated" in label.lower() and ":" in label:
+            coeff_idx = i
+            break
+
+    if coeff_idx is None:
+        # Fallback: use simple approximation
+        se = np.std(residuals) / np.sqrt(n)
+    else:
+        # Calculate standard error for this coefficient
+        X = result.X
+        try:
+            if hasattr(X, "values"):
+                X = X.values
+            elif hasattr(X, "data"):
+                X = X.data
+            XtX_inv = np.linalg.inv(X.T @ X)
+            se = np.sqrt(mse * XtX_inv[coeff_idx, coeff_idx])
+        except (np.linalg.LinAlgError, AttributeError):
+            se = np.std(residuals) / np.sqrt(n)
+
+    # t-critical value
+    t_critical = t.ppf(1 - alpha / 2, df=df)
+    ci_lower = discontinuity - t_critical * se
+    ci_upper = discontinuity + t_critical * se
+    # Two-sided p-value
+    t_stat = discontinuity / se if se > 0 else 0
+    p_value = 2 * (1 - t.cdf(abs(t_stat), df=df))
+
+    stats = {
+        "mean": float(discontinuity),
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "p_value": float(p_value),
+    }
+    return stats
+
+
+def _generate_table_rd(stats):
+    """Generate summary table for RD (PyMC)."""
+    row = {
+        "mean": stats["mean"],
+        "median": stats["median"],
+        "hdi_lower": stats["hdi_lower"],
+        "hdi_upper": stats["hdi_upper"],
+    }
+
+    # Add tail probabilities
+    if "p_gt_0" in stats:
+        row["p_gt_0"] = stats["p_gt_0"]
+    if "p_lt_0" in stats:
+        row["p_lt_0"] = stats["p_lt_0"]
+    if "p_two_sided" in stats:
+        row["p_two_sided"] = stats["p_two_sided"]
+        row["prob_of_effect"] = stats["prob_of_effect"]
+    if "p_rope" in stats:
+        row["p_rope"] = stats["p_rope"]
+
+    df = pd.DataFrame([row], index=["discontinuity"])
+    return df
+
+
+def _generate_table_rd_ols(stats):
+    """Generate summary table for RD with OLS model."""
+    row = {
+        "mean": stats["mean"],
+        "ci_lower": stats["ci_lower"],
+        "ci_upper": stats["ci_upper"],
+        "p_value": stats["p_value"],
+    }
+    df = pd.DataFrame([row], index=["discontinuity"])
+    return df
+
+
+def _generate_prose_rd(stats, alpha=0.05, direction="increase"):
+    """Generate prose summary for RD (PyMC)."""
+    hdi_pct = int((1 - alpha) * 100)
+
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    mean = stats["mean"]
+    lower = stats["hdi_lower"]
+    upper = stats["hdi_upper"]
+
+    # Tail probability text
+    if direction == "increase":
+        p_val = stats.get("p_gt_0", 0.0)
+        direction_text = "increase"
+    elif direction == "decrease":
+        p_val = stats.get("p_lt_0", 0.0)
+        direction_text = "decrease"
+    else:  # two-sided
+        p_val = stats.get("prob_of_effect", 0.0)
+        direction_text = "effect"
+
+    prose = (
+        f"The discontinuity at threshold was {fmt_num(mean)} "
+        f"({hdi_pct}% HDI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"with a posterior probability of an {direction_text} of {fmt_num(p_val, 3)}."
+    )
+
+    return prose
+
+
+def _generate_prose_rd_ols(stats, alpha=0.05):
+    """Generate prose summary for RD with OLS model."""
+    ci_pct = int((1 - alpha) * 100)
+
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    mean = stats["mean"]
+    lower = stats["ci_lower"]
+    upper = stats["ci_upper"]
+    p_val = stats["p_value"]
+
+    prose = (
+        f"The discontinuity at threshold was {fmt_num(mean)} "
+        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"with a p-value of {fmt_num(p_val, 3)}."
+    )
+
+    return prose
