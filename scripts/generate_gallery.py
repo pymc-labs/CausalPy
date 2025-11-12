@@ -29,27 +29,52 @@ except ImportError:
     Image = None  # type: ignore[assignment,misc]
 
 
-# Category mapping based on filename patterns
-CATEGORY_MAPPING = {
-    "ANCOVA": ["ancova"],
-    "Synthetic Control": ["sc_", "synthetic_control"],
-    "Geographical lift testing": ["geolift", "multi_cell_geolift"],
-    "Difference in Differences": ["did_"],
-    "Interrupted Time Series": ["its_"],
-    "Regression Discontinuity": ["rd_"],
-    "Regression Kink Design": ["rkink"],
-    "Instrumental Variables Regression": ["iv_"],
-    "Inverse Propensity Score Weighting": ["inv_prop"],
-}
+def load_categories_from_index(index_path: Path) -> Dict[str, List[str]]:
+    """
+    Load category structure from existing index.md.
+
+    Reads the markdown file and extracts:
+    - Category names from ## headers
+    - Notebook names from :link: fields under each category
+
+    Returns
+    -------
+    Dict[str, List[str]]
+        Mapping from category name to list of notebook names (without .ipynb)
+    """
+    categories: Dict[str, List[str]] = {}
+    current_category = None
+
+    if not index_path.exists():
+        return categories
+
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            for line in f:
+                # Check for category header (## Category Name)
+                if line.startswith("## "):
+                    current_category = line[3:].strip()
+                    if current_category and current_category != "Example Gallery":
+                        categories[current_category] = []
+                # Check for notebook links under current category
+                elif current_category and ":link:" in line:
+                    # Extract notebook name from :link: notebook_name
+                    link_match = re.search(r":link:\s+(\S+)", line)
+                    if link_match:
+                        notebook_name = link_match.group(1)
+                        categories[current_category].append(notebook_name)
+    except Exception as e:
+        print(f"Warning: Could not load categories from {index_path}: {e}")
+
+    return categories
 
 
-def get_notebook_category(filename: str) -> str:
-    """Determine the category for a notebook based on its filename."""
-    filename_lower = filename.lower()
-    for category, patterns in CATEGORY_MAPPING.items():
-        for pattern in patterns:
-            if pattern in filename_lower:
-                return category
+def get_notebook_category(filename: str, category_mapping: Dict[str, List[str]]) -> str:
+    """Determine the category for a notebook from the loaded mapping."""
+    notebook_name = filename.replace(".ipynb", "")
+    for category, notebooks in category_mapping.items():
+        if notebook_name in notebooks:
+            return category
     return "Other"
 
 
@@ -199,7 +224,11 @@ def _save_thumbnail(
         return None
 
 
-def generate_gallery_markdown(notebooks_data: List[Dict], output_path: Path):
+def generate_gallery_markdown(
+    notebooks_data: List[Dict],
+    output_path: Path,
+    category_mapping: Dict[str, List[str]],
+):
     """Generate gallery markdown file with sphinx-design cards."""
     # Group notebooks by category
     categories: Dict[str, List[Dict]] = {}
@@ -209,12 +238,13 @@ def generate_gallery_markdown(notebooks_data: List[Dict], output_path: Path):
             categories[category] = []
         categories[category].append(nb_data)
 
-    # Sort categories
-    category_order = list(CATEGORY_MAPPING.keys()) + ["Other"]
-    sorted_categories = sorted(
-        categories.keys(),
-        key=lambda x: category_order.index(x) if x in category_order else 999,
-    )
+    # Sort categories - maintain order from index.md (order of appearance)
+    # Use the order from category_mapping to preserve the structure
+    sorted_categories = [cat for cat in category_mapping.keys() if cat in categories]
+    # Add any categories found in notebooks but not in mapping (shouldn't happen, but handle gracefully)
+    for cat in categories.keys():
+        if cat not in sorted_categories:
+            sorted_categories.append(cat)
 
     # Generate markdown
     lines = ["# Example Gallery\n"]
@@ -266,6 +296,11 @@ def main():
     # Create thumbnails directory
     thumbnails_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load category structure from existing index.md
+    category_mapping = load_categories_from_index(output_file)
+    if category_mapping:
+        print(f"Loaded {len(category_mapping)} categories from index.md")
+
     # Find all notebooks
     notebook_files = sorted(notebooks_dir.glob("*.ipynb"))
 
@@ -283,8 +318,8 @@ def main():
         # Extract metadata
         title, description = extract_metadata(nb_path)
 
-        # Determine category
-        category = get_notebook_category(nb_path.name)
+        # Determine category from index.md structure
+        category = get_notebook_category(nb_path.name, category_mapping)
 
         # Generate thumbnail
         thumbnail = extract_first_image(nb_path, thumbnails_dir)
@@ -301,7 +336,7 @@ def main():
 
     # Generate gallery markdown
     print("Generating gallery markdown...")
-    generate_gallery_markdown(notebooks_data, output_file)
+    generate_gallery_markdown(notebooks_data, output_file, category_mapping)
 
     print(f"Gallery generated successfully at {output_file}")
     print(f"Thumbnails saved to {thumbnails_dir}")
