@@ -33,6 +33,7 @@ from causalpy.reporting import (
     _detect_experiment_type,
     _effect_summary_did,
     _effect_summary_rd,
+    _effect_summary_rkink,
     _extract_counterfactual,
     _extract_window,
     _generate_prose,
@@ -183,6 +184,14 @@ class BaseExperiment:
         if experiment_type == "rd":
             # Regression Discontinuity: scalar effect, no time dimension
             return _effect_summary_rd(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+            )
+        elif experiment_type == "rkink":
+            # Regression Kink: scalar effect (gradient change at kink point)
+            return _effect_summary_rkink(
                 self,
                 direction=direction,
                 alpha=alpha,

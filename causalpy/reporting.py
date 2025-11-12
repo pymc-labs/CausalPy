@@ -44,14 +44,17 @@ def _detect_experiment_type(result):
     """Detect experiment type from result attributes."""
     if hasattr(result, "discontinuity_at_threshold"):
         return "rd"  # Regression Discontinuity
+    elif hasattr(result, "gradient_change"):
+        return "rkink"  # Regression Kink
     elif hasattr(result, "causal_impact") and not hasattr(result, "post_impact"):
-        return "did"  # Difference-in-Differences
+        return "did"  # Difference-in-Differences or ANCOVA/PrePostNEGD
     elif hasattr(result, "post_impact"):
         return "its_or_sc"  # ITS or Synthetic Control
     else:
         raise ValueError(
             "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
-            "'causal_impact' (DiD), or 'post_impact' (ITS/Synthetic Control) attribute."
+            "'gradient_change' (Regression Kink), 'causal_impact' (DiD/ANCOVA), "
+            "or 'post_impact' (ITS/Synthetic Control) attribute."
         )
 
 
@@ -1241,6 +1244,208 @@ def _generate_prose_rd_ols(stats, alpha=0.05):
 
     prose = (
         f"The discontinuity at threshold was {fmt_num(mean)} "
+        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"with a p-value of {fmt_num(p_val, 3)}."
+    )
+
+    return prose
+
+
+# ==============================================================================
+# Regression Kink handler functions
+# ==============================================================================
+
+
+def _effect_summary_rkink(
+    result,
+    direction="increase",
+    alpha=0.05,
+    min_effect=None,
+):
+    """Generate effect summary for Regression Kink experiments."""
+    gradient_change = result.gradient_change
+
+    # Check if PyMC (xarray) or OLS (scalar)
+    is_pymc = isinstance(gradient_change, xr.DataArray)
+
+    if is_pymc:
+        # PyMC model: use posterior draws
+        hdi_prob = 1 - alpha
+        stats = _compute_statistics_rkink(
+            gradient_change,
+            hdi_prob=hdi_prob,
+            direction=direction,
+            min_effect=min_effect,
+        )
+        table = _generate_table_rkink(stats)
+        text = _generate_prose_rkink(stats, alpha=alpha, direction=direction)
+    else:
+        # OLS model: Not currently supported for RegressionKink, but structure is here
+        stats = _compute_statistics_rkink_ols(result, alpha=alpha)
+        table = _generate_table_rkink_ols(stats)
+        text = _generate_prose_rkink_ols(stats, alpha=alpha)
+
+    return EffectSummary(table=table, text=text)
+
+
+def _compute_statistics_rkink(
+    gradient_change,
+    hdi_prob=0.95,
+    direction="increase",
+    min_effect=None,
+):
+    """Compute statistics for Regression Kink scalar effect (PyMC)."""
+    stats = {
+        "mean": float(gradient_change.mean(dim=["chain", "draw"]).values),
+        "median": float(gradient_change.median(dim=["chain", "draw"]).values),
+    }
+
+    # HDI
+    hdi_result = az.hdi(gradient_change, hdi_prob=hdi_prob)
+    if isinstance(hdi_result, xr.Dataset):
+        hdi_data = list(hdi_result.data_vars.values())[0]
+        stats["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
+        stats["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+    else:
+        stats["hdi_lower"] = float(hdi_result.sel(hdi="lower").values)
+        stats["hdi_upper"] = float(hdi_result.sel(hdi="higher").values)
+
+    # Tail probabilities
+    if direction == "increase":
+        stats["p_gt_0"] = float((gradient_change > 0).mean().values)
+    elif direction == "decrease":
+        stats["p_lt_0"] = float((gradient_change < 0).mean().values)
+    else:  # two-sided
+        p_gt = float((gradient_change > 0).mean().values)
+        p_lt = float((gradient_change < 0).mean().values)
+        p_two_sided = 2 * min(p_gt, p_lt)
+        stats["p_two_sided"] = p_two_sided
+        stats["prob_of_effect"] = 1 - p_two_sided
+
+    # ROPE
+    if min_effect is not None:
+        if direction == "two-sided":
+            stats["p_rope"] = float(
+                (np.abs(gradient_change) > min_effect).mean().values
+            )
+        else:
+            stats["p_rope"] = float((gradient_change > min_effect).mean().values)
+
+    return stats
+
+
+def _compute_statistics_rkink_ols(result, alpha=0.05):
+    """Compute statistics for Regression Kink scalar effect with OLS model."""
+    # Note: RegressionKink currently only supports PyMC models
+    # This is a placeholder for future OLS support
+    raise NotImplementedError(
+        "OLS models are not currently supported for Regression Kink experiments. "
+        "Please use a PyMC model."
+    )
+
+
+def _generate_table_rkink(stats):
+    """Generate DataFrame table for Regression Kink (PyMC)."""
+    data = {
+        "metric": ["gradient_change"],
+        "mean": [stats["mean"]],
+        "median": [stats["median"]],
+        "HDI_lower": [stats["hdi_lower"]],
+        "HDI_upper": [stats["hdi_upper"]],
+    }
+
+    # Add direction-specific columns
+    if "p_gt_0" in stats:
+        data["P(effect>0)"] = [stats["p_gt_0"]]
+    elif "p_lt_0" in stats:
+        data["P(effect<0)"] = [stats["p_lt_0"]]
+    elif "p_two_sided" in stats:
+        data["P(two-sided)"] = [stats["p_two_sided"]]
+        data["P(effect)"] = [stats["prob_of_effect"]]
+
+    # Add ROPE if present
+    if "p_rope" in stats:
+        data["P(|effect|>min_effect)"] = [stats["p_rope"]]
+
+    return pd.DataFrame(data)
+
+
+def _generate_table_rkink_ols(stats):
+    """Generate DataFrame table for Regression Kink with OLS model."""
+    # Placeholder for future OLS support
+    data = {
+        "metric": ["gradient_change"],
+        "mean": [stats["mean"]],
+        "CI_lower": [stats["ci_lower"]],
+        "CI_upper": [stats["ci_upper"]],
+        "p_value": [stats["p_value"]],
+    }
+    return pd.DataFrame(data)
+
+
+def _generate_prose_rkink(stats, alpha=0.05, direction="increase"):
+    """Generate prose summary for Regression Kink (PyMC)."""
+    hdi_pct = int((1 - alpha) * 100)
+
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    mean = stats["mean"]
+    median = stats["median"]
+    lower = stats["hdi_lower"]
+    upper = stats["hdi_upper"]
+
+    prose_parts = [
+        f"The change in gradient at the kink point had a mean of {fmt_num(mean)} "
+        f"(median: {fmt_num(median)}, {hdi_pct}% HDI [{fmt_num(lower)}, {fmt_num(upper)}])."
+    ]
+
+    # Add tail probability info
+    if direction == "increase":
+        prob = stats["p_gt_0"]
+        prose_parts.append(
+            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
+            f"that the gradient change is positive."
+        )
+    elif direction == "decrease":
+        prob = stats["p_lt_0"]
+        prose_parts.append(
+            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
+            f"that the gradient change is negative."
+        )
+    else:  # two-sided
+        prob = stats["prob_of_effect"]
+        prose_parts.append(
+            f" There is a {fmt_num(prob * 100, 1)}% posterior probability "
+            f"of a non-zero gradient change (two-sided test)."
+        )
+
+    # Add ROPE info
+    if "p_rope" in stats:
+        p_rope = stats["p_rope"]
+        prose_parts.append(
+            f" The probability that the absolute gradient change exceeds "
+            f"the practical significance threshold is {fmt_num(p_rope * 100, 1)}%."
+        )
+
+    return "".join(prose_parts)
+
+
+def _generate_prose_rkink_ols(stats, alpha=0.05):
+    """Generate prose summary for Regression Kink with OLS model."""
+    # Placeholder for future OLS support
+    ci_pct = int((1 - alpha) * 100)
+
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    mean = stats["mean"]
+    lower = stats["ci_lower"]
+    upper = stats["ci_upper"]
+    p_val = stats["p_value"]
+
+    prose = (
+        f"The change in gradient at the kink point was {fmt_num(mean)} "
         f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     )

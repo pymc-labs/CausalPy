@@ -447,6 +447,116 @@ def test_effect_summary_rd_ols(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_effect_summary_rkink_pymc(mock_pymc_sample):
+    """Test effect_summary with Regression Kink (PyMC)."""
+    # Generate data for regression kink analysis
+    rng = np.random.default_rng(42)
+    kink_point = 0.5
+    beta = [1, 0.5, 0, 0.5, 0]  # Parameters for the piecewise function
+    N = 100
+    x = rng.uniform(-1, 1, N)
+    treated = (x >= kink_point).astype(int)
+    y = (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink_point) * treated
+        + beta[4] * (x - kink_point) ** 2 * treated
+        + rng.normal(0, 0.1, N)
+    )
+    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
+
+    result = cp.RegressionKink(
+        df,
+        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
+        kink_point=kink_point,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    stats = result.effect_summary()
+
+    assert isinstance(stats, EffectSummary)
+    assert stats.table["metric"].iloc[0] == "gradient_change"
+    assert "mean" in stats.table.columns
+    assert "median" in stats.table.columns
+    assert "HDI_lower" in stats.table.columns
+    assert "HDI_upper" in stats.table.columns
+    assert "P(effect>0)" in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_rkink_directions(mock_pymc_sample):
+    """Test effect_summary with Regression Kink with different directions."""
+    # Generate data
+    rng = np.random.default_rng(42)
+    kink_point = 0.5
+    beta = [1, 0.5, 0, -0.5, 0]  # Negative gradient change
+    N = 100
+    x = rng.uniform(-1, 1, N)
+    treated = (x >= kink_point).astype(int)
+    y = (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink_point) * treated
+        + beta[4] * (x - kink_point) ** 2 * treated
+        + rng.normal(0, 0.1, N)
+    )
+    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
+
+    result = cp.RegressionKink(
+        df,
+        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
+        kink_point=kink_point,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Test increase
+    stats_increase = result.effect_summary(direction="increase")
+    assert "P(effect>0)" in stats_increase.table.columns
+
+    # Test decrease
+    stats_decrease = result.effect_summary(direction="decrease")
+    assert "P(effect<0)" in stats_decrease.table.columns
+
+    # Test two-sided
+    stats_two_sided = result.effect_summary(direction="two-sided")
+    assert "P(two-sided)" in stats_two_sided.table.columns
+    assert "P(effect)" in stats_two_sided.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_rkink_rope(mock_pymc_sample):
+    """Test effect_summary with Regression Kink with ROPE."""
+    # Generate data
+    rng = np.random.default_rng(42)
+    kink_point = 0.5
+    beta = [1, 0.5, 0, 0.5, 0]
+    N = 100
+    x = rng.uniform(-1, 1, N)
+    treated = (x >= kink_point).astype(int)
+    y = (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink_point) * treated
+        + beta[4] * (x - kink_point) ** 2 * treated
+        + rng.normal(0, 0.1, N)
+    )
+    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
+
+    result = cp.RegressionKink(
+        df,
+        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
+        kink_point=kink_point,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    stats = result.effect_summary(min_effect=0.2)
+    assert "P(|effect|>min_effect)" in stats.table.columns
+
+
+@pytest.mark.integration
 def test_effect_summary_empty_window_error(mock_pymc_sample):
     """Test that effect_summary raises error for empty window."""
     df = (
