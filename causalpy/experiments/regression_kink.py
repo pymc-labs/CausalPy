@@ -210,7 +210,7 @@ class RegressionKink(BaseExperiment):
         Kink point on running variable: {self.kink_point}
 
         Results:
-        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)}
+        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
         """
         )
         self.print_coefficients(round_to)
