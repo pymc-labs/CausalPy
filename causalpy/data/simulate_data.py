@@ -180,7 +180,7 @@ def generate_time_series_data_seasonal(treatment_time: pd.Timestamp) -> pd.DataF
         t=df.index,
     ).set_index("date", drop=True)
     month_effect = np.array([11, 13, 12, 15, 19, 23, 21, 28, 20, 17, 15, 12])
-    df["y"] = 0.2 * df["t"] + 2 * month_effect[df.month.values - 1]
+    df["y"] = 0.2 * df["t"] + 2 * month_effect[np.asarray(df.month.values) - 1]
 
     N = df.shape[0]
     idx = np.arange(N)[df.index > treatment_time]
@@ -263,13 +263,13 @@ def generate_did() -> pd.DataFrame:
     df["post_treatment"] = df["t"] > intervention_time
 
     df["y"] = outcome(
-        df["t"],
+        np.asarray(df["t"]),
         control_intercept,
         treat_intercept_delta,
         trend,
         Δ,
-        df["group"],
-        df["post_treatment"],
+        np.asarray(df["group"]),
+        np.asarray(df["post_treatment"]),
     )
     df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df
