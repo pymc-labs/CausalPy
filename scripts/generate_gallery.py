@@ -56,12 +56,8 @@ def load_categories_from_index(index_path: Path) -> dict[str, list[str]]:
                     if current_category and current_category != "Example Gallery":
                         categories[current_category] = []
                 # Check for notebook links under current category
-                elif current_category and ":link:" in line:
-                    # Extract notebook name from :link: notebook_name
-                    link_match = re.search(r":link:\s+(\S+)", line)
-                    if link_match:
-                        notebook_name = link_match.group(1)
-                        categories[current_category].append(notebook_name)
+                elif current_category and (match := re.search(r":link:\s+(\S+)", line)):
+                    categories[current_category].append(match.group(1))
     except Exception as e:
         print(f"Warning: Could not load categories from {index_path}: {e}")
 
@@ -71,56 +67,40 @@ def load_categories_from_index(index_path: Path) -> dict[str, list[str]]:
 def get_notebook_category(filename: str, category_mapping: dict[str, list[str]]) -> str:
     """Determine the category for a notebook from the loaded mapping."""
     notebook_name = filename.replace(".ipynb", "")
-    for category, notebooks in category_mapping.items():
-        if notebook_name in notebooks:
-            return category
-    return "Other"
+    return next(
+        (
+            cat
+            for cat, notebooks in category_mapping.items()
+            if notebook_name in notebooks
+        ),
+        "Other",
+    )
 
 
-def extract_metadata(notebook_path: Path) -> tuple[str, str]:
-    """Extract title and description from notebook."""
+def extract_metadata(notebook_path: Path) -> str:
+    """Extract title from notebook."""
     with open(notebook_path, "r", encoding="utf-8") as f:
         nb = nbformat.read(f, as_version=4)
-
-    title = None
-    description = ""
 
     # Look for title in first markdown cell
     for cell in nb.cells:
         if cell.cell_type == "markdown":
-            source = cell.source.strip()
-            # Look for H1 or H2 title
-            title_match = re.match(r"^#+\s+(.+)$", source, re.MULTILINE)
-            if title_match:
-                title = title_match.group(1).strip()
-                # Get description from rest of first markdown cell
-                lines = source.split("\n")
-                description_lines = []
-                found_title = False
-                for line in lines:
-                    if re.match(r"^#+\s+", line):
-                        found_title = True
-                        continue
-                    if found_title and line.strip():
-                        # Skip MyST directives and formulas
-                        stripped = line.strip()
-                        if stripped.startswith(":::"):
-                            break  # Stop at first MyST directive
-                        if stripped.startswith("$$") or stripped.startswith("$"):
-                            continue  # Skip math formulas
-                        if stripped.startswith("*") and ":" in stripped:
-                            continue  # Skip list items that are definitions
-                        description_lines.append(stripped)
-                        if len(description_lines) >= 2:  # Take first 2 meaningful lines
-                            break
-                description = " ".join(description_lines)
-                break
+            if match := re.search(r"^#+\s+(.+)$", cell.source.strip(), re.MULTILINE):
+                return match.group(1).strip()
 
     # Fallback to filename-based title
-    if not title:
-        title = notebook_path.stem.replace("_", " ").title()
+    return notebook_path.stem.replace("_", " ").title()
 
-    return title, description
+
+def _find_image_in_notebook(nb) -> str | None:
+    """Find first PNG image in notebook outputs."""
+    for cell in nb.cells:
+        if cell.cell_type == "code" and hasattr(cell, "outputs") and cell.outputs:
+            for output in cell.outputs:
+                if output.output_type in ("display_data", "execute_result"):
+                    if image_data := output.get("data", {}).get("image/png"):
+                        return image_data
+    return None
 
 
 def extract_first_image(notebook_path: Path, output_dir: Path) -> str | None:
@@ -129,55 +109,27 @@ def extract_first_image(notebook_path: Path, output_dir: Path) -> str | None:
         return None
 
     try:
-        # Read notebook
         with open(notebook_path, "r", encoding="utf-8") as f:
             nb = nbformat.read(f, as_version=4)
 
-        # First, try to find images in existing outputs (no execution needed)
-        for cell in nb.cells:
-            if cell.cell_type == "code" and hasattr(cell, "outputs") and cell.outputs:
-                for output in cell.outputs:
-                    if (
-                        output.output_type == "display_data"
-                        or output.output_type == "execute_result"
-                    ):
-                        if "image/png" in output.get("data", {}):
-                            image_data = output["data"]["image/png"]
-                            return _save_thumbnail(
-                                notebook_path, output_dir, image_data
-                            )
+        # Try to find images in existing outputs first
+        if image_data := _find_image_in_notebook(nb):
+            return _save_thumbnail(notebook_path, output_dir, image_data)
 
-        # If no images found in existing outputs, try executing (with short timeout)
-        # Only execute if notebook appears to have no outputs
-        has_outputs = any(
+        # Execute if notebook has no outputs
+        if not any(
             cell.cell_type == "code" and hasattr(cell, "outputs") and cell.outputs
             for cell in nb.cells
-        )
-
-        if not has_outputs:
+        ):
             print(f"  Executing {notebook_path.name} to generate thumbnail...")
-            ep = ExecutePreprocessor(
-                timeout=120, kernel_name="python3"
-            )  # 2 min timeout
             try:
-                ep.preprocess(nb, {"metadata": {"path": str(notebook_path.parent)}})
+                ExecutePreprocessor(timeout=120, kernel_name="python3").preprocess(
+                    nb, {"metadata": {"path": str(notebook_path.parent)}}
+                )
+                if image_data := _find_image_in_notebook(nb):
+                    return _save_thumbnail(notebook_path, output_dir, image_data)
             except Exception as e:
                 print(f"  Warning: Failed to execute {notebook_path.name}: {e}")
-                return None
-
-            # Find first image in outputs after execution
-            for cell in nb.cells:
-                if cell.cell_type == "code" and hasattr(cell, "outputs"):
-                    for output in cell.outputs:
-                        if (
-                            output.output_type == "display_data"
-                            or output.output_type == "execute_result"
-                        ):
-                            if "image/png" in output.get("data", {}):
-                                image_data = output["data"]["image/png"]
-                                return _save_thumbnail(
-                                    notebook_path, output_dir, image_data
-                                )
 
         return None
     except Exception as e:
@@ -193,30 +145,22 @@ def _save_thumbnail(
         thumbnail_name = f"{notebook_path.stem}.png"
         thumbnail_path = output_dir / thumbnail_name
 
-        img_data = base64.b64decode(image_data)
-        with open(thumbnail_path, "wb") as img_file:
-            img_file.write(img_data)
+        # Decode and save image
+        thumbnail_path.write_bytes(base64.b64decode(image_data))
 
-        # Resize thumbnail to uniform square-like size (crop/pad to maintain aspect ratio)
-        try:
-            img = Image.open(thumbnail_path)
-            # Target size for uniform thumbnails - more square-like
-            target_size = (400, 250)
+        # Resize to uniform size (400x250) with padding
+        img = Image.open(thumbnail_path)
+        target_size = (400, 250)
+        img.thumbnail(target_size, Image.Resampling.LANCZOS)
 
-            # Calculate scaling to fit within target while maintaining aspect ratio
-            img.thumbnail(target_size, Image.Resampling.LANCZOS)
+        # Create padded image
+        new_img = Image.new("RGB", target_size, (255, 255, 255))
+        new_img.paste(
+            img,
+            ((target_size[0] - img.size[0]) // 2, (target_size[1] - img.size[1]) // 2),
+        )
+        new_img.save(thumbnail_path)
 
-            # Create a new image with target size and paste centered
-            new_img = Image.new("RGB", target_size, (255, 255, 255))
-            # Calculate position to center the image
-            x_offset = (target_size[0] - img.size[0]) // 2
-            y_offset = (target_size[1] - img.size[1]) // 2
-            new_img.paste(img, (x_offset, y_offset))
-            new_img.save(thumbnail_path)
-        except Exception as e:
-            print(f"Warning: Could not resize thumbnail for {notebook_path.name}: {e}")
-
-        # Use relative path: from notebooks/ subdirectory, go up to source root, then to _static
         return f"../_static/thumbnails/{thumbnail_name}"
     except Exception as e:
         print(f"Warning: Could not save thumbnail for {notebook_path.name}: {e}")
@@ -232,56 +176,35 @@ def generate_gallery_markdown(
     # Group notebooks by category
     categories: dict[str, list[dict]] = {}
     for nb_data in notebooks_data:
-        category = nb_data["category"]
-        if category not in categories:
-            categories[category] = []
-        categories[category].append(nb_data)
+        categories.setdefault(nb_data["category"], []).append(nb_data)
 
-    # Sort categories - maintain order from index.md (order of appearance)
-    # Use the order from category_mapping to preserve the structure
-    sorted_categories = [cat for cat in category_mapping.keys() if cat in categories]
-    # Add any categories found in notebooks but not in mapping (shouldn't happen, but handle gracefully)
-    for cat in categories.keys():
-        if cat not in sorted_categories:
-            sorted_categories.append(cat)
+    # Sort categories maintaining order from index.md
+    sorted_categories = [
+        cat for cat in category_mapping.keys() if cat in categories
+    ] + [cat for cat in categories.keys() if cat not in category_mapping]
 
     # Generate markdown
     lines = ["# Example Gallery\n"]
 
     for category in sorted_categories:
-        if category not in categories:
-            continue
+        notebooks = sorted(categories[category], key=lambda x: x["filename"])
 
-        notebooks = categories[category]
-        # Sort notebooks within category
-        notebooks.sort(key=lambda x: x["filename"])
-
-        lines.append(f"## {category}\n")
-        lines.append("::::{grid} 1 2 3 3\n")
-        lines.append(":gutter: 3\n\n")
+        lines.extend([f"## {category}\n", "::::{grid} 1 2 3 3\n", ":gutter: 3\n\n"])
 
         for nb in notebooks:
-            # Title goes on the same line as grid-item-card (escape braces in f-string)
-            card_lines = [f":::{'{grid-item-card}'} {nb['title']}\n"]
-            # Add class to ensure uniform card height
-            card_lines.append(":class-card: sd-card-h-100\n")
-
+            doc_name = nb["filename"].replace(".ipynb", "")
+            card_lines = [
+                f":::{'{grid-item-card}'} {nb['title']}\n",
+                ":class-card: sd-card-h-100\n",
+            ]
             if nb.get("thumbnail"):
                 card_lines.append(f":img-top: {nb['thumbnail']}\n")
-
-            # Use document name without extension (relative to current directory)
-            # Since index.md is in notebooks/, links are relative to that directory
-            doc_name = nb["filename"].replace(".ipynb", "")
-            card_lines.append(f":link: {doc_name}\n")
-            card_lines.append(":link-type: doc\n")
-            card_lines.append(":::\n")
+            card_lines.extend([f":link: {doc_name}\n", ":link-type: doc\n", ":::\n"])
             lines.extend(card_lines)
 
         lines.append("::::\n\n")
 
-    # Write to file
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("".join(lines))
+    output_path.write_text("".join(lines), encoding="utf-8")
 
 
 def main():
@@ -314,22 +237,12 @@ def main():
     for nb_path in notebook_files:
         print(f"Processing {nb_path.name}...")
 
-        # Extract metadata
-        title, description = extract_metadata(nb_path)
-
-        # Determine category from index.md structure
-        category = get_notebook_category(nb_path.name, category_mapping)
-
-        # Generate thumbnail
-        thumbnail = extract_first_image(nb_path, thumbnails_dir)
-
         notebooks_data.append(
             {
                 "filename": nb_path.name,
-                "title": title,
-                "description": description,
-                "category": category,
-                "thumbnail": thumbnail,
+                "title": extract_metadata(nb_path),
+                "category": get_notebook_category(nb_path.name, category_mapping),
+                "thumbnail": extract_first_image(nb_path, thumbnails_dir),
             }
         )
 
