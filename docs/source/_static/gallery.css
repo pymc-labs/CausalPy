@@ -1,0 +1,37 @@
+/* Custom CSS for uniform gallery card sizes - square-like cards */
+.sd-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.sd-card-body {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+}
+
+.sd-card-img-top {
+    width: 100%;
+    height: 250px;
+    object-fit: contain;
+    background-color: #f8f9fa;
+    padding: 8px;
+}
+
+.sd-card-header {
+    padding: 0.75rem 0.5rem;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    min-height: auto;
+}
+
+.sd-grid-item {
+    display: flex;
+}
+
+/* Ensure grid items stretch to same height */
+.sd-grid {
+    align-items: stretch;
+}

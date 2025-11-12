@@ -81,6 +81,13 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 master_doc = "index"
 
+# Suppress warnings for notebooks linked from gallery (not in toctree)
+suppress_warnings = [
+    "toc.not_included",  # Notebooks are linked from gallery, not toctree
+    "bibtex.duplicate_label",  # BibTeX duplicate labels (less critical)
+    "bibtex.duplicate_citation",  # BibTeX duplicate citations (less critical)
+]
+
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
 bibtex_default_style = "unsrt"
@@ -138,6 +145,7 @@ myst_enable_extensions = [
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
 html_favicon = "_static/favicon_logo.png"
+html_css_files = ["gallery.css"]
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
