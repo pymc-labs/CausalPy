@@ -153,6 +153,8 @@ def _save_thumbnail(
         )
         new_img.save(thumbnail_path)
 
+        # Path relative to document location (notebooks/)
+        # Need to go up one level to source/, then into _static/thumbnails/
         return f"../_static/thumbnails/{thumbnail_name}"
     except Exception as e:
         print(f"Warning: Could not save thumbnail for {notebook_path.name}: {e}")
