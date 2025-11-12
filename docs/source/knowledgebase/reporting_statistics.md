@@ -15,6 +15,25 @@ CausalPy supports two modeling frameworks, each with its own statistical paradig
 The reporting layer automatically detects which type of model you're using and generates appropriate statistics. You don't need to specify the statistical approach.
 :::
 
+## Experiment Support
+
+The `effect_summary()` method is available for the following experiment types:
+
+| Experiment Type | PyMC Models | Scikit-learn (OLS) Models |
+|----------------|-------------|---------------------------|
+| Difference-in-Differences | ✅ Full support | ✅ Full support |
+| Regression Discontinuity | ✅ Full support | ✅ Full support |
+| Regression Kink | ✅ Full support | ❌ Not implemented |
+| Interrupted Time Series | ✅ Full support | ✅ Full support |
+| Synthetic Control | ✅ Full support | ✅ Full support |
+| PrePostNEGD | ❌ Use `.summary()` instead | ❌ Use `.summary()` instead |
+| Instrumental Variable | ❌ Not available | ❌ Not available |
+| Inverse Propensity Weighting | ❌ Not available | ❌ Not available |
+
+:::{note}
+For experiments marked with ❌, use the experiment's `.summary()` method for results.
+:::
+
 ---
 
 ## Bayesian Statistics (PyMC Models)
@@ -69,8 +88,12 @@ Bayesian hypothesis testing uses posterior probabilities directly, making the in
 - **Example:** If `p_gt_0 = 0.95`, there's a 95% probability the effect is positive
 
 **Two-Sided Tests**
-- `p_two_sided`: Two-sided posterior probability (analogous to two-sided p-value)
-- `prob_of_effect`: Probability of an effect in either direction (1 - p_two_sided)
+- `p_two_sided`: Probability of observing an effect at least this extreme in either direction
+  - **Calculation:** `2 × min(P(effect > 0), P(effect < 0))`
+  - This mirrors the frequentist two-sided p-value approach
+  - Example: If 97% of posterior is > 0 and 3% is < 0, then p_two_sided = 2 × 0.03 = 0.06
+- `prob_of_effect`: Probability of a non-zero effect in either direction (1 - p_two_sided)
+  - Continuing the example: prob_of_effect = 1 - 0.06 = 0.94 (94% probability of some effect)
 - **When to use:** When you don't have a directional hypothesis
 - **Interpretation:** `prob_of_effect = 0.95` means 95% probability of a non-zero effect
 
@@ -93,8 +116,9 @@ Unlike frequentist p-values, Bayesian posterior probabilities answer the questio
 
 **How it works:**
 1. You specify `min_effect` (the smallest effect size you consider meaningful)
-2. For directional tests: `p_rope` = P(|effect| > min_effect)
-3. For two-sided tests: `p_rope` = P(|effect| > min_effect)
+2. For "increase" direction: `p_rope` = P(effect > min_effect)
+3. For "decrease" direction: `p_rope` = P(effect < -min_effect)
+4. For "two-sided" direction: `p_rope` = P(|effect| > min_effect)
 
 **Example:**
 ```python
@@ -235,6 +259,29 @@ For experiments with multiple post-treatment time points:
 
 ## Usage Examples
 
+### Understanding the Output
+
+The `effect_summary()` method returns an `EffectSummary` object with two attributes:
+
+**Numerical Summary (.table):**
+
+Returns a pandas DataFrame with all statistics:
+
+```python
+summary = result.effect_summary()
+print(summary.table)
+```
+
+**Prose Summary (.text):**
+
+Returns a human-readable interpretation ready for reports:
+
+```python
+print(summary.text)
+# Output: "The average treatment effect was 2.50 (95% HDI [1.20, 3.80]),
+#          with a posterior probability of an increase of 0.975."
+```
+
 ### Basic usage (default Bayesian):
 ```python
 import causalpy as cp
@@ -267,7 +314,9 @@ summary = result.effect_summary(
     direction="increase",
     min_effect=2.0  # ROPE analysis
 )
-# Now summary.table includes p_rope column
+# Access results
+print(summary.table)  # p_rope column included
+print(summary.text)   # Prose interpretation
 ```
 
 ### For time-series experiments with custom window:

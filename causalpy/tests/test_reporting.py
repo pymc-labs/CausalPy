@@ -1007,6 +1007,21 @@ def test_compute_rope_probability_one_sided():
     assert result == 0.2  # 1 out of 5
 
 
+def test_compute_rope_probability_decrease():
+    """Test _compute_rope_probability with direction='decrease'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_rope_probability
+
+    # Create mock effect posterior with negative values
+    effect = xr.DataArray([0.5, -1.5, -2.5, -0.5, -3.0])
+
+    result = _compute_rope_probability(effect, min_effect=2.0, direction="decrease")
+
+    # effect < -2.0 for 2 values: -2.5, -3.0
+    assert result == 0.4  # 2 out of 5
+
+
 def test_format_number():
     """Test _format_number helper."""
     from causalpy.reporting import _format_number

@@ -134,8 +134,10 @@ def _compute_rope_probability(
     """
     if direction == "two-sided":
         return float((np.abs(effect) > min_effect).mean().values)
-    else:
+    elif direction == "increase":
         return float((effect > min_effect).mean().values)
+    elif direction == "decrease":
+        return float((effect < -min_effect).mean().values)
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
