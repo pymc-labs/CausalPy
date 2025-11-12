@@ -172,10 +172,8 @@ def generate_gallery_markdown(
     for nb_data in notebooks_data:
         categories.setdefault(nb_data["category"], []).append(nb_data)
 
-    # Sort categories maintaining order from index.md
-    sorted_categories = list(category_mapping.keys() & categories.keys()) + list(
-        categories.keys() - category_mapping.keys()
-    )
+    # Sort categories alphabetically
+    sorted_categories = sorted(categories.keys())
 
     # Generate markdown
     lines = ["# Example Gallery\n"]

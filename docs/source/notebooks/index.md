@@ -11,26 +11,62 @@
 :::
 ::::
 
-## Synthetic Control
+## Difference in Differences
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Synthetic control with `pymc` models
+:::{grid-item-card} Difference in Differences with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc.png
-:link: sc_pymc
+:img-top: ../_static/thumbnails/did_pymc.png
+:link: did_pymc
 :link-type: doc
 :::
-:::{grid-item-card} The effects of Brexit
+:::{grid-item-card} Banking dataset with a `pymc` model
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc_brexit.png
-:link: sc_pymc_brexit
+:img-top: ../_static/thumbnails/did_pymc_banks.png
+:link: did_pymc_banks
 :link-type: doc
 :::
-:::{grid-item-card} Synthetic control with scikit-learn models
+:::{grid-item-card} Difference in Differences with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_skl.png
-:link: sc_skl
+:img-top: ../_static/thumbnails/did_skl.png
+:link: did_skl
+:link-type: doc
+:::
+::::
+
+## Geographical lift testing
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Bayesian geolift with CausalPy
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/geolift1.png
+:link: geolift1
+:link-type: doc
+:::
+:::{grid-item-card} Multi-cell geolift analysis
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/multi_cell_geolift.png
+:link: multi_cell_geolift
+:link-type: doc
+:::
+::::
+
+## Instrumental Variables Regression
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Instrumental Variable Modelling (IV) with `pymc` models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/iv_pymc.png
+:link: iv_pymc
+:link-type: doc
+:::
+:::{grid-item-card} Instrumental Regression and Justifying Instruments with `pymc`
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/iv_weak_instruments.png
+:link: iv_weak_instruments
 :link-type: doc
 :::
 ::::
@@ -59,20 +95,20 @@
 :::
 ::::
 
-## Geographical lift testing
+## Inverse Propensity Score Weighting
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Bayesian geolift with CausalPy
+:::{grid-item-card} The Paradox of Propensity Scores in Bayesian Inference
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/geolift1.png
-:link: geolift1
+:img-top: ../_static/thumbnails/inv_prop_latent.png
+:link: inv_prop_latent
 :link-type: doc
 :::
-:::{grid-item-card} Multi-cell geolift analysis
+:::{grid-item-card} Inverse Propensity Score Weighting with `pymc`
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/multi_cell_geolift.png
-:link: multi_cell_geolift
+:img-top: ../_static/thumbnails/inv_prop_pymc.png
+:link: inv_prop_pymc
 :link-type: doc
 :::
 ::::
@@ -107,24 +143,6 @@
 :::
 ::::
 
-## Instrumental Variables Regression
-::::{grid} 1 2 3 3
-:gutter: 3
-
-:::{grid-item-card} Instrumental Variable Modelling (IV) with `pymc` models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_pymc.png
-:link: iv_pymc
-:link-type: doc
-:::
-:::{grid-item-card} Instrumental Regression and Justifying Instruments with `pymc`
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_weak_instruments.png
-:link: iv_weak_instruments
-:link-type: doc
-:::
-::::
-
 ## Regression Kink Design
 ::::{grid} 1 2 3 3
 :gutter: 3
@@ -137,44 +155,26 @@
 :::
 ::::
 
-## Difference in Differences
+## Synthetic Control
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Difference in Differences with `pymc` models
+:::{grid-item-card} Synthetic control with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc.png
-:link: did_pymc
+:img-top: ../_static/thumbnails/sc_pymc.png
+:link: sc_pymc
 :link-type: doc
 :::
-:::{grid-item-card} Banking dataset with a `pymc` model
+:::{grid-item-card} The effects of Brexit
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc_banks.png
-:link: did_pymc_banks
+:img-top: ../_static/thumbnails/sc_pymc_brexit.png
+:link: sc_pymc_brexit
 :link-type: doc
 :::
-:::{grid-item-card} Difference in Differences with scikit-learn models
+:::{grid-item-card} Synthetic control with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_skl.png
-:link: did_skl
-:link-type: doc
-:::
-::::
-
-## Inverse Propensity Score Weighting
-::::{grid} 1 2 3 3
-:gutter: 3
-
-:::{grid-item-card} The Paradox of Propensity Scores in Bayesian Inference
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_latent.png
-:link: inv_prop_latent
-:link-type: doc
-:::
-:::{grid-item-card} Inverse Propensity Score Weighting with `pymc`
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_pymc.png
-:link: inv_prop_pymc
+:img-top: ../_static/thumbnails/sc_skl.png
+:link: sc_skl
 :link-type: doc
 :::
 ::::
