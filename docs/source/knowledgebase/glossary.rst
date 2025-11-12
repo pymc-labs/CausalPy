@@ -25,11 +25,18 @@ Glossary
    CITS
       An interrupted time series design with added comparison time series observations.
 
+   Confidence interval
+   CI
+      In frequentist statistics, a range of values that would contain the true parameter in a specified percentage of repeated samples. For example, a 95% confidence interval means that if we repeated the study many times, 95% of such intervals would contain the true parameter. See :doc:`reporting_statistics` for interpretation guidance and comparison with credible intervals.
+
    Confound
       Anything besides the treatment which varies across the treatment and control conditions.
 
    Counterfactual
       A hypothetical outcome that could or will occur under specific hypothetical circumstances.
+
+   Credible interval
+      In Bayesian statistics, an interval containing a specified probability of the posterior distribution. For example, a 95% credible interval contains 95% of the posterior probability mass. Unlike confidence intervals, this is a direct probability statement about the parameter. The HDI (Highest Density Interval) is a specific type of credible interval. See :doc:`reporting_statistics` for details.
 
    Difference in differences
    DiD
@@ -45,6 +52,10 @@ Glossary
 
    Endogenous Variable
       An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeniety violates the assumptions of the Gauss Markov theorem.
+
+   HDI
+   Highest Density Interval
+      In Bayesian statistics, the narrowest credible interval containing a specified percentage of the posterior probability mass. For example, a 95% HDI is the shortest interval that contains 95% of the posterior distribution. This is the default uncertainty interval reported by CausalPy for PyMC models. See :doc:`reporting_statistics` for interpretation guidance.
 
    Local Average Treatment effect
    LATE
@@ -63,14 +74,20 @@ Glossary
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
 
+   Posterior probability
+      In Bayesian statistics, the probability of a hypothesis or parameter value after observing the data. In CausalPy's reporting, posterior probabilities are used for hypothesis testing (e.g., the probability that a treatment effect is positive). Unlike p-values, these are direct probability statements about the hypothesis of interest. See :doc:`reporting_statistics` for examples.
+
+   Potential outcomes
+      A potential outcome is definable for a candidate or experimental unit under a treatment regime with respect to a measured outcome. The outcome Y(0) for that experimental unit is the outcome when the individual does not have the treatment. The outcome Y(1) for that experimental unit is the outcome when the individual does receive the treatment. Only one case can be observed in reality, and this is called the fundamental problem of causal inference. Seen this way causal inference becomes a kind of imputation problem.
+
    Pretest-posttest design
       A quasi-experimental design where the treatment effect is estimated by comparing an outcome measure before and after treatment.
 
    Propensity scores
       An estimate of the probability of adopting a treatment status. Used in re-weighting schemes to balance observational data.
 
-   Potential outcomes
-      A potential outcome is definable for a candidate or experimental unit under a treatment regime with respect to a measured outcome. The outcome Y(0) for that experimental unit is the outcome when the individual does not have the treatment. The outcome Y(1) for that experimental unit is the outcome when the individual does receive the treatment. Only one case can be observed in reality, and this is called the fundamental problem of causal inference. Seen this way causal inference becomes a kind of imputation problem.
+   p-value
+      In frequentist statistics, the probability of observing data at least as extreme as what was observed, assuming the null hypothesis (typically "no effect") is true. Lower p-values indicate stronger evidence against the null hypothesis. Commonly, p < 0.05 is used as a threshold for statistical significance, though the p-value itself should be reported along with effect sizes and confidence intervals. See :doc:`reporting_statistics` for interpretation guidance and common pitfalls.
 
    Quasi-experiment
       An empirical comparison used to estimate the effects of a treatment where units are not assigned to conditions at random.
@@ -87,6 +104,10 @@ Glossary
 
    Regression kink design
       A quasi-experimental research design that estimates treatment effects by analyzing the impact of a treatment or intervention precisely at a defined threshold or "kink" point in a quantitative assignment variable (running variable). Unlike traditional regression discontinuity designs, regression kink design looks for a change in the slope of an outcome variable at the kink, instead of a discontinuity. This is useful when the assignment variable is not discrete, jumping from 0 to 1 at a threshold. Instead, regression kink designs are appropriate when there is a change in the first derivative of the assignment function at the kink point.
+
+   ROPE
+   Region of Practical Equivalence
+      In Bayesian causal inference, a method for testing whether an effect exceeds a minimum meaningful threshold (the "minimum effect size"). Rather than just testing if an effect differs from zero (which may be statistically significant but trivially small), ROPE analysis tests if the effect is large enough to be practically important. CausalPy reports this as `p_rope`, the posterior probability that the effect exceeds the specified threshold. See :doc:`reporting_statistics` for usage and interpretation.
 
    Running variable
       In regression discontinuity designs, the running variable is the variable that determines the assignment of units to treatment or control conditions. This is typically a continuous variable. Examples could include a test score, age, income, or spatial location. But the running variable would not be time, which is the case in interrupted time series designs.
