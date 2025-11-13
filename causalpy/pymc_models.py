@@ -1033,3 +1033,309 @@ class PropensityScore(PyMCModel):
             idata_outcome.extend(pm.sample(**self.sample_kwargs))
 
         return idata_outcome, model_outcome
+
+
+class LinearChangePointDetection(PyMCModel):
+    r"""
+    Custom PyMC model to estimate one ChangePoint in time series.
+
+    This model implements three types of changepoints: level shift, trend change, and impulse response.
+    While the underlying mathematical framework could theoretically be applied to other changepoint
+    detection problems, it has been specifically designed and tested for use in interrupted time
+    series causal inference settings.
+
+    In words:
+    - `beta` represents the regression coefficients for the baseline signal `μ`.
+    - `tau` is the changepoint time, and `w` is a sigmoid function to smooth the transition.
+    - `level` and `trend` model a linear shift after the changepoint.
+    - `A` and `lambda` define an impulse response at the changepoint.
+    - `mu_in` combines the level, trend, and impulse contributions.
+    - `mu_ts` is the total mean, including baseline and intervention.
+    - `sigma` is the observation noise.
+    - Finally, `y` is drawn from a Normal distribution with mean `mu_ts` and standard deviation `sigma`.
+
+    .. math::
+        \beta &\sim \mathrm{Normal}(0, 5) \\
+        \mu &= \beta \cdot X\\
+        \\
+        \tau &\sim \mathrm{Uniform}(\text{lower_bound}, \text{upper_bound}) \\
+        w &= sigmoid(t-\tau) \\
+        \\
+        \text{level} &\sim \mathrm{Normal}(0, 5) \\
+        \text{trend} &\sim \mathrm{Normal}(0, 0.5) \\
+        A &\sim \mathrm{Normal}(0, 5) \\
+        \lambda &\sim \mathrm{HalfNormal}(0, 5) \\
+        \text{impulse} &= A \cdot exp(-\lambda \cdot |t-\tau|) \\
+        \mu_{in} &= \text{level} + \text{trend} \cdot (t-\tau) + \text{impulse}\\
+        \\
+        \sigma &\sim \mathrm{HalfNormal}(0, 1) \\
+        \mu_{ts} &= \mu + \mu_{in} \\
+        \\
+        y &\sim \mathrm{Normal}(\mu_{ts}, \sigma)
+
+    Example
+        --------
+        >>> import causalpy as cp
+        >>> import numpy as np
+        >>> from patsy import build_design_matrices, dmatrices
+        >>> from causalpy.pymc_models import LinearChangePointDetection
+        >>> data = cp.load_data("its")
+        >>> formula="y ~ 1 + t + C(month)"
+        >>> y, X = dmatrices(formula, data)
+        >>> outcome_variable_name = y.design_info.column_names[0]
+        >>> labels = X.design_info.column_names
+        >>> _y, _X = np.asarray(y), np.asarray(X)
+        >>> _X = xr.DataArray(
+        ...     _X,
+        ...     dims=["obs_ind", "coeffs"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "coeffs": labels,
+        ...         },
+        ... )
+        >>> _y = xr.DataArray(
+        ...     _y,
+        ...     dims=["obs_ind", "treated_units"],
+        ...     coords={
+        ...         "obs_ind": data.index,
+        ...         "treated_units": ["unit_0"]
+        ...         },
+        ... )
+        >>> COORDS = {
+        ...     "coeffs": labels,
+        ...     "obs_ind": np.arange(X.shape[0]),
+        ...     "treated_units": ["unit_0"],
+        ... }
+        >>> model = LinearChangePointDetection(cp_effect_type="level", sample_kwargs={"draws" : 10, "tune":10, "progressbar":False})
+        >>> model.set_time_range(None, data)
+        >>> model.fit(X=_X, y=_y, coords=COORDS)
+        Inference ...
+    """
+
+    default_priors = {
+        "beta": Prior("Normal", mu=0, sigma=5, dims=["treated_units", "coeffs"]),
+        "level": Prior("Normal", mu=0, sigma=5),
+        "trend": Prior("Normal", mu=0, sigma=5),
+        "impulse_amplitude": Prior("Normal", mu=0, sigma=5),
+        "impulse_decay_rate": Prior("HalfNormal", sigma=5),
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=5, dims=["treated_units"]),
+            dims=["obs_ind", "treated_units"],
+        ),
+    }
+
+    def __init__(
+        self,
+        cp_effect_type: str | list[str],
+        cp_effect_param=None,
+        sample_kwargs=None,
+    ):
+        """
+        Initializes the InterventionTimeEstimator model.
+
+        :param cp_effect_type: Optional dictionary that specifies prior parameters for the
+            intervention effects. Expected keys are:
+                - "level": [mu, sigma]
+                - "trend": [mu, sigma]
+                - "impulse": [mu, sigma1, sigma2]
+            If a key is missing, the corresponding effect is ignored.
+            If the associated list is incomplete, default values will be used.
+        :param sample_kwargs: Optional dictionary of arguments passed to pm.sample().
+        """
+
+        super().__init__(sample_kwargs, cp_effect_param)
+
+        # Make sure we get a list of all expected effects
+        if isinstance(cp_effect_type, str):
+            self.cp_effect_type = [cp_effect_type]
+        else:
+            self.cp_effect_type = cp_effect_type
+
+    def build_model(self, X, y, coords):
+        """
+        Defines the PyMC model
+
+        :param X: An array of the covariates
+        :param y: An array of values representing our outcome y
+        :param coords: Dictionary of named coordinates for PyMC variables (e.g., {"obs_ind": range(n_obs), "coeffs": range(n_covariates)}).
+
+        Assumes the following attributes are already defined in self:
+            - self.timeline: the index of the column in X representing time.
+            - self.time_range: a tuple (lower_bound, upper_bound) for the intervention time.
+            - self.cp_effect_type: a dictionary specifying which intervention effects to include and their priors.
+        """
+
+        with self:
+            self.add_coords(coords)
+
+            t = pm.Data("t", np.arange(len(X)), dims="obs_ind")
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+
+            lower_bound = pm.Data("lower_bound", self.time_range[0])
+            upper_bound = pm.Data("upper_bound", self.time_range[1])
+
+            # --- Priors ---
+            # --- change_point unconstrained mapping ---
+            tau_un = pm.Normal("tau_un", 0, 1)
+            change_point = pm.Deterministic(
+                "change_point",
+                lower_bound + (upper_bound - 1 - lower_bound) * pm.math.sigmoid(tau_un),
+            )
+
+            delta_t = pm.Deterministic(
+                name="delta_t",
+                var=(t - change_point),
+                dims=["obs_ind"],
+            )
+            beta = self.priors["beta"].create_variable("beta")
+
+            # --- Intervention effect ---
+            mu_in_components = []
+
+            if "level" in self.cp_effect_type:
+                level = self.priors["level"].create_variable("level")
+                mu_in_components.append(level)
+
+            if "trend" in self.cp_effect_type:
+                trend = self.priors["trend"].create_variable("trend")
+                mu_in_components.append(trend * delta_t)
+
+            if "impulse" in self.cp_effect_type:
+                impulse_amplitude = self.priors["impulse_amplitude"].create_variable(
+                    "impulse_amplitude"
+                )
+                decay_rate = self.priors["impulse_decay_rate"].create_variable(
+                    "impulse_decay_rate"
+                )
+                impulse = pm.Deterministic(
+                    "impulse",
+                    impulse_amplitude * pm.math.exp(-decay_rate * pm.math.abs(delta_t)),
+                )
+                mu_in_components.append(impulse)
+
+            # --- Parameterization ---
+            weight = pm.math.sigmoid(delta_t)
+            # Compute and store the base time series
+            mu_ts = pm.Deterministic(
+                name="mu_ts", var=pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            # Compute and store the modelled intervention effect
+            mu_in = (
+                pm.Deterministic(
+                    name="mu_in",
+                    var=sum(mu_in_components),
+                )
+                if len(mu_in_components) > 0
+                else pm.Data(
+                    name="mu_in",
+                    vars=0,
+                )
+            )
+
+            mu = pm.Deterministic(
+                "mu",
+                mu_ts + (weight * mu_in)[:, None],
+                dims=["obs_ind", "treated_units"],
+            )
+
+            # --- Likelihood ---
+
+            # Likelihodd of the base time series and the intervention's effect
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+
+    def predict(self, X):
+        """
+        Predict data given input data `X`
+
+        .. caution::
+            Results in KeyError if model hasn't been fit.
+        """
+
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+        self._data_setter(X)
+        with self:  # sample with new input data
+            pp = pm.sample_posterior_predictive(
+                self.idata,
+                var_names=["y_hat", "mu", "mu_ts", "mu_in"],
+                progressbar=False,
+                random_seed=random_seed,
+            )
+
+        # TODO: This is a bit of a hack. Maybe it could be done properly in _data_setter?
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
+            pp["posterior_predictive"] = pp["posterior_predictive"].assign_coords(
+                obs_ind=X.obs_ind
+            )
+
+        return pp
+
+    def _data_setter(self, X) -> None:
+        """
+        Set data for the model.
+
+        This method is used internally to register new data for the model for
+        prediction.
+        """
+        n_obs = X.shape[0]
+        with self:
+            treated_units_coord = getattr(self, "coords", {}).get(
+                "treated_units", ["unit_0"]
+            )
+            n_treated_unit = len(treated_units_coord)
+            pm.set_data(
+                {
+                    "X": X,
+                    "t": np.arange(n_obs),
+                    "y": np.zeros((n_obs, n_treated_unit)),
+                },
+                coords={"obs_ind": np.arange(n_obs)},
+            )
+
+    def score(self, X, y) -> pd.Series:
+        """
+        Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
+        """
+        mu = self.predict(X)
+        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
+
+        scores = {}
+
+        # Always iterate over treated_units dimension - no branching needed!
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
+            unit_score = r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+
+        return pd.Series(scores)
+
+    def calculate_impact(
+        self, y_true: xr.DataArray, y_pred: az.InferenceData
+    ) -> xr.DataArray:
+        impact = y_true - y_pred["posterior_predictive"]["mu_ts"]
+        return impact.transpose(..., "obs_ind")
+
+    def set_time_range(self, time_range, data):
+        """
+        Set time_range.
+
+        :param time_range: tuple or None
+            If not None, a tuple of two values (start_label, end_label) that correspond
+            to index labels in the 't' column of the `data` DataFrame
+        :param data: pandas.DataFrame.
+        """
+        if time_range is None:
+            self.time_range = (
+                0,
+                len(data),
+            )
+        else:
+            self.time_range = (
+                data.index.get_loc(time_range[0]),
+                data.index.get_loc(time_range[1]),
+            )
