@@ -34,3 +34,9 @@
 .sd-grid {
     align-items: stretch;
 }
+
+/* Hide right sidebar - move "On this page" to left sidebar via html_sidebars config */
+.bd-sidebar-secondary,
+.sidebar-secondary {
+    display: none !important;
+}

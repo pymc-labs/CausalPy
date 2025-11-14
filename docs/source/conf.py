@@ -185,6 +185,13 @@ html_theme_options = {
     },
     "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
 }
+
+# Configure sidebars: show local TOC ("On this page") in left sidebar
+# This moves "On this page" navigation from right sidebar to left sidebar
+html_sidebars = {
+    "**": ["localtoc.html"],  # Show "On this page" navigation in left sidebar
+}
+
 html_context = {
     "github_user": "pymc-labs",
     "github_repo": "CausalPy",
