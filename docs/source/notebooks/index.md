@@ -1,4 +1,4 @@
-# Example Gallery
+# How-to
 
 On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
