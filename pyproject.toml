@@ -78,6 +78,9 @@ docs = [
     "ipywidgets",
     "sphinx-design",
     "sphinx-togglebutton",
+    "nbformat",
+    "nbconvert",
+    "Pillow",
 ]
 lint = ["interrogate", "pre-commit", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]

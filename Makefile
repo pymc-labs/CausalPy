@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init lint check_lint test uml html cleandocs doctest help
+.PHONY: init lint check_lint test uml gallery html cleandocs doctest help
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
@@ -31,7 +31,10 @@ test: ## Run all tests with pytest
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
 
-html: ## Build HTML documentation with Sphinx
+gallery: ## Generate example gallery from notebooks
+	python scripts/generate_gallery.py
+
+html: gallery ## Build HTML documentation with Sphinx
 	sphinx-build -b html docs/source docs/_build
 
 cleandocs: ## Clean the documentation build directories
