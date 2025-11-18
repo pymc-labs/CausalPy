@@ -1619,7 +1619,7 @@ class StateSpaceTimeSeries(PyMCModel):
         self.seasonal_length = seasonal_length
         self.mode = mode
         self.ss_mod: Any = None
-        self.second_model: pm.Model
+        self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
 
     def _validate_and_initialize_components(self):
@@ -1744,6 +1744,8 @@ class StateSpaceTimeSeries(PyMCModel):
         Returns the InferenceData with parameter draws.
         """
         self.build_model(X, y, coords)
+        if self.second_model is None:
+            raise RuntimeError("Model not built. Call build_model() first.")
         with self.second_model:
             self.idata = pm.sample(**self.sample_kwargs)
             if self.idata is not None:
