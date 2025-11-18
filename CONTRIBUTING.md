@@ -20,6 +20,18 @@ Please verify that your issue is not being currently addressed by other issues o
 ## Use of agents
 PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
 
+## Understanding the codebase architecture
+If you're new to the CausalPy codebase or planning to make significant contributions, we strongly recommend reading [RESEARCH.md](./RESEARCH.md). This developer-oriented guide provides:
+
+- An overview of the package architecture and how modules interact
+- Details on core abstractions (`BaseExperiment`, `PyMCModel`, etc.)
+- Public vs. internal API boundaries
+- Step-by-step guides for adding new experiment designs or models
+- Testing conventions and quality standards
+- Known limitations and areas needing improvement
+
+This document serves as a "map" of the codebase and will help you understand where your contributions fit in the overall architecture.
+
 ## Contributing code via pull requests
 
 While issue reporting is valuable, we strongly encourage users who are inclined to do so to submit patches for new or existing issues via pull requests. This is particularly the case for simple fixes, such as typos or tweaks to documentation, which do not require a heavy investment of time and attention.
