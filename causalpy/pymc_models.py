@@ -1719,12 +1719,14 @@ class StateSpaceTimeSeries(PyMCModel):
             P0_diag = pm.Gamma("P0_diag", alpha=2, beta=1, dims=P0_dims[0])
             _P0 = pm.Deterministic("P0", pt.diag(P0_diag), dims=P0_dims)
             _initial_trend = pm.Normal(
-                "initial_trend", sigma=50, dims=initial_trend_dims
+                "initial_level_trend", sigma=50, dims=initial_trend_dims
             )
-            _annual_seasonal = pm.ZeroSumNormal("freq", sigma=80, dims=annual_dims)
+            _annual_seasonal = pm.ZeroSumNormal(
+                "params_freq", sigma=80, dims=annual_dims
+            )
 
             _sigma_trend = pm.Gamma(
-                "sigma_trend", alpha=2, beta=5, dims=sigma_trend_dims
+                "sigma_level_trend", alpha=2, beta=5, dims=sigma_trend_dims
             )
             _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
 
