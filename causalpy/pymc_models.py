@@ -91,7 +91,7 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    default_priors = {}
+    default_priors: Dict[str, Prior] = {}
 
     def priors_from_data(self, X, y) -> Dict[str, Any]:
         """
@@ -169,12 +169,19 @@ class PyMCModel(pm.Model):
 
     def __init__(
         self,
-        sample_kwargs: Optional[Dict[str, Any]] = None,
+        sample_kwargs: Dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """
-        :param sample_kwargs: A dictionary of kwargs that get unpacked and passed to the
-            :func:`pymc.sample` function. Defaults to an empty dictionary.
+        Parameters
+        ----------
+        sample_kwargs : dict, optional
+            Dictionary of kwargs that get unpacked and passed to the
+            :func:`pymc.sample` function. Defaults to an empty dictionary
+            if None.
+        priors : dict, optional
+            Dictionary of priors for the model. Defaults to None, in which
+            case default priors are used.
         """
         super().__init__()
         self.idata = None
@@ -182,8 +189,9 @@ class PyMCModel(pm.Model):
 
         self.priors = {**self.default_priors, **(priors or {})}
 
-    def build_model(self, X, y, coords) -> None:
-        """Build the model, must be implemented by subclass."""
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+    ) -> None:
         raise NotImplementedError(
             "This method must be implemented by a subclass"
         )  # pragma: no cover
@@ -220,9 +228,26 @@ class PyMCModel(pm.Model):
                 coords={"obs_ind": obs_coords},
             )
 
-    def fit(self, X, y, coords: Optional[Dict[str, Any]] = None) -> None:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions, placing them in the model's idata attribute.
+    def fit(
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
+    ) -> az.InferenceData:
+        """Draw samples from posterior, prior predictive, and posterior
+        predictive distributions.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features as an xarray DataArray.
+        y : xr.DataArray
+            Target variable as an xarray DataArray.
+        coords : dict, optional
+            Dictionary with coordinate names for named dimensions.
+            Defaults to None.
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData object containing the samples.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -236,6 +261,8 @@ class PyMCModel(pm.Model):
         self.build_model(X, y, coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
+            if self.idata is None:
+                raise RuntimeError("pm.sample() returned None")
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
                 pm.sample_posterior_predictive(
@@ -246,7 +273,7 @@ class PyMCModel(pm.Model):
 
     def predict(
         self,
-        X,
+        X: xr.DataArray,
         coords: Optional[Dict[str, Any]] = None,
         out_of_sample: Optional[bool] = False,
         **kwargs,
@@ -315,7 +342,44 @@ class PyMCModel(pm.Model):
     def calculate_impact(
         self, y_true: xr.DataArray, y_pred: az.InferenceData
     ) -> xr.DataArray:
-        y_hat = y_pred["posterior_predictive"]["y_hat"]
+        """
+        Calculate the causal impact as the difference between observed and predicted values.
+
+        The impact is calculated using the posterior expectation (`mu`) rather than the
+        posterior predictive (`y_hat`). This means the causal impact represents the
+        difference from the expected value of the model, excluding observation noise.
+        This approach provides a cleaner measure of the causal effect by focusing on
+        the systematic difference rather than including sampling variability from the
+        observation noise term.
+
+        Parameters
+        ----------
+        y_true : xr.DataArray
+            The observed outcome values with dimensions ["obs_ind", "treated_units"].
+        y_pred : az.InferenceData
+            The posterior predictive samples containing the "mu" variable, which
+            represents the expected value (mean) of the outcome.
+
+        Returns
+        -------
+        xr.DataArray
+            The causal impact with dimensions ending in "obs_ind". The impact includes
+            posterior uncertainty from the model parameters but excludes observation noise.
+
+        Notes
+        -----
+        By using `mu` (the posterior expectation) rather than `y_hat` (the posterior
+        predictive with observation noise), the uncertainty in the impact reflects:
+        - Parameter uncertainty in the fitted model
+        - Uncertainty in the counterfactual prediction
+
+        But excludes:
+        - Observation-level noise (sigma)
+
+        This makes the impact plots focus on the systematic causal effect rather than
+        individual observation variability.
+        """
+        y_hat = y_pred["posterior_predictive"]["mu"]
         # Ensure the coordinate type and values match along obs_ind so xarray can align
         if "obs_ind" in y_hat.dims and "obs_ind" in getattr(y_true, "coords", {}):
             try:
@@ -329,10 +393,25 @@ class PyMCModel(pm.Model):
         impact = y_true - y_hat
         return impact.transpose(..., "obs_ind")
 
-    def calculate_cumulative_impact(self, impact):
+    def calculate_cumulative_impact(self, impact: xr.DataArray) -> xr.DataArray:
         return impact.cumsum(dim="obs_ind")
 
-    def print_coefficients(self, labels, round_to=None) -> None:
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print the model coefficients with their labels.
+
+        Parameters
+        ----------
+        labels : list of str
+            List of strings representing the coefficient names.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit")
+
         def print_row(
             max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
         ) -> None:
@@ -430,13 +509,15 @@ class LinearRegression(PyMCModel):
         ),
     }
 
-    def build_model(self, X, y, coords):
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+    ) -> None:
         """
         Defines the PyMC model
         """
         with self:
             # Ensure treated_units coordinate exists for consistency
-            if "treated_units" not in coords:
+            if coords is not None and "treated_units" not in coords:
                 coords = coords.copy()
                 coords["treated_units"] = ["unit_0"]
 
@@ -527,7 +608,9 @@ class WeightedSumFitter(PyMCModel):
             ),
         }
 
-    def build_model(self, X, y, coords):
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+    ) -> None:
         """
         Defines the PyMC model
         """
@@ -588,20 +671,36 @@ class InstrumentalVariableRegression(PyMCModel):
     Inference data...
     """
 
-    def build_model(self, X, Z, y, t, coords, priors):
-        """Specify model with treatment regression and focal regression data and priors
+    def build_model(  # type: ignore
+        self,
+        X: np.ndarray,
+        Z: np.ndarray,
+        y: np.ndarray,
+        t: np.ndarray,
+        coords: Dict[str, Any],
+        priors: Dict[str, Any],
+    ) -> None:
+        """Specify model with treatment regression and focal regression
+        data and priors.
 
-        :param X: A pandas dataframe used to predict our outcome y
-        :param Z: A pandas dataframe used to predict our treatment variable t
-        :param y: An array of values representing our focal outcome y
-        :param t: An array of values representing the treatment t of
-                  which we're interested in estimating the causal impact
-        :param coords: A dictionary with the coordinate names for our
-                       instruments and covariates
-        :param priors: An optional dictionary of priors for the mus and
-                      sigmas of both regressions
-                      :code:`priors = {"mus": [0, 0], "sigmas": [1, 1],
-                      "eta": 2, "lkj_sd": 2}`
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict our outcome y.
+        Z : np.ndarray
+            Array used to predict our treatment variable t.
+        y : np.ndarray
+            Array of values representing our focal outcome y.
+        t : np.ndarray
+            Array representing the treatment t of which we're interested
+            in estimating the causal impact.
+        coords : dict
+            Dictionary with the coordinate names for our instruments and
+            covariates.
+        priors : dict
+            Dictionary of priors for the mus and sigmas of both
+            regressions. Example: ``priors = {"mus": [0, 0],
+            "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
         """
 
         # --- Priors ---
@@ -645,7 +744,7 @@ class InstrumentalVariableRegression(PyMCModel):
                 shape=(X.shape[0], 2),
             )
 
-    def sample_predictive_distribution(self, ppc_sampler="jax"):
+    def sample_predictive_distribution(self, ppc_sampler: str | None = "jax") -> None:
         """Function to sample the Multivariate Normal posterior predictive
         Likelihood term in the IV class. This can be slow without
         using the JAX sampler compilation method. If using the
@@ -655,32 +754,65 @@ class InstrumentalVariableRegression(PyMCModel):
         random_seed = self.sample_kwargs.get("random_seed", None)
 
         if ppc_sampler == "jax":
-            with self:
-                self.idata.extend(
-                    pm.sample_posterior_predictive(
-                        self.idata,
-                        random_seed=random_seed,
-                        compile_kwargs={"mode": "JAX"},
+            if self.idata is not None:
+                with self:
+                    self.idata.extend(
+                        pm.sample_posterior_predictive(
+                            self.idata,
+                            random_seed=random_seed,
+                            compile_kwargs={"mode": "JAX"},
+                        )
                     )
-                )
         elif ppc_sampler == "pymc":
-            with self:
-                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-                self.idata.extend(
-                    pm.sample_posterior_predictive(
-                        self.idata,
-                        random_seed=random_seed,
+            if self.idata is not None:
+                with self:
+                    self.idata.extend(
+                        pm.sample_prior_predictive(random_seed=random_seed)
                     )
-                )
+                    self.idata.extend(
+                        pm.sample_posterior_predictive(
+                            self.idata,
+                            random_seed=random_seed,
+                        )
+                    )
 
-    def fit(self, X, Z, y, t, coords, priors, ppc_sampler=None):
-        """Draw samples from posterior distribution and potentially
-        from the prior and posterior predictive distributions. The
-        fit call can take values for the
-        ppc_sampler = ['jax', 'pymc', None]
-        We default to None, so the user can determine if they wish
-        to spend time sampling the posterior predictive distribution
-        independently.
+    def fit(  # type: ignore
+        self,
+        X: np.ndarray,
+        Z: np.ndarray,
+        y: np.ndarray,
+        t: np.ndarray,
+        coords: Dict[str, Any],
+        priors: Dict[str, Any],
+        ppc_sampler: str | None = None,
+    ) -> az.InferenceData:
+        """Draw samples from posterior distribution and potentially from
+        the prior and posterior predictive distributions.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict our outcome y.
+        Z : np.ndarray
+            Array used to predict our treatment variable t.
+        y : np.ndarray
+            Array of values representing our focal outcome y.
+        t : np.ndarray
+            Array representing the treatment variable.
+        coords : dict
+            Dictionary with coordinate names for named dimensions.
+        priors : dict
+            Dictionary of priors for the model.
+        ppc_sampler : str, optional
+            Sampler for posterior predictive distribution. Can be 'jax',
+            'pymc', or None. Defaults to None, so the user can determine
+            if they wish to spend time sampling the posterior predictive
+            distribution independently.
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData object containing the samples.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -733,7 +865,14 @@ class PropensityScore(PyMCModel):
         "b": Prior("Normal", mu=0, sigma=1, dims="coeffs"),
     }
 
-    def build_model(self, X, t, coords, prior=None, noncentred=True):
+    def build_model(  # type: ignore
+        self,
+        X: np.ndarray,
+        t: np.ndarray,
+        coords: Dict[str, Any],
+        prior: Dict[str, Any] | None = None,
+        noncentred: bool = True,
+    ) -> None:
         "Defines the PyMC propensity model"
         with self:
             self.add_coords(coords)
@@ -744,7 +883,14 @@ class PropensityScore(PyMCModel):
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
-    def fit(self, X, t, coords, prior={"b": [0, 1]}, noncentred=True):
+    def fit(  # type: ignore
+        self,
+        X: np.ndarray,
+        t: np.ndarray,
+        coords: Dict[str, Any],
+        prior: Dict[str, list] = {"b": [0, 1]},
+        noncentred: bool = True,
+    ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
@@ -756,29 +902,30 @@ class PropensityScore(PyMCModel):
         self.build_model(X, t, coords, prior, noncentred)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata, progressbar=False, random_seed=random_seed
+            if self.idata is not None:
+                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata, progressbar=False, random_seed=random_seed
+                    )
                 )
-            )
         return self.idata
 
     def fit_outcome_model(
         self,
-        X_outcome,
-        y,
-        coords,
-        priors={
+        X_outcome: pd.DataFrame,
+        y: pd.Series,
+        coords: Dict[str, Any],
+        priors: Dict[str, Any] = {
             "b_outcome": [0, 1],
             "sigma": 1,
             "beta_ps": [0, 1],
         },
-        noncentred=True,
-        normal_outcome=True,
-        spline_component=False,
-        winsorize_boundary=0.0,
-    ):
+        noncentred: bool = True,
+        normal_outcome: bool = True,
+        spline_component: bool = False,
+        winsorize_boundary: float = 0.0,
+    ) -> tuple[az.InferenceData, pm.Model]:
         """
         Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
 
@@ -1114,8 +1261,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         return time_for_trend, time_for_seasonality, X_values_for_pymc, num_obs
 
     def build_model(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
-    ):
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any] | None
+    ) -> None:
         """
         Defines the PyMC model.
 
@@ -1129,6 +1276,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
             If X is provided and has columns, coords must also contain "coeffs" (List[str]).
         """
+        if coords is None:
+            raise ValueError("coords must be provided with 'datetime_index'")
         datetime_index = coords.pop("datetime_index", None)
         if not isinstance(datetime_index, pd.DatetimeIndex):
             raise ValueError(
@@ -1183,7 +1332,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 print(
                     f"Warning: Discrepancy in 'coeffs'. Using derived: {self._exog_var_names} over input: {model_coords['coeffs']}"
                 )
-            model_coords["coeffs"] = self._exog_var_names
+            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
         elif "coeffs" in model_coords and model_coords["coeffs"]:
             # No exog vars determined by _prepare..., but coords has non-empty coeffs
             raise ValueError(
@@ -1194,7 +1343,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         elif (
             "coeffs" not in model_coords and self._exog_var_names
         ):  # Should not happen if logic is right
-            model_coords["coeffs"] = self._exog_var_names
+            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
 
         with self:
             self.add_coords(model_coords)
@@ -1268,8 +1417,11 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_data, dims="obs_ind")
 
     def fit(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
-    ) -> None:
+        self,
+        X: Optional[np.ndarray],
+        y: np.ndarray,
+        coords: Dict[str, Any] | None = None,
+    ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
         Parameters
@@ -1289,18 +1441,19 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self.build_model(X, y, coords=coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    var_names=["y_hat", "mu"],  # Ensure mu is sampled
-                    progressbar=self.sample_kwargs.get("progressbar", True),
-                    random_seed=random_seed,
+            if self.idata is not None:
+                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        var_names=["y_hat", "mu"],  # Ensure mu is sampled
+                        progressbar=self.sample_kwargs.get("progressbar", True),
+                        random_seed=random_seed,
+                    )
                 )
-            )
-        return self.idata
+        return self.idata  # type: ignore[return-value]
 
-    def _data_setter(
+    def _data_setter(  # type: ignore[override]
         self,
         X_pred: Optional[np.ndarray],
         coords_pred: Dict[
@@ -1385,14 +1538,18 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     def predict(
         self,
         X: Optional[np.ndarray],
-        coords: Dict[str, Any],  # Must contain "datetime_index" for prediction period
+        coords: Dict[str, Any]
+        | None = None,  # Must contain "datetime_index" for prediction period
         out_of_sample: Optional[bool] = False,
-    ):
+        **kwargs: Any,
+    ) -> az.InferenceData:
         """
         Predict data given input X and coords for prediction period.
         coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
         However, for prediction, exog var names are already known by the model.
         """
+        if coords is None:
+            raise ValueError("coords must be provided with 'datetime_index'")
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X, coords_pred=coords)
         with self:
@@ -1410,7 +1567,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self,
         X: Optional[np.ndarray],
         y: np.ndarray,
-        coords: Dict[str, Any],  # Must contain "datetime_index" for score period
+        coords: Dict[str, Any]
+        | None = None,  # Must contain "datetime_index" for score period
+        **kwargs: Any,
     ) -> pd.Series:
         """Score the Bayesian R2.
         coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
@@ -1459,7 +1618,8 @@ class StateSpaceTimeSeries(PyMCModel):
         self.level_order = level_order
         self.seasonal_length = seasonal_length
         self.mode = mode
-        self.ss_mod = None
+        self.ss_mod: Any = None
+        self.second_model: pm.Model
         self._validate_and_initialize_components()
 
     def _validate_and_initialize_components(self):
@@ -1523,12 +1683,14 @@ class StateSpaceTimeSeries(PyMCModel):
         return self._seasonality_component
 
     def build_model(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any] | None
     ) -> None:
         """
         Build the PyMC state-space model.  `coords` must include:
           - 'datetime_index': a pandas.DatetimeIndex matching `y`.
         """
+        if coords is None:
+            raise ValueError("coords must be provided with 'datetime_index'")
         coords = coords.copy()
         datetime_index = coords.pop("datetime_index", None)
         if not isinstance(datetime_index, pd.DatetimeIndex):
@@ -1544,6 +1706,8 @@ class StateSpaceTimeSeries(PyMCModel):
         self.ss_mod = combined.build()
 
         # Extract parameter dims (order: initial_trend, sigma_trend, seasonal, P0)
+        if self.ss_mod is None:
+            raise RuntimeError("State space model not initialized")
         initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
             self.ss_mod.param_dims.values()
         )
@@ -1566,10 +1730,14 @@ class StateSpaceTimeSeries(PyMCModel):
 
             # Attach the state-space graph using the observed data
             df = pd.DataFrame({"y": y.flatten()}, index=datetime_index)
-            self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
+            if self.ss_mod is not None:
+                self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
 
     def fit(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+        self,
+        X: Optional[np.ndarray],
+        y: np.ndarray,
+        coords: Dict[str, Any] | None = None,
     ) -> az.InferenceData:
         """
         Fit the model, drawing posterior samples.
@@ -1578,11 +1746,12 @@ class StateSpaceTimeSeries(PyMCModel):
         self.build_model(X, y, coords)
         with self.second_model:
             self.idata = pm.sample(**self.sample_kwargs)
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata,
+            if self.idata is not None:
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                    )
                 )
-            )
         self.conditional_idata = self._smooth()
         return self._prepare_idata()
 
@@ -1625,13 +1794,16 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         if self.idata is None:
             raise RuntimeError("Model must be fit before forecasting.")
+        if self.ss_mod is None:
+            raise RuntimeError("State space model not initialized")
         return self.ss_mod.forecast(self.idata, start=start, periods=periods)
 
     def predict(
         self,
         X: Optional[np.ndarray],
-        coords: Dict[str, Any],
+        coords: Dict[str, Any] | None = None,
         out_of_sample: Optional[bool] = False,
+        **kwargs: Any,
     ) -> xr.Dataset:
         """
         Wrapper around forecast: expects coords with 'datetime_index' of future points.
@@ -1639,6 +1811,8 @@ class StateSpaceTimeSeries(PyMCModel):
         if not out_of_sample:
             return self._prepare_idata()
         else:
+            if coords is None:
+                raise ValueError("coords must be provided for out-of-sample prediction")
             idx = coords.get("datetime_index")
             if not isinstance(idx, pd.DatetimeIndex):
                 raise ValueError(
@@ -1661,7 +1835,11 @@ class StateSpaceTimeSeries(PyMCModel):
             return new_idata
 
     def score(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any]
+        self,
+        X: Optional[np.ndarray],
+        y: np.ndarray,
+        coords: Dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> pd.Series:
         """
         Compute R^2 between observed and mean forecast.

@@ -15,7 +15,7 @@
 Synthetic Control Experiment
 """
 
-from typing import List, Optional, Union
+from typing import List, Union
 
 import arviz as az
 import numpy as np
@@ -67,6 +67,14 @@ class SyntheticControl(BaseExperiment):
     ...         }
     ...     ),
     ... )
+
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
     """
 
     supports_ols = True
@@ -78,8 +86,8 @@ class SyntheticControl(BaseExperiment):
         treatment_time: Union[int, float, pd.Timestamp],
         control_units: list[str],
         treated_units: list[str],
-        model=None,
-        **kwargs,
+        model: Union[PyMCModel, RegressorMixin] | None = None,
+        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
         # rename the index to "obs_ind"
@@ -177,7 +185,9 @@ class SyntheticControl(BaseExperiment):
             self.post_impact
         )
 
-    def input_validation(self, data, treatment_time):
+    def input_validation(
+        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+    ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
@@ -192,7 +202,7 @@ class SyntheticControl(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -207,7 +217,10 @@ class SyntheticControl(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, treated_unit: str | None = None, **kwargs
+        self,
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        **kwargs: dict,
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results for a specific treated unit
@@ -358,7 +371,10 @@ class SyntheticControl(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to=None, treated_unit: str | None = None, **kwargs
+        self,
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        **kwargs: dict,
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results for OLS model for a specific treated unit
@@ -561,16 +577,20 @@ class SyntheticControl(BaseExperiment):
 
         return self.plot_data
 
-    def _get_score_title(
-        self, treated_unit: str, round_to: Optional[int] = None
-    ) -> str:
+    def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
         if isinstance(self.model, PyMCModel):
             # Bayesian model - get unit-specific R² scores using unified format
             unit_index = self.treated_units.index(treated_unit)
-            r2_val = round_num(self.score[f"unit_{unit_index}_r2"], round_to)
-            r2_std_val = round_num(self.score[f"unit_{unit_index}_r2_std"], round_to)
+            r2_val = round_num(
+                self.score[f"unit_{unit_index}_r2"],
+                round_to if round_to is not None else 2,
+            )
+            r2_std_val = round_num(
+                self.score[f"unit_{unit_index}_r2_std"],
+                round_to if round_to is not None else 2,
+            )
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"

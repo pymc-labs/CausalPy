@@ -94,10 +94,14 @@ class PrePostNEGD(BaseExperiment):
         formula: str,
         group_variable_name: str,
         pretreatment_variable_name: str,
-        model=None,
-        **kwargs,
-    ):
+        model: PyMCModel | None = None,
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
+        self.causal_impact: xr.DataArray
+        self.pred_xi: np.ndarray
+        self.pred_untreated: az.InferenceData
+        self.pred_treated: az.InferenceData
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
@@ -140,6 +144,7 @@ class PrePostNEGD(BaseExperiment):
         else:
             raise ValueError("Model type not recognized")
 
+        assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data
@@ -197,7 +202,7 @@ class PrePostNEGD(BaseExperiment):
 
         raise NameError("Unable to find coefficient name for the treatment effect")
 
-    def _causal_impact_summary_stat(self, round_to) -> str:
+    def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
         ci = (
@@ -207,7 +212,7 @@ class PrePostNEGD(BaseExperiment):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -221,7 +226,7 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, **kwargs
+        self, round_to: int | None = None, **kwargs: dict
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(

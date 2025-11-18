@@ -16,3 +16,5 @@ dependencies:
   - statsmodels
   - xarray>=v2022.11.0
   - pymc-extras>=0.3.0
+  - pymc-bart
+  - python>=3.11

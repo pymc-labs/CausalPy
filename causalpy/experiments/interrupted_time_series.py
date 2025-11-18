@@ -15,7 +15,7 @@
 Interrupted Time Series Analysis
 """
 
-from typing import List, Union
+from typing import Any, List, Union
 
 import arviz as az
 import numpy as np
@@ -74,6 +74,14 @@ class InterruptedTimeSeries(BaseExperiment):
     ...         }
     ...     ),
     ... )
+
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
     """
 
     expt_type = "Interrupted Time Series"
@@ -85,10 +93,12 @@ class InterruptedTimeSeries(BaseExperiment):
         data: pd.DataFrame,
         treatment_time: Union[int, float, pd.Timestamp],
         formula: str,
-        model=None,
-        **kwargs,
+        model: Union[PyMCModel, RegressorMixin] | None = None,
+        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
+        self.pre_y: xr.DataArray
+        self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.input_validation(data, treatment_time)
@@ -150,11 +160,11 @@ class InterruptedTimeSeries(BaseExperiment):
 
             if is_bsts_like:
                 # BSTS/StateSpace models expect numpy arrays and datetime coords
-                X_fit = self.pre_X.values if self.pre_X.shape[1] > 0 else None
-                y_fit = self.pre_y.isel(treated_units=0).values
-                pre_coords = {"datetime_index": self.datapre.index}
+                X_fit = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                y_fit = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
+                pre_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
                 if X_fit is not None:
-                    pre_coords["coeffs"] = self.labels
+                    pre_coords["coeffs"] = list(self.labels)
                 self.model.fit(X=X_fit, y=y_fit, coords=pre_coords)
             else:
                 # General PyMC models expect xarray with treated_units
@@ -176,11 +186,11 @@ class InterruptedTimeSeries(BaseExperiment):
                 self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
             )
             if is_bsts_like:
-                X_score = self.pre_X.values if self.pre_X.shape[1] > 0 else None
-                y_score = self.pre_y.isel(treated_units=0).values
-                score_coords = {"datetime_index": self.datapre.index}
+                X_score = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                y_score = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
+                score_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
                 if X_score is not None:
-                    score_coords["coeffs"] = self.labels
+                    score_coords["coeffs"] = list(self.labels)
                 self.score = self.model.score(X=X_score, y=y_score, coords=score_coords)
             else:
                 self.score = self.model.score(X=self.pre_X, y=self.pre_y)
@@ -195,8 +205,8 @@ class InterruptedTimeSeries(BaseExperiment):
                 self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
             )
             if is_bsts_like:
-                X_pre_predict = self.pre_X.values if self.pre_X.shape[1] > 0 else None
-                pre_pred_coords = {"datetime_index": self.datapre.index}
+                X_pre_predict = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                pre_pred_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
                 self.pre_pred = self.model.predict(
                     X=X_pre_predict, coords=pre_pred_coords
                 )
@@ -214,9 +224,11 @@ class InterruptedTimeSeries(BaseExperiment):
             )
             if is_bsts_like:
                 X_post_predict = (
-                    self.post_X.values if self.post_X.shape[1] > 0 else None
+                    self.post_X.values if self.post_X.shape[1] > 0 else None  # type: ignore[attr-defined]
                 )
-                post_pred_coords = {"datetime_index": self.datapost.index}
+                post_pred_coords: dict[str, Any] = {
+                    "datetime_index": self.datapost.index
+                }
                 self.post_pred = self.model.predict(
                     X=X_post_predict, coords=post_pred_coords, out_of_sample=True
                 )
@@ -262,7 +274,9 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
-    def input_validation(self, data, treatment_time):
+    def input_validation(
+        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+    ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
@@ -277,7 +291,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -288,7 +302,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, **kwargs
+        self, round_to: int | None = 2, **kwargs: dict
     ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
@@ -465,7 +479,9 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return fig, ax
 
-    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, List[plt.Axes]]:
+    def _ols_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, List[plt.Axes]]:
         """
         Plot the results
 
@@ -488,7 +504,7 @@ class InterruptedTimeSeries(BaseExperiment):
             c="k",
         )
         ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(self.score, round_to)}"
+            title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"
         )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")
