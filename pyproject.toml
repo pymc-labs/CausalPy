@@ -13,7 +13,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.5.0"
+version = "0.6.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -50,7 +50,15 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell", "nbformat", "nbconvert"]
+dev = [
+    "pathlib",
+    "pre-commit",
+    "twine",
+    "interrogate",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+]
 docs = [
     "ipykernel",
     "daft-pgm",
@@ -71,7 +79,7 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "pre-commit", "ruff"]
+lint = ["interrogate", "pre-commit", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
 
 [project.urls]
@@ -129,10 +137,7 @@ ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
-omit = [
-    "*/conftest.py",
-    "*/tests/conftest.py",
-]
+omit = ["*/conftest.py", "*/tests/conftest.py"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -147,3 +152,22 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+[tool.mypy]
+files = "causalpy/*.py"
+exclude = "build|dist|docs|notebooks|tests|setup.py"
+
+[tool.mypy-matplotlib]
+ignore_missing_imports = true
+
+[tool.mypy-pymc]
+ignore_missing_imports = true
+
+[tool.mypy-seaborn]
+ignore_missing_imports = true
+
+[tool.mypy-sklearn]
+ignore_missing_imports = true
+
+[tool.mypy-scipy]
+ignore_missing_imports = true

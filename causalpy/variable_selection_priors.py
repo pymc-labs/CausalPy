@@ -399,8 +399,8 @@ class VariableSelectionPrior:
                 slab_sigma=merged_hp["slab_sigma"],
                 temperature=merged_hp["temperature"],
                 dims=dims,
-            )
-            return self._prior_instance.create_variable(name)
+            )  # type: ignore[assignment]
+            return self._prior_instance.create_variable(name)  # type: ignore[attr-defined]
 
         elif self.prior_type == "horseshoe":
             self._prior_instance = HorseshoePrior(
@@ -409,8 +409,8 @@ class VariableSelectionPrior:
                 c2_alpha=merged_hp["c2_alpha"],
                 c2_beta=merged_hp["c2_beta"],
                 dims=dims,
-            )
-            return self._prior_instance.create_variable(name)
+            )  # type: ignore[assignment]
+            return self._prior_instance.create_variable(name)  # type: ignore[attr-defined]
 
         else:  # normal
             # Use Prior class directly for normal

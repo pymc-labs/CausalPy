@@ -16,6 +16,8 @@ Regression discontinuity design
 """
 
 import warnings  # noqa: I001
+from typing import Union
+
 
 import numpy as np
 import pandas as pd
@@ -86,12 +88,12 @@ class RegressionDiscontinuity(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         treatment_threshold: float,
-        model=None,
+        model: Union[PyMCModel, RegressorMixin] | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs,
-    ):
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
         self.data = data
@@ -198,7 +200,7 @@ class RegressionDiscontinuity(BaseExperiment):
             ) - np.squeeze(self.pred_discon[0])
         # ******************************************************************************
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if "treated" not in self.formula:
             raise FormulaException(
@@ -216,7 +218,7 @@ class RegressionDiscontinuity(BaseExperiment):
             self.data = self.data.copy()
             self.data["treated"] = self.data["treated"].astype(bool)
 
-    def _is_treated(self, x):
+    def _is_treated(self, x: Union[np.ndarray, pd.Series]) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
 
         .. warning::
@@ -225,7 +227,7 @@ class RegressionDiscontinuity(BaseExperiment):
         """
         return np.greater_equal(x, self.treatment_threshold)
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """
         Print summary of main results and model coefficients
 
@@ -243,7 +245,9 @@ class RegressionDiscontinuity(BaseExperiment):
         print("\n")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -292,7 +296,9 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         return (fig, ax)
 
-    def _ols_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(
+        self, round_to: int | None = None, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -312,7 +318,7 @@ class RegressionDiscontinuity(BaseExperiment):
             label="model fit",
         )
         # create strings to compose title
-        r2 = f"$R^2$ on all data = {round_num(self.score, round_to)}"
+        r2 = f"$R^2$ on all data = {round_num(float(self.score), round_to)}"
         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
         # Intervention line
