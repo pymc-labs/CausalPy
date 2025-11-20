@@ -379,7 +379,8 @@ class VariableSelectionPrior:
         >>> import pandas as pd
         >>> from causalpy.variable_selection_priors import VariableSelectionPrior
         >>> vs_prior = VariableSelectionPrior("spike_and_slab")
-        >>> with pm.Model() as model:
+        >>> coords = {"features": ["a", "b", "c", "d", "e"]}
+        >>> with pm.Model(coords=coords) as model:
         ...     beta = vs_prior.create_prior("beta", n_params=4, dims="features")
         """
         # Merge instance and call-specific hyperparameters
