@@ -41,14 +41,14 @@ def _relaxed_bernoulli_transform(
     Parameters
     ----------
     p : float or PyMC variable
-        Probability parameter
+        Probability parameter.
     temperature : float, default=0.1
-        Temperature parameter (lower = more binary)
+        Temperature parameter (lower = more binary).
 
     Returns
     -------
     function
-        Transform function that takes uniform random variable
+        Transform function that takes uniform random variable.
     """
 
     def transform(u):
@@ -84,6 +84,8 @@ class SpikeAndSlabPrior:
 
     Example
     -------
+    >>> import pymc as pm
+    >>> from causalpy.variable_selection_priors import SpikeAndSlabPrior
     >>> spike_slab = SpikeAndSlabPrior(dims="features")
     >>> with pm.Model():
     ...     beta = spike_slab.create_variable("beta")
@@ -161,6 +163,8 @@ class HorseshoePrior:
 
     Example
     -------
+    >>> import pymc as pm
+    >>> from causalpy.variable_selection_priors import HorseshoePrior
     >>> horseshoe = HorseshoePrior(dims="features")
     >>> with pm.Model():
     ...     beta = horseshoe.create_variable("beta")
@@ -261,18 +265,11 @@ class VariableSelectionPrior:
     -------
     >>> import pymc as pm
     >>> from variable_selection_priors import VariableSelectionPrior
-    >>>
     >>> # Create spike-and-slab prior
     >>> vs_prior = VariableSelectionPrior("spike_and_slab")
-    >>>
     >>> with pm.Model() as model:
     ...     # Create coefficients with variable selection
-    ...     beta = vs_prior.create_prior(
-    ...         name="beta",
-    ...         n_params=5,
-    ...         dims="features",
-    ...         X=X_train,  # For computing tau0 in horseshoe
-    ...     )
+    ...     beta = vs_prior.create_prior(name="beta", n_params=5, dims="features")
     """
 
     def __init__(self, prior_type: str, hyperparams: Optional[Dict[str, Any]] = None):
@@ -375,11 +372,13 @@ class VariableSelectionPrior:
 
         Example
         -------
-        >>> vs_prior = VariableSelectionPrior("horseshoe")
+        >>> import pymc as pm
+        >>> import pandas as pd
+        >>> from variable_selection_priors import VariableSelectionPrior
+        >>> X_train = pd.DataFrame{'x': [1, 2, 3, 4]}
+        >>> vs_prior = VariableSelectionPrior("spike_and_slab")
         >>> with pm.Model() as model:
-        ...     beta = vs_prior.create_prior(
-        ...         "beta", n_params=10, dims="features", X=X_train
-        ...     )
+        ...     beta = vs_prior.create_prior("beta", n_params=4, dims="features")
         """
         # Merge instance and call-specific hyperparameters
         default_hp = self._get_default_hyperparams(n_params, X)
@@ -450,11 +449,6 @@ class VariableSelectionPrior:
         ValueError
             If prior_type is not 'spike_and_slab' or gamma variables not found
 
-        Example
-        -------
-        >>> result = vs_prior.get_inclusion_probabilities(idata, "beta")
-        >>> print(f"Selected features: {result['selected']}")
-        >>> print(f"Inclusion probs: {result['probabilities']}")
         """
         if self.prior_type != "spike_and_slab":
             raise ValueError(
@@ -512,10 +506,6 @@ class VariableSelectionPrior:
         ValueError
             If prior_type is not 'horseshoe' or required variables not found
 
-        Example
-        -------
-        >>> result = vs_prior.get_shrinkage_factors(idata, "beta")
-        >>> print(f"Shrinkage factors: {result['shrinkage_factors']}")
         """
         if self.prior_type != "horseshoe":
             raise ValueError("Shrinkage factors only available for 'horseshoe' priors")
