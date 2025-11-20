@@ -51,10 +51,10 @@ class InstrumentalVariable(BaseExperiment):
         If priors are not specified we will substitute MLE estimates for
         the beta coefficients. Example: ``priors = {"mus": [0, 0],
         "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
-    :param vs_prior_type : str or None, default=None
+    vs_prior_type : str or None, default=None
         Type of variable selection prior: 'spike_and_slab', 'horseshoe', or None.
         If None, uses standard normal priors.
-    :param vs_hyperparams : dict, optional
+    vs_hyperparams : dict, optional
         Hyperparameters for variable selection priors. Only used if vs_prior_type
         is not None.
 
