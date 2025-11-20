@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Custom PyMC models for causal inference"""
 
+import warnings
 from typing import Any, Dict
 
 import arviz as az
@@ -693,6 +694,13 @@ class InstrumentalVariableRegression(PyMCModel):
         # --- Priors ---
         with self:
             self.add_coords(coords)
+
+            if vs_prior_type and ("mus" in priors or "sigmas" in priors):
+                warnings.warn(
+                    "Variable selection priors specified. "
+                    "The 'mus' and 'sigmas' in the priors dict will be ignored "
+                    "for beta coefficients. Only 'eta' and 'lkj_sd' will be used."
+                )
 
             # Create coefficient priors
             if vs_prior_type:

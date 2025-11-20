@@ -91,6 +91,16 @@ class InstrumentalVariable(BaseExperiment):
     ...     formula=formula,
     ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
+    >>> # With variable selection
+    >>> iv = cp.InstrumentalVariable(
+    ...     instruments_data=instruments_data,
+    ...     data=data,
+    ...     instruments_formula=instruments_formula,
+    ...     formula=formula,
+    ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ...     vs_prior_type="spike_and_slab",
+    ...     vs_hyperparams={"slab_sigma": 5.0},
+    ... )
     """
 
     supports_ols = False
@@ -115,7 +125,7 @@ class InstrumentalVariable(BaseExperiment):
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.model = model
-        self.vs_prior_type = (vs_prior_type,)
+        self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
         self.input_validation()
 
@@ -142,7 +152,7 @@ class InstrumentalVariable(BaseExperiment):
         if priors is None:
             priors = {
                 "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
-                "sigmas": [1, 1],
+                "sigmas": [10, 10],
                 "eta": 2,
                 "lkj_sd": 1,
             }
