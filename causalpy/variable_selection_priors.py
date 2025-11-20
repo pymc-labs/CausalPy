@@ -375,7 +375,6 @@ class VariableSelectionPrior:
         >>> import pymc as pm
         >>> import pandas as pd
         >>> from variable_selection_priors import VariableSelectionPrior
-        >>> X_train = pd.DataFrame{'x': [1, 2, 3, 4]}
         >>> vs_prior = VariableSelectionPrior("spike_and_slab")
         >>> with pm.Model() as model:
         ...     beta = vs_prior.create_prior("beta", n_params=4, dims="features")
@@ -568,14 +567,6 @@ def create_variable_selection_prior(
     PyMC variable
         The coefficient vector with specified prior
 
-    Example
-    -------
-    >>> with pm.Model() as model:
-    ...     X = pm.Data("X", X_train)
-    ...     beta = create_variable_selection_prior(
-    ...         "spike_and_slab", "beta", n_params=X_train.shape[1], dims="features"
-    ...     )
-    ...     mu = pm.math.dot(X, beta)
     """
     vs_prior = VariableSelectionPrior(prior_type, hyperparams)
     return vs_prior.create_prior(name, n_params, dims, X)
