@@ -87,7 +87,8 @@ class SpikeAndSlabPrior:
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import SpikeAndSlabPrior
     >>> spike_slab = SpikeAndSlabPrior(dims="features")
-    >>> with pm.Model():
+    >>> coords = {"features": ["a", "b", "c", "d", "e"]}
+    >>> with pm.Model(coords=coords) as model:
     ...     beta = spike_slab.create_variable("beta")
     """
 
@@ -166,7 +167,8 @@ class HorseshoePrior:
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import HorseshoePrior
     >>> horseshoe = HorseshoePrior(dims="features")
-    >>> with pm.Model():
+    >>> coords = {"features": ["a", "b", "c", "d", "e"]}
+    >>> with pm.Model(coords=coords) as model:
     ...     beta = horseshoe.create_variable("beta")
     """
 
@@ -264,10 +266,11 @@ class VariableSelectionPrior:
     Example
     -------
     >>> import pymc as pm
-    >>> from variable_selection_priors import VariableSelectionPrior
+    >>> from causalpy.variable_selection_priors import VariableSelectionPrior
     >>> # Create spike-and-slab prior
     >>> vs_prior = VariableSelectionPrior("spike_and_slab")
-    >>> with pm.Model() as model:
+    >>> coords = {"features": ["a", "b", "c", "d", "e"]}
+    >>> with pm.Model(coords=coords) as model:
     ...     # Create coefficients with variable selection
     ...     beta = vs_prior.create_prior(name="beta", n_params=5, dims="features")
     """
@@ -374,7 +377,7 @@ class VariableSelectionPrior:
         -------
         >>> import pymc as pm
         >>> import pandas as pd
-        >>> from variable_selection_priors import VariableSelectionPrior
+        >>> from causalpy.variable_selection_priors import VariableSelectionPrior
         >>> vs_prior = VariableSelectionPrior("spike_and_slab")
         >>> with pm.Model() as model:
         ...     beta = vs_prior.create_prior("beta", n_params=4, dims="features")
