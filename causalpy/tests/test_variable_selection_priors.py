@@ -100,6 +100,17 @@ def test_create_prior_horseshoe(coords, sample_data):
         assert beta.name == "beta"
 
 
+def test_create_prior_normal(coords, sample_data):
+    """Test create_prior for horseshoe."""
+    vs_prior = VariableSelectionPrior("normal")
+
+    with pm.Model(coords=coords) as model:
+        beta = vs_prior.create_prior(name="beta", n_params=5, dims="features")
+
+        assert "beta" in model.named_vars
+        assert beta.name == "beta"
+
+
 def test_convenience_function_with_custom_hyperparams(coords):
     """Test convenience function with custom hyperparameters."""
     with pm.Model(coords=coords) as model:
