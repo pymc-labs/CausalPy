@@ -78,7 +78,7 @@ def test_create_variable_in_model_context_horseshoe(coords):
 
 def test_create_prior_spike_and_slab(coords):
     """Test create_prior for spike-and-slab."""
-    vs_prior = VariableSelectionPrior("spike_and_slab")
+    vs_prior = VariableSelectionPrior("spike_and_slab", hyperparams={"pi_alpha": 5})
 
     with pm.Model(coords=coords) as model:
         beta = vs_prior.create_prior(name="beta", n_params=5, dims="features")

@@ -710,6 +710,10 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
         result.idata, "beta_z"
     )
     assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+            result.idata, "beta_z"
+        )
 
 
 @pytest.mark.integration
@@ -745,6 +749,10 @@ def test_iv_reg_vs_prior_hs(mock_pymc_sample):
         result.idata, "beta_z"
     )
     assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+            result.idata, "beta_z"
+        )
 
 
 @pytest.mark.integration
