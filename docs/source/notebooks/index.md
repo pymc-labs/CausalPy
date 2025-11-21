@@ -65,6 +65,7 @@ rkink_pymc.ipynb
 
 iv_pymc.ipynb
 iv_weak_instruments.ipynb
+iv_vs_priors.ipynb
 :::
 
 :::{toctree}
