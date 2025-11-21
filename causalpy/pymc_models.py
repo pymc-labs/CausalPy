@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Custom PyMC models for causal inference"""
 
+import warnings
 from typing import Any, Dict, List, Optional
 
 import arviz as az
@@ -1103,6 +1104,15 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     ):
         super().__init__(sample_kwargs=sample_kwargs)
 
+        # Warn that this is experimental
+        warnings.warn(
+            "BayesianBasisExpansionTimeSeries is experimental and its API may change in future versions. "
+            "It uses a different data format (numpy arrays and datetime indices) compared to other PyMC models. "
+            "Not recommended for production use.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
         # Store original configuration parameters
         self.n_order = n_order
         self.n_changepoints_trend = n_changepoints_trend
@@ -1613,6 +1623,17 @@ class StateSpaceTimeSeries(PyMCModel):
         mode: str = "JAX",
     ):
         super().__init__(sample_kwargs=sample_kwargs)
+
+        # Warn that this is experimental
+        warnings.warn(
+            "StateSpaceTimeSeries is experimental and its API may change in future versions. "
+            "It uses a different data format (numpy arrays and datetime indices) compared to other PyMC models, "
+            "and returns xr.Dataset instead of az.InferenceData from predict(). "
+            "Not recommended for production use.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
         self.level_order = level_order
