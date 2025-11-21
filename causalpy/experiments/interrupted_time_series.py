@@ -15,7 +15,7 @@
 Interrupted Time Series Analysis
 """
 
-from typing import List, Union
+from typing import Any, List, Union
 
 import arviz as az
 import numpy as np
@@ -27,7 +27,11 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import (
+    BayesianBasisExpansionTimeSeries,
+    PyMCModel,
+    StateSpaceTimeSeries,
+)
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -150,12 +154,26 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.pre_X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            is_bsts_like = isinstance(
+                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+            )
+
+            if is_bsts_like:
+                # BSTS/StateSpace models expect numpy arrays and datetime coords
+                X_fit = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                y_fit = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
+                pre_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
+                if X_fit is not None:
+                    pre_coords["coeffs"] = list(self.labels)
+                self.model.fit(X=X_fit, y=y_fit, coords=pre_coords)
+            else:
+                # General PyMC models expect xarray with treated_units
+                COORDS = {
+                    "coeffs": self.labels,
+                    "obs_ind": np.arange(self.pre_X.shape[0]),
+                    "treated_units": ["unit_0"],
+                }
+                self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             # For OLS models, use 1D y data
             self.model.fit(X=self.pre_X, y=self.pre_y.isel(treated_units=0))
@@ -163,19 +181,86 @@ class InterruptedTimeSeries(BaseExperiment):
             raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        if isinstance(self.model, PyMCModel):
+            is_bsts_like = isinstance(
+                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+            )
+            if is_bsts_like:
+                X_score = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                y_score = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
+                score_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
+                if X_score is not None:
+                    score_coords["coeffs"] = list(self.labels)
+                self.score = self.model.score(X=X_score, y=y_score, coords=score_coords)
+            else:
+                self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+        elif isinstance(self.model, RegressorMixin):
+            self.score = self.model.score(
+                X=self.pre_X, y=self.pre_y.isel(treated_units=0)
+            )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_X)
+        if isinstance(self.model, PyMCModel):
+            is_bsts_like = isinstance(
+                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+            )
+            if is_bsts_like:
+                X_pre_predict = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                pre_pred_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
+                self.pre_pred = self.model.predict(
+                    X=X_pre_predict, coords=pre_pred_coords
+                )
+                if not isinstance(self.pre_pred, az.InferenceData):
+                    self.pre_pred = az.InferenceData(posterior_predictive=self.pre_pred)
+            else:
+                self.pre_pred = self.model.predict(X=self.pre_X)
+        elif isinstance(self.model, RegressorMixin):
+            self.pre_pred = self.model.predict(X=self.pre_X)
 
-        # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_X)
+        # calculate the counterfactual (post period)
+        if isinstance(self.model, PyMCModel):
+            is_bsts_like = isinstance(
+                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+            )
+            if is_bsts_like:
+                X_post_predict = (
+                    self.post_X.values if self.post_X.shape[1] > 0 else None  # type: ignore[attr-defined]
+                )
+                post_pred_coords: dict[str, Any] = {
+                    "datetime_index": self.datapost.index
+                }
+                self.post_pred = self.model.predict(
+                    X=X_post_predict, coords=post_pred_coords, out_of_sample=True
+                )
+                if not isinstance(self.post_pred, az.InferenceData):
+                    self.post_pred = az.InferenceData(
+                        posterior_predictive=self.post_pred
+                    )
+            else:
+                self.post_pred = self.model.predict(X=self.post_X)
+        elif isinstance(self.model, RegressorMixin):
+            self.post_pred = self.model.predict(X=self.post_X)
 
         # calculate impact - use appropriate y data format for each model type
         if isinstance(self.model, PyMCModel):
-            # PyMC models work with 2D data
-            self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-            self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
+            is_bsts_like = isinstance(
+                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+            )
+            if is_bsts_like:
+                pre_y_for_impact = self.pre_y.isel(treated_units=0)
+                post_y_for_impact = self.post_y.isel(treated_units=0)
+                self.pre_impact = self.model.calculate_impact(
+                    pre_y_for_impact, self.pre_pred
+                )
+                self.post_impact = self.model.calculate_impact(
+                    post_y_for_impact, self.post_pred
+                )
+            else:
+                # PyMC models with treated_units use 2D data
+                self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
+                self.post_impact = self.model.calculate_impact(
+                    self.post_y, self.post_pred
+                )
         elif isinstance(self.model, RegressorMixin):
             # SKL models work with 1D data
             self.pre_impact = self.model.calculate_impact(
@@ -230,9 +315,13 @@ class InterruptedTimeSeries(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
+        pre_mu = self.pre_pred["posterior_predictive"].mu
+        pre_mu_plot = (
+            pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
+        )
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            self.pre_pred["posterior_predictive"].mu.isel(treated_units=0),
+            pre_mu_plot,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -251,9 +340,15 @@ class InterruptedTimeSeries(BaseExperiment):
         labels.append("Observations")
 
         # post intervention period
+        post_mu = self.post_pred["posterior_predictive"].mu
+        post_mu_plot = (
+            post_mu.isel(treated_units=0)
+            if "treated_units" in post_mu.dims
+            else post_mu
+        )
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            self.post_pred["posterior_predictive"].mu.isel(treated_units=0),
+            post_mu_plot,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -268,11 +363,12 @@ class InterruptedTimeSeries(BaseExperiment):
             "k.",
         )
         # Shaded causal effect
-        post_pred_mu = (
-            az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-            .isel(treated_units=0)
-            .mean("sample")
-        )  # Add .mean("sample") to get 1D array
+        post_pred_mu = az.extract(
+            self.post_pred, group="posterior_predictive", var_names="mu"
+        )
+        if "treated_units" in post_pred_mu.dims:
+            post_pred_mu = post_pred_mu.isel(treated_units=0)
+        post_pred_mu = post_pred_mu.mean("sample")
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_mu,
@@ -285,30 +381,65 @@ class InterruptedTimeSeries(BaseExperiment):
         handles.append(h)
         labels.append("Causal impact")
 
-        ax[0].set(
-            title=f"""
-            Pre-intervention Bayesian $R^2$: {round_num(self.score["unit_0_r2"], round_to)}
-            (std = {round_num(self.score["unit_0_r2_std"], round_to)})
-            """
-        )
+        # Title with R^2, supporting both unit_0_r2 and r2 keys
+        r2_val = None
+        r2_std_val = None
+        try:
+            if isinstance(self.score, pd.Series):
+                if "unit_0_r2" in self.score.index:
+                    r2_val = self.score["unit_0_r2"]
+                    r2_std_val = self.score.get("unit_0_r2_std", None)
+                elif "r2" in self.score.index:
+                    r2_val = self.score["r2"]
+                    r2_std_val = self.score.get("r2_std", None)
+        except Exception:
+            pass
+        title_str = "Pre-intervention Bayesian $R^2$"
+        if r2_val is not None:
+            title_str += f": {round_num(r2_val, round_to)}"
+            if r2_std_val is not None:
+                title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
+        ax[0].set(title=title_str)
 
         # MIDDLE PLOT -----------------------------------------------
+        pre_impact_plot = (
+            self.pre_impact.isel(treated_units=0)
+            if hasattr(self.pre_impact, "dims")
+            and "treated_units" in self.pre_impact.dims
+            else self.pre_impact
+        )
         plot_xY(
             self.datapre.index,
-            self.pre_impact.isel(treated_units=0),
+            pre_impact_plot,
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
+        post_impact_plot = (
+            self.post_impact.isel(treated_units=0)
+            if hasattr(self.post_impact, "dims")
+            and "treated_units" in self.post_impact.dims
+            else self.post_impact
+        )
         plot_xY(
             self.datapost.index,
-            self.post_impact.isel(treated_units=0),
+            post_impact_plot,
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
+        post_impact_mean = (
+            self.post_impact.mean(["chain", "draw"])
+            if hasattr(self.post_impact, "mean")
+            else self.post_impact
+        )
+        if (
+            hasattr(post_impact_mean, "dims")
+            and "treated_units" in post_impact_mean.dims
+        ):
+            post_impact_mean = post_impact_mean.isel(treated_units=0)
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).isel(treated_units=0),
+            y1=post_impact_mean,
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -317,9 +448,15 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
+        post_cum_plot = (
+            self.post_impact_cumulative.isel(treated_units=0)
+            if hasattr(self.post_impact_cumulative, "dims")
+            and "treated_units" in self.post_impact_cumulative.dims
+            else self.post_impact_cumulative
+        )
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.isel(treated_units=0),
+            post_cum_plot,
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -434,49 +571,97 @@ class InterruptedTimeSeries(BaseExperiment):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
 
-            pre_data["prediction"] = (
-                az.extract(self.pre_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .isel(treated_units=0)
-                .values
+            pre_mu = az.extract(
+                self.pre_pred, group="posterior_predictive", var_names="mu"
             )
-            post_data["prediction"] = (
-                az.extract(self.post_pred, group="posterior_predictive", var_names="mu")
-                .mean("sample")
-                .isel(treated_units=0)
-                .values
+            post_mu = az.extract(
+                self.post_pred, group="posterior_predictive", var_names="mu"
             )
+            if "treated_units" in pre_mu.dims:
+                pre_mu = pre_mu.isel(treated_units=0)
+            if "treated_units" in post_mu.dims:
+                post_mu = post_mu.isel(treated_units=0)
+            pre_data["prediction"] = pre_mu.mean("sample").values
+            post_data["prediction"] = post_mu.mean("sample").values
+
             hdi_pre_pred = get_hdi_to_df(
                 self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
             )
             hdi_post_pred = get_hdi_to_df(
                 self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
             )
-            # Select the single unit from the MultiIndex results
-            pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
-                "unit_0", level="treated_units"
-            ).set_index(pre_data.index)
-            post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
-                "unit_0", level="treated_units"
-            ).set_index(post_data.index)
+            # If treated_units present, select unit_0; otherwise use directly
+            if (
+                isinstance(hdi_pre_pred.index, pd.MultiIndex)
+                and "treated_units" in hdi_pre_pred.index.names
+            ):
+                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
+                    "unit_0", level="treated_units"
+                ).set_index(pre_data.index)
+                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
+                    "unit_0", level="treated_units"
+                ).set_index(post_data.index)
+            else:
+                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.set_index(
+                    pre_data.index
+                )
+                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.set_index(
+                    post_data.index
+                )
 
-            pre_data["impact"] = (
-                self.pre_impact.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+            pre_impact_mean = (
+                self.pre_impact.mean(dim=["chain", "draw"])
+                if hasattr(self.pre_impact, "mean")
+                else self.pre_impact
             )
-            post_data["impact"] = (
+            post_impact_mean = (
                 self.post_impact.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-                .values
+                if hasattr(self.post_impact, "mean")
+                else self.post_impact
             )
-            hdi_pre_impact = get_hdi_to_df(self.pre_impact, hdi_prob=hdi_prob)
-            hdi_post_impact = get_hdi_to_df(self.post_impact, hdi_prob=hdi_prob)
-            # Select the single unit from the MultiIndex results
-            pre_data[[impact_lower_col, impact_upper_col]] = hdi_pre_impact.xs(
-                "unit_0", level="treated_units"
-            ).set_index(pre_data.index)
-            post_data[[impact_lower_col, impact_upper_col]] = hdi_post_impact.xs(
-                "unit_0", level="treated_units"
-            ).set_index(post_data.index)
+            if (
+                hasattr(pre_impact_mean, "dims")
+                and "treated_units" in pre_impact_mean.dims
+            ):
+                pre_impact_mean = pre_impact_mean.isel(treated_units=0)
+            if (
+                hasattr(post_impact_mean, "dims")
+                and "treated_units" in post_impact_mean.dims
+            ):
+                post_impact_mean = post_impact_mean.isel(treated_units=0)
+            pre_data["impact"] = pre_impact_mean.values
+            post_data["impact"] = post_impact_mean.values
+
+            # Compute impact HDIs directly via quantiles over posterior dims to avoid column shape issues
+            alpha = 1 - hdi_prob
+            lower_q = alpha / 2
+            upper_q = 1 - alpha / 2
+
+            pre_lower_da = self.pre_impact.quantile(lower_q, dim=["chain", "draw"])
+            pre_upper_da = self.pre_impact.quantile(upper_q, dim=["chain", "draw"])
+            post_lower_da = self.post_impact.quantile(lower_q, dim=["chain", "draw"])
+            post_upper_da = self.post_impact.quantile(upper_q, dim=["chain", "draw"])
+
+            # If a treated_units dim remains for some models, select unit_0
+            if hasattr(pre_lower_da, "dims") and "treated_units" in pre_lower_da.dims:
+                pre_lower_da = pre_lower_da.sel(treated_units="unit_0")
+                pre_upper_da = pre_upper_da.sel(treated_units="unit_0")
+            if hasattr(post_lower_da, "dims") and "treated_units" in post_lower_da.dims:
+                post_lower_da = post_lower_da.sel(treated_units="unit_0")
+                post_upper_da = post_upper_da.sel(treated_units="unit_0")
+
+            pre_data[impact_lower_col] = (
+                pre_lower_da.to_series().reindex(pre_data.index).values
+            )
+            pre_data[impact_upper_col] = (
+                pre_upper_da.to_series().reindex(pre_data.index).values
+            )
+            post_data[impact_lower_col] = (
+                post_lower_da.to_series().reindex(post_data.index).values
+            )
+            post_data[impact_upper_col] = (
+                post_upper_da.to_series().reindex(post_data.index).values
+            )
 
             self.plot_data = pd.concat([pre_data, post_data])
 
