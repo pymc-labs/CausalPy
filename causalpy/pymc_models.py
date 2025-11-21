@@ -923,6 +923,7 @@ class PropensityScore(PyMCModel):
         normal_outcome: bool = True,
         spline_component: bool = False,
         winsorize_boundary: float = 0.0,
+        spline_knots: int = 30,
     ) -> tuple[az.InferenceData, pm.Model]:
         """
         Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
@@ -962,6 +963,9 @@ class PropensityScore(PyMCModel):
         winsorize_boundary : float, default 0.0
             If we wish to winsorize the propensity score this can be set to clip the high
             and low values of the propensity at 0 + winsorize_boundary and 1-winsorize_boundary
+
+        spline_knots: int, default 30
+            The number of knots we use in the 0 - 1 interval to create our spline function
 
         Returns
         -------
@@ -1026,11 +1030,11 @@ class PropensityScore(PyMCModel):
                     "beta_ps_spline",
                     priors["beta_ps"][0],
                     priors["beta_ps"][1],
-                    size=34,
+                    size=spline_knots + 4,
                 )
                 B = dmatrix(
                     "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
-                    {"ps": p, "knots": np.linspace(0, 1, 30)},
+                    {"ps": p, "knots": np.linspace(0, 1, spline_knots)},
                 )
                 B_f = np.asarray(B, order="F")
                 splines_summed = pm.Deterministic(
