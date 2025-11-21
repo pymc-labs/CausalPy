@@ -11,4 +11,24 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Quasi-experimental designs for causal inference."""
+"""CausalPy experiment module"""
+
+from .diff_in_diff import DifferenceInDifferences
+from .instrumental_variable import InstrumentalVariable
+from .interrupted_time_series import InterruptedTimeSeries
+from .inverse_propensity_weighting import InversePropensityWeighting
+from .prepostnegd import PrePostNEGD
+from .regression_discontinuity import RegressionDiscontinuity
+from .regression_kink import RegressionKink
+from .synthetic_control import SyntheticControl
+
+__all__ = [
+    "DifferenceInDifferences",
+    "InstrumentalVariable",
+    "InversePropensityWeighting",
+    "PrePostNEGD",
+    "RegressionDiscontinuity",
+    "RegressionKink",
+    "SyntheticControl",
+    "InterruptedTimeSeries",
+]
