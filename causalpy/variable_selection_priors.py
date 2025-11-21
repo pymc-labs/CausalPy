@@ -23,6 +23,7 @@ top of the pymc-extras Prior infrastructure.
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
+import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
 from pymc_extras.prior import Prior
@@ -65,9 +66,10 @@ class SpikeAndSlabPrior:
     Creates a mixture prior with a point mass at zero (spike) and a diffuse
     normal distribution (slab), implemented as:
 
-    β_j = γ_j × β_j^raw
-
-    where γ_j ∈ [0,1] is a relaxed indicator and β_j^raw ~ N(0, σ_slab²).
+    .. math::
+        \beta_{j} = \gamma_{j} \cdot \beta_{j}^{\text{raw}} \\
+        \beta_{j}^{\text{raw}} \sim \mathcal{N}(0, \sigma_{\text{slab}}^{2}), \qquad
+        \gamma_{j} \in [0,1].
 
     Parameters
     ----------
@@ -145,9 +147,9 @@ class HorseshoePrior:
     Provides continuous shrinkage with heavy tails, allowing strong signals
     to escape shrinkage while weak signals are dampened:
 
-    β_j = τ · λ̃_j · β_j^raw
-
-    where λ̃_j = √(c²λ_j² / (c² + τ²λ_j²)) is the regularized local shrinkage.
+    .. math::
+        \beta_{j} & =  \tau \cdot \lambda_{j} \cdot \beta_{j}^{raw}  \\
+        \lambda_{j} & = \sqrt{ \dfrac{c^{2}\lambda_{j}^{2}}{c^{2} + \tau^{2}\lambda_{j}^{2}} }
 
     Parameters
     ----------
@@ -423,7 +425,7 @@ class VariableSelectionPrior:
 
     def get_inclusion_probabilities(
         self, idata, param_name: str, threshold: float = 0.5
-    ) -> Dict[str, np.ndarray]:
+    ) -> pd.DataFrame:
         """
         Extract variable inclusion probabilities from fitted model.
 
@@ -472,17 +474,24 @@ class VariableSelectionPrior:
         gamma = az.extract(idata.posterior[gamma_name])
 
         # Compute inclusion probabilities
-        probabilities = (gamma > threshold).mean(dim="sample").values
-        gamma_mean = gamma.mean(dim="sample").values
+        probabilities = (gamma > threshold).mean(dim="sample").to_array()
+        gamma_mean = gamma.mean(dim="sample").to_array()
         selected = probabilities > threshold
 
-        return {
+        summary = {
             "probabilities": probabilities,
             "selected": selected,
             "gamma_mean": gamma_mean,
         }
+        probs = summary["probabilities"].T
+        df = pd.DataFrame(index=list(range(len(probs))))
 
-    def get_shrinkage_factors(self, idata, param_name: str) -> Dict[str, np.ndarray]:
+        df["prob"] = probs
+        df["selected"] = summary["selected"].T
+        df["gamma_mean"] = summary["gamma_mean"].T
+        return df
+
+    def get_shrinkage_factors(self, idata, param_name: str) -> pd.DataFrame:
         """
         Extract shrinkage factors from horseshoe prior.
 
@@ -524,17 +533,26 @@ class VariableSelectionPrior:
             raise ValueError(f"Could not find '{lambda_tilde_name}' in posterior")
 
         # Extract components
-        tau = az.extract(idata.posterior[tau_name])
-        lambda_tilde = az.extract(idata.posterior[lambda_tilde_name])
+        tau = az.extract(idata.posterior[tau_name]).to_array()
+        lambda_tilde = az.extract(idata.posterior[lambda_tilde_name]).to_array()
 
-        # Compute shrinkage factors
-        shrinkage_factors = (tau * lambda_tilde).mean(dim="sample").values
+        shrinkage_factor = np.array(
+            [tau[0, i] * lambda_tilde[0, :, :] for i in range(len(tau))]
+        )
+        shrinkage_factor = shrinkage_factor.mean(axis=2)
 
-        return {
-            "shrinkage_factors": shrinkage_factors,
-            "tau": tau.mean().values,
-            "lambda_tilde": lambda_tilde.mean(dim="sample").values,
+        summary = {
+            "shrinkage_factors": shrinkage_factor,
+            "tau": tau.mean(),
+            "lambda_tilde": lambda_tilde.mean(dim=("sample")),
         }
+        probs = summary["shrinkage_factors"].T
+        df = pd.DataFrame(index=list(range(len(probs))))
+        df["shrinkage_factor"] = probs
+
+        df["lambda_tilde"] = summary["lambda_tilde"].T
+        df["tau"] = np.mean(tau).item()
+        return df
 
 
 def create_variable_selection_prior(

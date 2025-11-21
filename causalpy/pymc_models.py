@@ -684,9 +684,9 @@ class InstrumentalVariableRegression(PyMCModel):
             Dictionary of priors for the mus and sigmas of both
             regressions. Example: ``priors = {"mus": [0, 0],
             "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
-        :param vs_prior_type: An optional string. Can be "spike_and_slab"
+        vs_prior_type: An optional string. Can be "spike_and_slab"
                               or "horseshoe" or "normal
-        :param vs_hyperparams: An optional dictionary of priors for the
+        vs_hyperparams: An optional dictionary of priors for the
                                variable selection hyperparameters
 
         """
@@ -705,16 +705,18 @@ class InstrumentalVariableRegression(PyMCModel):
             # Create coefficient priors
             if vs_prior_type:
                 # Use variable selection priors
-                vs_prior_treatment = VariableSelectionPrior(
+                self.vs_prior_treatment = VariableSelectionPrior(
                     vs_prior_type, vs_hyperparams
                 )
-                vs_prior_outcome = VariableSelectionPrior(vs_prior_type, vs_hyperparams)
+                self.vs_prior_outcome = VariableSelectionPrior(
+                    vs_prior_type, vs_hyperparams
+                )
 
-                beta_t = vs_prior_treatment.create_prior(
+                beta_t = self.vs_prior_treatment.create_prior(
                     name="beta_t", n_params=Z.shape[1], dims="instruments", X=Z
                 )
 
-                beta_z = vs_prior_outcome.create_prior(
+                beta_z = self.vs_prior_outcome.create_prior(
                     name="beta_z", n_params=X.shape[1], dims="covariates", X=X
                 )
             else:
@@ -733,7 +735,7 @@ class InstrumentalVariableRegression(PyMCModel):
                 )
 
             sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
-            chol, corr, sigmas = pm.LKJCholeskyCov(
+            chol, _, _ = pm.LKJCholeskyCov(
                 name="chol_cov",
                 eta=priors["eta"],
                 n=2,

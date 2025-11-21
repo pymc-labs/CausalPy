@@ -706,6 +706,45 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
         result.get_plot_data()
     assert "gamma_beta_t" in result.model.named_vars
     assert "pi_beta_t" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
+
+
+@pytest.mark.integration
+def test_iv_reg_vs_prior_hs(mock_pymc_sample):
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        vs_prior_type="horseshoe",
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "tau_beta_t" in result.model.named_vars
+    assert "tau_beta_z" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
 
 
 @pytest.mark.integration
