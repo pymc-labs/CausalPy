@@ -52,7 +52,6 @@ dependencies = [
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
 dev = [
-    "pathlib",
     "pre-commit",
     "twine",
     "interrogate",
