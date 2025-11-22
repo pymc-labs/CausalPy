@@ -15,8 +15,6 @@
 Inverse propensity weighting
 """
 
-from typing import List
-
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -263,7 +261,7 @@ class InversePropensityWeighting(BaseExperiment):
         method: str | None = None,
         prop_draws: int = 100,
         ate_draws: int = 300,
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         if idata is None:
             idata = self.model.idata
         if method is None:
@@ -325,7 +323,7 @@ class InversePropensityWeighting(BaseExperiment):
                     BBBBCC"""
 
         fig, axs = plt.subplot_mosaic(mosaic, figsize=(20, 13))
-        axs = [axs[k] for k in axs.keys()]
+        axs = [axs[k] for k in axs]
         axs[0].axvline(
             0.1, linestyle="--", label="Low Extreme Propensity Scores", color="black"
         )
@@ -412,7 +410,7 @@ class InversePropensityWeighting(BaseExperiment):
         covariate: str,
         idata: az.InferenceData | None = None,
         weighting_scheme: str | None = None,
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plotting function takes a single covariate and shows the
         differences in the ECDF between the treatment and control

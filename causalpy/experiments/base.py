@@ -16,7 +16,7 @@ Base class for quasi experimental designs.
 """
 
 from abc import abstractmethod
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -54,7 +54,7 @@ class BaseExperiment:
     supports_bayes: bool
     supports_ols: bool
 
-    def __init__(self, model: Union[PyMCModel, RegressorMixin] | None = None) -> None:
+    def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
@@ -141,7 +141,7 @@ class BaseExperiment:
 
     def effect_summary(
         self,
-        window: Union[Literal["post"], tuple, slice] = "post",
+        window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         cumulative: bool = True,
