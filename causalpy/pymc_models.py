@@ -27,6 +27,7 @@ from patsy import dmatrix
 from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
+from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
 class PyMCModel(pm.Model):
@@ -679,7 +680,10 @@ class InstrumentalVariableRegression(PyMCModel):
         y: np.ndarray,
         t: np.ndarray,
         coords: Dict[str, Any],
-        priors: Dict[str, Any],
+        priors,
+        vs_prior_type=None,
+        vs_hyperparams=None,
+        binary_treatment=False,
     ) -> None:
         """Specify model with treatment regression and focal regression
         data and priors.
@@ -702,48 +706,126 @@ class InstrumentalVariableRegression(PyMCModel):
             Dictionary of priors for the mus and sigmas of both
             regressions. Example: ``priors = {"mus": [0, 0],
             "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
+        vs_prior_type: An optional string. Can be "spike_and_slab"
+                              or "horseshoe" or "normal
+        vs_hyperparams: An optional dictionary of priors for the
+                               variable selection hyperparameters
+        binary_treatment: A flag for determining the relevant
+                                likelihood to be used.
+
         """
 
         # --- Priors ---
         with self:
             self.add_coords(coords)
-            beta_t = pm.Normal(
-                name="beta_t",
-                mu=priors["mus"][0],
-                sigma=priors["sigmas"][0],
-                dims="instruments",
-            )
-            beta_z = pm.Normal(
-                name="beta_z",
-                mu=priors["mus"][1],
-                sigma=priors["sigmas"][1],
-                dims="covariates",
-            )
-            sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
-            chol, corr, sigmas = pm.LKJCholeskyCov(
-                name="chol_cov",
-                eta=priors["eta"],
-                n=2,
-                sd_dist=sd_dist,
-            )
-            # compute and store the covariance matrix
-            pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
 
-            # --- Parameterization ---
-            mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
-            # focal regression
-            mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
-            # instrumental regression
-            mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
+            if vs_prior_type and ("mus" in priors or "sigmas" in priors):
+                warnings.warn(
+                    "Variable selection priors specified. "
+                    "The 'mus' and 'sigmas' in the priors dict will be ignored "
+                    "for beta coefficients. Only 'eta' and 'lkj_sd' will be used."
+                )
 
-            # --- Likelihood ---
-            pm.MvNormal(
-                name="likelihood",
-                mu=mu,
-                chol=chol,
-                observed=np.stack(arrays=(y.flatten(), t.flatten()), axis=1),
-                shape=(X.shape[0], 2),
-            )
+            # Create coefficient priors
+            if vs_prior_type:
+                # Use variable selection priors
+                self.vs_prior_treatment = VariableSelectionPrior(
+                    vs_prior_type, vs_hyperparams
+                )
+                self.vs_prior_outcome = VariableSelectionPrior(
+                    vs_prior_type, vs_hyperparams
+                )
+
+                beta_t = self.vs_prior_treatment.create_prior(
+                    name="beta_t", n_params=Z.shape[1], dims="instruments", X=Z
+                )
+
+                beta_z = self.vs_prior_outcome.create_prior(
+                    name="beta_z", n_params=X.shape[1], dims="covariates", X=X
+                )
+            else:
+                # Use standard normal priors
+                beta_t = pm.Normal(
+                    name="beta_t",
+                    mu=priors["mus"][0],
+                    sigma=priors["sigmas"][0],
+                    dims="instruments",
+                )
+                beta_z = pm.Normal(
+                    name="beta_z",
+                    mu=priors["mus"][1],
+                    sigma=priors["sigmas"][1],
+                    dims="covariates",
+                )
+
+            if binary_treatment:
+                # Binary treatment formulation with correlated latent errors
+                sigma_U = pm.Exponential("sigma_U", priors.get("sigma_U", 1.0))
+
+                # Correlation parameter with bounds
+                rho_lower = priors.get("rho_bounds", [-0.99, 0.99])[0]
+                rho_upper = priors.get("rho_bounds", [-0.99, 0.99])[1]
+
+                # Use tanh transform to keep correlation in valid range
+                rho_unconstr = pm.Normal("rho_unconstr", 0, 0.5)
+                rho = pm.Deterministic("rho", pm.math.tanh(rho_unconstr))
+
+                # Clip to ensure numerical stability
+                rho_clipped = pt.clip(rho, rho_lower + 0.01, rho_upper - 0.01)
+
+                # Cholesky decomposition for correlated errors
+                inverse_rho = pm.math.sqrt(pm.math.maximum(1 - rho_clipped**2, 1e-12))
+                chol = pt.stack([[sigma_U, 0.0], [sigma_U * rho_clipped, inverse_rho]])
+
+                # Draw latent errors
+                eps_raw = pm.Normal("eps_raw", 0, 1, shape=(X.shape[0], 2))
+                eps = pm.Deterministic("eps", pt.dot(eps_raw, chol.T))
+
+                U = eps[:, 0]  # Outcome error
+                V = eps[:, 1]  # Treatment error
+
+                # Treatment equation (logit link for binary treatment)
+                mu_treatment = pm.Deterministic("mu_t", pt.dot(Z, beta_t) + V)
+                p_t = pm.math.invlogit(mu_treatment)
+                pm.Bernoulli("likelihood_treatment", p=p_t, observed=t.flatten())
+
+                # Outcome equation
+                mu_outcome = pm.Deterministic("mu_y", pt.dot(X, beta_z) + U)
+                pm.Normal(
+                    "likelihood_outcome",
+                    mu=mu_outcome,
+                    sigma=sigma_U,
+                    observed=y.flatten(),
+                )
+
+            else:
+                sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
+                chol, _, _ = pm.LKJCholeskyCov(
+                    name="chol_cov",
+                    eta=priors["eta"],
+                    n=2,
+                    sd_dist=sd_dist,
+                )
+                # compute and store the covariance matrix
+                pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
+
+                # --- Parameterization ---
+                mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
+                # focal regression
+                mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
+                # instrumental regression
+                mu = pm.Deterministic(
+                    name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1)
+                )
+
+                # --- Likelihood ---
+                pm.MvNormal(
+                    name="likelihood",
+                    mu=mu,
+                    chol=chol,
+                    observed=np.stack(arrays=(y.flatten(), t.flatten()), axis=1),
+                    shape=(X.shape[0], 2),
+                )
 
     def sample_predictive_distribution(self, ppc_sampler: str | None = "jax") -> None:
         """Function to sample the Multivariate Normal posterior predictive
@@ -777,50 +859,35 @@ class InstrumentalVariableRegression(PyMCModel):
                         )
                     )
 
-    def fit(  # type: ignore
+    def fit(  # type: ignore[override]
         self,
-        X: np.ndarray,
-        Z: np.ndarray,
-        y: np.ndarray,
-        t: np.ndarray,
-        coords: Dict[str, Any],
-        priors: Dict[str, Any],
-        ppc_sampler: str | None = None,
-    ) -> az.InferenceData:
-        """Draw samples from posterior distribution and potentially from
-        the prior and posterior predictive distributions.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Array used to predict our outcome y.
-        Z : np.ndarray
-            Array used to predict our treatment variable t.
-        y : np.ndarray
-            Array of values representing our focal outcome y.
-        t : np.ndarray
-            Array representing the treatment variable.
-        coords : dict
-            Dictionary with coordinate names for named dimensions.
-        priors : dict
-            Dictionary of priors for the model.
-        ppc_sampler : str, optional
-            Sampler for posterior predictive distribution. Can be 'jax',
-            'pymc', or None. Defaults to None, so the user can determine
-            if they wish to spend time sampling the posterior predictive
-            distribution independently.
-
-        Returns
-        -------
-        az.InferenceData
-            InferenceData object containing the samples.
+        X,
+        Z,
+        y,
+        t,
+        coords,
+        priors,
+        ppc_sampler=None,
+        vs_prior_type=None,
+        vs_hyperparams=None,
+        binary_treatment: bool = False,
+    ):  # type: ignore[override]
+        """Draw samples from posterior distribution and potentially
+        from the prior and posterior predictive distributions. The
+        fit call can take values for the
+        ppc_sampler = ['jax', 'pymc', None]
+        We default to None, so the user can determine if they wish
+        to spend time sampling the posterior predictive distribution
+        independently.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         # Use JAX for ppc sampling of multivariate likelihood
 
-        self.build_model(X, Z, y, t, coords, priors)
+        self.build_model(
+            X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
+        )
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
         self.sample_predictive_distribution(ppc_sampler=ppc_sampler)
@@ -926,6 +993,7 @@ class PropensityScore(PyMCModel):
         normal_outcome: bool = True,
         spline_component: bool = False,
         winsorize_boundary: float = 0.0,
+        spline_knots: int = 30,
     ) -> tuple[az.InferenceData, pm.Model]:
         """
         Fit a Bayesian outcome model using covariates and previously estimated propensity scores.
@@ -965,6 +1033,9 @@ class PropensityScore(PyMCModel):
         winsorize_boundary : float, default 0.0
             If we wish to winsorize the propensity score this can be set to clip the high
             and low values of the propensity at 0 + winsorize_boundary and 1-winsorize_boundary
+
+        spline_knots: int, default 30
+            The number of knots we use in the 0 - 1 interval to create our spline function
 
         Returns
         -------
@@ -1029,11 +1100,11 @@ class PropensityScore(PyMCModel):
                     "beta_ps_spline",
                     priors["beta_ps"][0],
                     priors["beta_ps"][1],
-                    size=34,
+                    size=spline_knots + 4,
                 )
                 B = dmatrix(
                     "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
-                    {"ps": p, "knots": np.linspace(0, 1, 30)},
+                    {"ps": p, "knots": np.linspace(0, 1, spline_knots)},
                 )
                 B_f = np.asarray(B, order="F")
                 splines_summed = pm.Deterministic(
