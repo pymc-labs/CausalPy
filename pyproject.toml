@@ -138,9 +138,13 @@ ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
+source = ["causalpy"]
 omit = ["*/conftest.py", "*/tests/conftest.py"]
+branch = true  # Also measure branch coverage, not just line coverage
 
 [tool.coverage.report]
+fail_under = 80
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
