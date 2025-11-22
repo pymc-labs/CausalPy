@@ -161,7 +161,9 @@ class InstrumentalVariable(BaseExperiment):
                 """Warning. The treatment variable is not Binary.
                 This is not necessarily a problem but it violates
                 the assumption of a simple IV experiment.
-                The coefficients should be interpreted appropriately."""
+                The coefficients should be interpreted appropriately.""",
+                UserWarning,
+                stacklevel=2,
             )
 
     def get_2SLS_fit(self) -> None:
@@ -195,7 +197,9 @@ class InstrumentalVariable(BaseExperiment):
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
+        self.ols_beta_params = dict(
+            zip(self._x_design_info.column_names, beta_params, strict=False)
+        )
         self.ols_reg = ols_reg
 
     def plot(self, *args, **kwargs) -> None:  # type: ignore[override]

@@ -16,7 +16,6 @@ Regression discontinuity design
 """
 
 import warnings  # noqa: I001
-from typing import Union
 
 
 import numpy as np
@@ -88,7 +87,7 @@ class RegressionDiscontinuity(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         treatment_threshold: float,
-        model: Union[PyMCModel, RegressorMixin] | None = None,
+        model: PyMCModel | RegressorMixin | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
@@ -112,6 +111,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 warnings.warn(
                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
                     UserWarning,
+                    stacklevel=2,
                 )
             y, X = dmatrices(formula, filtered_data)
         else:
@@ -218,7 +218,7 @@ class RegressionDiscontinuity(BaseExperiment):
             self.data = self.data.copy()
             self.data["treated"] = self.data["treated"].astype(bool)
 
-    def _is_treated(self, x: Union[np.ndarray, pd.Series]) -> np.ndarray:
+    def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
 
         .. warning::

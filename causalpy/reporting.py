@@ -24,7 +24,7 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 """
 
 from dataclasses import dataclass
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import arviz as az
 import numpy as np
@@ -55,7 +55,7 @@ class EffectSummary:
 
 
 def _extract_hdi_bounds(
-    hdi_result: Union[xr.Dataset, xr.DataArray], hdi_prob: float = 0.95
+    hdi_result: xr.Dataset | xr.DataArray, hdi_prob: float = 0.95
 ) -> tuple[float, float]:
     """Extract HDI lower and upper bounds from arviz.hdi result.
 
@@ -167,7 +167,7 @@ def _compute_statistics_scalar(
     effect: xr.DataArray,
     hdi_prob: float = 0.95,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ) -> dict[str, float]:
     """Compute statistics for scalar causal effects (DiD, RD, RKink).
 
@@ -312,7 +312,7 @@ def _effect_summary_did(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Difference-in-Differences experiments."""
     causal_impact = result.causal_impact
@@ -344,7 +344,7 @@ def _effect_summary_rd(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
@@ -376,9 +376,7 @@ def _effect_summary_rd(
 # ==============================================================================
 
 
-def _select_treated_unit(
-    data: xr.DataArray, treated_unit: Optional[str]
-) -> xr.DataArray:
+def _select_treated_unit(data: xr.DataArray, treated_unit: str | None) -> xr.DataArray:
     """Select a specific treated unit from multi-unit xarray data.
 
     Parameters
@@ -408,7 +406,7 @@ def _select_treated_unit(
 
 
 def _select_treated_unit_numpy(
-    data: np.ndarray, result, treated_unit: Optional[str]
+    data: np.ndarray, result, treated_unit: str | None
 ) -> np.ndarray:
     """Select a specific treated unit from multi-dimensional numpy array.
 
@@ -1319,7 +1317,7 @@ def _effect_summary_rkink(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Regression Kink experiments."""
     gradient_change = result.gradient_change

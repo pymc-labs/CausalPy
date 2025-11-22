@@ -478,7 +478,7 @@ class TestWeightedSumFitterMultiUnit:
         assert isinstance(score, pd.Series)
 
         # Check that we have r2 and r2_std for each treated unit using unified format
-        for i, unit in enumerate(treated_units):
+        for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in score.index
             assert f"unit_{i}_r2_std" in score.index
 

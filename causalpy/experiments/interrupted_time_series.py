@@ -15,7 +15,7 @@
 Interrupted Time Series Analysis
 """
 
-from typing import Any, List, Union
+from typing import Any
 
 import arviz as az
 import numpy as np
@@ -91,9 +91,9 @@ class InterruptedTimeSeries(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
+        treatment_time: int | float | pd.Timestamp,
         formula: str,
-        model: Union[PyMCModel, RegressorMixin] | None = None,
+        model: PyMCModel | RegressorMixin | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -155,7 +155,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+                self.model, BayesianBasisExpansionTimeSeries | StateSpaceTimeSeries
             )
 
             if is_bsts_like:
@@ -183,7 +183,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # score the goodness of fit to the pre-intervention data
         if isinstance(self.model, PyMCModel):
             is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+                self.model, BayesianBasisExpansionTimeSeries | StateSpaceTimeSeries
             )
             if is_bsts_like:
                 X_score = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
@@ -202,7 +202,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # get the model predictions of the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+                self.model, BayesianBasisExpansionTimeSeries | StateSpaceTimeSeries
             )
             if is_bsts_like:
                 X_pre_predict = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
@@ -220,7 +220,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # calculate the counterfactual (post period)
         if isinstance(self.model, PyMCModel):
             is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+                self.model, BayesianBasisExpansionTimeSeries | StateSpaceTimeSeries
             )
             if is_bsts_like:
                 X_post_predict = (
@@ -244,7 +244,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # calculate impact - use appropriate y data format for each model type
         if isinstance(self.model, PyMCModel):
             is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
+                self.model, BayesianBasisExpansionTimeSeries | StateSpaceTimeSeries
             )
             if is_bsts_like:
                 pre_y_for_impact = self.pre_y.isel(treated_units=0)
@@ -275,7 +275,7 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
     def input_validation(
-        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+        self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
@@ -303,7 +303,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _bayesian_plot(
         self, round_to: int | None = 2, **kwargs: dict
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 
@@ -481,7 +481,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _ols_plot(
         self, round_to: int | None = 2, **kwargs: dict
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 

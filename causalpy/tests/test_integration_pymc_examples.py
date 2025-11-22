@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import contextlib
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -1297,7 +1299,7 @@ class TestSyntheticControlMultiUnit:
         assert isinstance(sc.score, pd.Series)
 
         # Check that we have r2 and r2_std for each treated unit using unified format
-        for i, unit in enumerate(treated_units):
+        for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in sc.score.index
             assert f"unit_{i}_r2_std" in sc.score.index
 
@@ -1429,12 +1431,8 @@ class TestSyntheticControlMultiUnit:
 
         # Test that invalid treated unit name is handled gracefully
         # Note: Current implementation may not raise ValueError, so we test default behavior
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.plot(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable
 
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.get_plot_data(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable
