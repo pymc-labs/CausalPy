@@ -21,9 +21,14 @@ repos:
       - id: end-of-file-fixer
         exclude_types: [svg]
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
       - id: check-added-large-files
         exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test)\.ipynb'
         args: ["--maxkb=1500"]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.5
     hooks:
@@ -55,3 +60,7 @@ repos:
         args: [--ignore-missing-imports]
         files: ^causalpy/
         additional_dependencies: [numpy>=1.20, pandas-stubs]
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.23
+    hooks:
+      - id: validate-pyproject
