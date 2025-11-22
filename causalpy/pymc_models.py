@@ -683,6 +683,7 @@ class InstrumentalVariableRegression(PyMCModel):
         priors,
         vs_prior_type=None,
         vs_hyperparams=None,
+        binary_treatment=False,
     ) -> None:
         """Specify model with treatment regression and focal regression
         data and priors.
@@ -709,6 +710,8 @@ class InstrumentalVariableRegression(PyMCModel):
                               or "horseshoe" or "normal
         vs_hyperparams: An optional dictionary of priors for the
                                variable selection hyperparameters
+        binary_treatment: A flag for determining the relevant
+                                likelihood to be used.
 
         """
 
@@ -755,31 +758,74 @@ class InstrumentalVariableRegression(PyMCModel):
                     dims="covariates",
                 )
 
-            sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
-            chol, _, _ = pm.LKJCholeskyCov(
-                name="chol_cov",
-                eta=priors["eta"],
-                n=2,
-                sd_dist=sd_dist,
-            )
-            # compute and store the covariance matrix
-            pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
+            if binary_treatment:
+                # Binary treatment formulation with correlated latent errors
+                sigma_U = pm.Exponential("sigma_U", priors.get("sigma_U", 1.0))
 
-            # --- Parameterization ---
-            mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
-            # focal regression
-            mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
-            # instrumental regression
-            mu = pm.Deterministic(name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1))
+                # Correlation parameter with bounds
+                rho_lower = priors.get("rho_bounds", [-0.99, 0.99])[0]
+                rho_upper = priors.get("rho_bounds", [-0.99, 0.99])[1]
 
-            # --- Likelihood ---
-            pm.MvNormal(
-                name="likelihood",
-                mu=mu,
-                chol=chol,
-                observed=np.stack(arrays=(y.flatten(), t.flatten()), axis=1),
-                shape=(X.shape[0], 2),
-            )
+                # Use tanh transform to keep correlation in valid range
+                rho_unconstr = pm.Normal("rho_unconstr", 0, 0.5)
+                rho = pm.Deterministic("rho", pm.math.tanh(rho_unconstr))
+
+                # Clip to ensure numerical stability
+                rho_clipped = pt.clip(rho, rho_lower + 0.01, rho_upper - 0.01)
+
+                # Cholesky decomposition for correlated errors
+                inverse_rho = pm.math.sqrt(pm.math.maximum(1 - rho_clipped**2, 1e-12))
+                chol = pt.stack([[sigma_U, 0.0], [sigma_U * rho_clipped, inverse_rho]])
+
+                # Draw latent errors
+                eps_raw = pm.Normal("eps_raw", 0, 1, shape=(X.shape[0], 2))
+                eps = pm.Deterministic("eps", pt.dot(eps_raw, chol.T))
+
+                U = eps[:, 0]  # Outcome error
+                V = eps[:, 1]  # Treatment error
+
+                # Treatment equation (logit link for binary treatment)
+                mu_treatment = pm.Deterministic("mu_t", pt.dot(Z, beta_t) + V)
+                p_t = pm.math.invlogit(mu_treatment)
+                pm.Bernoulli("likelihood_treatment", p=p_t, observed=t.flatten())
+
+                # Outcome equation
+                mu_outcome = pm.Deterministic("mu_y", pt.dot(X, beta_z) + U)
+                pm.Normal(
+                    "likelihood_outcome",
+                    mu=mu_outcome,
+                    sigma=sigma_U,
+                    observed=y.flatten(),
+                )
+
+            else:
+                sd_dist = pm.Exponential.dist(priors["lkj_sd"], shape=2)
+                chol, _, _ = pm.LKJCholeskyCov(
+                    name="chol_cov",
+                    eta=priors["eta"],
+                    n=2,
+                    sd_dist=sd_dist,
+                )
+                # compute and store the covariance matrix
+                pm.Deterministic(name="cov", var=pt.dot(l=chol, r=chol.T))
+
+                # --- Parameterization ---
+                mu_y = pm.Deterministic(name="mu_y", var=pt.dot(X, beta_z))
+                # focal regression
+                mu_t = pm.Deterministic(name="mu_t", var=pt.dot(Z, beta_t))
+                # instrumental regression
+                mu = pm.Deterministic(
+                    name="mu", var=pt.stack(tensors=(mu_y, mu_t), axis=1)
+                )
+
+                # --- Likelihood ---
+                pm.MvNormal(
+                    name="likelihood",
+                    mu=mu,
+                    chol=chol,
+                    observed=np.stack(arrays=(y.flatten(), t.flatten()), axis=1),
+                    shape=(X.shape[0], 2),
+                )
 
     def sample_predictive_distribution(self, ppc_sampler: str | None = "jax") -> None:
         """Function to sample the Multivariate Normal posterior predictive
@@ -813,7 +859,7 @@ class InstrumentalVariableRegression(PyMCModel):
                         )
                     )
 
-    def fit(
+    def fit(  # type: ignore[override]
         self,
         X,
         Z,
@@ -824,7 +870,8 @@ class InstrumentalVariableRegression(PyMCModel):
         ppc_sampler=None,
         vs_prior_type=None,
         vs_hyperparams=None,
-    ):
+        binary_treatment: bool = False,
+    ):  # type: ignore[override]
         """Draw samples from posterior distribution and potentially
         from the prior and posterior predictive distributions. The
         fit call can take values for the
@@ -838,7 +885,9 @@ class InstrumentalVariableRegression(PyMCModel):
         # sample_posterior_predictive() if provided in sample_kwargs.
         # Use JAX for ppc sampling of multivariate likelihood
 
-        self.build_model(X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams)
+        self.build_model(
+            X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
+        )
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
         self.sample_predictive_distribution(ppc_sampler=ppc_sampler)

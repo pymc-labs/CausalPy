@@ -57,6 +57,10 @@ class InstrumentalVariable(BaseExperiment):
     vs_hyperparams : dict, optional
         Hyperparameters for variable selection priors. Only used if vs_prior_type
         is not None.
+    binary_treatment : bool, default=False
+        A indicator for whether the treatment to be modelled is binary or not.
+        Determines which PyMC model we use to model the joint outcome and
+        treatment.
 
     Example
     --------
@@ -116,6 +120,7 @@ class InstrumentalVariable(BaseExperiment):
         priors: dict | None = None,
         vs_prior_type=None,
         vs_hyperparams=None,
+        binary_treatment=False,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -127,6 +132,7 @@ class InstrumentalVariable(BaseExperiment):
         self.model = model
         self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
+        self.binary_treatment = binary_treatment
         self.input_validation()
 
         y, X = dmatrices(formula, self.data)
@@ -150,12 +156,22 @@ class InstrumentalVariable(BaseExperiment):
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
         if priors is None:
-            priors = {
-                "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
-                "sigmas": [10, 10],
-                "eta": 2,
-                "lkj_sd": 1,
-            }
+            if binary_treatment:
+                # Different default priors for binary treatment
+                priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "sigma_U": 1.0,
+                    "rho_bounds": [-0.99, 0.99],
+                }
+            else:
+                # Original continuous treatment priors
+                priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "eta": 2,
+                    "lkj_sd": 1,
+                }
         self.priors = priors
         self.model.fit(  # type: ignore[call-arg,union-attr]
             X=self.X,
@@ -166,6 +182,7 @@ class InstrumentalVariable(BaseExperiment):
             priors=self.priors,
             vs_prior_type=vs_prior_type,
             vs_hyperparams=vs_hyperparams,
+            binary_treatment=self.binary_treatment,
         )
 
     def input_validation(self) -> None:
@@ -186,9 +203,8 @@ class InstrumentalVariable(BaseExperiment):
         if check_binary:
             warnings.warn(
                 """Warning. The treatment variable is not Binary.
-                This is not necessarily a problem but it violates
-                the assumption of a simple IV experiment.
-                The coefficients should be interpreted appropriately."""
+                We will use the multivariate normal likelihood
+                for continuous treatment."""
             )
 
     def get_2SLS_fit(self) -> None:
