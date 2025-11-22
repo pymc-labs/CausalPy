@@ -143,7 +143,14 @@ docstring-code-format = true
 
 [tool.ruff.lint]
 extend-select = [
-    "I", # isort
+    "I",   # isort
+    # "E",   # pycodestyle errors - PEP 8 style violations
+    # "W",   # pycodestyle warnings - PEP 8 warnings
+    "F",   # pyflakes - detect unused imports, undefined names
+    "B",   # flake8-bugbear - find likely bugs and design problems
+    "UP",  # pyupgrade - modern Python syntax upgrades
+    "C4",  # flake8-comprehensions - better list/dict comprehensions
+    "SIM", # flake8-simplify - suggest simpler code
 ]
 
 [tool.codespell]

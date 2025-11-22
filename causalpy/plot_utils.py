@@ -15,7 +15,7 @@
 Plotting utility functions.
 """
 
-from typing import Any, Dict, Tuple, Union
+from typing import Any
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -28,13 +28,13 @@ from pandas.api.extensions import ExtensionArray
 
 
 def plot_xY(
-    x: Union[pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, ExtensionArray],
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
     ax: plt.Axes,
-    plot_hdi_kwargs: Dict[str, Any] | None = None,
+    plot_hdi_kwargs: dict[str, Any] | None = None,
     hdi_prob: float = 0.94,
     label: str | None = None,
-) -> Tuple[Line2D, PolyCollection]:
+) -> tuple[Line2D, PolyCollection]:
     """Plot HDI intervals.
 
     Parameters

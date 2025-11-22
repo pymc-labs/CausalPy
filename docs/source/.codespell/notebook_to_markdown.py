@@ -37,7 +37,7 @@ def notebook_to_markdown(pattern: str, output_dir: str) -> None:
         str directory to save the markdown files to
     """
     for f_name in glob(pattern, recursive=True):
-        with open(f_name, "r", encoding="utf-8") as f:
+        with open(f_name, encoding="utf-8") as f:
             nb = nbformat.read(f, as_version=4)
 
         markdown_exporter = MarkdownExporter()

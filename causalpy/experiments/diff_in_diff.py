@@ -15,8 +15,6 @@
 Difference in differences
 """
 
-from typing import Union
-
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -98,7 +96,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_variable_name: str,
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
-        model: Union[PyMCModel, RegressorMixin] | None = None,
+        model: PyMCModel | RegressorMixin | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -234,7 +232,7 @@ class DifferenceInDifferences(BaseExperiment):
         elif isinstance(self.model, RegressorMixin):
             # This is the coefficient on the interaction term
             # Store the coefficient into dictionary {intercept:value}
-            coef_map = dict(zip(self.labels, self.model.get_coeffs()))
+            coef_map = dict(zip(self.labels, self.model.get_coeffs(), strict=False))
             # Create and find the interaction term based on the values user provided
             interaction_term = (
                 f"{self.group_variable_name}:{self.post_treatment_variable_name}"

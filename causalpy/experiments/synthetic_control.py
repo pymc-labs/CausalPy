@@ -15,8 +15,6 @@
 Synthetic Control Experiment
 """
 
-from typing import List, Union
-
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -83,10 +81,10 @@ class SyntheticControl(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
+        treatment_time: int | float | pd.Timestamp,
         control_units: list[str],
         treated_units: list[str],
-        model: Union[PyMCModel, RegressorMixin] | None = None,
+        model: PyMCModel | RegressorMixin | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -186,7 +184,7 @@ class SyntheticControl(BaseExperiment):
         )
 
     def input_validation(
-        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+        self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
@@ -221,7 +219,7 @@ class SyntheticControl(BaseExperiment):
         round_to: int | None = None,
         treated_unit: str | None = None,
         **kwargs: dict,
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for a specific treated unit
 
@@ -375,7 +373,7 @@ class SyntheticControl(BaseExperiment):
         round_to: int | None = None,
         treated_unit: str | None = None,
         **kwargs: dict,
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS model for a specific treated unit
 
