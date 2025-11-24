@@ -392,18 +392,8 @@ def test_effect_summary_default_behavior(datetime_data, mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_comparison_raises_not_implemented(
-    datetime_data, mock_pymc_sample
-):
-    """Test that period='comparison' raises NotImplementedError.
-
-    The comparison period provides a comparative summary with persistence metrics:
-    - Post-intervention effect as percentage of intervention effect
-    - Posterior probability that some effect persisted
-    - Comparison of HDI intervals between periods
-
-    This is currently not implemented but is planned for future enhancement.
-    """
+def test_effect_summary_comparison_pymc(datetime_data, mock_pymc_sample):
+    """Test that period='comparison' provides comparative summary with persistence metrics."""
     df, treatment_time, treatment_end_time = datetime_data
 
     result = cp.InterruptedTimeSeries(
@@ -414,8 +404,147 @@ def test_effect_summary_comparison_raises_not_implemented(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    with pytest.raises(NotImplementedError):
-        result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(period="comparison")
+
+    # Check that summary is returned (not NotImplementedError)
+    assert comparison_summary is not None
+    assert hasattr(comparison_summary, "table")
+    assert hasattr(comparison_summary, "text")
+
+    # Check table structure
+    assert isinstance(comparison_summary.table, pd.DataFrame)
+    assert "intervention" in comparison_summary.table.index
+    assert "post_intervention" in comparison_summary.table.index
+
+    # Check required columns
+    assert "mean" in comparison_summary.table.columns
+    assert "hdi_lower" in comparison_summary.table.columns
+    assert "hdi_upper" in comparison_summary.table.columns
+    assert "persistence_ratio_pct" in comparison_summary.table.columns
+    assert "prob_persisted" in comparison_summary.table.columns
+
+    # Check text contains key information
+    assert "persistence" in comparison_summary.text.lower()
+    assert (
+        "post-intervention" in comparison_summary.text.lower()
+        or "post intervention" in comparison_summary.text.lower()
+    )
+    assert "intervention" in comparison_summary.text.lower()
+
+
+@pytest.mark.integration
+def test_effect_summary_comparison_sklearn(datetime_data):
+    """Test that period='comparison' works with sklearn models."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=LinearRegression(),
+    )
+
+    comparison_summary = result.effect_summary(period="comparison")
+
+    # Check that summary is returned
+    assert comparison_summary is not None
+    assert hasattr(comparison_summary, "table")
+    assert hasattr(comparison_summary, "text")
+
+    # Check table structure
+    assert isinstance(comparison_summary.table, pd.DataFrame)
+    assert "intervention" in comparison_summary.table.index
+    assert "post_intervention" in comparison_summary.table.index
+
+    # Check required columns (OLS uses CI, not HDI)
+    assert "mean" in comparison_summary.table.columns
+    assert "ci_lower" in comparison_summary.table.columns
+    assert "ci_upper" in comparison_summary.table.columns
+    assert "persistence_ratio_pct" in comparison_summary.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_comparison_persistence_ratio(datetime_data, mock_pymc_sample):
+    """Test that comparison period calculates persistence ratio correctly."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    comparison_summary = result.effect_summary(period="comparison")
+
+    # Get persistence ratio from table (in post_intervention row)
+    persistence_ratio_pct = comparison_summary.table.loc[
+        "post_intervention", "persistence_ratio_pct"
+    ]
+
+    # Calculate expected ratio from intervention and post means
+    intervention_mean = comparison_summary.table.loc["intervention", "mean"]
+    post_mean = comparison_summary.table.loc["post_intervention", "mean"]
+
+    expected_ratio_pct = (post_mean / intervention_mean) * 100
+
+    # Allow for small floating point differences
+    assert abs(persistence_ratio_pct - expected_ratio_pct) < 1e-6
+
+
+@pytest.mark.integration
+def test_effect_summary_comparison_prob_persisted(datetime_data, mock_pymc_sample):
+    """Test that comparison period calculates probability that effect persisted."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    comparison_summary = result.effect_summary(period="comparison")
+
+    # Check that prob_persisted is in the table (in post_intervention row)
+    assert "prob_persisted" in comparison_summary.table.columns
+    prob_persisted = comparison_summary.table.loc["post_intervention", "prob_persisted"]
+
+    # Probability should be between 0 and 1
+    assert 0 <= prob_persisted <= 1
+
+
+@pytest.mark.integration
+def test_effect_summary_comparison_hdi_intervals(datetime_data, mock_pymc_sample):
+    """Test that comparison period includes HDI intervals in text."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    comparison_summary = result.effect_summary(period="comparison")
+
+    # Check that HDI intervals are in the table
+    intervention_lower = comparison_summary.table.loc["intervention", "hdi_lower"]
+    intervention_upper = comparison_summary.table.loc["intervention", "hdi_upper"]
+    post_lower = comparison_summary.table.loc["post_intervention", "hdi_lower"]
+    post_upper = comparison_summary.table.loc["post_intervention", "hdi_upper"]
+
+    # Check that intervals are valid (lower < upper)
+    assert intervention_lower < intervention_upper
+    assert post_lower < post_upper
+
+    # Check that text mentions HDI intervals
+    assert "hdi" in comparison_summary.text.lower()
+    assert "persistence" in comparison_summary.text.lower()
 
 
 @pytest.mark.integration
@@ -665,3 +794,142 @@ def test_intervention_pred_is_slice_of_post_pred(datetime_data, mock_pymc_sample
 
     # They should have the same shape
     assert intervention_mu.shape == post_mu_intervention.shape
+
+
+# ==============================================================================
+# 5.1 Persistence Analysis Methods
+# ==============================================================================
+
+
+@pytest.mark.integration
+def test_analyze_persistence_pymc(datetime_data, mock_pymc_sample):
+    """Test analyze_persistence() with PyMC model."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    persistence = result.analyze_persistence()
+
+    # Check structure
+    assert isinstance(persistence, dict)
+    assert "mean_effect_during" in persistence
+    assert "mean_effect_post" in persistence
+    assert "persistence_ratio" in persistence
+    assert "total_effect_during" in persistence
+    assert "total_effect_post" in persistence
+
+    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    assert isinstance(persistence["persistence_ratio"], (int, float))
+    assert persistence["persistence_ratio"] >= 0
+    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
+
+    # Check values are reasonable
+    assert persistence["mean_effect_during"] is not None
+    assert persistence["mean_effect_post"] is not None
+    assert persistence["persistence_ratio"] is not None
+    assert persistence["total_effect_during"] is not None
+    assert persistence["total_effect_post"] is not None
+
+
+@pytest.mark.integration
+def test_analyze_persistence_sklearn(datetime_data):
+    """Test analyze_persistence() with sklearn model."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=LinearRegression(),
+    )
+
+    persistence = result.analyze_persistence()
+
+    # Check structure
+    assert isinstance(persistence, dict)
+    assert "mean_effect_during" in persistence
+    assert "mean_effect_post" in persistence
+    assert "persistence_ratio" in persistence
+    assert "total_effect_during" in persistence
+    assert "total_effect_post" in persistence
+
+    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    assert isinstance(persistence["persistence_ratio"], (int, float))
+    assert persistence["persistence_ratio"] >= 0
+    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
+
+    # Check values are reasonable
+    assert persistence["mean_effect_during"] is not None
+    assert persistence["mean_effect_post"] is not None
+    assert persistence["persistence_ratio"] is not None
+    assert persistence["total_effect_during"] is not None
+    assert persistence["total_effect_post"] is not None
+
+
+def test_analyze_persistence_raises_error_without_treatment_end_time(
+    datetime_data, mock_pymc_sample
+):
+    """Test that analyze_persistence() raises error when treatment_end_time is None."""
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    with pytest.raises(ValueError, match="treatment_end_time"):
+        result.analyze_persistence()
+
+
+@pytest.mark.integration
+def test_analyze_persistence_with_custom_hdi_prob(datetime_data, mock_pymc_sample):
+    """Test analyze_persistence() with custom hdi_prob parameter."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    persistence = result.analyze_persistence(hdi_prob=0.90)
+
+    # Check that results are returned (method prints internally)
+    assert "mean_effect_during" in persistence
+    assert "mean_effect_post" in persistence
+    assert "persistence_ratio" in persistence
+
+
+@pytest.mark.integration
+def test_analyze_persistence_persistence_ratio_calculation(
+    datetime_data, mock_pymc_sample
+):
+    """Test that persistence ratio is calculated correctly."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    persistence = result.analyze_persistence()
+
+    # Persistence ratio should be post_mean / intervention_mean (as decimal, not percentage)
+    expected_ratio = persistence["mean_effect_post"] / persistence["mean_effect_during"]
+
+    # Allow for small floating point differences
+    assert abs(persistence["persistence_ratio"] - expected_ratio) < 1e-6

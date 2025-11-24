@@ -512,7 +512,8 @@ class InterruptedTimeSeries(BaseExperiment):
             For three-period designs, specify which period to summarize:
             - "intervention": Summary for intervention period only
             - "post": Summary for post-intervention period only
-            - "comparison": Comparative summary with persistence metrics (NotImplementedError)
+            - "comparison": Comparative summary with persistence metrics (persistence ratio,
+              probability that effect persisted, HDI/CI interval comparison)
             - None: Default behavior (summarizes all post-treatment data, backward compatible)
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only)
@@ -552,9 +553,13 @@ class InterruptedTimeSeries(BaseExperiment):
                 )
 
             if period == "comparison":
-                raise NotImplementedError(
-                    "period='comparison' is not yet implemented. "
-                    "This will provide a comparative summary with persistence metrics."
+                # Comparison period: compare intervention and post-intervention periods
+                return self._comparison_period_summary(
+                    direction=direction,
+                    alpha=alpha,
+                    cumulative=cumulative,
+                    relative=relative,
+                    min_effect=min_effect,
                 )
 
             # Select appropriate impact and prediction data based on period
@@ -657,6 +662,170 @@ class InterruptedTimeSeries(BaseExperiment):
                 min_effect=min_effect,
                 treated_unit=treated_unit,
             )
+
+    def _comparison_period_summary(
+        self,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+    ):
+        """Generate comparative summary between intervention and post-intervention periods.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only)
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics
+        relative : bool, default=True
+            Whether to include relative effect statistics
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only)
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import EffectSummary, _extract_hdi_bounds
+
+        is_pymc = isinstance(self.model, PyMCModel)
+        time_dim = "obs_ind"
+        hdi_prob = 1 - alpha
+        prob_persisted: float | None
+
+        if is_pymc:
+            # PyMC: Compute statistics for both periods
+            intervention_avg = self.intervention_impact.mean(dim=time_dim)
+            intervention_mean = float(
+                intervention_avg.mean(dim=["chain", "draw"]).values
+            )
+            intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
+            intervention_lower, intervention_upper = _extract_hdi_bounds(
+                intervention_hdi, hdi_prob
+            )
+
+            post_avg = self.post_intervention_impact.mean(dim=time_dim)
+            post_mean = float(post_avg.mean(dim=["chain", "draw"]).values)
+            post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
+            post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
+
+            # Persistence ratio: post_mean / intervention_mean (as percentage)
+            epsilon = 1e-8
+            persistence_ratio_pct = (post_mean / (intervention_mean + epsilon)) * 100
+
+            # Probability that some effect persisted (P(post_mean > 0))
+            prob_persisted = float((post_avg > 0).mean().values)
+
+            # Build simple table
+            table = pd.DataFrame(
+                {
+                    "mean": [intervention_mean, post_mean],
+                    "hdi_lower": [intervention_lower, post_lower],
+                    "hdi_upper": [intervention_upper, post_upper],
+                    "persistence_ratio_pct": [None, persistence_ratio_pct],
+                    "prob_persisted": [None, prob_persisted],
+                },
+                index=["intervention", "post_intervention"],
+            )
+
+            # Generate simple prose
+            hdi_pct = int(hdi_prob * 100)
+            text = (
+                f"Effect persistence: The post-intervention effect "
+                f"({post_mean:.1f}, {hdi_pct}% HDI [{post_lower:.1f}, {post_upper:.1f}]) "
+                f"was {persistence_ratio_pct:.1f}% of the intervention effect "
+                f"({intervention_mean:.1f}, {hdi_pct}% HDI [{intervention_lower:.1f}, {intervention_upper:.1f}]), "
+                f"with a posterior probability of {prob_persisted:.2f} that some effect persisted "
+                f"beyond the intervention period."
+            )
+
+        else:
+            # OLS: Compute statistics for both periods
+            from causalpy.reporting import _compute_statistics_ols
+
+            intervention_stats = _compute_statistics_ols(
+                self.intervention_impact.values
+                if hasattr(self.intervention_impact, "values")
+                else np.asarray(self.intervention_impact),
+                self.intervention_pred,
+                alpha=alpha,
+                cumulative=False,
+                relative=False,
+            )
+
+            post_stats = _compute_statistics_ols(
+                self.post_intervention_impact.values
+                if hasattr(self.post_intervention_impact, "values")
+                else np.asarray(self.post_intervention_impact),
+                self.post_intervention_pred,
+                alpha=alpha,
+                cumulative=False,
+                relative=False,
+            )
+
+            # Persistence ratio (as percentage)
+            epsilon = 1e-8
+            persistence_ratio_pct = (
+                post_stats["avg"]["mean"]
+                / (intervention_stats["avg"]["mean"] + epsilon)
+            ) * 100
+
+            # For OLS, use 1 - p-value as proxy for probability
+            prob_persisted = (
+                1 - post_stats["avg"]["p_value"]
+                if "p_value" in post_stats["avg"]
+                else None
+            )
+
+            # Build simple table
+            table_data = {
+                "mean": [
+                    intervention_stats["avg"]["mean"],
+                    post_stats["avg"]["mean"],
+                ],
+                "ci_lower": [
+                    intervention_stats["avg"]["ci_lower"],
+                    post_stats["avg"]["ci_lower"],
+                ],
+                "ci_upper": [
+                    intervention_stats["avg"]["ci_upper"],
+                    post_stats["avg"]["ci_upper"],
+                ],
+                "persistence_ratio_pct": [None, persistence_ratio_pct],
+            }
+            if prob_persisted is not None:
+                table_data["prob_persisted"] = [None, prob_persisted]
+
+            table = pd.DataFrame(
+                table_data,
+                index=["intervention", "post_intervention"],
+            )
+
+            # Generate simple prose
+            ci_pct = int((1 - alpha) * 100)
+            if prob_persisted is not None:
+                text = (
+                    f"Effect persistence: The post-intervention effect "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"was {persistence_ratio_pct:.1f}% of the intervention effect "
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}]), "
+                    f"with a probability of {prob_persisted:.2f} that some effect persisted "
+                    f"beyond the intervention period."
+                )
+            else:
+                text = (
+                    f"Effect persistence: The post-intervention effect "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"was {persistence_ratio_pct:.1f}% of the intervention effect "
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
+                )
+
+        return EffectSummary(table=table, text=text)
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
@@ -1049,3 +1218,179 @@ class InterruptedTimeSeries(BaseExperiment):
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
+
+    def analyze_persistence(
+        self,
+        hdi_prob: float = 0.95,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    ) -> dict[str, Any]:
+        """Analyze effect persistence between intervention and post-intervention periods.
+
+        Computes mean effects, persistence ratio, and total (cumulative) impacts for both periods.
+        The persistence ratio is the post-intervention mean effect divided by the intervention
+        mean effect (as a decimal, e.g., 0.30 means 30% persistence, 1.5 means 150%).
+        Note: The ratio can exceed 1.0 if the post-intervention effect is larger than the
+        intervention effect.
+
+        Automatically prints a summary of the results.
+
+        Parameters
+        ----------
+        hdi_prob : float, default=0.95
+            Probability for HDI interval (Bayesian models only)
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (Bayesian models only)
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing:
+            - "mean_effect_during": Mean effect during intervention period
+            - "mean_effect_post": Mean effect during post-intervention period
+            - "persistence_ratio": Post-intervention mean effect divided by intervention mean (decimal, can exceed 1.0)
+            - "total_effect_during": Total (cumulative) effect during intervention period
+            - "total_effect_post": Total (cumulative) effect during post-intervention period
+
+        Raises
+        ------
+        ValueError
+            If treatment_end_time is not provided (two-period design)
+
+        Examples
+        --------
+        >>> result = cp.InterruptedTimeSeries(
+        ...     df,
+        ...     treatment_time=pd.Timestamp("2024-01-01"),
+        ...     treatment_end_time=pd.Timestamp("2024-04-01"),
+        ...     formula="y ~ 1 + t",
+        ... )
+        >>> persistence = result.analyze_persistence()
+        >>> # Results are automatically printed
+        >>> print(f"Persistence ratio: {persistence['persistence_ratio']:.2f}")
+        """
+        if self.treatment_end_time is None:
+            raise ValueError(
+                "analyze_persistence() requires treatment_end_time to be provided. "
+                "This method is only available for three-period designs."
+            )
+
+        is_pymc = isinstance(self.model, PyMCModel)
+        time_dim = "obs_ind"
+
+        if is_pymc:
+            # PyMC: Compute statistics using xarray operations
+            from causalpy.reporting import _extract_hdi_bounds
+
+            # Intervention period
+            intervention_avg = self.intervention_impact.mean(dim=time_dim)
+            intervention_mean = float(
+                intervention_avg.mean(dim=["chain", "draw"]).values
+            )
+            intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
+            intervention_lower, intervention_upper = _extract_hdi_bounds(
+                intervention_hdi, hdi_prob
+            )
+
+            # Post-intervention period
+            post_avg = self.post_intervention_impact.mean(dim=time_dim)
+            post_mean = float(post_avg.mean(dim=["chain", "draw"]).values)
+            post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
+            post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
+
+            # Cumulative (total) impacts
+            intervention_cum = self.intervention_impact_cumulative.isel({time_dim: -1})
+            intervention_cum_mean = float(
+                intervention_cum.mean(dim=["chain", "draw"]).values
+            )
+
+            post_cum = self.post_intervention_impact_cumulative.isel({time_dim: -1})
+            post_cum_mean = float(post_cum.mean(dim=["chain", "draw"]).values)
+
+            # Persistence ratio: post_mean / intervention_mean (as decimal, not percentage)
+            epsilon = 1e-8
+            persistence_ratio = post_mean / (intervention_mean + epsilon)
+
+            result = {
+                "mean_effect_during": intervention_mean,
+                "mean_effect_post": post_mean,
+                "persistence_ratio": float(persistence_ratio),
+                "total_effect_during": intervention_cum_mean,
+                "total_effect_post": post_cum_mean,
+            }
+            # Store HDI bounds for printing
+            intervention_ci_lower = intervention_lower
+            intervention_ci_upper = intervention_upper
+            post_ci_lower = post_lower
+            post_ci_upper = post_upper
+        else:
+            # OLS: Compute statistics using numpy operations
+            from causalpy.reporting import _compute_statistics_ols
+
+            # Get counterfactual predictions for each period
+            intervention_counterfactual = self.intervention_pred
+            post_counterfactual = self.post_intervention_pred
+
+            # Compute statistics for intervention period
+            intervention_stats = _compute_statistics_ols(
+                self.intervention_impact.values
+                if hasattr(self.intervention_impact, "values")
+                else np.asarray(self.intervention_impact),
+                intervention_counterfactual,
+                alpha=1 - hdi_prob,
+                cumulative=True,
+                relative=False,
+            )
+
+            # Compute statistics for post-intervention period
+            post_stats = _compute_statistics_ols(
+                self.post_intervention_impact.values
+                if hasattr(self.post_intervention_impact, "values")
+                else np.asarray(self.post_intervention_impact),
+                post_counterfactual,
+                alpha=1 - hdi_prob,
+                cumulative=True,
+                relative=False,
+            )
+
+            # Persistence ratio (as decimal)
+            epsilon = 1e-8
+            persistence_ratio = post_stats["avg"]["mean"] / (
+                intervention_stats["avg"]["mean"] + epsilon
+            )
+
+            result = {
+                "mean_effect_during": intervention_stats["avg"]["mean"],
+                "mean_effect_post": post_stats["avg"]["mean"],
+                "persistence_ratio": float(persistence_ratio),
+                "total_effect_during": intervention_stats["cum"]["mean"],
+                "total_effect_post": post_stats["cum"]["mean"],
+            }
+            # Store CI bounds for printing
+            intervention_ci_lower = intervention_stats["avg"]["ci_lower"]
+            intervention_ci_upper = intervention_stats["avg"]["ci_upper"]
+            post_ci_lower = post_stats["avg"]["ci_lower"]
+            post_ci_upper = post_stats["avg"]["ci_upper"]
+
+        # Print results
+        hdi_pct = int(hdi_prob * 100)
+        ci_label = "HDI" if is_pymc else "CI"
+        print("=" * 60)
+        print("Effect Persistence Analysis")
+        print("=" * 60)
+        print("\nDuring intervention period:")
+        print(f"  Mean effect: {result['mean_effect_during']:.2f}")
+        print(
+            f"  {hdi_pct}% {ci_label}: [{intervention_ci_lower:.2f}, {intervention_ci_upper:.2f}]"
+        )
+        print(f"  Total effect: {result['total_effect_during']:.2f}")
+        print("\nPost-intervention period:")
+        print(f"  Mean effect: {result['mean_effect_post']:.2f}")
+        print(f"  {hdi_pct}% {ci_label}: [{post_ci_lower:.2f}, {post_ci_upper:.2f}]")
+        print(f"  Total effect: {result['total_effect_post']:.2f}")
+        print(f"\nPersistence ratio: {result['persistence_ratio']:.3f}")
+        print(
+            f"  ({result['persistence_ratio'] * 100:.1f}% of intervention effect persisted)"
+        )
+        print("=" * 60)
+
+        return result
