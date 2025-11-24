@@ -998,14 +998,23 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         ax[2].axhline(y=0, c="k")
 
-        # Intervention line
+        # Intervention lines
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
+                label="Treatment start" if i == 0 else None,
             )
+            if self.treatment_end_time is not None:
+                ax[i].axvline(
+                    x=self.treatment_end_time,
+                    ls="--",
+                    lw=2,
+                    color="orange",
+                    label="Treatment end" if i == 0 else None,
+                )
 
         ax[0].legend(
             handles=(h_tuple for h_tuple in handles),
@@ -1029,9 +1038,9 @@ class InterruptedTimeSeries(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
-
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+
+        ax[0].plot(self.datapost.index, self.post_y, "k.")
         ax[0].plot(
             self.datapost.index,
             self.post_pred,
@@ -1039,6 +1048,16 @@ class InterruptedTimeSeries(BaseExperiment):
             ls=":",
             c="k",
         )
+        # Shaded causal effect
+        ax[0].fill_between(
+            self.datapost.index,
+            y1=np.squeeze(self.post_pred),
+            y2=np.squeeze(self.post_y),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+
         ax[0].set(
             title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"
         )
@@ -1051,21 +1070,7 @@ class InterruptedTimeSeries(BaseExperiment):
             label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
         # Shaded causal effect
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_y),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
         ax[1].fill_between(
             self.datapost.index,
             y1=np.squeeze(self.post_impact),
@@ -1073,17 +1078,29 @@ class InterruptedTimeSeries(BaseExperiment):
             alpha=0.25,
             label="Causal impact",
         )
+        ax[1].set(title="Causal Impact")
 
-        # Intervention line
-        # TODO: make this work when treatment_time is a datetime
+        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].axhline(y=0, c="k")
+        ax[2].set(title="Cumulative Causal Impact")
+
+        # Intervention lines
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
-                label="Treatment time",
+                label="Treatment start" if i == 0 else None,
             )
+            if self.treatment_end_time is not None:
+                ax[i].axvline(
+                    x=self.treatment_end_time,
+                    ls="--",
+                    lw=2,
+                    color="orange",
+                    label="Treatment end" if i == 0 else None,
+                )
 
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 

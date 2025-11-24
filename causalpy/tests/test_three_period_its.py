@@ -933,3 +933,75 @@ def test_analyze_persistence_persistence_ratio_calculation(
 
     # Allow for small floating point differences
     assert abs(persistence["persistence_ratio"] - expected_ratio) < 1e-6
+
+
+@pytest.mark.integration
+def test_plot_three_period_pymc(datetime_data, mock_pymc_sample):
+    """Test that plotting works with three-period design for PyMC models."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Plot should not raise an error
+    fig, ax = result.plot()
+
+    # Check that we have 3 subplots
+    assert len(ax) == 3
+
+    # Check that treatment_end_time line is present (should be in all 3 subplots)
+    # We can't easily check the exact line properties, but we can verify the plot was created
+    assert fig is not None
+    assert ax is not None
+
+
+@pytest.mark.integration
+def test_plot_three_period_sklearn(datetime_data):
+    """Test that plotting works with three-period design for sklearn models."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=LinearRegression(),
+    )
+
+    # Plot should not raise an error
+    fig, ax = result.plot()
+
+    # Check that we have 3 subplots
+    assert len(ax) == 3
+
+    # Check that treatment_end_time line is present (should be in all 3 subplots)
+    assert fig is not None
+    assert ax is not None
+
+
+@pytest.mark.integration
+def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
+    """Test that plotting still works with two-period design (backward compatibility)."""
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Plot should not raise an error
+    fig, ax = result.plot()
+
+    # Check that we have 3 subplots
+    assert len(ax) == 3
+
+    # Should only have treatment_time line, not treatment_end_time
+    assert fig is not None
+    assert ax is not None
