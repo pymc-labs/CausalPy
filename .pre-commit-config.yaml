@@ -36,6 +36,9 @@ repos:
       - id: ruff
         types_or: [ python, pyi, jupyter ]
         args: [ --fix ]
+        # Exclude docs/ to avoid applying strict linting rules to example notebooks
+        # Remove this exclusion if you want to enforce strict rules on documentation
+        exclude: ^docs/
       # Run the formatter
       - id: ruff-format
         types_or: [ python, pyi, jupyter ]

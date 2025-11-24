@@ -54,7 +54,7 @@ class ScikitLearnAdaptor:
         # Determine the width of the longest label
         max_label_length = max(len(name) for name in labels)
         # Print each coefficient with formatted alignment
-        for name, val in zip(labels, coef_):
+        for name, val in zip(labels, coef_, strict=False):
             # Left-align the name
             formatted_name = f"{name:<{max_label_length}}"
             # Right-align the value with width 10

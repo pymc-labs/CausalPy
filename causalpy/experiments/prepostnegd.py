@@ -15,8 +15,6 @@
 Pretest/posttest nonequivalent group design
 """
 
-from typing import List
-
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -227,7 +225,7 @@ class PrePostNEGD(BaseExperiment):
 
     def _bayesian_plot(
         self, round_to: int | None = None, **kwargs: dict
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
