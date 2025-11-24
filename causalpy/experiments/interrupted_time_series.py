@@ -15,7 +15,7 @@
 Interrupted Time Series Analysis
 """
 
-from typing import Any, List, Union
+from typing import Any, List, Literal, Union
 
 import arviz as az
 import numpy as np
@@ -43,17 +43,59 @@ class InterruptedTimeSeries(BaseExperiment):
     """
     The class for interrupted time series analysis.
 
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param formula:
-        A statistical model formula
-    :param model:
-        A PyMC model
+    Supports both two-period (permanent intervention) and three-period (temporary
+    intervention) designs. When ``treatment_end_time`` is provided, the analysis
+    splits the post-intervention period into an intervention period and a
+    post-intervention period, enabling analysis of effect persistence and decay.
 
-    Example
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe with time series data. The index should be either
+        a DatetimeIndex or numeric (integer/float).
+    treatment_time : Union[int, float, pd.Timestamp]
+        The time when treatment occurred, should be in reference to the data index.
+        Must match the index type (DatetimeIndex requires pd.Timestamp).
+    formula : str
+        A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
+    model : Union[PyMCModel, RegressorMixin], optional
+        A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
+        LinearRegression model.
+    treatment_end_time : Union[int, float, pd.Timestamp], optional
+        The time when treatment ended, enabling three-period analysis. Must be
+        greater than ``treatment_time`` and within the data range. If None (default),
+        the analysis assumes a permanent intervention (two-period design).
+    **kwargs : dict
+        Additional keyword arguments passed to the model.
+
+    Attributes
+    ----------
+    When ``treatment_end_time`` is provided, the following additional attributes
+    are available:
+
+    data_intervention : pd.DataFrame
+        Data from the intervention period (between ``treatment_time`` and
+        ``treatment_end_time``).
+    data_post_intervention : pd.DataFrame
+        Data from the post-intervention period (after ``treatment_end_time``).
+    intervention_pred : az.InferenceData or np.ndarray
+        Counterfactual predictions for the intervention period (PyMC: InferenceData,
+        sklearn: numpy array).
+    post_intervention_pred : az.InferenceData or np.ndarray
+        Counterfactual predictions for the post-intervention period.
+    intervention_impact : xr.DataArray
+        Causal impact during the intervention period.
+    post_intervention_impact : xr.DataArray
+        Causal impact during the post-intervention period.
+    intervention_impact_cumulative : xr.DataArray
+        Cumulative causal impact during the intervention period.
+    post_intervention_impact_cumulative : xr.DataArray
+        Cumulative causal impact during the post-intervention period.
+
+    Examples
     --------
+    **Two-period design (permanent intervention):**
+
     >>> import causalpy as cp
     >>> df = (
     ...     cp.load_data("its")
@@ -61,19 +103,31 @@ class InterruptedTimeSeries(BaseExperiment):
     ...     .set_index("date")
     ... )
     >>> treatment_time = pd.to_datetime("2017-01-01")
-    >>> seed = 42
     >>> result = cp.InterruptedTimeSeries(
     ...     df,
     ...     treatment_time,
     ...     formula="y ~ 1 + t + C(month)",
     ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
     ... )
+
+    **Three-period design (temporary intervention):**
+
+    >>> treatment_time = pd.to_datetime("2017-01-01")
+    >>> treatment_end_time = pd.to_datetime("2017-06-01")
+    >>> result = cp.InterruptedTimeSeries(
+    ...     df,
+    ...     treatment_time,
+    ...     formula="y ~ 1 + t + C(month)",
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...     ),
+    ...     treatment_end_time=treatment_end_time,
+    ... )
+    >>> # Get period-specific effect summaries
+    >>> intervention_summary = result.effect_summary(period="intervention")
+    >>> post_summary = result.effect_summary(period="post")
 
     Notes
     -----
@@ -82,6 +136,16 @@ class InterruptedTimeSeries(BaseExperiment):
     its uncertainty represent the systematic causal effect, excluding observation-level
     noise. The uncertainty bands in the plots reflect parameter uncertainty and
     counterfactual prediction uncertainty, but not individual observation variability.
+
+    The three-period design is useful for analyzing temporary interventions such as:
+    - Marketing campaigns with defined start and end dates
+    - Policy trials or pilot programs
+    - Clinical treatments with limited duration
+    - Seasonal interventions
+
+    Use ``effect_summary(period="intervention")`` to analyze effects during the
+    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
+    after the intervention ends.
     """
 
     expt_type = "Interrupted Time Series"
@@ -94,6 +158,7 @@ class InterruptedTimeSeries(BaseExperiment):
         treatment_time: Union[int, float, pd.Timestamp],
         formula: str,
         model: Union[PyMCModel, RegressorMixin] | None = None,
+        treatment_end_time: Union[int, float, pd.Timestamp] | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -101,8 +166,9 @@ class InterruptedTimeSeries(BaseExperiment):
         self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
-        self.input_validation(data, treatment_time)
+        self.input_validation(data, treatment_time, treatment_end_time)
         self.treatment_time = treatment_time
+        self.treatment_end_time = treatment_end_time
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
@@ -274,8 +340,15 @@ class InterruptedTimeSeries(BaseExperiment):
             self.post_impact
         )
 
+        # Split post period into intervention and post-intervention if treatment_end_time is provided
+        if self.treatment_end_time is not None:
+            self._split_post_period()
+
     def input_validation(
-        self, data: pd.DataFrame, treatment_time: Union[int, float, pd.Timestamp]
+        self,
+        data: pd.DataFrame,
+        treatment_time: Union[int, float, pd.Timestamp],
+        treatment_end_time: Union[int, float, pd.Timestamp] | None = None,
     ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
@@ -289,6 +362,300 @@ class InterruptedTimeSeries(BaseExperiment):
         ):
             raise BadIndexException(
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
+            )
+        if treatment_end_time is not None:
+            # Validate treatment_end_time matches index type
+            if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
+                treatment_end_time, pd.Timestamp
+            ):
+                raise BadIndexException(
+                    "If data.index is DatetimeIndex, treatment_end_time must be pd.Timestamp."
+                )
+            if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
+                treatment_end_time, pd.Timestamp
+            ):
+                raise BadIndexException(
+                    "If data.index is not DatetimeIndex, treatment_end_time must not be pd.Timestamp."
+                )
+            # Validate treatment_end_time > treatment_time
+            # Type check: we've already validated both match the index type, so they're compatible
+            if treatment_end_time <= treatment_time:  # type: ignore[operator]
+                raise ValueError(
+                    f"treatment_end_time ({treatment_end_time}) must be greater than treatment_time ({treatment_time})"
+                )
+            # Validate treatment_end_time is within data range
+            if treatment_end_time > data.index.max():  # type: ignore[operator]
+                raise ValueError(
+                    f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
+                )
+
+    def _split_post_period(self) -> None:
+        """Split post period into intervention and post-intervention periods.
+
+        Creates new attributes for data, predictions, and impacts for each period.
+        Only called when treatment_end_time is provided.
+
+        Key insight: intervention_pred and post_intervention_pred are slices of post_pred,
+        not new computations. The model makes one continuous forecast (post_pred), which is
+        then sliced into two periods for analysis.
+        """
+        # 1. Create boolean masks based on treatment_end_time
+        during_mask = self.datapost.index < self.treatment_end_time
+        post_mask = self.datapost.index >= self.treatment_end_time
+
+        # 2. Split datapost into data_intervention and data_post_intervention
+        self.data_intervention = self.datapost[during_mask]
+        self.data_post_intervention = self.datapost[post_mask]
+
+        # Split predictions and impacts
+        # Handle both PyMC (xarray) and OLS (numpy) cases
+        is_pymc = isinstance(self.model, PyMCModel)
+
+        if is_pymc:
+            # PyMC: use xarray selection
+            # Dimension is always "obs_ind" in CausalPy
+            time_dim = "obs_ind"
+
+            # Get indices for selection
+            intervention_coords = self.data_intervention.index
+            post_intervention_coords = self.data_post_intervention.index
+
+            # 3. Split post_pred into intervention_pred and post_intervention_pred
+            # These are slices of post_pred, not new computations
+            # For PyMC models, post_pred is guaranteed to be az.InferenceData
+            # (regular PyMC models return it directly, BSTS-like models are wrapped in __init__)
+            intervention_pred_dataset = self.post_pred.posterior_predictive.sel(
+                {time_dim: intervention_coords}
+            )
+            post_intervention_pred_dataset = self.post_pred.posterior_predictive.sel(
+                {time_dim: post_intervention_coords}
+            )
+
+            # Create new InferenceData objects with the sliced posterior_predictive
+            # This maintains the same structure as post_pred
+            self.intervention_pred = az.InferenceData(
+                posterior_predictive=intervention_pred_dataset
+            )
+            self.post_intervention_pred = az.InferenceData(
+                posterior_predictive=post_intervention_pred_dataset
+            )
+
+            # 4. Split post_impact into intervention_impact and post_intervention_impact
+            # Similarly, these are slices of the existing post_impact calculation
+            if "treated_units" in self.post_impact.dims:
+                post_impact_sel = self.post_impact.isel(treated_units=0)
+            else:
+                post_impact_sel = self.post_impact
+            self.intervention_impact = post_impact_sel.sel(
+                {time_dim: intervention_coords}
+            )
+            self.post_intervention_impact = post_impact_sel.sel(
+                {time_dim: post_intervention_coords}
+            )
+
+            # 5. Calculate cumulative impacts for each period using the sliced impacts
+            self.intervention_impact_cumulative = (
+                self.model.calculate_cumulative_impact(self.intervention_impact)
+            )
+            self.post_intervention_impact_cumulative = (
+                self.model.calculate_cumulative_impact(self.post_intervention_impact)
+            )
+        else:
+            # OLS: use numpy array indexing with position-based selection
+            # For OLS models, post_pred is guaranteed to be numpy array
+            intervention_indices = [
+                self.datapost.index.get_loc(coord)
+                for coord in self.data_intervention.index
+            ]
+            post_intervention_indices = [
+                self.datapost.index.get_loc(coord)
+                for coord in self.data_post_intervention.index
+            ]
+
+            # 3. Split post_pred (numpy array for OLS) - slices of post_pred
+            self.intervention_pred = self.post_pred[intervention_indices]
+            self.post_intervention_pred = self.post_pred[post_intervention_indices]
+
+            # 4. Split post_impact (numpy array for OLS) - slices of post_impact
+            self.intervention_impact = self.post_impact[intervention_indices]
+            self.post_intervention_impact = self.post_impact[post_intervention_indices]
+
+            # 5. Calculate cumulative impacts for each period using the sliced impacts
+            self.intervention_impact_cumulative = (
+                self.model.calculate_cumulative_impact(self.intervention_impact)
+            )
+            self.post_intervention_impact_cumulative = (
+                self.model.calculate_cumulative_impact(self.post_intervention_impact)
+            )
+
+    def effect_summary(
+        self,
+        window: Union[Literal["post"], tuple, slice] = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+    ):
+        """Generate a decision-ready summary of causal effects.
+
+        For three-period designs (when treatment_end_time is provided), use the
+        period parameter to get summaries for specific periods.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Time window for analysis (ignored when period is specified for three-period design)
+        period : {"intervention", "post", "comparison"}, optional
+            For three-period designs, specify which period to summarize:
+            - "intervention": Summary for intervention period only
+            - "post": Summary for post-intervention period only
+            - "comparison": Comparative summary with persistence metrics (NotImplementedError)
+            - None: Default behavior (summarizes all post-treatment data, backward compatible)
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only)
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics
+        relative : bool, default=True
+            Whether to include relative effect statistics
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only)
+        treated_unit : str, optional
+            For multi-unit experiments, specify which treated unit to analyze
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import (
+            EffectSummary,
+            _compute_statistics,
+            _compute_statistics_ols,
+            _generate_prose,
+            _generate_prose_ols,
+            _generate_table,
+            _generate_table_ols,
+        )
+
+        # Handle three-period design
+        if self.treatment_end_time is not None and period is not None:
+            # Validate period parameter
+            valid_periods = ["intervention", "post", "comparison"]
+            if period not in valid_periods:
+                raise ValueError(
+                    f"period must be one of {valid_periods}, got '{period}'"
+                )
+
+            if period == "comparison":
+                raise NotImplementedError(
+                    "period='comparison' is not yet implemented. "
+                    "This will provide a comparative summary with persistence metrics."
+                )
+
+            # Select appropriate impact and prediction data based on period
+            if period == "intervention":
+                impact = self.intervention_impact
+                counterfactual_pred = self.intervention_pred
+                window_coords = self.data_intervention.index
+                prefix = "During intervention"
+            elif period == "post":
+                impact = self.post_intervention_impact
+                counterfactual_pred = self.post_intervention_pred
+                window_coords = self.data_post_intervention.index
+                prefix = "Post-intervention"
+
+            # Determine time dimension
+            is_pymc = isinstance(self.model, PyMCModel)
+            if is_pymc:
+                # For PyMC, dimension is always "obs_ind" in CausalPy
+                time_dim = "obs_ind"
+
+                # Extract counterfactual from InferenceData
+                if hasattr(counterfactual_pred, "posterior_predictive"):
+                    counterfactual = counterfactual_pred.posterior_predictive["mu"]
+                    if "treated_units" in counterfactual.dims:
+                        counterfactual = counterfactual.isel(treated_units=0)
+                else:
+                    counterfactual = counterfactual_pred
+
+                # Compute statistics
+                hdi_prob = 1 - alpha
+                stats = _compute_statistics(
+                    impact,
+                    counterfactual,
+                    hdi_prob=hdi_prob,
+                    direction=direction,
+                    cumulative=cumulative,
+                    relative=relative,
+                    min_effect=min_effect,
+                    time_dim=time_dim,
+                )
+
+                # Generate table
+                table = _generate_table(stats, cumulative=cumulative, relative=relative)
+
+                # Generate prose
+                text = _generate_prose(
+                    stats,
+                    window_coords,
+                    alpha=alpha,
+                    direction=direction,
+                    cumulative=cumulative,
+                    relative=relative,
+                    prefix=prefix,
+                )
+            else:
+                # OLS model
+                # Convert to numpy arrays if needed
+                if hasattr(impact, "values"):
+                    impact_array = impact.values
+                else:
+                    impact_array = np.asarray(impact)
+
+                if hasattr(counterfactual_pred, "values"):
+                    counterfactual_array = counterfactual_pred.values
+                else:
+                    counterfactual_array = np.asarray(counterfactual_pred)
+
+                stats = _compute_statistics_ols(
+                    impact_array,
+                    counterfactual_array,
+                    alpha=alpha,
+                    cumulative=cumulative,
+                    relative=relative,
+                )
+
+                # Generate table
+                table = _generate_table_ols(
+                    stats, cumulative=cumulative, relative=relative
+                )
+
+                # Generate prose
+                text = _generate_prose_ols(
+                    stats,
+                    window_coords,
+                    alpha=alpha,
+                    cumulative=cumulative,
+                    relative=relative,
+                    prefix=prefix,
+                )
+
+            return EffectSummary(table=table, text=text)
+        else:
+            # Default: use base class implementation (backward compatible)
+            return super().effect_summary(
+                window=window,
+                direction=direction,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+                treated_unit=treated_unit,
             )
 
     def summary(self, round_to: int | None = None) -> None:
