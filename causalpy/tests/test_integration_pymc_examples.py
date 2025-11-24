@@ -945,6 +945,42 @@ def test_bayesian_structural_time_series():
         )  # 2 columns
         model_with_x.predict(X=wrong_shape_x_pred_vals, coords=coords_with_x)
 
+    # --- Test Case 5: Custom component validation errors --- #
+    class BadTrendComponent:
+        """Component without apply method"""
+
+        pass
+
+    with pytest.raises(
+        ValueError,
+        match="Custom trend_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            trend_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Custom seasonality_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            seasonality_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    # --- Test Case 6: Additional error conditions --- #
+    # Test TypeError for non-numpy array X
+    with pytest.raises(TypeError, match="X_exog_array must be a NumPy array or None"):
+        model_with_x.predict(
+            X=data_with_x[["x1"]].values.tolist(),  # Pass list instead of array
+            coords=coords_with_x,
+        )
+
+    # Test coords=None error in predict
+    with pytest.raises(ValueError, match="coords must be provided"):
+        model_with_x.predict(X=data_with_x[["x1"]].values, coords=None)
+
 
 @pytest.mark.integration
 def test_state_space_time_series():
