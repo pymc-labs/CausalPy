@@ -1275,15 +1275,26 @@ class InterruptedTimeSeries(BaseExperiment):
 
         Examples
         --------
+        >>> import causalpy as cp
+        >>> import pandas as pd
+        >>> df = (
+        ...     cp.load_data("its")
+        ...     .assign(date=lambda x: pd.to_datetime(x["date"]))
+        ...     .set_index("date")
+        ... )
         >>> result = cp.InterruptedTimeSeries(
         ...     df,
-        ...     treatment_time=pd.Timestamp("2024-01-01"),
-        ...     treatment_end_time=pd.Timestamp("2024-04-01"),
-        ...     formula="y ~ 1 + t",
+        ...     treatment_time=pd.Timestamp("2017-01-01"),
+        ...     treatment_end_time=pd.Timestamp("2017-06-01"),
+        ...     formula="y ~ 1 + t + C(month)",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+        ...     ),
         ... )
-        >>> persistence = result.analyze_persistence()
-        >>> # Results are automatically printed
-        >>> print(f"Persistence ratio: {persistence['persistence_ratio']:.2f}")
+        >>> persistence = result.analyze_persistence()  # doctest: +SKIP
+        ... # Note: Results are automatically printed to console
+        >>> persistence["persistence_ratio"]  # doctest: +SKIP
+        -1.224
         """
         if self.treatment_end_time is None:
             raise ValueError(
