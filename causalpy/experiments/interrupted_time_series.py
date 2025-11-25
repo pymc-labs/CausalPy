@@ -56,6 +56,8 @@ class InterruptedTimeSeries(BaseExperiment):
     treatment_time : Union[int, float, pd.Timestamp]
         The time when treatment occurred, should be in reference to the data index.
         Must match the index type (DatetimeIndex requires pd.Timestamp).
+        **INCLUSIVE**: Observations at exactly ``treatment_time`` are included in the
+        post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
     model : Union[PyMCModel, RegressorMixin], optional
@@ -65,32 +67,10 @@ class InterruptedTimeSeries(BaseExperiment):
         The time when treatment ended, enabling three-period analysis. Must be
         greater than ``treatment_time`` and within the data range. If None (default),
         the analysis assumes a permanent intervention (two-period design).
+        **INCLUSIVE**: Observations at exactly ``treatment_end_time`` are included in the
+        post-intervention period (uses ``>=`` comparison).
     **kwargs : dict
         Additional keyword arguments passed to the model.
-
-    Attributes
-    ----------
-    When ``treatment_end_time`` is provided, the following additional attributes
-    are available:
-
-    data_intervention : pd.DataFrame
-        Data from the intervention period (between ``treatment_time`` and
-        ``treatment_end_time``).
-    data_post_intervention : pd.DataFrame
-        Data from the post-intervention period (after ``treatment_end_time``).
-    intervention_pred : az.InferenceData or np.ndarray
-        Counterfactual predictions for the intervention period (PyMC: InferenceData,
-        sklearn: numpy array).
-    post_intervention_pred : az.InferenceData or np.ndarray
-        Counterfactual predictions for the post-intervention period.
-    intervention_impact : xr.DataArray
-        Causal impact during the intervention period.
-    post_intervention_impact : xr.DataArray
-        Causal impact during the post-intervention period.
-    intervention_impact_cumulative : xr.DataArray
-        Cumulative causal impact during the intervention period.
-    post_intervention_impact_cumulative : xr.DataArray
-        Cumulative causal impact during the post-intervention period.
 
     Examples
     --------
@@ -172,6 +152,9 @@ class InterruptedTimeSeries(BaseExperiment):
         # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
         # split data in to pre and post intervention
+        # NOTE: treatment_time is INCLUSIVE (>=) in post-period
+        # Pre-period: index < treatment_time (exclusive)
+        # Post-period: index >= treatment_time (inclusive)
         self.datapre = data[data.index < self.treatment_time]
         self.datapost = data[data.index >= self.treatment_time]
 
@@ -379,11 +362,13 @@ class InterruptedTimeSeries(BaseExperiment):
                 )
             # Validate treatment_end_time > treatment_time
             # Type check: we've already validated both match the index type, so they're compatible
+            # NOTE: Both treatment_time and treatment_end_time are INCLUSIVE (>=) in their respective periods
             if treatment_end_time <= treatment_time:  # type: ignore[operator]
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) must be greater than treatment_time ({treatment_time})"
                 )
             # Validate treatment_end_time is within data range
+            # NOTE: treatment_end_time is INCLUSIVE, so it can equal data.index.max()
             if treatment_end_time > data.index.max():  # type: ignore[operator]
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
@@ -398,8 +383,15 @@ class InterruptedTimeSeries(BaseExperiment):
         Key insight: intervention_pred and post_intervention_pred are slices of post_pred,
         not new computations. The model makes one continuous forecast (post_pred), which is
         then sliced into two periods for analysis.
+
+        NOTE: treatment_end_time is INCLUSIVE (>=) in post-intervention period.
+        - Intervention period: treatment_time <= index < treatment_end_time
+        - Post-intervention period: index >= treatment_end_time (inclusive)
         """
         # 1. Create boolean masks based on treatment_end_time
+        # NOTE: treatment_end_time is INCLUSIVE (>=) in post-intervention period
+        # Intervention period: index < treatment_end_time (exclusive)
+        # Post-intervention period: index >= treatment_end_time (inclusive)
         during_mask = self.datapost.index < self.treatment_end_time
         post_mask = self.datapost.index >= self.treatment_end_time
 
