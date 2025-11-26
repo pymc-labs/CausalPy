@@ -1057,6 +1057,76 @@ class PropensityScore(PyMCModel):
         return idata_outcome, model_outcome
 
 
+def _convert_timeseries_data(
+    X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any]
+) -> tuple[Optional[np.ndarray], np.ndarray, pd.DatetimeIndex, List[str]]:
+    """
+    Convert xr.DataArray inputs to numpy arrays for time series models.
+
+    This helper function maintains API consistency with other PyMCModel subclasses
+    by accepting xr.DataArray inputs and converting them internally to the numpy
+    format needed by time series models.
+
+    Parameters
+    ----------
+    X : xr.DataArray
+        Input features as an xarray DataArray with dims ["obs_ind", "coeffs"].
+    y : xr.DataArray
+        Target variable as an xarray DataArray with dims ["obs_ind", "treated_units"].
+    coords : dict
+        Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+
+    Returns
+    -------
+    tuple
+        (X_numpy, y_numpy, datetime_index, coeff_names)
+        - X_numpy: numpy array or None if no exogenous variables
+        - y_numpy: 1D numpy array
+        - datetime_index: pd.DatetimeIndex
+        - coeff_names: list of coefficient names
+    """
+    # Extract datetime_index from coords
+    datetime_index = coords.get("datetime_index")
+    if datetime_index is None:
+        # Try to extract from obs_ind coordinate if it's a datetime
+        if hasattr(X, "coords") and "obs_ind" in X.coords:
+            obs_ind = X.coords["obs_ind"].values
+            if len(obs_ind) > 0 and isinstance(
+                obs_ind[0], (np.datetime64, pd.Timestamp)
+            ):
+                datetime_index = pd.DatetimeIndex(obs_ind)
+
+    if not isinstance(datetime_index, pd.DatetimeIndex):
+        raise ValueError(
+            "coords must contain 'datetime_index' of type pd.DatetimeIndex, "
+            "or X must have datetime obs_ind coordinates."
+        )
+
+    # Convert X from xr.DataArray to numpy
+    X_numpy: Optional[np.ndarray] = None
+    coeff_names: List[str] = []
+    if isinstance(X, xr.DataArray):
+        if X.shape[1] > 0:
+            X_numpy = X.values
+            if "coeffs" in X.coords:
+                coeff_names = list(X.coords["coeffs"].values)
+    elif isinstance(X, np.ndarray):
+        if X.shape[1] > 0:
+            X_numpy = X
+            coeff_names = coords.get("coeffs", [])
+
+    # Convert y from xr.DataArray to numpy (1D)
+    if isinstance(y, xr.DataArray):
+        if "treated_units" in y.dims:
+            y_numpy = y.isel(treated_units=0).values.flatten()
+        else:
+            y_numpy = y.values.flatten()
+    else:
+        y_numpy = np.asarray(y).flatten()
+
+    return X_numpy, y_numpy, datetime_index, coeff_names
+
+
 class BayesianBasisExpansionTimeSeries(PyMCModel):
     r"""
     Bayesian Structural Time Series Model.
@@ -1107,7 +1177,6 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         # Warn that this is experimental
         warnings.warn(
             "BayesianBasisExpansionTimeSeries is experimental and its API may change in future versions. "
-            "It uses a different data format (numpy arrays and datetime indices) compared to other PyMC models. "
             "Not recommended for production use.",
             FutureWarning,
             stacklevel=2,
@@ -1271,31 +1340,37 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         return time_for_trend, time_for_seasonality, X_values_for_pymc, num_obs
 
     def build_model(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
     ) -> None:
         """
         Defines the PyMC model.
 
         Parameters
         ----------
-        X : np.ndarray or None
-            NumPy array of exogenous regressors. Can be None if no exogenous variables.
-        y : np.ndarray
-            The target variable.
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Can have 0 columns if
+            no exogenous variables.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
         coords : dict
             Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
-            If X is provided and has columns, coords must also contain "coeffs" (List[str]).
         """
         if coords is None:
             raise ValueError("coords must be provided with 'datetime_index'")
-        datetime_index = coords.pop("datetime_index", None)
-        if not isinstance(datetime_index, pd.DatetimeIndex):
-            raise ValueError(
-                "`coords` must contain 'datetime_index' of type pd.DatetimeIndex."
-            )
 
-        # Get exog_names from coords["coeffs"] if X_exog_array is present
-        exog_names_from_coords = coords.get("coeffs")
+        # Make a copy to avoid modifying the original
+        coords = coords.copy()
+
+        # Convert xr.DataArray to numpy internally
+        X_numpy, y_numpy, datetime_index, coeff_names = _convert_timeseries_data(
+            X, y, coords
+        )
+
+        # Pop datetime_index from coords copy (already extracted)
+        coords.pop("datetime_index", None)
+
+        # Get exog_names from conversion or coords
+        exog_names_from_coords = coeff_names if coeff_names else coords.get("coeffs")
 
         (
             time_for_trend,
@@ -1303,11 +1378,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             X_values_for_pymc,  # NumPy array for PyMC or None
             num_obs,
         ) = self._prepare_time_and_exog_features(
-            X, datetime_index, exog_names_from_coords
+            X_numpy, datetime_index, exog_names_from_coords
         )
 
         model_coords = {
             "obs_ind": np.arange(num_obs),
+            "treated_units": ["unit_0"],  # Add treated_units for consistency
         }
 
         # Start with a copy of the input coords (datetime_index was already popped)
@@ -1322,37 +1398,30 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             elif isinstance(current_coeffs, tuple):
                 model_coords["coeffs"] = list(current_coeffs)
             elif not isinstance(current_coeffs, list):
-                # If it's something else weird, raise error or clear it
-                # so self._exog_var_names can take precedence if needed.
                 raise TypeError(
                     f"Unexpected type for 'coeffs' in input coords: {type(current_coeffs)}"
                 )
 
-        # self._exog_var_names is the source of truth for coefficient names, ensure it's a list (done in _prepare)
-        # Override or set "coeffs" in model_coords based on self._exog_var_names
+        # self._exog_var_names is the source of truth for coefficient names
         if self._exog_var_names:
             if (
                 "coeffs" in model_coords
                 and model_coords["coeffs"] != self._exog_var_names
             ):
-                # This implies a mismatch between what user provided in coords["coeffs"]
-                # and what _prepare_time_and_exog_features decided based on X and coords["coeffs"]
-                # This should ideally be caught earlier or be consistent.
-                # For now, let's assume _prepare_time_and_exog_features's derivation (self._exog_var_names) is correct.
-                print(
-                    f"Warning: Discrepancy in 'coeffs'. Using derived: {self._exog_var_names} over input: {model_coords['coeffs']}"
+                warnings.warn(
+                    f"Discrepancy in 'coeffs'. Using derived: {self._exog_var_names} "
+                    f"over input: {model_coords['coeffs']}",
+                    UserWarning,
+                    stacklevel=2,
                 )
             model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
         elif "coeffs" in model_coords and model_coords["coeffs"]:
-            # No exog vars determined by _prepare..., but coords has non-empty coeffs
             raise ValueError(
                 f"Model determined no exogenous variables (self._exog_var_names is {self._exog_var_names}), "
                 f"but input coords provided 'coeffs': {model_coords['coeffs']}. "
                 f"If no exog vars, provide empty list or omit 'coeffs'."
             )
-        elif (
-            "coeffs" not in model_coords and self._exog_var_names
-        ):  # Should not happen if logic is right
+        elif "coeffs" not in model_coords and self._exog_var_names:
             model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
 
         with self:
@@ -1370,7 +1439,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 dims="obs_ind",
             )
 
-            # Get validated components (no more ugly imports in build_model!)
+            # Get validated components
             trend_component_instance = self._get_trend_component()
             seasonality_component_instance = self._get_seasonality_component()
 
@@ -1393,11 +1462,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             mu_ = trend_component + season_component
 
             # Exogenous regressors (optional)
-            if (
-                X_values_for_pymc is not None and self._exog_var_names
-            ):  # self._exog_var_names is guaranteed list
-                # self.coords["coeffs"] should be an xarray.Coordinate object here.
-                # Its .values attribute is a numpy array. So list(self.coords["coeffs"].values) is a list.
+            if X_values_for_pymc is not None and self._exog_var_names:
                 model_coord_coeffs_list = (
                     list(self.coords["coeffs"]) if "coeffs" in self.coords else []
                 )
@@ -1418,36 +1483,38 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
                 mu_ = mu_ + pm.math.dot(X_data, beta)
 
-            # Make mu_ an explicit deterministic variable named "mu"
-            mu = pm.Deterministic("mu", mu_, dims="obs_ind")
+            # Make mu_ an explicit deterministic variable with treated_units dimension
+            # Expand dims to include treated_units for consistency with other models
+            mu = pm.Deterministic("mu", mu_[:, None], dims=["obs_ind", "treated_units"])
 
-            # Likelihood
-            sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma)
-            y_data = pm.Data("y", y.flatten(), dims="obs_ind")
-            pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_data, dims="obs_ind")
+            # Likelihood - also with treated_units dimension
+            sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma, dims="treated_units")
+            y_data = pm.Data("y", y_numpy[:, None], dims=["obs_ind", "treated_units"])
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_data,
+                dims=["obs_ind", "treated_units"],
+            )
 
     def fit(
-        self,
-        X: Optional[np.ndarray],
-        y: np.ndarray,
-        coords: Dict[str, Any] | None = None,
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
     ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
+
         Parameters
         ----------
-        X : np.ndarray or None
-            NumPy array of exogenous regressors. Can be None or an array with 0 columns
-            if no exogenous variables.
-        y : np.ndarray
-            The target variable.
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Can have 0 columns if
+            no exogenous variables.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
         coords : dict
             Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
-            If X is provided and has columns, coords must also contain "coeffs" (List[str]).
         """
-
         random_seed = self.sample_kwargs.get("random_seed", None)
-        # X can be None if no exog vars, _prepare_... handles it.
         self.build_model(X, y, coords=coords)
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
@@ -1456,61 +1523,61 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 self.idata.extend(
                     pm.sample_posterior_predictive(
                         self.idata,
-                        var_names=["y_hat", "mu"],  # Ensure mu is sampled
+                        var_names=["y_hat", "mu"],
                         progressbar=self.sample_kwargs.get("progressbar", True),
                         random_seed=random_seed,
                     )
                 )
         return self.idata  # type: ignore[return-value]
 
-    def _data_setter(  # type: ignore[override]
-        self,
-        X_pred: Optional[np.ndarray],
-        coords_pred: Dict[
-            str, Any
-        ],  # Must contain "datetime_index" for prediction period
-    ) -> None:
+    def _data_setter(self, X: xr.DataArray) -> None:
         """
         Set data for the model for prediction.
-        X_pred contains exogenous variables for the prediction period.
-        coords_pred must contain "datetime_index" for the prediction period.
-        """
-        datetime_index_pred = coords_pred.get("datetime_index")
-        if not isinstance(datetime_index_pred, pd.DatetimeIndex):
-            raise ValueError(
-                "`coords_pred` must contain 'datetime_index' for prediction."
-            )
 
-        # For _data_setter, exog_names are already known (self._exog_var_names from fit)
-        # We pass self._exog_var_names so _prepare_time_and_exog_features can validate
-        # the shape of X_pred_numpy if it's provided.
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Must have datetime
+            coordinates on obs_ind.
+        """
+        # Extract datetime from X coordinates
+        if not hasattr(X, "coords") or "obs_ind" not in X.coords:
+            raise ValueError("X must have 'obs_ind' coordinate with datetime values")
+
+        obs_ind_vals = X.coords["obs_ind"].values
+        if len(obs_ind_vals) == 0 or not isinstance(
+            obs_ind_vals[0], (np.datetime64, pd.Timestamp)
+        ):
+            raise ValueError("X 'obs_ind' coordinate must contain datetime values")
+
+        datetime_index_pred = pd.DatetimeIndex(obs_ind_vals)
+
+        # Convert X to numpy
+        X_numpy = X.values if X.shape[1] > 0 else None
+
         (
             time_for_trend_pred_vals,
             time_for_seasonality_pred_vals,
-            X_exog_pred_vals,  # NumPy array for PyMC or None
+            X_exog_pred_vals,
             num_obs_pred,
         ) = self._prepare_time_and_exog_features(
-            X_pred, datetime_index_pred, self._exog_var_names
+            X_numpy, datetime_index_pred, self._exog_var_names
         )
 
         new_obs_inds = np.arange(num_obs_pred)
 
         data_to_set = {
-            "y": np.zeros(num_obs_pred),
+            "y": np.zeros((num_obs_pred, 1)),  # 2D for treated_units
             "t_trend_data": time_for_trend_pred_vals,
             "t_season_data": time_for_seasonality_pred_vals,
         }
         coords_to_set = {"obs_ind": new_obs_inds}
 
-        if (
-            "X" in self.named_vars
-        ):  # Model was built with exogenous variable X (i.e. self._exog_var_names is not empty)
-            if (
-                X_exog_pred_vals is None and self._exog_var_names
-            ):  # Check if exog_var_names expects something
+        if "X" in self.named_vars:
+            if X_exog_pred_vals is None and self._exog_var_names:
                 raise ValueError(
                     "Model was built with exogenous variables. "
-                    "New X data (X_pred) must provide these (or index_for_time_pred if X_pred is array)."
+                    "New X data must provide these."
                 )
             if (
                 self._exog_var_names
@@ -1518,28 +1585,30 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 and X_exog_pred_vals.shape[1] != len(self._exog_var_names)
             ):
                 raise ValueError(
-                    f"Shape mismatch for exogenous prediction variables. Expected {len(self._exog_var_names)} columns, "
+                    f"Shape mismatch for exogenous prediction variables. "
+                    f"Expected {len(self._exog_var_names)} columns, "
                     f"got {X_exog_pred_vals.shape[1]}."
                 )
-            data_to_set["X"] = X_exog_pred_vals  # Can be None if no exog vars
+            data_to_set["X"] = X_exog_pred_vals
         elif X_exog_pred_vals is not None:
-            print(
-                "Warning: X_pred provided exogenous variables, but the model was not "
-                "built with exogenous variables. These will be ignored."
+            warnings.warn(
+                "X provided exogenous variables, but the model was not "
+                "built with exogenous variables. These will be ignored.",
+                UserWarning,
+                stacklevel=2,
             )
 
-        # Ensure "X" is set to None if no exog vars, even if "X" data var exists but model has no coeffs
         if not self._exog_var_names and "X" in self.named_vars:
-            # Pass an array with 0 columns for the X data variable if no exog vars expected
             if X_exog_pred_vals is not None and X_exog_pred_vals.shape[1] > 0:
-                # This should not happen if self._exog_var_names is empty
-                print(
-                    "Warning: Model expects no exog vars, but X_exog_pred_vals has columns. Forcing to 0 columns."
+                warnings.warn(
+                    "Model expects no exog vars, but X has columns. Forcing to 0 columns.",
+                    UserWarning,
+                    stacklevel=2,
                 )
                 data_to_set["X"] = np.empty((num_obs_pred, 0))
             elif X_exog_pred_vals is None:
                 data_to_set["X"] = np.empty((num_obs_pred, 0))
-            else:  # X_exog_pred_vals has 0 columns already
+            else:
                 data_to_set["X"] = X_exog_pred_vals
 
         with self:
@@ -1547,50 +1616,72 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def predict(
         self,
-        X: Optional[np.ndarray],
-        coords: Dict[str, Any]
-        | None = None,  # Must contain "datetime_index" for prediction period
+        X: xr.DataArray,
+        coords: Optional[Dict[str, Any]] = None,
         out_of_sample: Optional[bool] = False,
         **kwargs: Any,
     ) -> az.InferenceData:
         """
-        Predict data given input X and coords for prediction period.
-        coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
-        However, for prediction, exog var names are already known by the model.
+        Predict data given input X.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Must have datetime
+            coordinates on obs_ind.
+        coords : dict, optional
+            Not used, kept for API compatibility.
+        out_of_sample : bool, optional
+            Not used, kept for API compatibility.
+
+        Returns
+        -------
+        az.InferenceData
+            Posterior predictive samples.
         """
-        if coords is None:
-            raise ValueError("coords must be provided with 'datetime_index'")
         random_seed = self.sample_kwargs.get("random_seed", None)
-        self._data_setter(X, coords_pred=coords)
+        self._data_setter(X)
         with self:
             post_pred = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=["y_hat", "mu"],
-                progressbar=self.sample_kwargs.get(
-                    "progressbar", False
-                ),  # Consistent with base
+                progressbar=self.sample_kwargs.get("progressbar", False),
                 random_seed=random_seed,
             )
+
+        # Assign coordinates from input X for proper alignment
+        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
+            post_pred["posterior_predictive"] = post_pred[
+                "posterior_predictive"
+            ].assign_coords(obs_ind=X.obs_ind)
+
         return post_pred
 
     def score(
         self,
-        X: Optional[np.ndarray],
-        y: np.ndarray,
-        coords: Dict[str, Any]
-        | None = None,  # Must contain "datetime_index" for score period
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> pd.Series:
-        """Score the Bayesian R2.
-        coords must contain "datetime_index". If X has columns, coords should also have "coeffs".
-        However, for scoring, exog var names are already known by the model.
+        """Score the Bayesian R^2.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"].
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
+        coords : dict, optional
+            Not used, kept for API compatibility.
+
+        Returns
+        -------
+        pd.Series
+            R² score and standard deviation for each treated unit.
         """
-        pred_output = self.predict(X, coords=coords)
-        mu_pred = az.extract(
-            pred_output, group="posterior_predictive", var_names="mu"
-        ).T.values
-        # Note: First argument must be a 1D array
-        return r2_score(y.flatten(), mu_pred)
+        # Use base class score method now that we have treated_units dimension
+        return super().score(X, y, coords=coords, **kwargs)
 
 
 class StateSpaceTimeSeries(PyMCModel):
@@ -1610,7 +1701,7 @@ class StateSpaceTimeSeries(PyMCModel):
     sample_kwargs : dict, optional
         Kwargs passed to `pm.sample`.
     mode : str, optional
-        Mode passed to `build_statespace_graph` (e.g., "JAX").
+        Pytensor compile mode passed to `build_statespace_graph`. Defaults to None.
     """
 
     def __init__(
@@ -1620,15 +1711,13 @@ class StateSpaceTimeSeries(PyMCModel):
         trend_component: Optional[Any] = None,
         seasonality_component: Optional[Any] = None,
         sample_kwargs: Optional[Dict[str, Any]] = None,
-        mode: str = "JAX",
+        mode: Optional[str] = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs)
 
         # Warn that this is experimental
         warnings.warn(
             "StateSpaceTimeSeries is experimental and its API may change in future versions. "
-            "It uses a different data format (numpy arrays and datetime indices) compared to other PyMC models, "
-            "and returns xr.Dataset instead of az.InferenceData from predict(). "
             "Not recommended for production use.",
             FutureWarning,
             stacklevel=2,
@@ -1704,20 +1793,30 @@ class StateSpaceTimeSeries(PyMCModel):
         return self._seasonality_component
 
     def build_model(
-        self, X: Optional[np.ndarray], y: np.ndarray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
     ) -> None:
         """
-        Build the PyMC state-space model.  `coords` must include:
-          - 'datetime_index': a pandas.DatetimeIndex matching `y`.
+        Build the PyMC state-space model.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
+            models, but kept for API compatibility.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
+        coords : dict
+            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
         """
         if coords is None:
             raise ValueError("coords must be provided with 'datetime_index'")
         coords = coords.copy()
-        datetime_index = coords.pop("datetime_index", None)
-        if not isinstance(datetime_index, pd.DatetimeIndex):
-            raise ValueError(
-                "coords must contain 'datetime_index' of type pandas.DatetimeIndex."
-            )
+
+        # Convert xr.DataArray to numpy internally
+        _, y_numpy, datetime_index, _ = _convert_timeseries_data(X, y, coords)
+
+        # Pop datetime_index from coords copy (already extracted)
+        coords.pop("datetime_index", None)
         self._train_index = datetime_index
 
         # Instantiate components and build state-space object
@@ -1752,19 +1851,30 @@ class StateSpaceTimeSeries(PyMCModel):
             _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
 
             # Attach the state-space graph using the observed data
-            df = pd.DataFrame({"y": y.flatten()}, index=datetime_index)
+            df = pd.DataFrame({"y": y_numpy.flatten()}, index=datetime_index)
             if self.ss_mod is not None:
                 self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
 
     def fit(
-        self,
-        X: Optional[np.ndarray],
-        y: np.ndarray,
-        coords: Dict[str, Any] | None = None,
+        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
     ) -> az.InferenceData:
         """
         Fit the model, drawing posterior samples.
-        Returns the InferenceData with parameter draws.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
+            models, but kept for API compatibility.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
+        coords : dict
+            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData with parameter draws.
         """
         self.build_model(X, y, coords)
         if self.second_model is None:
@@ -1780,7 +1890,8 @@ class StateSpaceTimeSeries(PyMCModel):
         self.conditional_idata = self._smooth()
         return self._prepare_idata()
 
-    def _prepare_idata(self):
+    def _prepare_idata(self) -> az.InferenceData:
+        """Prepare InferenceData with proper dimensions including treated_units."""
         if self.idata is None:
             raise RuntimeError("Model must be fit before smoothing.")
 
@@ -1797,8 +1908,11 @@ class StateSpaceTimeSeries(PyMCModel):
         else:
             y_hat_final = y_hat_summed
 
-        new_idata["posterior_predictive"]["y_hat"] = y_hat_final
-        new_idata["posterior_predictive"]["mu"] = y_hat_final
+        # Add treated_units dimension for consistency with other models
+        y_hat_with_units = y_hat_final.expand_dims({"treated_units": ["unit_0"]})
+
+        new_idata["posterior_predictive"]["y_hat"] = y_hat_with_units
+        new_idata["posterior_predictive"]["mu"] = y_hat_with_units
 
         return new_idata
 
@@ -1825,58 +1939,95 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def predict(
         self,
-        X: Optional[np.ndarray],
-        coords: Dict[str, Any] | None = None,
+        X: xr.DataArray,
+        coords: Optional[Dict[str, Any]] = None,
         out_of_sample: Optional[bool] = False,
         **kwargs: Any,
-    ) -> xr.Dataset:
+    ) -> az.InferenceData:
         """
-        Wrapper around forecast: expects coords with 'datetime_index' of future points.
+        Predict data given input X.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]. Must have datetime
+            coordinates on obs_ind for out-of-sample predictions.
+        coords : dict, optional
+            Not used directly, datetime extracted from X coordinates.
+        out_of_sample : bool, optional
+            If True, forecast future values. If False, return in-sample predictions.
+
+        Returns
+        -------
+        az.InferenceData
+            Posterior predictive samples with y_hat and mu.
         """
         if not out_of_sample:
             return self._prepare_idata()
         else:
-            if coords is None:
-                raise ValueError("coords must be provided for out-of-sample prediction")
-            idx = coords.get("datetime_index")
-            if not isinstance(idx, pd.DatetimeIndex):
+            # Extract datetime from X coordinates
+            if not hasattr(X, "coords") or "obs_ind" not in X.coords:
                 raise ValueError(
-                    "coords must contain 'datetime_index' for prediction period."
+                    "X must have 'obs_ind' coordinate with datetime values for prediction"
                 )
+
+            obs_ind_vals = X.coords["obs_ind"].values
+            if len(obs_ind_vals) == 0 or not isinstance(
+                obs_ind_vals[0], (np.datetime64, pd.Timestamp)
+            ):
+                raise ValueError("X 'obs_ind' coordinate must contain datetime values")
+
+            idx = pd.DatetimeIndex(obs_ind_vals)
             last = self._train_index[-1]  # start forecasting after the last observed
-            temp_idata = self._forecast(start=last, periods=len(idx))
-            new_idata = temp_idata.copy()
+            forecast_data = self._forecast(start=last, periods=len(idx))
+            forecast_copy = forecast_data.copy()
 
             # Rename 'time' to 'obs_ind' to match CausalPy conventions
-            if "time" in new_idata.dims:
-                new_idata = new_idata.rename({"time": "obs_ind"})
+            if "time" in forecast_copy.dims:
+                forecast_copy = forecast_copy.rename({"time": "obs_ind"})
 
-            # Extract the forecasted observed data and assign it to 'y_hat'
-            new_idata["y_hat"] = new_idata["forecast_observed"].isel(observed_state=0)
+            # Extract the forecasted observed data and add treated_units dimension
+            y_hat = forecast_copy["forecast_observed"].isel(observed_state=0)
+            y_hat_with_units = y_hat.expand_dims({"treated_units": ["unit_0"]})
 
-            # Assign 'y_hat' to 'mu' for consistency
-            new_idata["mu"] = new_idata["y_hat"]
+            # Wrap in InferenceData for consistency
+            result = az.InferenceData(
+                posterior_predictive=xr.Dataset(
+                    {"y_hat": y_hat_with_units, "mu": y_hat_with_units}
+                )
+            )
 
-            return new_idata
+            # Assign coordinates from input X for proper alignment
+            if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
+                result["posterior_predictive"] = result[
+                    "posterior_predictive"
+                ].assign_coords(obs_ind=X.obs_ind)
+
+            return result
 
     def score(
         self,
-        X: Optional[np.ndarray],
-        y: np.ndarray,
-        coords: Dict[str, Any] | None = None,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> pd.Series:
         """
         Compute R^2 between observed and mean forecast.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"].
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
+        coords : dict, optional
+            Not used, kept for API compatibility.
+
+        Returns
+        -------
+        pd.Series
+            R² score and standard deviation for each treated unit.
         """
-        pred = self.predict(X, coords)
-        fc = pred["posterior_predictive"]["y_hat"]  # .isel(observed_state=0)
-
-        # Use all posterior samples to compute Bayesian R²
-        # fc has shape (chain, draw, time), we want (n_samples, time)
-        fc_samples = fc.stack(
-            sample=["chain", "draw"]
-        ).T.values  # Shape: (time, n_samples)
-
-        # Use arviz.r2_score to get both r2 and r2_std
-        return r2_score(y.flatten(), fc_samples)
+        # Use base class score method now that we have treated_units dimension
+        return super().score(X, y, coords=coords, **kwargs)

@@ -27,11 +27,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import (
-    BayesianBasisExpansionTimeSeries,
-    PyMCModel,
-    StateSpaceTimeSeries,
-)
+from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -153,27 +149,15 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
         # fit the model to the observed (pre-intervention) data
+        # All PyMC models now accept xr.DataArray with consistent API
         if isinstance(self.model, PyMCModel):
-            is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
-            )
-
-            if is_bsts_like:
-                # BSTS/StateSpace models expect numpy arrays and datetime coords
-                X_fit = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
-                y_fit = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
-                pre_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
-                if X_fit is not None:
-                    pre_coords["coeffs"] = list(self.labels)
-                self.model.fit(X=X_fit, y=y_fit, coords=pre_coords)
-            else:
-                # General PyMC models expect xarray with treated_units
-                COORDS = {
-                    "coeffs": self.labels,
-                    "obs_ind": np.arange(self.pre_X.shape[0]),
-                    "treated_units": ["unit_0"],
-                }
-                self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            COORDS: dict[str, Any] = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.pre_X.shape[0]),
+                "treated_units": ["unit_0"],
+                "datetime_index": self.datapre.index,  # For time series models
+            }
+            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             # For OLS models, use 1D y data
             self.model.fit(X=self.pre_X, y=self.pre_y.isel(treated_units=0))
@@ -182,18 +166,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # score the goodness of fit to the pre-intervention data
         if isinstance(self.model, PyMCModel):
-            is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
-            )
-            if is_bsts_like:
-                X_score = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
-                y_score = self.pre_y.isel(treated_units=0).values  # type: ignore[attr-defined]
-                score_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
-                if X_score is not None:
-                    score_coords["coeffs"] = list(self.labels)
-                self.score = self.model.score(X=X_score, y=y_score, coords=score_coords)
-            else:
-                self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+            self.score = self.model.score(X=self.pre_X, y=self.pre_y)
         elif isinstance(self.model, RegressorMixin):
             self.score = self.model.score(
                 X=self.pre_X, y=self.pre_y.isel(treated_units=0)
@@ -201,66 +174,20 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # get the model predictions of the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
-            is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
-            )
-            if is_bsts_like:
-                X_pre_predict = self.pre_X.values if self.pre_X.shape[1] > 0 else None  # type: ignore[attr-defined]
-                pre_pred_coords: dict[str, Any] = {"datetime_index": self.datapre.index}
-                self.pre_pred = self.model.predict(
-                    X=X_pre_predict, coords=pre_pred_coords
-                )
-                if not isinstance(self.pre_pred, az.InferenceData):
-                    self.pre_pred = az.InferenceData(posterior_predictive=self.pre_pred)
-            else:
-                self.pre_pred = self.model.predict(X=self.pre_X)
+            self.pre_pred = self.model.predict(X=self.pre_X)
         elif isinstance(self.model, RegressorMixin):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
         if isinstance(self.model, PyMCModel):
-            is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
-            )
-            if is_bsts_like:
-                X_post_predict = (
-                    self.post_X.values if self.post_X.shape[1] > 0 else None  # type: ignore[attr-defined]
-                )
-                post_pred_coords: dict[str, Any] = {
-                    "datetime_index": self.datapost.index
-                }
-                self.post_pred = self.model.predict(
-                    X=X_post_predict, coords=post_pred_coords, out_of_sample=True
-                )
-                if not isinstance(self.post_pred, az.InferenceData):
-                    self.post_pred = az.InferenceData(
-                        posterior_predictive=self.post_pred
-                    )
-            else:
-                self.post_pred = self.model.predict(X=self.post_X)
+            self.post_pred = self.model.predict(X=self.post_X, out_of_sample=True)
         elif isinstance(self.model, RegressorMixin):
             self.post_pred = self.model.predict(X=self.post_X)
 
-        # calculate impact - use appropriate y data format for each model type
+        # calculate impact - all PyMC models now use 2D data with treated_units
         if isinstance(self.model, PyMCModel):
-            is_bsts_like = isinstance(
-                self.model, (BayesianBasisExpansionTimeSeries, StateSpaceTimeSeries)
-            )
-            if is_bsts_like:
-                pre_y_for_impact = self.pre_y.isel(treated_units=0)
-                post_y_for_impact = self.post_y.isel(treated_units=0)
-                self.pre_impact = self.model.calculate_impact(
-                    pre_y_for_impact, self.pre_pred
-                )
-                self.post_impact = self.model.calculate_impact(
-                    post_y_for_impact, self.post_pred
-                )
-            else:
-                # PyMC models with treated_units use 2D data
-                self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-                self.post_impact = self.model.calculate_impact(
-                    self.post_y, self.post_pred
-                )
+            self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
+            self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
         elif isinstance(self.model, RegressorMixin):
             # SKL models work with 1D data
             self.pre_impact = self.model.calculate_impact(
