@@ -1045,10 +1045,11 @@ def test_state_space_time_series():
     }
 
     # Create DataArray for y to support score() which requires xarray
+    # Use dates as obs_ind coordinate (datetime values required by new API)
     y_da = xr.DataArray(
         data["y"].values.reshape(-1, 1),
         dims=["obs_ind", "treated_units"],
-        coords={"obs_ind": coords["obs_ind"], "treated_units": ["unit_0"]},
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
     )
 
     # Initialize model with PyMC mode (more stable than JAX for testing)

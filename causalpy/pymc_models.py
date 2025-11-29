@@ -1057,76 +1057,6 @@ class PropensityScore(PyMCModel):
         return idata_outcome, model_outcome
 
 
-def _convert_timeseries_data(
-    X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any]
-) -> tuple[Optional[np.ndarray], np.ndarray, pd.DatetimeIndex, List[str]]:
-    """
-    Convert xr.DataArray inputs to numpy arrays for time series models.
-
-    This helper function maintains API consistency with other PyMCModel subclasses
-    by accepting xr.DataArray inputs and converting them internally to the numpy
-    format needed by time series models.
-
-    Parameters
-    ----------
-    X : xr.DataArray
-        Input features as an xarray DataArray with dims ["obs_ind", "coeffs"].
-    y : xr.DataArray
-        Target variable as an xarray DataArray with dims ["obs_ind", "treated_units"].
-    coords : dict
-        Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
-
-    Returns
-    -------
-    tuple
-        (X_numpy, y_numpy, datetime_index, coeff_names)
-        - X_numpy: numpy array or None if no exogenous variables
-        - y_numpy: 1D numpy array
-        - datetime_index: pd.DatetimeIndex
-        - coeff_names: list of coefficient names
-    """
-    # Extract datetime_index from coords
-    datetime_index = coords.get("datetime_index")
-    if datetime_index is None:
-        # Try to extract from obs_ind coordinate if it's a datetime
-        if hasattr(X, "coords") and "obs_ind" in X.coords:
-            obs_ind = X.coords["obs_ind"].values
-            if len(obs_ind) > 0 and isinstance(
-                obs_ind[0], (np.datetime64, pd.Timestamp)
-            ):
-                datetime_index = pd.DatetimeIndex(obs_ind)
-
-    if not isinstance(datetime_index, pd.DatetimeIndex):
-        raise ValueError(
-            "coords must contain 'datetime_index' of type pd.DatetimeIndex, "
-            "or X must have datetime obs_ind coordinates."
-        )
-
-    # Convert X from xr.DataArray to numpy
-    X_numpy: Optional[np.ndarray] = None
-    coeff_names: List[str] = []
-    if isinstance(X, xr.DataArray):
-        if X.shape[1] > 0:
-            X_numpy = X.values
-            if "coeffs" in X.coords:
-                coeff_names = list(X.coords["coeffs"].values)
-    elif isinstance(X, np.ndarray):
-        if X.shape[1] > 0:
-            X_numpy = X
-            coeff_names = coords.get("coeffs", [])
-
-    # Convert y from xr.DataArray to numpy (1D)
-    if isinstance(y, xr.DataArray):
-        if "treated_units" in y.dims:
-            y_numpy = y.isel(treated_units=0).values.flatten()
-        else:
-            y_numpy = y.values.flatten()
-    else:
-        y_numpy = np.asarray(y).flatten()
-
-    return X_numpy, y_numpy, datetime_index, coeff_names
-
-
 class BayesianBasisExpansionTimeSeries(PyMCModel):
     r"""
     Bayesian Structural Time Series Model.
@@ -1256,88 +1186,100 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def _prepare_time_and_exog_features(
         self,
-        X_exog_array: Optional[np.ndarray],
-        datetime_index: pd.DatetimeIndex,
-        exog_names_from_coords: Optional[List[str]] = None,
-    ):
+        X: Optional[xr.DataArray],
+    ) -> tuple[np.ndarray, np.ndarray, Optional[xr.DataArray], int]:
         """
-        Prepares time features from datetime_index and processes exogenous variables from X_exog_array.
-        Exogenous variable names are taken from exog_names_from_coords (expected to be a list).
-        """
-        if not isinstance(datetime_index, pd.DatetimeIndex):
-            raise ValueError("`datetime_index` must be a pandas DatetimeIndex.")
+        Prepares time features and processes exogenous variables from X.
 
+        Parameters
+        ----------
+        X : xr.DataArray or None
+            Input features with dims ["obs_ind", "coeffs"]. The obs_ind coordinate
+            must contain datetime values. Can be None or have 0 columns if no
+            exogenous variables.
+
+        Returns
+        -------
+        tuple
+            (time_for_trend, time_for_seasonality, X_for_pymc, num_obs)
+            - time_for_trend: numpy array of time values for trend component
+            - time_for_seasonality: numpy array of day-of-year values
+            - X_for_pymc: xarray DataArray for exogenous vars, or None if no exog vars
+            - num_obs: number of observations
+        """
+        if X is None:
+            raise ValueError(
+                "X cannot be None. Pass an empty DataArray if no exog vars."
+            )
+
+        if not isinstance(X, xr.DataArray):
+            raise TypeError("X must be an xarray DataArray.")
+
+        # Extract datetime index from X coordinates
+        if "obs_ind" not in X.coords:
+            raise ValueError("X must have 'obs_ind' coordinate.")
+
+        obs_ind_vals = X.coords["obs_ind"].values
+        if len(obs_ind_vals) == 0:
+            raise ValueError("X must have at least one observation.")
+
+        # Check if obs_ind contains datetime values
+        if not isinstance(obs_ind_vals[0], (np.datetime64, pd.Timestamp)):
+            raise ValueError(
+                "X.coords['obs_ind'] must contain datetime values (np.datetime64 or pd.Timestamp)."
+            )
+
+        datetime_index = pd.DatetimeIndex(obs_ind_vals)
         num_obs = len(datetime_index)
 
-        if X_exog_array is not None:
-            if not isinstance(X_exog_array, np.ndarray):
-                raise TypeError("X_exog_array must be a NumPy array or None.")
-            if X_exog_array.ndim == 1:
-                X_exog_array = X_exog_array.reshape(-1, 1)
-            if X_exog_array.shape[0] != num_obs:
-                raise ValueError(
-                    f"Shape mismatch: X_exog_array rows ({X_exog_array.shape[0]}) and length of `datetime_index` ({num_obs}) must be equal."
-                )
-            if exog_names_from_coords and X_exog_array.shape[1] != len(
-                exog_names_from_coords
-            ):
-                raise ValueError(
-                    f"Mismatch: X_exog_array has {X_exog_array.shape[1]} columns, but {len(exog_names_from_coords)} names provided."
-                )
-        else:  # No exogenous variables passed as array
-            if exog_names_from_coords:
-                # This implies exog_names were given, but no array. Could mean an empty array for 0 columns was intended.
-                if X_exog_array is None:
-                    X_exog_array = np.empty((num_obs, 0))
+        # Extract coefficient names from X coordinates
+        exog_names: List[str] = []
+        if "coeffs" in X.coords:
+            coeffs_vals = X.coords["coeffs"].values
+            if len(coeffs_vals) > 0:
+                exog_names = list(coeffs_vals)
 
-        # Ensure exog_names_from_coords is a list for internal processing
-        processed_exog_names = []
-        if exog_names_from_coords is not None:
-            if isinstance(exog_names_from_coords, str):
-                processed_exog_names = [exog_names_from_coords]
-            elif isinstance(exog_names_from_coords, (list, tuple)):
-                processed_exog_names = list(exog_names_from_coords)
-            else:
-                raise TypeError(
-                    f"exog_names_from_coords should be a list, tuple, or string, not {type(exog_names_from_coords)}"
-                )
+        # Validate dimensions
+        if X.shape[0] != num_obs:
+            raise ValueError(
+                f"Shape mismatch: X has {X.shape[0]} rows but datetime_index has {num_obs} entries."
+            )
 
-        # Set or validate self._exog_var_names (must be a list)
-        if X_exog_array is not None and X_exog_array.shape[1] > 0:
-            if not processed_exog_names:
-                raise ValueError(
-                    "Logic error: processed_exog_names should be set if X_exog_array has columns."
-                )
+        if X.shape[1] != len(exog_names):
+            raise ValueError(
+                f"Mismatch: X has {X.shape[1]} columns, but {len(exog_names)} coefficient names provided."
+            )
+
+        # Set or validate self._exog_var_names
+        if X.shape[1] > 0:
             if self._exog_var_names is None:
-                self._exog_var_names = processed_exog_names  # Ensures it's a list
-            elif (
-                self._exog_var_names != processed_exog_names
-            ):  # List-to-list comparison
+                self._exog_var_names = exog_names
+            elif self._exog_var_names != exog_names:
                 raise ValueError(
                     f"Exogenous variable names mismatch. Model fit with {self._exog_var_names}, "
-                    f"but current call provides {processed_exog_names}."
+                    f"but current call provides {exog_names}."
                 )
-        elif (
-            self._exog_var_names is None
-        ):  # No exog vars in this call, and none set before
-            self._exog_var_names = []  # Explicitly an empty list
+        elif self._exog_var_names is None:
+            # No exog vars in this call, and none set before
+            self._exog_var_names = []
 
+        # Set first fit timestamp if not set
         if self._first_fit_timestamp is None:
             self._first_fit_timestamp = datetime_index[0]
 
+        # Compute time features (these are numpy arrays)
         time_for_trend = (
             (datetime_index - self._first_fit_timestamp).days / 365.25
         ).values
         time_for_seasonality = datetime_index.dayofyear.values
 
-        # X_values to be used by PyMC; None if no exog vars
-        X_values_for_pymc = X_exog_array if self._exog_var_names else None
-        if X_values_for_pymc is not None and X_values_for_pymc.shape[1] == 0:
-            X_values_for_pymc = (
-                None  # Treat 0-column array as no exog vars for PyMC part
-            )
+        # Determine X to use for PyMC (return as xarray or None)
+        X_for_pymc: Optional[xr.DataArray] = None
+        if self._exog_var_names and X.shape[1] > 0:
+            X_for_pymc = X  # Keep as xarray
+        # else: no exog vars, return None
 
-        return time_for_trend, time_for_seasonality, X_values_for_pymc, num_obs
+        return time_for_trend, time_for_seasonality, X_for_pymc, num_obs
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
@@ -1349,79 +1291,30 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         ----------
         X : xr.DataArray
             Input features with dims ["obs_ind", "coeffs"]. Can have 0 columns if
-            no exogenous variables.
+            no exogenous variables. The obs_ind coordinate must contain datetime values.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"].
-        coords : dict
-            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+        coords : dict, optional
+            Coordinates dictionary. Can contain "datetime_index" for backwards compatibility,
+            but datetime is preferentially extracted from X.coords['obs_ind'].
         """
-        if coords is None:
-            raise ValueError("coords must be provided with 'datetime_index'")
-
-        # Make a copy to avoid modifying the original
-        coords = coords.copy()
-
-        # Convert xr.DataArray to numpy internally
-        X_numpy, y_numpy, datetime_index, coeff_names = _convert_timeseries_data(
-            X, y, coords
-        )
-
-        # Pop datetime_index from coords copy (already extracted)
-        coords.pop("datetime_index", None)
-
-        # Get exog_names from conversion or coords
-        exog_names_from_coords = coeff_names if coeff_names else coords.get("coeffs")
-
+        # Prepare time features and validate X
+        # This extracts datetime from X.coords['obs_ind'] and validates exog vars
         (
             time_for_trend,
             time_for_seasonality,
-            X_values_for_pymc,  # NumPy array for PyMC or None
+            X_for_pymc,  # xarray DataArray or None
             num_obs,
-        ) = self._prepare_time_and_exog_features(
-            X_numpy, datetime_index, exog_names_from_coords
-        )
+        ) = self._prepare_time_and_exog_features(X)
 
+        # Build model coordinates
         model_coords = {
             "obs_ind": np.arange(num_obs),
-            "treated_units": ["unit_0"],  # Add treated_units for consistency
+            "treated_units": ["unit_0"],
         }
 
-        # Start with a copy of the input coords (datetime_index was already popped)
-        if coords:
-            model_coords.update(coords)
-
-        # Ensure "coeffs" in model_coords (if present from input) is a list
-        if "coeffs" in model_coords:
-            current_coeffs = model_coords["coeffs"]
-            if isinstance(current_coeffs, str):
-                model_coords["coeffs"] = [current_coeffs]
-            elif isinstance(current_coeffs, tuple):
-                model_coords["coeffs"] = list(current_coeffs)
-            elif not isinstance(current_coeffs, list):
-                raise TypeError(
-                    f"Unexpected type for 'coeffs' in input coords: {type(current_coeffs)}"
-                )
-
-        # self._exog_var_names is the source of truth for coefficient names
+        # Add coeffs coordinate if we have exogenous variables
         if self._exog_var_names:
-            if (
-                "coeffs" in model_coords
-                and model_coords["coeffs"] != self._exog_var_names
-            ):
-                warnings.warn(
-                    f"Discrepancy in 'coeffs'. Using derived: {self._exog_var_names} "
-                    f"over input: {model_coords['coeffs']}",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
-        elif "coeffs" in model_coords and model_coords["coeffs"]:
-            raise ValueError(
-                f"Model determined no exogenous variables (self._exog_var_names is {self._exog_var_names}), "
-                f"but input coords provided 'coeffs': {model_coords['coeffs']}. "
-                f"If no exog vars, provide empty list or omit 'coeffs'."
-            )
-        elif "coeffs" not in model_coords and self._exog_var_names:
             model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
 
         with self:
@@ -1462,24 +1355,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             mu_ = trend_component + season_component
 
             # Exogenous regressors (optional)
-            if X_values_for_pymc is not None and self._exog_var_names:
-                model_coord_coeffs_list = (
-                    list(self.coords["coeffs"]) if "coeffs" in self.coords else []
-                )
-                if (
-                    "coeffs" not in self.coords
-                    or model_coord_coeffs_list != self._exog_var_names
-                ):
-                    raise ValueError(
-                        f"Mismatch between internal exogenous variable names ('{self._exog_var_names}') "
-                        f"and model coordinates for 'coeffs' ({model_coord_coeffs_list})."
-                    )
-                if X_values_for_pymc.shape[1] != len(self._exog_var_names):
-                    raise ValueError(
-                        f"Shape mismatch: X_values_for_pymc has {X_values_for_pymc.shape[1]} columns, but "
-                        f"{len(self._exog_var_names)} names in self._exog_var_names ({self._exog_var_names})."
-                    )
-                X_data = pm.Data("X", X_values_for_pymc, dims=["obs_ind", "coeffs"])
+            if X_for_pymc is not None:
+                # Use xarray directly with pm.Data
+                X_data = pm.Data("X", X_for_pymc, dims=["obs_ind", "coeffs"])
                 beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
                 mu_ = mu_ + pm.math.dot(X_data, beta)
 
@@ -1488,8 +1366,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             mu = pm.Deterministic("mu", mu_[:, None], dims=["obs_ind", "treated_units"])
 
             # Likelihood - also with treated_units dimension
+            # Use xarray directly with pm.Data
             sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma, dims="treated_units")
-            y_data = pm.Data("y", y_numpy[:, None], dims=["obs_ind", "treated_units"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             pm.Normal(
                 "y_hat",
                 mu=mu,
@@ -1540,76 +1419,55 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
             coordinates on obs_ind.
         """
-        # Extract datetime from X coordinates
-        if not hasattr(X, "coords") or "obs_ind" not in X.coords:
-            raise ValueError("X must have 'obs_ind' coordinate with datetime values")
-
-        obs_ind_vals = X.coords["obs_ind"].values
-        if len(obs_ind_vals) == 0 or not isinstance(
-            obs_ind_vals[0], (np.datetime64, pd.Timestamp)
-        ):
-            raise ValueError("X 'obs_ind' coordinate must contain datetime values")
-
-        datetime_index_pred = pd.DatetimeIndex(obs_ind_vals)
-
-        # Convert X to numpy
-        X_numpy = X.values if X.shape[1] > 0 else None
-
+        # Prepare time features and get X for PyMC (as xarray or None)
         (
             time_for_trend_pred_vals,
             time_for_seasonality_pred_vals,
-            X_exog_pred_vals,
+            X_for_pymc,  # xarray or None
             num_obs_pred,
-        ) = self._prepare_time_and_exog_features(
-            X_numpy, datetime_index_pred, self._exog_var_names
-        )
+        ) = self._prepare_time_and_exog_features(X)
 
         new_obs_inds = np.arange(num_obs_pred)
 
+        # Create dummy y data with proper shape
+        dummy_y = xr.DataArray(
+            np.zeros((num_obs_pred, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": new_obs_inds, "treated_units": ["unit_0"]},
+        )
+
         data_to_set = {
-            "y": np.zeros((num_obs_pred, 1)),  # 2D for treated_units
+            "y": dummy_y,
             "t_trend_data": time_for_trend_pred_vals,
             "t_season_data": time_for_seasonality_pred_vals,
         }
         coords_to_set = {"obs_ind": new_obs_inds}
 
+        # Handle exogenous variables
         if "X" in self.named_vars:
-            if X_exog_pred_vals is None and self._exog_var_names:
+            if X_for_pymc is None and self._exog_var_names:
                 raise ValueError(
                     "Model was built with exogenous variables. "
                     "New X data must provide these."
                 )
-            if (
-                self._exog_var_names
-                and X_exog_pred_vals is not None
-                and X_exog_pred_vals.shape[1] != len(self._exog_var_names)
-            ):
-                raise ValueError(
-                    f"Shape mismatch for exogenous prediction variables. "
-                    f"Expected {len(self._exog_var_names)} columns, "
-                    f"got {X_exog_pred_vals.shape[1]}."
+            if X_for_pymc is not None:
+                # Use xarray directly
+                data_to_set["X"] = X_for_pymc
+            else:
+                # Model expects X but we have none - create empty xarray
+                empty_X = xr.DataArray(
+                    np.empty((num_obs_pred, 0)),
+                    dims=["obs_ind", "coeffs"],
+                    coords={"obs_ind": new_obs_inds, "coeffs": []},
                 )
-            data_to_set["X"] = X_exog_pred_vals
-        elif X_exog_pred_vals is not None:
+                data_to_set["X"] = empty_X
+        elif X_for_pymc is not None:
             warnings.warn(
                 "X provided exogenous variables, but the model was not "
                 "built with exogenous variables. These will be ignored.",
                 UserWarning,
                 stacklevel=2,
             )
-
-        if not self._exog_var_names and "X" in self.named_vars:
-            if X_exog_pred_vals is not None and X_exog_pred_vals.shape[1] > 0:
-                warnings.warn(
-                    "Model expects no exog vars, but X has columns. Forcing to 0 columns.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                data_to_set["X"] = np.empty((num_obs_pred, 0))
-            elif X_exog_pred_vals is None:
-                data_to_set["X"] = np.empty((num_obs_pred, 0))
-            else:
-                data_to_set["X"] = X_exog_pred_vals
 
         with self:
             pm.set_data(data_to_set, coords=coords_to_set)
@@ -1793,30 +1651,55 @@ class StateSpaceTimeSeries(PyMCModel):
         return self._seasonality_component
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+        self,
+        X: Optional[xr.DataArray] = None,
+        y: Optional[xr.DataArray] = None,
+        coords: Dict[str, Any] | None = None,
     ) -> None:
         """
         Build the PyMC state-space model.
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xr.DataArray, optional
             Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
             models, but kept for API compatibility.
         y : xr.DataArray
-            Target variable with dims ["obs_ind", "treated_units"].
-        coords : dict
-            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+            Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
+            coordinates on obs_ind.
+        coords : dict, optional
+            Coordinates dictionary. Can contain "datetime_index" for backwards compatibility,
+            but datetime is preferentially extracted from y.coords['obs_ind'].
         """
-        if coords is None:
-            raise ValueError("coords must be provided with 'datetime_index'")
-        coords = coords.copy()
+        if y is None:
+            raise ValueError(
+                "y must be provided for StateSpaceTimeSeries.build_model()"
+            )
 
-        # Convert xr.DataArray to numpy internally
-        _, y_numpy, datetime_index, _ = _convert_timeseries_data(X, y, coords)
+        # Extract datetime index from y coordinates
+        if "obs_ind" not in y.coords:
+            raise ValueError("y must have 'obs_ind' coordinate.")
 
-        # Pop datetime_index from coords copy (already extracted)
-        coords.pop("datetime_index", None)
+        obs_ind_vals = y.coords["obs_ind"].values
+        if len(obs_ind_vals) == 0:
+            raise ValueError("y must have at least one observation.")
+
+        # Check if obs_ind contains datetime values
+        if isinstance(obs_ind_vals[0], (np.datetime64, pd.Timestamp)):
+            datetime_index = pd.DatetimeIndex(obs_ind_vals)
+        elif coords is not None and "datetime_index" in coords:
+            # Fallback to coords dict for backwards compatibility
+            datetime_index = coords["datetime_index"]
+            if not isinstance(datetime_index, pd.DatetimeIndex):
+                raise ValueError(
+                    "coords['datetime_index'] must be a pd.DatetimeIndex if provided."
+                )
+        else:
+            raise ValueError(
+                "y.coords['obs_ind'] must contain datetime values or "
+                "coords must contain 'datetime_index' (pd.DatetimeIndex)."
+            )
+
         self._train_index = datetime_index
 
         # Instantiate components and build state-space object
@@ -1831,7 +1714,14 @@ class StateSpaceTimeSeries(PyMCModel):
         initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
             self.ss_mod.param_dims.values()
         )
-        coordinates = {**coords, **self.ss_mod.coords}
+
+        # Build coordinates for the model
+        coordinates = self.ss_mod.coords.copy()
+        if coords:
+            # Merge with user-provided coords (excluding datetime_index which was extracted)
+            coords_copy = coords.copy()
+            coords_copy.pop("datetime_index", None)
+            coordinates.update(coords_copy)
 
         # Build model
         with pm.Model(coords=coordinates) as self.second_model:
@@ -1851,31 +1741,43 @@ class StateSpaceTimeSeries(PyMCModel):
             _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
 
             # Attach the state-space graph using the observed data
-            df = pd.DataFrame({"y": y_numpy.flatten()}, index=datetime_index)
+            # Extract values from xarray for pandas DataFrame
+            y_values = (
+                y.isel(treated_units=0).values
+                if "treated_units" in y.dims
+                else y.values
+            )
+            df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
             if self.ss_mod is not None:
                 self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
 
     def fit(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
+        self,
+        X: Optional[xr.DataArray] = None,
+        y: Optional[xr.DataArray] = None,
+        coords: Dict[str, Any] | None = None,
     ) -> az.InferenceData:
         """
         Fit the model, drawing posterior samples.
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xr.DataArray, optional
             Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
             models, but kept for API compatibility.
         y : xr.DataArray
-            Target variable with dims ["obs_ind", "treated_units"].
-        coords : dict
-            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
+            Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
+            coordinates on obs_ind.
+        coords : dict, optional
+            Coordinates dictionary. Can contain "datetime_index" for backwards compatibility.
 
         Returns
         -------
         az.InferenceData
             InferenceData with parameter draws.
         """
+        if y is None:
+            raise ValueError("y must be provided for StateSpaceTimeSeries.fit()")
         self.build_model(X, y, coords)
         if self.second_model is None:
             raise RuntimeError("Model not built. Call build_model() first.")
@@ -1939,7 +1841,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def predict(
         self,
-        X: xr.DataArray,
+        X: Optional[xr.DataArray] = None,
         coords: Optional[Dict[str, Any]] = None,
         out_of_sample: Optional[bool] = False,
         **kwargs: Any,
@@ -1949,9 +1851,10 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xr.DataArray, optional
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
-            coordinates on obs_ind for out-of-sample predictions.
+            coordinates on obs_ind for out-of-sample predictions. Not required for
+            in-sample predictions.
         coords : dict, optional
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
@@ -1966,6 +1869,10 @@ class StateSpaceTimeSeries(PyMCModel):
             return self._prepare_idata()
         else:
             # Extract datetime from X coordinates
+            if X is None:
+                raise ValueError(
+                    "X must be provided for out-of-sample predictions with datetime coordinates"
+                )
             if not hasattr(X, "coords") or "obs_ind" not in X.coords:
                 raise ValueError(
                     "X must have 'obs_ind' coordinate with datetime values for prediction"
@@ -2007,8 +1914,8 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def score(
         self,
-        X: xr.DataArray,
-        y: xr.DataArray,
+        X: Optional[xr.DataArray] = None,
+        y: Optional[xr.DataArray] = None,
         coords: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> pd.Series:
@@ -2017,8 +1924,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
-            Input features with dims ["obs_ind", "coeffs"].
+        X : xr.DataArray, optional
+            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
+            models, kept for API compatibility.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
