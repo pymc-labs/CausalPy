@@ -53,6 +53,15 @@ Glossary
    Endogenous Variable
       An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeniety violates the assumptions of the Gauss Markov theorem.
 
+   Effect decay
+      In interrupted time series analysis with temporary interventions, effect decay refers to the reduction in treatment effect magnitude over time after the intervention ends. Decay patterns can be exponential (rapid initial decline), linear (steady decline), or step (sudden drop to zero). Analyzing decay helps understand how long intervention effects persist and whether they fade gradually or disappear abruptly.
+
+   Effect persistence
+      In interrupted time series analysis with temporary interventions, effect persistence refers to the extent to which treatment effects continue after the intervention period ends. It is measured by comparing post-intervention effects to intervention-period effects, often expressed as a percentage (e.g., "30% of the intervention effect persisted"). High persistence suggests lasting behavioral or structural changes, while low persistence indicates temporary effects that fade quickly.
+
+   Intervention period
+      In three-period interrupted time series designs, the intervention period is the time window between the treatment start time (``treatment_time``) and treatment end time (``treatment_end_time``) when the intervention is actively applied. This period is distinct from the pre-intervention period (before treatment starts) and the post-intervention period (after treatment ends), enabling separate analysis of immediate effects during treatment versus persistent effects after treatment ends.
+
    HDI
    Highest Density Interval
       In Bayesian statistics, the narrowest credible interval containing a specified percentage of the posterior probability mass. For example, a 95% HDI is the shortest interval that contains 95% of the posterior distribution. This is the default uncertainty interval reported by CausalPy for PyMC models. See :doc:`reporting_statistics` for interpretation guidance.
