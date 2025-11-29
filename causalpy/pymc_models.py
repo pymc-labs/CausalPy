@@ -1718,9 +1718,12 @@ class StateSpaceTimeSeries(PyMCModel):
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
         if coords:
-            # Merge with user-provided coords (excluding datetime_index which was extracted)
+            # Merge with user-provided coords (excluding datetime_index and obs_ind which are handled separately)
             coords_copy = coords.copy()
             coords_copy.pop("datetime_index", None)
+            coords_copy.pop(
+                "obs_ind", None
+            )  # obs_ind handled by state-space model's time dimension
             coordinates.update(coords_copy)
 
         # Build model
@@ -1920,13 +1923,12 @@ class StateSpaceTimeSeries(PyMCModel):
         **kwargs: Any,
     ) -> pd.Series:
         """
-        Compute R^2 between observed and mean forecast.
+        Score the Bayesian R^2 given inputs X and outputs y.
 
         Parameters
         ----------
         X : xr.DataArray, optional
-            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
-            models, kept for API compatibility.
+            Input features. Not used by state-space models, but kept for API compatibility.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
@@ -1937,5 +1939,5 @@ class StateSpaceTimeSeries(PyMCModel):
         pd.Series
             R² score and standard deviation for each treated unit.
         """
-        # Use base class score method now that we have treated_units dimension
-        return super().score(X, y, coords=coords, **kwargs)
+        # Use base class implementation - X is accepted but not used by predict()
+        return super().score(X, y, coords, **kwargs)

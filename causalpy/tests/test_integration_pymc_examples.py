@@ -945,21 +945,32 @@ def test_bayesian_structural_time_series():
     assert isinstance(score_empty_x, pd.Series)
 
     # --- Test Case 4: Model with incorrect coord/data setup (ValueErrors) --- #
+    # Test that X must have datetime coordinates
     with pytest.raises(
         ValueError,
-        match=r"coords must contain 'datetime_index' of type pd\.DatetimeIndex",
+        match=r"X\.coords\['obs_ind'\] must contain datetime values",
     ):
         model_error_idx = cp.pymc_models.BayesianBasisExpansionTimeSeries(
             sample_kwargs=bsts_sample_kwargs
         )
-        bad_dt_idx_coords = coords_with_x.copy()
-        bad_dt_idx_coords["datetime_index"] = np.arange(n_obs)  # Not a DatetimeIndex
-
-        # Using DataArrays here too for consistency, though check happens on coords dict
+        # Create X with non-datetime obs_ind coordinates
+        bad_X = xr.DataArray(
+            data_with_x[["x1"]].values,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(n_obs),
+                "coeffs": ["x1"],
+            },  # integers not datetime
+        )
+        bad_y = xr.DataArray(
+            data_with_x["y"].values[:, None],
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+        )
         model_error_idx.fit(
-            X=X_da,
-            y=y_da,
-            coords=bad_dt_idx_coords.copy(),  # Pass a copy
+            X=bad_X,
+            y=bad_y,
+            coords=coords_with_x.copy(),
         )
 
     with pytest.raises(ValueError, match="Model was built with exogenous variables"):
@@ -969,7 +980,7 @@ def test_bayesian_structural_time_series():
 
     with pytest.raises(
         ValueError,
-        match=r"Mismatch: X_exog_array has 2 columns, but 1 names provided",
+        match=r"Exogenous variable names mismatch",
     ):
         wrong_shape_x_pred_vals = np.hstack(
             [data_with_x[["x1"]].values, data_with_x[["x1"]].values]
@@ -1038,12 +1049,6 @@ def test_state_space_time_series():
         "random_seed": 42,
     }
 
-    # Coordinates for the model
-    coords = {
-        "obs_ind": np.arange(n_obs),
-        "datetime_index": dates,
-    }
-
     # Create DataArray for y to support score() which requires xarray
     # Use dates as obs_ind coordinate (datetime values required by new API)
     y_da = xr.DataArray(
@@ -1062,10 +1067,16 @@ def test_state_space_time_series():
 
     # Test the complete workflow
     # --- Test Case 1: Model fitting --- #
+    # Create dummy X (state-space doesn't use exogenous vars but we pass empty array for API consistency)
+    dummy_X = xr.DataArray(
+        np.zeros((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
+    # StateSpaceTimeSeries extracts datetime from xarray coords, no separate coords dict needed
     idata = model.fit(
-        X=None,  # No exogenous variables for state-space model
+        X=dummy_X,
         y=y_da,
-        coords=coords.copy(),
     )
 
     # Verify inference data structure
@@ -1089,9 +1100,14 @@ def test_state_space_time_series():
     assert "mu" in idata.posterior_predictive
 
     # --- Test Case 2: In-sample prediction --- #
+    # Create dummy X for in-sample prediction (state-space doesn't use it but API requires it for consistency)
+    dummy_X_insample = xr.DataArray(
+        np.zeros((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
     predictions_in_sample = model.predict(
-        X=None,
-        coords=coords,
+        X=dummy_X_insample,
         out_of_sample=False,
     )
     assert isinstance(predictions_in_sample, az.InferenceData)
@@ -1101,9 +1117,6 @@ def test_state_space_time_series():
 
     # --- Test Case 3: Out-of-sample prediction (forecasting) --- #
     future_dates = pd.date_range(start="2020-04-01", end="2020-04-07", freq="D")
-    future_coords = {
-        "datetime_index": future_dates,
-    }
     # Create dummy X for forecasting (needs time index)
     future_X = xr.DataArray(
         np.zeros((len(future_dates), 0)),
@@ -1113,7 +1126,6 @@ def test_state_space_time_series():
 
     predictions_out_sample = model.predict(
         X=future_X,
-        coords=future_coords,
         out_of_sample=True,
     )
     # Note: predict now returns InferenceData, not Dataset!
@@ -1134,10 +1146,15 @@ def test_state_space_time_series():
     )
 
     # --- Test Case 4: Model scoring --- #
+    # Create dummy X for score (state-space doesn't use it but API requires it)
+    dummy_X_for_score = xr.DataArray(
+        np.zeros((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
     score = model.score(
-        X=None,
+        X=dummy_X_for_score,
         y=y_da,
-        coords=coords,
     )
     assert isinstance(score, pd.Series)
     assert "unit_0_r2" in score.index
@@ -1164,30 +1181,37 @@ def test_state_space_time_series():
     assert model.mode == "FAST_COMPILE"
 
     # --- Test Case 6: Error handling --- #
-    # Test with invalid datetime_index
+    # Test that y must have datetime coordinates
     with pytest.raises(
         ValueError,
-        match=r"coords must contain 'datetime_index' of type pd\.DatetimeIndex",
+        match=r"y\.coords\['obs_ind'\] must contain datetime values",
     ):
         model_error = cp.pymc_models.StateSpaceTimeSeries(
             sample_kwargs=ss_sample_kwargs
         )
-        bad_coords = coords.copy()
-        bad_coords["datetime_index"] = np.arange(n_obs)  # Not a DatetimeIndex
+        # Create y with non-datetime coords (integers instead)
+        bad_y = xr.DataArray(
+            data["y"].values.reshape(-1, 1),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+        )
+        bad_X = xr.DataArray(
+            np.zeros((n_obs, 0)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(n_obs), "coeffs": []},
+        )
         model_error.fit(
-            X=None,
-            y=data["y"].values.reshape(-1, 1),
-            coords=bad_coords,
+            X=bad_X,
+            y=bad_y,
         )
 
-    # Test prediction with invalid coords (missing X)
+    # Test prediction with missing X for out-of-sample
     with pytest.raises(
         ValueError,
-        match="X must have 'obs_ind' coordinate with datetime values",
+        match="X must be provided for out-of-sample predictions",
     ):
         model.predict(
             X=None,
-            coords={"invalid": "coords"},
             out_of_sample=True,
         )
 
