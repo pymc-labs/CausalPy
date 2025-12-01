@@ -104,6 +104,7 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :img-top: ../_static/thumbnails/its_pymc.png
 :link: its_pymc
 :link-type: doc
+
 :::
 :::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
 :class-card: sd-card-h-100
