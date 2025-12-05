@@ -149,6 +149,43 @@ We recommend that your contribution complies with the following guidelines befor
 
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
+### Adding a new example notebook
+
+When adding a new example notebook to the documentation gallery:
+
+1. **Place the notebook** in `docs/source/notebooks/` following the naming convention `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`).
+
+2. **Ensure the notebook has at least one plot/figure** in its outputs. The gallery generation script (`scripts/generate_gallery.py`) will automatically extract the first PNG image from the notebook outputs to create a thumbnail. If the notebook has no outputs, the script will attempt to execute it to generate the thumbnail.
+
+3. **Add the notebook to the gallery** by manually editing `docs/source/notebooks/index.md`:
+   - Find the appropriate category section (e.g., "Difference in Differences", "Regression Discontinuity") or create a new one if needed
+   - Add a new `grid-item-card` entry within the category's grid, following this format:
+     ```markdown
+     :::{grid-item-card} Your Notebook Title
+     :class-card: sd-card-h-100
+     :img-top: ../_static/thumbnails/{notebook_name}.png
+     :link: {notebook_name_without_extension}
+     :link-type: doc
+     :::
+     ```
+   - The `:img-top:` path should reference `../_static/thumbnails/{notebook_name}.png` (the thumbnail will be generated automatically)
+   - The `:link:` should be the notebook name without the `.ipynb` extension
+   - Cards are arranged in a 3-column grid layout
+
+4. **Generate thumbnails locally** (optional, for testing):
+   ```bash
+   python scripts/generate_gallery.py
+   ```
+   Thumbnails are automatically generated during the documentation build process, so you don't need to commit them (the `docs/source/_static/thumbnails/` directory is gitignored).
+
+5. **Build and test the documentation** to verify the notebook appears correctly in the gallery:
+   ```bash
+   make html
+   ```
+   Then open `docs/_build/html/notebooks/index.html` in your browser to see the gallery.
+
+**Note**: The gallery generation script (`scripts/generate_gallery.py`) runs automatically during the Sphinx build process (configured in `docs/source/conf.py`), so thumbnails will be generated on Read the Docs builds without needing to commit them.
+
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
