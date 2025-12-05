@@ -440,6 +440,127 @@ def generate_multicell_geolift_data() -> pd.DataFrame:
     return df
 
 
+def generate_event_study_data(
+    n_units: int = 20,
+    n_time: int = 20,
+    treatment_time: int = 10,
+    treated_fraction: float = 0.5,
+    event_window: tuple[int, int] = (-5, 5),
+    treatment_effects: dict[int, float] | None = None,
+    unit_fe_sigma: float = 1.0,
+    time_fe_sigma: float = 0.5,
+    noise_sigma: float = 0.2,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """
+    Generate synthetic panel data for event study / dynamic DiD analysis.
+
+    Creates panel data with unit and time fixed effects, where a fraction of units
+    receive treatment at a common treatment time. Treatment effects can vary by
+    event time (time relative to treatment).
+
+    Parameters
+    ----------
+    n_units : int
+        Total number of units (treated + control). Default 20.
+    n_time : int
+        Number of time periods. Default 20.
+    treatment_time : int
+        Time period when treatment occurs (0-indexed). Default 10.
+    treated_fraction : float
+        Fraction of units that are treated. Default 0.5.
+    event_window : tuple[int, int]
+        Range of event times (K_min, K_max) for which treatment effects are defined.
+        Default (-5, 5).
+    treatment_effects : dict[int, float], optional
+        Dictionary mapping event time k to treatment effect beta_k.
+        Default creates effects that are 0 for k < 0 (pre-treatment)
+        and gradually increase post-treatment.
+    unit_fe_sigma : float
+        Standard deviation for unit fixed effects. Default 1.0.
+    time_fe_sigma : float
+        Standard deviation for time fixed effects. Default 0.5.
+    noise_sigma : float
+        Standard deviation for observation noise. Default 0.2.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        Panel data with columns:
+        - unit: Unit identifier
+        - time: Time period
+        - y: Outcome variable
+        - treat_time: Treatment time for unit (NaN if never treated)
+        - treated: Whether unit is in treated group (0 or 1)
+
+    Example
+    --------
+    >>> from causalpy.data.simulate_data import generate_event_study_data
+    >>> df = generate_event_study_data(
+    ...     n_units=20, n_time=20, treatment_time=10, seed=42
+    ... )
+    >>> df.shape
+    (400, 5)
+    >>> df.columns.tolist()
+    ['unit', 'time', 'y', 'treat_time', 'treated']
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Default treatment effects: zero pre-treatment, gradual increase post-treatment
+    if treatment_effects is None:
+        treatment_effects = {}
+        for k in range(event_window[0], event_window[1] + 1):
+            if k < 0:
+                treatment_effects[k] = 0.0  # No anticipation
+            else:
+                # Gradual treatment effect that increases post-treatment
+                treatment_effects[k] = 0.5 + 0.1 * k
+
+    # Determine treated units
+    n_treated = int(n_units * treated_fraction)
+    treated_units = set(range(n_treated))
+
+    # Generate unit fixed effects
+    unit_fe = np.random.normal(0, unit_fe_sigma, n_units)
+
+    # Generate time fixed effects
+    time_fe = np.random.normal(0, time_fe_sigma, n_time)
+
+    # Build panel data
+    data = []
+    for unit in range(n_units):
+        is_treated = unit in treated_units
+        unit_treat_time = treatment_time if is_treated else np.nan
+
+        for t in range(n_time):
+            # Base outcome: unit FE + time FE + noise
+            y = unit_fe[unit] + time_fe[t] + np.random.normal(0, noise_sigma)
+
+            # Add treatment effect for treated units in event window
+            if is_treated:
+                event_time = t - treatment_time
+                if (
+                    event_window[0] <= event_time <= event_window[1]
+                    and event_time in treatment_effects
+                ):
+                    y += treatment_effects[event_time]
+
+            data.append(
+                {
+                    "unit": unit,
+                    "time": t,
+                    "y": y,
+                    "treat_time": unit_treat_time,
+                    "treated": 1 if is_treated else 0,
+                }
+            )
+
+    return pd.DataFrame(data)
+
+
 # -----------------
 # UTILITY FUNCTIONS
 # -----------------
