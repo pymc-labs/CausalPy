@@ -2,7 +2,13 @@
 
 ## Environment
 
-- **Activation required**: Always run `conda activate CausalPy` before executing any Python commands, tests, or scripts
+- **Activation required**: Always activate the `CausalPy` environment before executing any Python commands, tests, or scripts
+  - Try one of the following commands based on your environment manager:
+    - `conda activate CausalPy` (for conda)
+    - `micromamba activate CausalPy` (for micromamba)
+    - `pixi shell` (for pixi)
+  - If unsure which tool you're using, try running `which conda || which micromamba || which pixi` to detect available tools
+  - The environment should be configured using the `environment.yml` file in the repository root
 
 ## Testing preferences
 
