@@ -21,7 +21,7 @@ from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-from causalpy.custom_exceptions import DataException
+from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.data.simulate_data import generate_event_study_data
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
@@ -96,9 +96,26 @@ def test_event_study_missing_column():
     with pytest.raises(DataException, match="Required column 'treat_time' not found"):
         cp.EventStudy(
             df,
+            formula="y ~ C(unit) + C(time)",
             unit_col="unit",
             time_col="time",
-            outcome_col="y",
+            treat_time_col="treat_time",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+
+def test_event_study_missing_formula():
+    """Test that missing formula raises FormulaException."""
+    df = pd.DataFrame(
+        {"unit": [0, 1], "time": [0, 0], "y": [1.0, 2.0], "treat_time": [5.0, np.nan]}
+    )
+
+    with pytest.raises(FormulaException, match="Formula must be provided"):
+        cp.EventStudy(
+            df,
+            formula="",  # Empty formula
+            unit_col="unit",
+            time_col="time",
             treat_time_col="treat_time",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
@@ -111,9 +128,9 @@ def test_event_study_invalid_event_window():
     with pytest.raises(DataException, match="event_window\\[0\\].*must be less than"):
         cp.EventStudy(
             df,
+            formula="y ~ C(unit) + C(time)",
             unit_col="unit",
             time_col="time",
-            outcome_col="y",
             treat_time_col="treat_time",
             event_window=(5, -5),  # Invalid: min > max
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
@@ -127,9 +144,9 @@ def test_event_study_reference_outside_window():
     with pytest.raises(DataException, match="reference_event_time.*must be within"):
         cp.EventStudy(
             df,
+            formula="y ~ C(unit) + C(time)",
             unit_col="unit",
             time_col="time",
-            outcome_col="y",
             treat_time_col="treat_time",
             event_window=(-3, 3),
             reference_event_time=-5,  # Outside window
@@ -151,9 +168,9 @@ def test_event_study_duplicate_observations():
     with pytest.raises(DataException, match="duplicate unit-time observations"):
         cp.EventStudy(
             df,
+            formula="y ~ C(unit) + C(time)",
             unit_col="unit",
             time_col="time",
-            outcome_col="y",
             treat_time_col="treat_time",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
@@ -171,9 +188,9 @@ def test_event_study_pymc(mock_pymc_sample):
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-5, 5),
         reference_event_time=-1,
@@ -199,9 +216,9 @@ def test_event_study_pymc_summary(mock_pymc_sample):
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -226,9 +243,9 @@ def test_event_study_pymc_plot(mock_pymc_sample):
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -248,9 +265,9 @@ def test_event_study_pymc_get_plot_data(mock_pymc_sample):
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -272,9 +289,9 @@ def test_event_study_sklearn():
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-5, 5),
         reference_event_time=-1,
@@ -298,9 +315,9 @@ def test_event_study_sklearn_summary():
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -324,9 +341,9 @@ def test_event_study_sklearn_plot():
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -365,9 +382,9 @@ def test_event_study_sklearn_recovers_effects():
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
@@ -396,9 +413,9 @@ def test_event_study_narrow_event_window():
 
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-1, 1),
         reference_event_time=-1,
@@ -419,9 +436,9 @@ def test_event_study_all_control_units():
     # The model should still run but event-time dummies will all be 0
     result = cp.EventStudy(
         df,
+        formula="y ~ C(unit) + C(time)",
         unit_col="unit",
         time_col="time",
-        outcome_col="y",
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,

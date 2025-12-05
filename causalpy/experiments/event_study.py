@@ -20,9 +20,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
+from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
-from causalpy.custom_exceptions import DataException
+from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
 
@@ -58,12 +59,15 @@ class EventStudy(BaseExperiment):
     ----------
     data : pd.DataFrame
         Panel data with unit, time, outcome, and treatment time columns.
+    formula : str
+        A patsy-style formula specifying the model. Should include the outcome variable
+        on the left-hand side and fixed effects on the right-hand side. Use ``C(column)``
+        syntax for categorical fixed effects. Example: ``"y ~ C(unit) + C(time)"``.
+        Event-time dummies are added automatically by the class.
     unit_col : str
-        Name of the column identifying units.
+        Name of the column identifying units (must match a term in the formula).
     time_col : str
-        Name of the column identifying time periods.
-    outcome_col : str
-        Name of the outcome variable column.
+        Name of the column identifying time periods (must match a term in the formula).
     treat_time_col : str
         Name of the column containing treatment time for each unit.
         Use NaN or np.inf for never-treated (control) units.
@@ -85,9 +89,9 @@ class EventStudy(BaseExperiment):
     ... )
     >>> result = cp.EventStudy(
     ...     df,
+    ...     formula="y ~ C(unit) + C(time)",
     ...     unit_col="unit",
     ...     time_col="time",
-    ...     outcome_col="y",
     ...     treat_time_col="treat_time",
     ...     event_window=(-5, 5),
     ...     reference_event_time=-1,
@@ -109,9 +113,9 @@ class EventStudy(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
+        formula: str,
         unit_col: str,
         time_col: str,
-        outcome_col: str,
         treat_time_col: str,
         event_window: tuple[int, int] = (-5, 5),
         reference_event_time: int = -1,
@@ -121,9 +125,9 @@ class EventStudy(BaseExperiment):
         super().__init__(model=model)
         self.data = data.copy()
         self.expt_type = "Event Study"
+        self.formula = formula
         self.unit_col = unit_col
         self.time_col = time_col
-        self.outcome_col = outcome_col
         self.treat_time_col = treat_time_col
         self.event_window = event_window
         self.reference_event_time = reference_event_time
@@ -156,14 +160,15 @@ class EventStudy(BaseExperiment):
         self._extract_event_time_coefficients()
 
     def input_validation(self) -> None:
-        """Validate input data and parameters."""
-        # Check required columns exist
-        required_cols = [
-            self.unit_col,
-            self.time_col,
-            self.outcome_col,
-            self.treat_time_col,
-        ]
+        """Validate input data, formula, and parameters."""
+        # Check formula is provided
+        if not self.formula or "~" not in self.formula:
+            raise FormulaException(
+                "Formula must be provided in the form 'outcome ~ predictors'"
+            )
+
+        # Check required columns exist for event time computation
+        required_cols = [self.unit_col, self.time_col, self.treat_time_col]
         for col in required_cols:
             if col not in self.data.columns:
                 raise DataException(f"Required column '{col}' not found in data")
@@ -209,28 +214,19 @@ class EventStudy(BaseExperiment):
         ) & (self.data["_event_time"] <= self.event_window[1])
 
     def _build_design_matrix(self) -> None:
-        """Build design matrix with unit FE, time FE, and event-time dummies."""
-        # Get unique units and times
-        units = sorted(self.data[self.unit_col].unique())
-        times = sorted(self.data[self.time_col].unique())
+        """Build design matrix using patsy formula plus event-time dummies."""
+        # Parse formula with patsy to get y and X (including FEs and covariates)
+        y, X = dmatrices(self.formula, self.data)
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
 
-        # Reference categories (first unit and first time)
-        ref_unit = units[0]
-        ref_time = times[0]
+        # Extract outcome variable name from formula
+        self.outcome_variable_name = y.design_info.column_names[0]
 
-        # Build unit fixed effect dummies (excluding reference)
-        unit_dummies = pd.get_dummies(
-            self.data[self.unit_col], prefix="unit", dtype=float
+        # Convert patsy output to DataFrames for manipulation
+        X_df = pd.DataFrame(
+            X, columns=X.design_info.column_names, index=self.data.index
         )
-        unit_cols_to_keep = [c for c in unit_dummies.columns if c != f"unit_{ref_unit}"]
-        unit_dummies = unit_dummies[unit_cols_to_keep]
-
-        # Build time fixed effect dummies (excluding reference)
-        time_dummies = pd.get_dummies(
-            self.data[self.time_col], prefix="time", dtype=float
-        )
-        time_cols_to_keep = [c for c in time_dummies.columns if c != f"time_{ref_time}"]
-        time_dummies = time_dummies[time_cols_to_keep]
 
         # Build event-time dummies (excluding reference event time)
         event_times = list(range(self.event_window[0], self.event_window[1] + 1))
@@ -245,9 +241,8 @@ class EventStudy(BaseExperiment):
                 (self.data["_event_time"] == k) & self.data["_in_event_window"]
             ).astype(float)
 
-        # Combine all features: intercept + unit FE + time FE + event-time dummies
-        X_df = pd.DataFrame({"intercept": 1.0}, index=self.data.index)
-        X_df = pd.concat([X_df, unit_dummies, time_dummies, event_time_dummies], axis=1)
+        # Combine patsy design matrix with event-time dummies
+        X_df = pd.concat([X_df, event_time_dummies], axis=1)
 
         self.labels = list(X_df.columns)
         self.event_time_labels = [f"event_time_{k}" for k in event_times_non_ref]
@@ -262,7 +257,7 @@ class EventStudy(BaseExperiment):
             },
         )
 
-        y_values = np.asarray(self.data[self.outcome_col].values).reshape(-1, 1)
+        y_values = np.asarray(y).reshape(-1, 1)
         self.y = xr.DataArray(
             y_values,
             dims=["obs_ind", "treated_units"],
@@ -311,6 +306,7 @@ class EventStudy(BaseExperiment):
             Number of decimals for rounding. Defaults to 2.
         """
         print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
         print(f"Event window: {self.event_window}")
         print(f"Reference event time: {self.reference_event_time}")
         print("\nEvent-time coefficients (beta_k):")
