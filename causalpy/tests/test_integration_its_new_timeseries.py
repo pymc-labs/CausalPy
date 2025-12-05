@@ -84,7 +84,7 @@ def test_its_with_state_space_model():
     """
     # Skip if pymc-extras is not available
     try:
-        import pymc_extras.statespace.structural  # noqa: F401
+        from pymc_extras.statespace import structural  # noqa: F401
     except ImportError:
         pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
 
@@ -111,7 +111,7 @@ def test_its_with_state_space_model():
         level_order=2,
         seasonal_length=7,
         sample_kwargs=sample_kwargs,
-        mode="PyMC",
+        mode="FAST_COMPILE",
     )
 
     result = cp.InterruptedTimeSeries(
