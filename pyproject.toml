@@ -19,6 +19,17 @@ readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
 requires-python = ">=3.11"
+keywords = ["causal inference", "statistics", "econometrics", "pymc", "bayesian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 
 # This field lists other packages that your project depends on to run.
 # Any package you put here will be installed by pip when your project is
@@ -52,7 +63,6 @@ dependencies = [
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
 dev = [
-    "pathlib",
     "pre-commit",
     "twine",
     "interrogate",
@@ -86,7 +96,10 @@ test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
-"Source" = "https://github.com/pymc-labs/CausalPy"
+Source = "https://github.com/pymc-labs/CausalPy"
+Documentation = "https://causalpy.readthedocs.io"
+Changelog = "https://github.com/pymc-labs/CausalPy/releases"
+Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 
 [tool.pytest.ini_options]
 addopts = [
@@ -130,7 +143,14 @@ docstring-code-format = true
 
 [tool.ruff.lint]
 extend-select = [
-    "I", # isort
+    "I",   # isort
+    # "E",   # pycodestyle errors - PEP 8 style violations
+    # "W",   # pycodestyle warnings - PEP 8 warnings
+    "F",   # pyflakes - detect unused imports, undefined names
+    "B",   # flake8-bugbear - find likely bugs and design problems
+    "UP",  # pyupgrade - modern Python syntax upgrades
+    "C4",  # flake8-comprehensions - better list/dict comprehensions
+    "SIM", # flake8-simplify - suggest simpler code
 ]
 
 [tool.codespell]
@@ -138,9 +158,13 @@ ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
+source = ["causalpy"]
 omit = ["*/conftest.py", "*/tests/conftest.py"]
+branch = true  # Also measure branch coverage, not just line coverage
 
 [tool.coverage.report]
+fail_under = 80
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

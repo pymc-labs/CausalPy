@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import contextlib
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -997,6 +999,38 @@ def test_bayesian_structural_time_series():
 
         model_with_x.predict(X=X_wrong_shape, coords=coords_with_x)
 
+    # --- Test Case 5: Custom component validation errors --- #
+    class BadTrendComponent:
+        """Component without apply method"""
+
+        pass
+
+    with pytest.raises(
+        ValueError,
+        match="Custom trend_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            trend_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Custom seasonality_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            seasonality_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    # --- Test Case 6: Additional error conditions --- #
+    # Test TypeError for non-xarray X (expecting xarray DataArray)
+    with pytest.raises(TypeError, match="X must be an xarray DataArray"):
+        model_with_x.predict(
+            X=data_with_x[["x1"]].values,  # Pass numpy array instead of xarray
+            coords=coords_with_x,
+        )
+
 
 @pytest.mark.integration
 def test_state_space_time_series():
@@ -1381,7 +1415,7 @@ class TestSyntheticControlMultiUnit:
         assert isinstance(sc.score, pd.Series)
 
         # Check that we have r2 and r2_std for each treated unit using unified format
-        for i, unit in enumerate(treated_units):
+        for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in sc.score.index
             assert f"unit_{i}_r2_std" in sc.score.index
 
@@ -1513,12 +1547,8 @@ class TestSyntheticControlMultiUnit:
 
         # Test that invalid treated unit name is handled gracefully
         # Note: Current implementation may not raise ValueError, so we test default behavior
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.plot(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable
 
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.get_plot_data(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable

@@ -15,7 +15,7 @@
 Interrupted Time Series Analysis
 """
 
-from typing import Any, List, Literal, Union
+from typing import Any, Literal
 
 import arviz as az
 import numpy as np
@@ -131,10 +131,10 @@ class InterruptedTimeSeries(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
+        treatment_time: int | float | pd.Timestamp,
         formula: str,
-        model: Union[PyMCModel, RegressorMixin] | None = None,
-        treatment_end_time: Union[int, float, pd.Timestamp] | None = None,
+        model: PyMCModel | RegressorMixin | None = None,
+        treatment_end_time: int | float | pd.Timestamp | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -222,9 +222,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         # get the model predictions of the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
-            self.pre_pred = self.model.predict(X=self.pre_X)
-        elif isinstance(self.model, RegressorMixin):
+        if isinstance(self.model, (PyMCModel, RegressorMixin)):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
@@ -257,8 +255,8 @@ class InterruptedTimeSeries(BaseExperiment):
     def input_validation(
         self,
         data: pd.DataFrame,
-        treatment_time: Union[int, float, pd.Timestamp],
-        treatment_end_time: Union[int, float, pd.Timestamp] | None = None,
+        treatment_time: int | float | pd.Timestamp,
+        treatment_end_time: int | float | pd.Timestamp | None = None,
     ) -> None:
         """Validate the input data and model formula for correctness"""
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
@@ -409,7 +407,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def effect_summary(
         self,
-        window: Union[Literal["post"], tuple, slice] = "post",
+        window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         cumulative: bool = True,
@@ -758,7 +756,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _bayesian_plot(
         self, round_to: int | None = 2, **kwargs: dict
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 
@@ -945,7 +943,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _ols_plot(
         self, round_to: int | None = 2, **kwargs: dict
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 

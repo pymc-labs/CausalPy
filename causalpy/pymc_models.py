@@ -14,7 +14,7 @@
 """Custom PyMC models for causal inference"""
 
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import arviz as az
 import numpy as np
@@ -92,9 +92,9 @@ class PyMCModel(pm.Model):
     Inference data...
     """
 
-    default_priors: Dict[str, Prior] = {}
+    default_priors: dict[str, Prior] = {}
 
-    def priors_from_data(self, X, y) -> Dict[str, Any]:
+    def priors_from_data(self, X, y) -> dict[str, Any]:
         """
         Generate priors dynamically based on the input data.
 
@@ -170,7 +170,7 @@ class PyMCModel(pm.Model):
 
     def __init__(
         self,
-        sample_kwargs: Dict[str, Any] | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
     ) -> None:
         """
@@ -191,7 +191,7 @@ class PyMCModel(pm.Model):
         self.priors = {**self.default_priors, **(priors or {})}
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         raise NotImplementedError(
             "This method must be implemented by a subclass"
@@ -230,7 +230,7 @@ class PyMCModel(pm.Model):
             )
 
     def fit(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
     ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior
         predictive distributions.
@@ -275,8 +275,8 @@ class PyMCModel(pm.Model):
     def predict(
         self,
         X: xr.DataArray,
-        coords: Optional[Dict[str, Any]] = None,
-        out_of_sample: Optional[bool] = False,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
         **kwargs,
     ):
         """
@@ -311,9 +311,7 @@ class PyMCModel(pm.Model):
 
         return pp
 
-    def score(
-        self, X, y, coords: Optional[Dict[str, Any]] = None, **kwargs
-    ) -> pd.Series:
+    def score(self, X, y, coords: dict[str, Any] | None = None, **kwargs) -> pd.Series:
         """Score the Bayesian :math:`R^2` given inputs ``X`` and outputs ``y``.
 
         Note that the score is based on a comparison of the observed data ``y`` and the
@@ -511,7 +509,7 @@ class LinearRegression(PyMCModel):
     }
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         """
         Defines the PyMC model
@@ -580,7 +578,7 @@ class WeightedSumFitter(PyMCModel):
         ),
     }
 
-    def priors_from_data(self, X, y) -> Dict[str, Any]:
+    def priors_from_data(self, X, y) -> dict[str, Any]:
         """
         Set Dirichlet prior for weights based on number of control units.
 
@@ -610,7 +608,7 @@ class WeightedSumFitter(PyMCModel):
         }
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         """
         Defines the PyMC model
@@ -678,8 +676,8 @@ class InstrumentalVariableRegression(PyMCModel):
         Z: np.ndarray,
         y: np.ndarray,
         t: np.ndarray,
-        coords: Dict[str, Any],
-        priors: Dict[str, Any],
+        coords: dict[str, Any],
+        priors: dict[str, Any],
     ) -> None:
         """Specify model with treatment regression and focal regression
         data and priors.
@@ -764,18 +762,15 @@ class InstrumentalVariableRegression(PyMCModel):
                             compile_kwargs={"mode": "JAX"},
                         )
                     )
-        elif ppc_sampler == "pymc":
-            if self.idata is not None:
-                with self:
-                    self.idata.extend(
-                        pm.sample_prior_predictive(random_seed=random_seed)
+        elif ppc_sampler == "pymc" and self.idata is not None:
+            with self:
+                self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+                self.idata.extend(
+                    pm.sample_posterior_predictive(
+                        self.idata,
+                        random_seed=random_seed,
                     )
-                    self.idata.extend(
-                        pm.sample_posterior_predictive(
-                            self.idata,
-                            random_seed=random_seed,
-                        )
-                    )
+                )
 
     def fit(  # type: ignore
         self,
@@ -783,8 +778,8 @@ class InstrumentalVariableRegression(PyMCModel):
         Z: np.ndarray,
         y: np.ndarray,
         t: np.ndarray,
-        coords: Dict[str, Any],
-        priors: Dict[str, Any],
+        coords: dict[str, Any],
+        priors: dict[str, Any],
         ppc_sampler: str | None = None,
     ) -> az.InferenceData:
         """Draw samples from posterior distribution and potentially from
@@ -870,8 +865,8 @@ class PropensityScore(PyMCModel):
         self,
         X: np.ndarray,
         t: np.ndarray,
-        coords: Dict[str, Any],
-        prior: Dict[str, Any] | None = None,
+        coords: dict[str, Any],
+        prior: dict[str, Any] | None = None,
         noncentred: bool = True,
     ) -> None:
         "Defines the PyMC propensity model"
@@ -888,14 +883,16 @@ class PropensityScore(PyMCModel):
         self,
         X: np.ndarray,
         t: np.ndarray,
-        coords: Dict[str, Any],
-        prior: Dict[str, list] = {"b": [0, 1]},
+        coords: dict[str, Any],
+        prior: dict[str, list] | None = None,
         noncentred: bool = True,
     ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
         """
+        if prior is None:
+            prior = {"b": [0, 1]}
         # Ensure random_seed is used in sample_prior_predictive() and
         # sample_posterior_predictive() if provided in sample_kwargs.
         random_seed = self.sample_kwargs.get("random_seed", None)
@@ -916,12 +913,8 @@ class PropensityScore(PyMCModel):
         self,
         X_outcome: pd.DataFrame,
         y: pd.Series,
-        coords: Dict[str, Any],
-        priors: Dict[str, Any] = {
-            "b_outcome": [0, 1],
-            "sigma": 1,
-            "beta_ps": [0, 1],
-        },
+        coords: dict[str, Any],
+        priors: dict[str, Any] | None = None,
         noncentred: bool = True,
         normal_outcome: bool = True,
         spline_component: bool = False,
@@ -992,6 +985,12 @@ class PropensityScore(PyMCModel):
         between the propensity score and the outcome.
 
         """
+        if priors is None:
+            priors = {
+                "b_outcome": [0, 1],
+                "sigma": 1,
+                "beta_ps": [0, 1],
+            }
         if not hasattr(self, "idata"):
             raise AttributeError("""Object is missing required attribute 'idata'
                                  so cannot proceed. Call fit() first""")
@@ -1098,9 +1097,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         n_order: int = 3,
         n_changepoints_trend: int = 10,
         prior_sigma: float = 5,
-        trend_component: Optional[Any] = None,
-        seasonality_component: Optional[Any] = None,
-        sample_kwargs: Optional[Dict[str, Any]] = None,
+        trend_component: Any | None = None,
+        seasonality_component: Any | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs)
 
@@ -1116,8 +1115,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self.n_order = n_order
         self.n_changepoints_trend = n_changepoints_trend
         self.prior_sigma = prior_sigma
-        self._first_fit_timestamp: Optional[pd.Timestamp] = None
-        self._exog_var_names: Optional[List[str]] = None
+        self._first_fit_timestamp: pd.Timestamp | None = None
+        self._exog_var_names: list[str] | None = None
 
         # Store custom components (fix the bug where they were swapped)
         self._custom_trend_component = trend_component
@@ -1134,19 +1133,21 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         when default components are actually needed.
         """
         # Validate custom components have required methods
-        if self._custom_trend_component is not None:
-            if not hasattr(self._custom_trend_component, "apply"):
-                raise ValueError(
-                    "Custom trend_component must have an 'apply' method that accepts time data "
-                    "and returns a PyMC tensor."
-                )
+        if self._custom_trend_component is not None and not hasattr(
+            self._custom_trend_component, "apply"
+        ):
+            raise ValueError(
+                "Custom trend_component must have an 'apply' method that accepts time data "
+                "and returns a PyMC tensor."
+            )
 
-        if self._custom_seasonality_component is not None:
-            if not hasattr(self._custom_seasonality_component, "apply"):
-                raise ValueError(
-                    "Custom seasonality_component must have an 'apply' method that accepts time data "
-                    "and returns a PyMC tensor."
-                )
+        if self._custom_seasonality_component is not None and not hasattr(
+            self._custom_seasonality_component, "apply"
+        ):
+            raise ValueError(
+                "Custom seasonality_component must have an 'apply' method that accepts time data "
+                "and returns a PyMC tensor."
+            )
 
     def _get_trend_component(self):
         """Get the trend component, creating default if needed."""
@@ -1186,8 +1187,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def _prepare_time_and_exog_features(
         self,
-        X: Optional[xr.DataArray],
-    ) -> tuple[np.ndarray, np.ndarray, Optional[xr.DataArray], int]:
+        X: xr.DataArray | None,
+    ) -> tuple[np.ndarray, np.ndarray, xr.DataArray | None, int]:
         """
         Prepares time features and processes exogenous variables from X.
 
@@ -1233,7 +1234,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         num_obs = len(datetime_index)
 
         # Extract coefficient names from X coordinates
-        exog_names: List[str] = []
+        exog_names: list[str] = []
         if "coeffs" in X.coords:
             coeffs_vals = X.coords["coeffs"].values
             if len(coeffs_vals) > 0:
@@ -1274,7 +1275,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         time_for_seasonality = datetime_index.dayofyear.values
 
         # Determine X to use for PyMC (return as xarray or None)
-        X_for_pymc: Optional[xr.DataArray] = None
+        X_for_pymc: xr.DataArray | None = None
         if self._exog_var_names and X.shape[1] > 0:
             X_for_pymc = X  # Keep as xarray
         # else: no exog vars, return None
@@ -1282,7 +1283,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         return time_for_trend, time_for_seasonality, X_for_pymc, num_obs
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         """
         Defines the PyMC model.
@@ -1378,7 +1379,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             )
 
     def fit(
-        self, X: xr.DataArray, y: xr.DataArray, coords: Dict[str, Any] | None = None
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
     ) -> az.InferenceData:
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions, placing them in the model's idata attribute.
@@ -1475,8 +1476,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     def predict(
         self,
         X: xr.DataArray,
-        coords: Optional[Dict[str, Any]] = None,
-        out_of_sample: Optional[bool] = False,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
         **kwargs: Any,
     ) -> az.InferenceData:
         """
@@ -1519,7 +1520,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self,
         X: xr.DataArray,
         y: xr.DataArray,
-        coords: Optional[Dict[str, Any]] = None,
+        coords: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> pd.Series:
         """Score the Bayesian R^2.
@@ -1566,10 +1567,10 @@ class StateSpaceTimeSeries(PyMCModel):
         self,
         level_order: int = 2,
         seasonal_length: int = 12,
-        trend_component: Optional[Any] = None,
-        seasonality_component: Optional[Any] = None,
-        sample_kwargs: Optional[Dict[str, Any]] = None,
-        mode: Optional[str] = None,
+        trend_component: Any | None = None,
+        seasonality_component: Any | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
+        mode: str | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs)
 
@@ -1596,19 +1597,21 @@ class StateSpaceTimeSeries(PyMCModel):
         when default components are actually needed.
         """
         # Validate custom components have required methods
-        if self._custom_trend_component is not None:
-            if not hasattr(self._custom_trend_component, "apply"):
-                raise ValueError(
-                    "Custom trend_component must have an 'apply' method that accepts time data "
-                    "and returns a PyMC tensor."
-                )
+        if self._custom_trend_component is not None and not hasattr(
+            self._custom_trend_component, "apply"
+        ):
+            raise ValueError(
+                "Custom trend_component must have an 'apply' method that accepts time data "
+                "and returns a PyMC tensor."
+            )
 
-        if self._custom_seasonality_component is not None:
-            if not hasattr(self._custom_seasonality_component, "apply"):
-                raise ValueError(
-                    "Custom seasonality_component must have an 'apply' method that accepts time data "
-                    "and returns a PyMC tensor."
-                )
+        if self._custom_seasonality_component is not None and not hasattr(
+            self._custom_seasonality_component, "apply"
+        ):
+            raise ValueError(
+                "Custom seasonality_component must have an 'apply' method that accepts time data "
+                "and returns a PyMC tensor."
+            )
 
         # Initialize components
         self._trend_component = None
@@ -1652,9 +1655,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def build_model(
         self,
-        X: Optional[xr.DataArray] = None,
-        y: Optional[xr.DataArray] = None,
-        coords: Dict[str, Any] | None = None,
+        X: xr.DataArray | None = None,
+        y: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
     ) -> None:
         """
         Build the PyMC state-space model.
@@ -1756,9 +1759,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def fit(
         self,
-        X: Optional[xr.DataArray] = None,
-        y: Optional[xr.DataArray] = None,
-        coords: Dict[str, Any] | None = None,
+        X: xr.DataArray | None = None,
+        y: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
     ) -> az.InferenceData:
         """
         Fit the model, drawing posterior samples.
@@ -1844,9 +1847,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def predict(
         self,
-        X: Optional[xr.DataArray] = None,
-        coords: Optional[Dict[str, Any]] = None,
-        out_of_sample: Optional[bool] = False,
+        X: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
         **kwargs: Any,
     ) -> az.InferenceData:
         """
@@ -1917,9 +1920,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def score(
         self,
-        X: Optional[xr.DataArray] = None,
-        y: Optional[xr.DataArray] = None,
-        coords: Optional[Dict[str, Any]] = None,
+        X: xr.DataArray | None = None,
+        y: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> pd.Series:
         """
