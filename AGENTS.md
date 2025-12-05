@@ -21,6 +21,7 @@
 
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
 - **Notebook naming**: Use pattern `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`), organized by causal method
+- **Notebook index**: New notebooks must be added to `docs/source/notebooks/index.md` under the appropriate `toctree` section for them to appear in the rendered documentation
 - **MyST directives**: Use `:::{note}` and other MyST features for callouts and formatting
 - **Glossary linking**: Link to glossary terms (defined in `glossary.rst`) on first mention in a file:
   - In Markdown files (`.md`, `.ipynb`): Use MyST syntax `{term}glossary term``
