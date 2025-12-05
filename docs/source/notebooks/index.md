@@ -25,6 +25,13 @@ multi_cell_geolift.ipynb
 :::
 
 :::{toctree}
+:caption: Event Studies
+:maxdepth: 1
+
+event_study_pymc.ipynb
+:::
+
+:::{toctree}
 :caption: Difference in Differences
 :maxdepth: 1
 
