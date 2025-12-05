@@ -1024,16 +1024,12 @@ def test_bayesian_structural_time_series():
         )
 
     # --- Test Case 6: Additional error conditions --- #
-    # Test TypeError for non-numpy array X
-    with pytest.raises(TypeError, match="X_exog_array must be a NumPy array or None"):
+    # Test TypeError for non-xarray X (expecting xarray DataArray)
+    with pytest.raises(TypeError, match="X must be an xarray DataArray"):
         model_with_x.predict(
-            X=data_with_x[["x1"]].values.tolist(),  # Pass list instead of array
+            X=data_with_x[["x1"]].values,  # Pass numpy array instead of xarray
             coords=coords_with_x,
         )
-
-    # Test coords=None error in predict
-    with pytest.raises(ValueError, match="coords must be provided"):
-        model_with_x.predict(X=data_with_x[["x1"]].values, coords=None)
 
 
 @pytest.mark.integration
