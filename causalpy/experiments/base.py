@@ -32,6 +32,7 @@ from causalpy.reporting import (
     _compute_statistics_ols,
     _detect_experiment_type,
     _effect_summary_did,
+    _effect_summary_event_study,
     _effect_summary_rd,
     _effect_summary_rkink,
     _extract_counterfactual,
@@ -148,18 +149,20 @@ class BaseExperiment:
         relative: bool = True,
         min_effect: float | None = None,
         treated_unit: str | None = None,
+        include_pretrend_check: bool = True,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects.
 
         Supports Interrupted Time Series (ITS), Synthetic Control, Difference-in-Differences (DiD),
-        and Regression Discontinuity (RD) experiments. Works with both PyMC (Bayesian) and OLS models.
-        Automatically detects experiment type and model type, generating appropriate summary.
+        Regression Discontinuity (RD), and Event Study experiments. Works with both PyMC (Bayesian)
+        and OLS models. Automatically detects experiment type and model type, generating
+        appropriate summary.
 
         Parameters
         ----------
         window : str, tuple, or slice, default="post"
-            Time window for analysis (ITS/SC only, ignored for DiD/RD):
+            Time window for analysis (ITS/SC only, ignored for DiD/RD/EventStudy):
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
@@ -171,16 +174,19 @@ class BaseExperiment:
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level)
         cumulative : bool, default=True
-            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
+            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD/EventStudy)
         relative : bool, default=True
             Whether to include relative effect statistics (% change vs counterfactual)
-            (ITS/SC only, ignored for DiD/RD)
+            (ITS/SC only, ignored for DiD/RD/EventStudy)
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
             If provided, reports P(|effect| > min_effect) for two-sided or P(effect > min_effect) for one-sided.
         treated_unit : str, optional
             For multi-unit experiments (Synthetic Control), specify which treated unit
             to analyze. If None and multiple units exist, uses first unit.
+        include_pretrend_check : bool, default=True
+            Whether to include parallel trends analysis in prose summary (Event Study only).
+            When True, checks if pre-treatment coefficient HDIs include zero.
 
         Returns
         -------
@@ -193,7 +199,16 @@ class BaseExperiment:
         # Check if PyMC or OLS model
         is_pymc = isinstance(self.model, PyMCModel)
 
-        if experiment_type == "rd":
+        if experiment_type == "event_study":
+            # Event Study: time-varying effects over event time
+            return _effect_summary_event_study(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+                include_pretrend_check=include_pretrend_check,
+            )
+        elif experiment_type == "rd":
             # Regression Discontinuity: scalar effect, no time dimension
             return _effect_summary_rd(
                 self,
