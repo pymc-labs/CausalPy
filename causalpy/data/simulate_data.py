@@ -450,6 +450,9 @@ def generate_event_study_data(
     unit_fe_sigma: float = 1.0,
     time_fe_sigma: float = 0.5,
     noise_sigma: float = 0.2,
+    predictor_effects: dict[str, float] | None = None,
+    ar_phi: float = 0.9,
+    ar_scale: float = 1.0,
     seed: int | None = None,
 ) -> pd.DataFrame:
     """
@@ -457,7 +460,8 @@ def generate_event_study_data(
 
     Creates panel data with unit and time fixed effects, where a fraction of units
     receive treatment at a common treatment time. Treatment effects can vary by
-    event time (time relative to treatment).
+    event time (time relative to treatment). Optionally includes time-varying
+    predictor variables generated via AR(1) processes.
 
     Parameters
     ----------
@@ -482,6 +486,19 @@ def generate_event_study_data(
         Standard deviation for time fixed effects. Default 0.5.
     noise_sigma : float
         Standard deviation for observation noise. Default 0.2.
+    predictor_effects : dict[str, float], optional
+        Dictionary mapping predictor names to their true coefficients.
+        Each predictor is generated as an AR(1) time series that varies over time
+        but is the same for all units at a given time. For example,
+        ``{'temperature': 0.3, 'humidity': -0.1}`` creates two predictors.
+        Default None (no predictors).
+    ar_phi : float
+        AR(1) autoregressive coefficient controlling persistence of predictors.
+        Values closer to 1 produce smoother, more persistent series.
+        Default 0.9.
+    ar_scale : float
+        Standard deviation of the AR(1) innovation noise for predictors.
+        Default 1.0.
     seed : int, optional
         Random seed for reproducibility.
 
@@ -494,6 +511,7 @@ def generate_event_study_data(
         - y: Outcome variable
         - treat_time: Treatment time for unit (NaN if never treated)
         - treated: Whether unit is in treated group (0 or 1)
+        - <predictor_name>: One column per predictor (if predictor_effects provided)
 
     Example
     --------
@@ -505,6 +523,20 @@ def generate_event_study_data(
     (400, 5)
     >>> df.columns.tolist()
     ['unit', 'time', 'y', 'treat_time', 'treated']
+
+    With predictors:
+
+    >>> df = generate_event_study_data(
+    ...     n_units=10,
+    ...     n_time=10,
+    ...     treatment_time=5,
+    ...     seed=42,
+    ...     predictor_effects={"temperature": 0.3, "humidity": -0.1},
+    ... )
+    >>> df.shape
+    (100, 7)
+    >>> "temperature" in df.columns and "humidity" in df.columns
+    True
     """
     if seed is not None:
         np.random.seed(seed)
@@ -529,6 +561,16 @@ def generate_event_study_data(
     # Generate time fixed effects
     time_fe = np.random.normal(0, time_fe_sigma, n_time)
 
+    # Generate predictor time series (if any)
+    # Each predictor is an AR(1) series that varies over time but is the same
+    # for all units at a given time
+    predictors: dict[str, np.ndarray] = {}
+    if predictor_effects is not None:
+        for predictor_name in predictor_effects:
+            predictors[predictor_name] = generate_ar1_series(
+                n=n_time, phi=ar_phi, scale=ar_scale
+            )
+
     # Build panel data
     data = []
     for unit in range(n_units):
@@ -539,6 +581,11 @@ def generate_event_study_data(
             # Base outcome: unit FE + time FE + noise
             y = unit_fe[unit] + time_fe[t] + np.random.normal(0, noise_sigma)
 
+            # Add predictor contributions to outcome
+            if predictor_effects is not None:
+                for predictor_name, coef in predictor_effects.items():
+                    y += coef * predictors[predictor_name][t]
+
             # Add treatment effect for treated units in event window
             if is_treated:
                 event_time = t - treatment_time
@@ -548,15 +595,18 @@ def generate_event_study_data(
                 ):
                     y += treatment_effects[event_time]
 
-            data.append(
-                {
-                    "unit": unit,
-                    "time": t,
-                    "y": y,
-                    "treat_time": unit_treat_time,
-                    "treated": 1 if is_treated else 0,
-                }
-            )
+            row = {
+                "unit": unit,
+                "time": t,
+                "y": y,
+                "treat_time": unit_treat_time,
+                "treated": 1 if is_treated else 0,
+            }
+            # Add predictor values to the row
+            for predictor_name, series in predictors.items():
+                row[predictor_name] = series[t]
+
+            data.append(row)
 
     return pd.DataFrame(data)
 
@@ -564,6 +614,52 @@ def generate_event_study_data(
 # -----------------
 # UTILITY FUNCTIONS
 # -----------------
+
+
+def generate_ar1_series(
+    n: int,
+    phi: float = 0.9,
+    scale: float = 1.0,
+    initial: float = 0.0,
+) -> np.ndarray:
+    """
+    Generate an AR(1) autoregressive time series.
+
+    The AR(1) process is defined as:
+        x_{t+1} = phi * x_t + eta_t, where eta_t ~ N(0, scale^2)
+
+    Parameters
+    ----------
+    n : int
+        Length of the time series to generate.
+    phi : float
+        Autoregressive coefficient controlling persistence. Values closer to 1
+        produce smoother, more persistent series. Must be in (-1, 1) for
+        stationarity. Default 0.9.
+    scale : float
+        Standard deviation of the innovation noise. Default 1.0.
+    initial : float
+        Initial value of the series. Default 0.0.
+
+    Returns
+    -------
+    np.ndarray
+        Array of length n containing the AR(1) time series.
+
+    Example
+    -------
+    >>> from causalpy.data.simulate_data import generate_ar1_series
+    >>> np.random.seed(42)
+    >>> series = generate_ar1_series(n=10, phi=0.9, scale=0.5)
+    >>> len(series)
+    10
+    """
+    series = np.zeros(n)
+    series[0] = initial
+    innovations = np.random.normal(0, scale, n - 1)
+    for t in range(1, n):
+        series[t] = phi * series[t - 1] + innovations[t - 1]
+    return series
 
 
 def generate_seasonality(
