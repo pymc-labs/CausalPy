@@ -54,6 +54,18 @@ class EventStudy(BaseExperiment):
     - :math:`E_{it} = t - G_i` is event time (time relative to treatment)
     - :math:`\\beta_k` are the dynamic treatment effects at event time k
     - :math:`k_0` is the reference (omitted) event time
+    - :math:`\\mathbf{1}\\{E_{it} = k\\}` is the indicator function: equals 1 when the
+      condition :math:`E_{it} = k` is true (i.e., when observation it is at event time k),
+      and 0 otherwise
+
+    **Implementation via dummy variables:** The indicator function notation is equivalent
+    to creating dummy (binary) variables for each event time. Internally, this class
+    creates one dummy variable for each event time k in the event window, where the dummy
+    equals 1 for treated observations at that specific event time and 0 otherwise. One
+    event time (the reference period, typically k=-1) is omitted to avoid perfect
+    multicollinearity. The estimated regression coefficient :math:`\\beta_k` for each
+    dummy variable represents the Average Treatment Effect on the Treated (ATT) at event
+    time k, measured relative to the reference period.
 
     .. warning::
 
