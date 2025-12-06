@@ -414,6 +414,7 @@ class InterruptedTimeSeries(BaseExperiment):
         relative: bool = True,
         min_effect: float | None = None,
         treated_unit: str | None = None,
+        include_pretrend_check: bool = True,
         period: Literal["intervention", "post", "comparison"] | None = None,
     ):
         """Generate a decision-ready summary of causal effects.

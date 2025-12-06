@@ -318,13 +318,15 @@ class EventStudy(BaseExperiment):
             # Add reference event time as zero
             self.event_time_coeffs[self.reference_event_time] = 0.0
 
-    def summary(self, round_to: int | None = 2) -> None:
+    def summary(self, round_to: int | None = 2, hdi_prob: float = 0.94) -> None:
         """Print summary of event-time coefficients.
 
         Parameters
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        hdi_prob : float, optional
+            Probability mass for the highest density interval. Defaults to 0.94.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -336,9 +338,14 @@ class EventStudy(BaseExperiment):
         # Sort by event time
         sorted_times = sorted(self.event_time_coeffs.keys())
 
+        # Compute HDI bounds labels
+        hdi_lower_pct = (1 - hdi_prob) / 2 * 100
+        hdi_upper_pct = (1 - (1 - hdi_prob) / 2) * 100
+
         if isinstance(self.model, PyMCModel):
             print(
-                f"{'Event Time':>12} {'Mean':>10} {'SD':>10} {'HDI 3%':>10} {'HDI 97%':>10}"
+                f"{'Event Time':>12} {'Mean':>10} {'SD':>10} "
+                f"{f'HDI {hdi_lower_pct:.0f}%':>10} {f'HDI {hdi_upper_pct:.0f}%':>10}"
             )
             print("-" * 60)
             for k in sorted_times:
@@ -348,7 +355,7 @@ class EventStudy(BaseExperiment):
                 else:
                     mean_val = float(coeff.mean())
                     std_val = float(coeff.std())
-                    hdi = az.hdi(coeff.values.flatten(), hdi_prob=0.94)
+                    hdi = az.hdi(coeff.values.flatten(), hdi_prob=hdi_prob)
                     print(
                         f"{k:>12} "
                         f"{round_num(mean_val, round_to):>10} "
@@ -369,13 +376,17 @@ class EventStudy(BaseExperiment):
         print("-" * 60)
         self.print_coefficients(round_to)
 
-    def get_event_time_summary(self, round_to: int | None = 2) -> pd.DataFrame:
+    def get_event_time_summary(
+        self, round_to: int | None = 2, hdi_prob: float = 0.94
+    ) -> pd.DataFrame:
         """Get event-time coefficients as a DataFrame.
 
         Parameters
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        hdi_prob : float, optional
+            Probability mass for the highest density interval. Defaults to 0.94.
 
         Returns
         -------
@@ -385,6 +396,12 @@ class EventStudy(BaseExperiment):
         sorted_times = sorted(self.event_time_coeffs.keys())
         rows = []
 
+        # Compute HDI bounds labels
+        hdi_lower_pct = (1 - hdi_prob) / 2 * 100
+        hdi_upper_pct = (1 - (1 - hdi_prob) / 2) * 100
+        hdi_lower_col = f"hdi_{hdi_lower_pct:.0f}%"
+        hdi_upper_col = f"hdi_{hdi_upper_pct:.0f}%"
+
         for k in sorted_times:
             coeff = self.event_time_coeffs[k]
             if k == self.reference_event_time:
@@ -392,18 +409,18 @@ class EventStudy(BaseExperiment):
                     "event_time": k,
                     "mean": 0.0,
                     "std": 0.0,
-                    "hdi_3%": 0.0,
-                    "hdi_97%": 0.0,
+                    hdi_lower_col: 0.0,
+                    hdi_upper_col: 0.0,
                     "is_reference": True,
                 }
             elif isinstance(self.model, PyMCModel):
-                hdi = az.hdi(coeff.values.flatten(), hdi_prob=0.94)
+                hdi = az.hdi(coeff.values.flatten(), hdi_prob=hdi_prob)
                 row = {
                     "event_time": k,
                     "mean": float(coeff.mean()),
                     "std": float(coeff.std()),
-                    "hdi_3%": hdi[0],
-                    "hdi_97%": hdi[1],
+                    hdi_lower_col: hdi[0],
+                    hdi_upper_col: hdi[1],
                     "is_reference": False,
                 }
             else:
@@ -411,8 +428,8 @@ class EventStudy(BaseExperiment):
                     "event_time": k,
                     "mean": float(coeff),
                     "std": np.nan,
-                    "hdi_3%": np.nan,
-                    "hdi_97%": np.nan,
+                    hdi_lower_col: np.nan,
+                    hdi_upper_col: np.nan,
                     "is_reference": False,
                 }
             rows.append(row)
@@ -608,10 +625,12 @@ class EventStudy(BaseExperiment):
 
         return fig, ax
 
-    def get_plot_data_bayesian(self, **kwargs: dict) -> pd.DataFrame:
+    def get_plot_data_bayesian(
+        self, hdi_prob: float = 0.94, **kwargs: dict
+    ) -> pd.DataFrame:
         """Get plot data for Bayesian model."""
-        return self.get_event_time_summary()
+        return self.get_event_time_summary(hdi_prob=hdi_prob)
 
     def get_plot_data_ols(self, **kwargs: dict) -> pd.DataFrame:
         """Get plot data for OLS model."""
-        return self.get_event_time_summary()
+        return self.get_event_time_summary(hdi_prob=0.94)
