@@ -176,6 +176,35 @@ def test_event_study_duplicate_observations():
         )
 
 
+def test_event_study_staggered_adoption_not_supported():
+    """Test that staggered adoption (different treatment times) raises DataException."""
+    df = pd.DataFrame(
+        {
+            "unit": [0, 0, 1, 1, 2, 2],
+            "time": [0, 1, 0, 1, 0, 1],
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "treat_time": [
+                5.0,
+                5.0,
+                10.0,
+                10.0,
+                np.nan,
+                np.nan,
+            ],  # Different treat times
+        }
+    )
+
+    with pytest.raises(DataException, match="same treatment time"):
+        cp.EventStudy(
+            df,
+            formula="y ~ C(unit) + C(time)",
+            unit_col="unit",
+            time_col="time",
+            treat_time_col="treat_time",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+
 # ============================================================================
 # Integration Tests with PyMC
 # ============================================================================

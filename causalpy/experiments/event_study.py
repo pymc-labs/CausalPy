@@ -55,6 +55,14 @@ class EventStudy(BaseExperiment):
     - :math:`\\beta_k` are the dynamic treatment effects at event time k
     - :math:`k_0` is the reference (omitted) event time
 
+    .. warning::
+
+        This implementation uses a standard two-way fixed effects (TWFE) estimator,
+        which requires **simultaneous treatment timing** (all treated units receive
+        treatment at the same time). Staggered adoption designs, where different units
+        are treated at different times, can produce biased estimates when treatment
+        effects vary across cohorts. See Sun & Abraham (2021) for details.
+
     Parameters
     ----------
     data : pd.DataFrame
@@ -195,6 +203,19 @@ class EventStudy(BaseExperiment):
             raise DataException(
                 "Data contains duplicate unit-time observations. "
                 "Each unit should have at most one observation per time period."
+            )
+
+        # Check that all treated units have the same treatment time
+        # (staggered adoption is not currently supported)
+        treated_times = self.data.loc[
+            ~self.data[self.treat_time_col].isna(), self.treat_time_col
+        ].unique()
+        if len(treated_times) > 1:
+            raise DataException(
+                f"All treated units must have the same treatment time. "
+                f"Found {len(treated_times)} different treatment times: "
+                f"{sorted(treated_times)}. "
+                f"Staggered adoption designs are not currently supported."
             )
 
     def _compute_event_time(self) -> None:
