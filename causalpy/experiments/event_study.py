@@ -420,10 +420,31 @@ class EventStudy(BaseExperiment):
         return pd.DataFrame(rows)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] = (10, 6),
+        hdi_prob: float = 0.94,
+        **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot event-study coefficients with credible intervals (Bayesian)."""
-        fig, ax = plt.subplots(figsize=(10, 6))
+        """Plot event-study coefficients with credible intervals (Bayesian).
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals for rounding. Defaults to 2.
+        figsize : tuple[float, float], optional
+            Figure size in inches (width, height). Defaults to (10, 6).
+        hdi_prob : float, optional
+            Probability mass for the highest density interval. Defaults to 0.94.
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+            The matplotlib Figure and Axes objects.
+        """
+        fig, ax = plt.subplots(figsize=figsize)
 
         sorted_times = sorted(self.event_time_coeffs.keys())
         means_list: list[float] = []
@@ -437,7 +458,7 @@ class EventStudy(BaseExperiment):
                 lower_list.append(0.0)
                 upper_list.append(0.0)
             else:
-                hdi = az.hdi(coeff.values.flatten(), hdi_prob=0.94)
+                hdi = az.hdi(coeff.values.flatten(), hdi_prob=hdi_prob)
                 means_list.append(float(coeff.mean()))
                 lower_list.append(float(hdi[0]))
                 upper_list.append(float(hdi[1]))
@@ -447,6 +468,7 @@ class EventStudy(BaseExperiment):
         upper = np.array(upper_list)
 
         # Plot coefficients with error bars
+        hdi_pct = int(hdi_prob * 100)
         ax.errorbar(
             sorted_times,
             means,
@@ -456,7 +478,7 @@ class EventStudy(BaseExperiment):
             capthick=2,
             markersize=8,
             color="C0",
-            label="Event-time coefficient",
+            label=f"Event-time coefficient ({hdi_pct}% HDI)",
         )
 
         # Add horizontal line at zero
@@ -502,10 +524,28 @@ class EventStudy(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] = (10, 6),
+        **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot event-study coefficients (OLS)."""
-        fig, ax = plt.subplots(figsize=(10, 6))
+        """Plot event-study coefficients (OLS).
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals for rounding. Defaults to 2.
+        figsize : tuple[float, float], optional
+            Figure size in inches (width, height). Defaults to (10, 6).
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+            The matplotlib Figure and Axes objects.
+        """
+        fig, ax = plt.subplots(figsize=figsize)
 
         sorted_times = sorted(self.event_time_coeffs.keys())
         coeffs = []
