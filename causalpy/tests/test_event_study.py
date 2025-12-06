@@ -476,3 +476,67 @@ def test_event_study_all_control_units():
 
     # Check that result was created
     assert isinstance(result, cp.EventStudy)
+
+
+# ============================================================================
+# Tests for effect_summary
+# ============================================================================
+
+
+@pytest.mark.integration
+def test_event_study_pymc_effect_summary(mock_pymc_sample):
+    """Test EventStudy effect_summary method with PyMC model."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-3, 3),
+        reference_event_time=-1,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Test effect_summary returns EffectSummary with table and text
+    effect = result.effect_summary()
+    assert isinstance(effect.table, pd.DataFrame)
+    assert isinstance(effect.text, str)
+    assert "event_time" in effect.table.columns
+    assert "mean" in effect.table.columns
+
+    # Check prose mentions key elements
+    assert "Event study" in effect.text
+    assert "k=" in effect.text
+
+    # Test with include_pretrend_check=False
+    effect_no_pretrend = result.effect_summary(include_pretrend_check=False)
+    assert isinstance(effect_no_pretrend.text, str)
+
+
+def test_event_study_sklearn_effect_summary():
+    """Test EventStudy effect_summary method with sklearn model."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-3, 3),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Test effect_summary returns EffectSummary with table and text
+    effect = result.effect_summary()
+    assert isinstance(effect.table, pd.DataFrame)
+    assert isinstance(effect.text, str)
+    assert "event_time" in effect.table.columns
+    assert "mean" in effect.table.columns
+
+    # Check prose mentions key elements
+    assert "Event study" in effect.text
+    assert "k=" in effect.text
