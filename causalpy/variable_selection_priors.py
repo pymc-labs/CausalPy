@@ -20,7 +20,7 @@ and horseshoe priors for automatic variable selection and shrinkage, built on
 top of the pymc-extras Prior infrastructure.
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ from pymc_extras.prior import Prior
 
 
 def _relaxed_bernoulli_transform(
-    p: Union[float, pt.TensorVariable], temperature: float = 0.1
+    p: float | pt.TensorVariable, temperature: float = 0.1
 ):
     """
     Transform function for relaxed (continuous) Bernoulli distribution.
@@ -100,7 +100,7 @@ class SpikeAndSlabPrior:
         pi_beta: float = 2,
         slab_sigma: float = 2,
         temperature: float = 0.1,
-        dims: Optional[Union[str, tuple]] = None,
+        dims: str | tuple | None = None,
     ):
         self.pi_alpha = pi_alpha
         self.pi_beta = pi_beta
@@ -176,11 +176,11 @@ class HorseshoePrior:
 
     def __init__(
         self,
-        tau0: Optional[float] = None,
+        tau0: float | None = None,
         nu: float = 3,
         c2_alpha: float = 2,
         c2_beta: float = 2,
-        dims: Optional[Union[str, tuple]] = None,
+        dims: str | tuple | None = None,
     ):
         self.tau0 = tau0
         self.nu = nu
@@ -277,7 +277,7 @@ class VariableSelectionPrior:
     ...     beta = vs_prior.create_prior(name="beta", n_params=5, dims="features")
     """
 
-    def __init__(self, prior_type: str, hyperparams: Optional[Dict[str, Any]] = None):
+    def __init__(self, prior_type: str, hyperparams: dict[str, Any] | None = None):
         """Initialize the variable selection prior factory."""
         self.prior_type = prior_type.lower()
         self.hyperparams = hyperparams or {}
@@ -292,8 +292,8 @@ class VariableSelectionPrior:
         self._prior_instance = None
 
     def _get_default_hyperparams(
-        self, n_params: int, X: Optional[np.ndarray] = None
-    ) -> Dict[str, Any]:
+        self, n_params: int, X: np.ndarray | None = None
+    ) -> dict[str, Any]:
         """
         Get default hyperparameters for the chosen prior type.
 
@@ -346,10 +346,10 @@ class VariableSelectionPrior:
         self,
         name: str,
         n_params: int,
-        dims: Optional[Union[str, tuple]] = None,
-        X: Optional[np.ndarray] = None,
-        hyperparams: Optional[Dict[str, Any]] = None,
-    ) -> Union[pm.Deterministic, pm.Distribution]:
+        dims: str | tuple | None = None,
+        X: np.ndarray | None = None,
+        hyperparams: dict[str, Any] | None = None,
+    ) -> pm.Deterministic | pm.Distribution:
         """
         Create the specified prior on a coefficient vector.
 
@@ -559,10 +559,10 @@ def create_variable_selection_prior(
     prior_type: str,
     name: str,
     n_params: int,
-    dims: Optional[Union[str, tuple]] = None,
-    X: Optional[np.ndarray] = None,
-    hyperparams: Optional[Dict[str, Any]] = None,
-) -> Union[pm.Deterministic, pm.Distribution]:
+    dims: str | tuple | None = None,
+    X: np.ndarray | None = None,
+    hyperparams: dict[str, Any] | None = None,
+) -> pm.Deterministic | pm.Distribution:
     """
     Convenience function to create a variable selection prior in one call.
 

@@ -677,7 +677,7 @@ class InstrumentalVariableRegression(PyMCModel):
         Z: np.ndarray,
         y: np.ndarray,
         t: np.ndarray,
-        coords: Dict[str, Any],
+        coords: dict[str, Any],
         priors,
         vs_prior_type=None,
         vs_hyperparams=None,
@@ -721,7 +721,8 @@ class InstrumentalVariableRegression(PyMCModel):
                 warnings.warn(
                     "Variable selection priors specified. "
                     "The 'mus' and 'sigmas' in the priors dict will be ignored "
-                    "for beta coefficients. Only 'eta' and 'lkj_sd' will be used."
+                    "for beta coefficients. Only 'eta' and 'lkj_sd' will be used.",
+                    stacklevel=2,
                 )
 
             # Create coefficient priors
