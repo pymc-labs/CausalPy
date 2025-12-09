@@ -349,7 +349,7 @@ class VariableSelectionPrior:
         dims: str | tuple | None = None,
         X: np.ndarray | None = None,
         hyperparams: dict[str, Any] | None = None,
-    ) -> pm.Deterministic | pm.Distribution:
+    ) -> pm.Deterministic:
         """
         Create the specified prior on a coefficient vector.
 
@@ -562,7 +562,7 @@ def create_variable_selection_prior(
     dims: str | tuple | None = None,
     X: np.ndarray | None = None,
     hyperparams: dict[str, Any] | None = None,
-) -> pm.Deterministic | pm.Distribution:
+) -> pm.Deterministic:
     """
     Convenience function to create a variable selection prior in one call.
 
