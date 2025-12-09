@@ -17,7 +17,6 @@ Regression kink design
 """
 
 import warnings  # noqa: I001
-from typing import Union
 
 
 from matplotlib import pyplot as plt
@@ -75,6 +74,7 @@ class RegressionKink(BaseExperiment):
                 warnings.warn(
                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
                     UserWarning,
+                    stacklevel=2,
                 )
             y, X = dmatrices(formula, filtered_data)
         else:
@@ -192,7 +192,7 @@ class RegressionKink(BaseExperiment):
         mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
         return mu_kink_left, mu_kink, mu_kink_right
 
-    def _is_treated(self, x: Union[np.ndarray, pd.Series]) -> np.ndarray:
+    def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 

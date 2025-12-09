@@ -39,6 +39,7 @@ did_pymc_banks.ipynb
 
 its_skl.ipynb
 its_pymc.ipynb
+its_post_intervention_analysis.ipynb
 its_covid.ipynb
 its_lift_test.ipynb
 :::

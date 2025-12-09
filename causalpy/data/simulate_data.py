@@ -308,7 +308,7 @@ def generate_regression_discontinuity_data(
 
 def generate_ancova_data(
     N: int = 200,
-    pre_treatment_means: np.ndarray = np.array([10, 12]),
+    pre_treatment_means: np.ndarray | None = None,
     treatment_effect: int = 2,
     sigma: int = 1,
 ) -> pd.DataFrame:
@@ -324,6 +324,8 @@ def generate_ancova_data(
     ... )
     >>> df.to_csv(pathlib.Path.cwd() / "ancova_data.csv", index=False)  # doctest: +SKIP
     """
+    if pre_treatment_means is None:
+        pre_treatment_means = np.array([10, 12])
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
     post = pre + treatment_effect * group + np.random.normal(size=N) * sigma

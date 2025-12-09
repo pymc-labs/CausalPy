@@ -238,7 +238,9 @@ class InstrumentalVariable(BaseExperiment):
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
+        self.ols_beta_params = dict(
+            zip(self._x_design_info.column_names, beta_params, strict=False)
+        )
         self.ols_reg = ols_reg
 
     def plot(self, *args, **kwargs) -> None:  # type: ignore[override]

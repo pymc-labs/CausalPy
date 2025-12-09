@@ -24,7 +24,7 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 """
 
 from dataclasses import dataclass
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import arviz as az
 import numpy as np
@@ -55,7 +55,7 @@ class EffectSummary:
 
 
 def _extract_hdi_bounds(
-    hdi_result: Union[xr.Dataset, xr.DataArray], hdi_prob: float = 0.95
+    hdi_result: xr.Dataset | xr.DataArray, hdi_prob: float = 0.95
 ) -> tuple[float, float]:
     """Extract HDI lower and upper bounds from arviz.hdi result.
 
@@ -167,7 +167,7 @@ def _compute_statistics_scalar(
     effect: xr.DataArray,
     hdi_prob: float = 0.95,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ) -> dict[str, float]:
     """Compute statistics for scalar causal effects (DiD, RD, RKink).
 
@@ -312,7 +312,7 @@ def _effect_summary_did(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Difference-in-Differences experiments."""
     causal_impact = result.causal_impact
@@ -344,7 +344,7 @@ def _effect_summary_rd(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
@@ -376,9 +376,7 @@ def _effect_summary_rd(
 # ==============================================================================
 
 
-def _select_treated_unit(
-    data: xr.DataArray, treated_unit: Optional[str]
-) -> xr.DataArray:
+def _select_treated_unit(data: xr.DataArray, treated_unit: str | None) -> xr.DataArray:
     """Select a specific treated unit from multi-unit xarray data.
 
     Parameters
@@ -408,7 +406,7 @@ def _select_treated_unit(
 
 
 def _select_treated_unit_numpy(
-    data: np.ndarray, result, treated_unit: Optional[str]
+    data: np.ndarray, result, treated_unit: str | None
 ) -> np.ndarray:
     """Select a specific treated unit from multi-dimensional numpy array.
 
@@ -629,12 +627,13 @@ def _compute_statistics(
     cumulative=True,
     relative=True,
     min_effect=None,
+    time_dim="obs_ind",
 ):
     """Compute all summary statistics from posterior draws."""
     stats = {}
 
     # Average effect over window
-    avg_effect = impact.mean(dim="obs_ind")
+    avg_effect = impact.mean(dim=time_dim)
     stats["avg"] = {
         "mean": float(avg_effect.mean(dim=["chain", "draw"]).values),
         "median": float(avg_effect.median(dim=["chain", "draw"]).values),
@@ -677,9 +676,9 @@ def _compute_statistics(
     # Cumulative effect
     if cumulative:
         # Use cumulative sum over window
-        cum_effect = impact.cumsum(dim="obs_ind")
+        cum_effect = impact.cumsum(dim=time_dim)
         # Take final value (cumulative over entire window)
-        cum_final = cum_effect.isel(obs_ind=-1)
+        cum_final = cum_effect.isel({time_dim: -1})
 
         stats["cum"] = {
             "mean": float(cum_final.mean(dim=["chain", "draw"]).values),
@@ -720,7 +719,7 @@ def _compute_statistics(
     # Relative effects
     if relative:
         epsilon = 1e-8  # Guard against division by zero
-        counterfactual_mean = counterfactual.mean(dim="obs_ind")
+        counterfactual_mean = counterfactual.mean(dim=time_dim)
         rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
 
         stats["avg"]["relative_mean"] = float(
@@ -746,7 +745,9 @@ def _compute_statistics(
 
         if cumulative:
             # Relative cumulative: (cumulative effect / cumulative counterfactual) * 100
-            counterfactual_cum = counterfactual.cumsum(dim="obs_ind").isel(obs_ind=-1)
+            counterfactual_cum = counterfactual.cumsum(dim=time_dim).isel(
+                {time_dim: -1}
+            )
             rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
 
             stats["cum"]["relative_mean"] = float(
@@ -850,6 +851,7 @@ def _generate_prose(
     direction="increase",
     cumulative=True,
     relative=True,
+    prefix="Post-period",
 ):
     """Generate prose summary from statistics."""
     hdi_pct = int((1 - alpha) * 100)
@@ -883,7 +885,7 @@ def _generate_prose(
         direction_text = "effect"
 
     prose_parts = [
-        f"Post-period ({window_str}), the average effect was {fmt_num(avg_mean)} "
+        f"{prefix} ({window_str}), the average effect was {fmt_num(avg_mean)} "
         f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]), "
         f"with a posterior probability of an {direction_text} of {fmt_num(p_val, 3)}."
     ]
@@ -1138,6 +1140,7 @@ def _generate_prose_ols(
     alpha=0.05,
     cumulative=True,
     relative=True,
+    prefix="Post-period",
 ):
     """Generate prose summary for OLS models."""
     ci_pct = int((1 - alpha) * 100)
@@ -1161,7 +1164,7 @@ def _generate_prose_ols(
     p_val = stats["avg"]["p_value"]
 
     prose_parts = [
-        f"Post-period ({window_str}), the average effect was {fmt_num(avg_mean)} "
+        f"{prefix} ({window_str}), the average effect was {fmt_num(avg_mean)} "
         f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     ]
@@ -1319,7 +1322,7 @@ def _effect_summary_rkink(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
-    min_effect: Optional[float] = None,
+    min_effect: float | None = None,
 ):
     """Generate effect summary for Regression Kink experiments."""
     gradient_change = result.gradient_change
