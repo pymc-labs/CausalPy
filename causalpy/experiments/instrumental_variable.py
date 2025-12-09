@@ -204,7 +204,8 @@ class InstrumentalVariable(BaseExperiment):
             warnings.warn(
                 """Warning. The treatment variable is not Binary.
                 We will use the multivariate normal likelihood
-                for continuous treatment."""
+                for continuous treatment.""",
+                stacklevel=2,
             )
 
     def get_2SLS_fit(self) -> None:
