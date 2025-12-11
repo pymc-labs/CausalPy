@@ -225,7 +225,6 @@ class PlaceboAnalysis(BaseModel):
 
         return results
 ```
-Done.
 
 ### Code example
 
