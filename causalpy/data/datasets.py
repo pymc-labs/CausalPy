@@ -49,22 +49,62 @@ def _get_data_home() -> pathlib.Path:
 
 
 def load_data(dataset: str | None = None) -> pd.DataFrame:
-    """Load the requested dataset and return a pandas DataFrame.
+    """Load example datasets for causal inference analysis.
+
+    This function loads pre-packaged datasets that are used in CausalPy's
+    documentation and examples. These datasets demonstrate various causal
+    inference methods including difference-in-differences, regression
+    discontinuity, synthetic control, interrupted time series, and more.
 
     Parameters
     ----------
-    dataset : str, optional
-        The desired dataset to load. If None, raises ValueError.
+    dataset : str
+        Name of the dataset to load. Available datasets are:
+
+        - ``"anova1"`` - ANCOVA example with pre/post treatment nonequivalent groups
+        - ``"banks"`` - Historic banking closures data for difference-in-differences
+        - ``"brexit"`` - UK GDP data for estimating causal impact of Brexit
+        - ``"covid"`` - Deaths and temperature data for England and Wales
+        - ``"did"`` - Synthetic difference-in-differences example dataset
+        - ``"drinking"`` - Minimum legal drinking age data for regression discontinuity
+        - ``"geolift1"`` - Single treatment geo-lift dataset for synthetic control
+        - ``"geolift_multi_cell"`` - Multi-cell geo-lift dataset for synthetic control
+        - ``"its"`` - Interrupted time series example dataset
+        - ``"its simple"`` - Simplified interrupted time series dataset
+        - ``"lalonde"`` - LaLonde dataset for propensity score analysis
+        - ``"nets"`` - National Supported Work Demonstration dataset
+        - ``"nhefs"`` - National Health and Nutrition Examination Survey data
+        - ``"pisa18"`` - PISA 2018 sample data
+        - ``"rd"`` - Regression discontinuity example dataset
+        - ``"risk"`` - Acemoglu, Johnson & Robinson (2001) data for instrumental variables
+        - ``"sc"`` - Synthetic control example dataset
+        - ``"schoolReturns"`` - Schooling returns data for instrumental variable analysis
 
     Returns
     -------
     pd.DataFrame
-        The loaded dataset as a pandas DataFrame.
+        The requested dataset as a pandas DataFrame.
 
     Raises
     ------
     ValueError
-        If the requested dataset is not found.
+        If the requested dataset name is not found in the available datasets.
+
+    Examples
+    --------
+    Load the difference-in-differences example dataset:
+
+    >>> import causalpy as cp
+    >>> df = cp.load_data("did")
+
+    Load the regression discontinuity dataset:
+
+    >>> df = cp.load_data("rd")
+
+    See Also
+    --------
+    For detailed usage examples of each dataset, refer to the CausalPy documentation
+    at https://causalpy.readthedocs.io/
     """
 
     if dataset in DATASETS:
