@@ -48,7 +48,7 @@ def _get_data_home() -> pathlib.Path:
     return pathlib.Path(cp.__file__).parents[1] / "causalpy" / "data"
 
 
-def load_data(dataset: str | None = None) -> pd.DataFrame:
+def load_data(dataset: str) -> pd.DataFrame:
     """Load example datasets for causal inference analysis.
 
     This function loads pre-packaged datasets that are used in CausalPy's
@@ -65,7 +65,7 @@ def load_data(dataset: str | None = None) -> pd.DataFrame:
         - ``"banks"`` - Historic banking closures data for difference-in-differences
         - ``"brexit"`` - UK GDP data for estimating causal impact of Brexit
         - ``"covid"`` - Deaths and temperature data for England and Wales
-        - ``"did"`` - Synthetic difference-in-differences example dataset
+        - ``"did"`` - Difference-in-differences example dataset
         - ``"drinking"`` - Minimum legal drinking age data for regression discontinuity
         - ``"geolift1"`` - Single treatment geo-lift dataset for synthetic control
         - ``"geolift_multi_cell"`` - Multi-cell geo-lift dataset for synthetic control
