@@ -100,11 +100,6 @@ def load_data(dataset: str) -> pd.DataFrame:
     Load the regression discontinuity dataset:
 
     >>> df = cp.load_data("rd")
-
-    See Also
-    --------
-    For detailed usage examples of each dataset, refer to the CausalPy documentation
-    at https://causalpy.readthedocs.io/
     """
 
     if dataset in DATASETS:
