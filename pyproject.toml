@@ -83,6 +83,7 @@ docs = [
     "labs-sphinx-theme @ git+https://github.com/pymc-labs/labs-sphinx-theme@v016_update",
     "sphinx-copybutton",
     "sphinx-rtd-theme",
+    "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex",
     "sphinx-notfound-page",
