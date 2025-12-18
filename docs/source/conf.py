@@ -63,6 +63,7 @@ extensions = [
     "notfound.extension",
     "sphinx_copybutton",
     "sphinx_design",
+    "sphinx_sitemap",
     "sphinx_togglebutton",
 ]
 
@@ -134,11 +135,16 @@ myst_enable_extensions = [
     "html_admonition",
 ]
 
+# sitemap extension configuration
+site_url = "https://causalpy.readthedocs.io/"
+sitemap_url_scheme = f"{{lang}}{version}/{{link}}"
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
+html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -156,6 +162,7 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs/source/",
     "default_mode": "light",
+    "baseurl": "https://causalpy.readthedocs.io/",
 }
 
 # -- Options for autodoc ----------------------------------------------------

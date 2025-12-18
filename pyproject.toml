@@ -80,7 +80,7 @@ docs = [
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
-    "labs-sphinx-theme",
+    "labs-sphinx-theme @ git+https://github.com/pymc-labs/labs-sphinx-theme@v016_update",
     "sphinx-copybutton",
     "sphinx-rtd-theme",
     "statsmodels",
