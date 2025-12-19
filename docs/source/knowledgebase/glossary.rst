@@ -23,7 +23,7 @@ Glossary
 
    Comparative interrupted time-series
    CITS
-      An interrupted time series design with added comparison time series observations.
+      An interrupted time series design with added comparison time series observations. In CITS, one or more control units are included as predictors in the model, providing a counterfactual by accounting for common trends and shocks that affect both treated and control units. This approach provides stronger causal inference than standard ITS by controlling for confounding trends. CITS can be implemented using the ``InterruptedTimeSeries`` class by including control unit observations as predictors in the model formula (e.g., ``treated ~ 1 + control``). Unlike synthetic control, CITS typically includes an intercept and has no sum-to-1 constraint on control weights. Additional covariates such as seasonality, time trends, or other predictors can also be included alongside control units.
 
    Confidence interval
    CI
