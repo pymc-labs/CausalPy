@@ -72,14 +72,22 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
 
     # Strategy: Use matplotlib's AutoDateLocator and ConciseDateFormatter
     # which provide intelligent automatic date formatting
+    
+    # Calculate number of years for better decisions
+    num_years = days_span / 365.25
 
-    if days_span > 365 * 3:  # More than 3 years
-        # Use yearly major ticks, quarterly minor ticks
-        major_locator = mdates.YearLocator()
-        minor_locator = mdates.MonthLocator(bymonth=[1, 4, 7, 10])
+    if days_span > 365 * 6:  # More than 6 years
+        # Use yearly major ticks, no minor ticks (too cluttered)
+        # For very long series, space out the year labels more
+        if num_years > 15:
+            # Every 2 years for very long series
+            major_locator = mdates.YearLocator(2)
+        else:
+            major_locator = mdates.YearLocator()
+        minor_locator = mdates.YearLocator()  # Minor at every year
         major_formatter = mdates.DateFormatter("%Y")
 
-    elif days_span > 365:  # 1-3 years
+    elif days_span > 365:  # 1-6 years
         # Use yearly major ticks, monthly minor ticks
         major_locator = mdates.YearLocator()
         minor_locator = mdates.MonthLocator()
@@ -108,13 +116,22 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
     ax.xaxis.set_major_formatter(major_formatter)
     ax.xaxis.set_minor_locator(minor_locator)
 
-    # Rotate labels for better readability (except for year-only labels)
-    if days_span <= 365 * 3:
+    # Rotate labels for better readability
+    # For very long series (>8 years), use vertical rotation to prevent overlap
+    if num_years > 8:
+        ax.tick_params(axis="x", labelrotation=-90)
+    elif days_span <= 365 * 3:
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
     # Enable minor grid lines for better readability
-    ax.grid(True, which="minor", linestyle=":", alpha=0.3)
-    ax.grid(True, which="major", linestyle="-", alpha=0.5)
+    # For long series with years, only show minor gridlines if <= 6 years
+    if num_years > 6:
+        # Only major grid for very long series
+        ax.grid(True, which="major", linestyle="-", alpha=0.5)
+    else:
+        # Both major and minor for shorter series
+        ax.grid(True, which="minor", linestyle=":", alpha=0.3)
+        ax.grid(True, which="major", linestyle="-", alpha=0.5)
 
 
 def format_date_axes(axes: list[plt.Axes], date_index: pd.DatetimeIndex) -> None:
