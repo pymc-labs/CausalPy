@@ -11,9 +11,6 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Sync labels from closing issues
         uses: williambdean/closing-labels@v0.0.6
         with:
