@@ -61,64 +61,54 @@ class TestCombineDatetimeIndices:
 class TestFormatDateAxis:
     """Tests for format_date_axis function"""
 
-    def test_long_date_range_uses_year_locator(self):
-        """Test that long date ranges (>3 years) use YearLocator"""
+    def test_uses_auto_date_locator(self):
+        """Test that AutoDateLocator is used for automatic tick positioning"""
         dates = pd.date_range("2010-01-01", "2020-01-01", freq="ME")
         fig, ax = plt.subplots()
         ax.plot(dates, np.random.randn(len(dates)))
 
         format_date_axis(ax, dates)
 
-        # Check that major locator is YearLocator
-        assert isinstance(ax.xaxis.get_major_locator(), mdates.YearLocator)
+        # Check that major locator is AutoDateLocator
+        assert isinstance(ax.xaxis.get_major_locator(), mdates.AutoDateLocator)
         plt.close(fig)
 
-    def test_medium_date_range_uses_year_locator(self):
-        """Test that medium date ranges (1-3 years) use YearLocator"""
+    def test_uses_concise_date_formatter(self):
+        """Test that ConciseDateFormatter is used for concise labels"""
         dates = pd.date_range("2020-01-01", "2022-01-01", freq="ME")
         fig, ax = plt.subplots()
         ax.plot(dates, np.random.randn(len(dates)))
 
         format_date_axis(ax, dates)
 
-        # Check that major locator is YearLocator
-        assert isinstance(ax.xaxis.get_major_locator(), mdates.YearLocator)
+        # Check that major formatter is ConciseDateFormatter
+        assert isinstance(ax.xaxis.get_major_formatter(), mdates.ConciseDateFormatter)
         plt.close(fig)
 
-    def test_months_date_range_uses_month_locator(self):
-        """Test that 3-12 month date ranges use MonthLocator"""
-        dates = pd.date_range("2023-01-01", "2023-07-01", freq="D")
+    def test_long_date_range_rotates_labels_vertically(self):
+        """Test that long date ranges (>3 years) use vertical rotation (-90)"""
+        dates = pd.date_range("2010-01-01", "2020-01-01", freq="ME")
         fig, ax = plt.subplots()
         ax.plot(dates, np.random.randn(len(dates)))
 
         format_date_axis(ax, dates)
 
-        # Check that major locator is MonthLocator
-        assert isinstance(ax.xaxis.get_major_locator(), mdates.MonthLocator)
+        # Check rotation is -90 (or 270) for long series
+        rotation = ax.xaxis.get_ticklabels()[0].get_rotation()
+        assert rotation in (-90, 270.0)
         plt.close(fig)
 
-    def test_short_date_range_uses_week_locator(self):
-        """Test that 1-3 month date ranges use WeekdayLocator"""
-        dates = pd.date_range("2023-01-01", "2023-02-15", freq="D")
+    def test_short_date_range_keeps_labels_horizontal(self):
+        """Test that short date ranges (<=3 years) keep labels horizontal (0)"""
+        dates = pd.date_range("2020-01-01", "2022-01-01", freq="ME")
         fig, ax = plt.subplots()
         ax.plot(dates, np.random.randn(len(dates)))
 
         format_date_axis(ax, dates)
 
-        # Check that major locator is WeekdayLocator
-        assert isinstance(ax.xaxis.get_major_locator(), mdates.WeekdayLocator)
-        plt.close(fig)
-
-    def test_very_short_date_range_uses_week_locator(self):
-        """Test that <1 month date ranges use WeekdayLocator"""
-        dates = pd.date_range("2023-01-01", "2023-01-22", freq="D")
-        fig, ax = plt.subplots()
-        ax.plot(dates, np.random.randn(len(dates)))
-
-        format_date_axis(ax, dates)
-
-        # Check that major locator is WeekdayLocator
-        assert isinstance(ax.xaxis.get_major_locator(), mdates.WeekdayLocator)
+        # Check rotation is 0 for short series
+        rotation = ax.xaxis.get_ticklabels()[0].get_rotation()
+        assert rotation == 0
         plt.close(fig)
 
     def test_empty_date_index_does_not_error(self):
@@ -140,17 +130,17 @@ class TestFormatDateAxis:
         format_date_axis(ax, dates)
         plt.close(fig)
 
-    def test_grid_is_enabled(self):
-        """Test that grid lines are enabled after formatting"""
+    def test_maxticks_parameter_is_accepted(self):
+        """Test that maxticks parameter is accepted without error"""
         dates = pd.date_range("2020-01-01", "2022-01-01", freq="ME")
         fig, ax = plt.subplots()
         ax.plot(dates, np.random.randn(len(dates)))
 
-        format_date_axis(ax, dates)
+        # Should not raise an error with custom maxticks
+        format_date_axis(ax, dates, maxticks=5)
 
-        # Check that gridlines are present (public API)
-        # The grid should have been configured
-        assert len(ax.xaxis.get_gridlines()) > 0
+        # Verify AutoDateLocator is still used
+        assert isinstance(ax.xaxis.get_major_locator(), mdates.AutoDateLocator)
         plt.close(fig)
 
 
@@ -167,8 +157,8 @@ class TestFormatDateAxes:
 
         format_date_axes(axes, dates)
 
-        # Check that bottom axis has YearLocator
-        assert isinstance(axes[-1].xaxis.get_major_locator(), mdates.YearLocator)
+        # Check that bottom axis has AutoDateLocator
+        assert isinstance(axes[-1].xaxis.get_major_locator(), mdates.AutoDateLocator)
         plt.close(fig)
 
     def test_empty_axes_list_does_not_error(self):
@@ -188,7 +178,7 @@ class TestFormatDateAxes:
 
         format_date_axes(axes, dates)
 
-        # Bottom axis should have new locator
-        assert isinstance(axes[-1].xaxis.get_major_locator(), mdates.YearLocator)
+        # Bottom axis should have AutoDateLocator
+        assert isinstance(axes[-1].xaxis.get_major_locator(), mdates.AutoDateLocator)
 
         plt.close(fig)

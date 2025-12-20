@@ -41,15 +41,13 @@ def _combine_datetime_indices(
     return pd.DatetimeIndex(index1.tolist() + index2.tolist()).sort_values()
 
 
-def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
+def format_date_axis(
+    ax: plt.Axes,
+    date_index: pd.DatetimeIndex,
+    maxticks: int = 8,
+) -> None:
     """
-    Apply intelligent date formatting to x-axis based on date range.
-
-    This function automatically selects appropriate date formatters and locators
-    based on the span of dates being plotted. It aims to:
-    - Prevent overlapping x-axis labels
-    - Use appropriate granularity (years, months, weeks, days)
-    - Set intelligent major and minor ticks/gridlines
+    Apply intelligent date formatting to x-axis using AutoDateLocator.
 
     Parameters
     ----------
@@ -57,88 +55,22 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
         Matplotlib axes object to format
     date_index : pd.DatetimeIndex
         The datetime index being plotted on the x-axis
-
-    Notes
-    -----
-    This function uses matplotlib's built-in date formatters and locators,
-    which provide good automatic behavior for most date ranges.
+    maxticks : int
+        Maximum number of ticks to display (default 8)
     """
-    if len(date_index) == 0:
-        return
+    locator = mdates.AutoDateLocator(minticks=3, maxticks=maxticks)
+    formatter = mdates.ConciseDateFormatter(locator)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
 
-    # Calculate the span of dates
-    date_span = date_index.max() - date_index.min()
-    days_span = date_span.days
-
-    # Strategy: Use matplotlib's AutoDateLocator and ConciseDateFormatter
-    # which provide intelligent automatic date formatting
-
-    # Calculate number of years for better decisions
-    num_years = days_span / 365.25
-
-    if days_span > 365 * 6:  # More than 6 years
-        # Use yearly major ticks, no minor ticks (too cluttered)
-        # For very long series, space out the year labels more
-        if num_years > 15:
-            # Every 2 years for very long series
-            major_locator = mdates.YearLocator(2)
+    # Rotate labels: vertical (-90) for long series, horizontal (0) otherwise
+    if len(date_index) > 1:
+        date_span = date_index.max() - date_index.min()
+        num_years = date_span.days / 365.25
+        if num_years > 3:
+            ax.tick_params(axis="x", labelrotation=-90)
         else:
-            major_locator = mdates.YearLocator()
-        minor_locator = mdates.MonthLocator(bymonth=[1, 7])  # Semi-annual minor ticks
-        major_formatter = mdates.DateFormatter("%Y")
-
-    elif days_span > 365:  # 1-6 years
-        # Use yearly major ticks, monthly minor ticks
-        major_locator = mdates.YearLocator()
-        minor_locator = mdates.MonthLocator()
-        major_formatter = mdates.DateFormatter("%Y")
-
-    elif days_span > 90:  # 3-12 months
-        # Use monthly major ticks
-        major_locator = mdates.MonthLocator()
-        minor_locator = mdates.MonthLocator(bymonthday=15)
-        major_formatter = mdates.DateFormatter("%Y-%m")
-
-    elif days_span > 30:  # 1-3 months
-        # Use bi-weekly major ticks
-        major_locator = mdates.WeekdayLocator(byweekday=mdates.MO, interval=2)
-        minor_locator = mdates.WeekdayLocator(byweekday=mdates.MO)
-        major_formatter = mdates.DateFormatter("%Y-%m-%d")
-
-    else:  # Less than 1 month
-        # Use weekly major ticks
-        major_locator = mdates.WeekdayLocator(byweekday=mdates.MO)
-        minor_locator = mdates.DayLocator()
-        major_formatter = mdates.DateFormatter("%Y-%m-%d")
-
-    # Apply formatters and locators
-    ax.xaxis.set_major_locator(major_locator)
-    ax.xaxis.set_major_formatter(major_formatter)
-    ax.xaxis.set_minor_locator(minor_locator)
-
-    # Rotate labels for better readability
-    # For very long series (>8 years), use vertical rotation to prevent overlap
-    if num_years > 8:
-        ax.tick_params(axis="x", labelrotation=-90)
-    elif num_years > 3:
-        # 3-8 years: use 45 degree rotation
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
-    elif days_span > 90:
-        # Less than 3 years but more than 3 months: also use 45 degree rotation
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
-
-    # Enable minor grid lines for better readability
-    # For long series with years, only show minor gridlines if <= 6 years
-    if num_years > 6:
-        # Only major grid for very long series
-        ax.grid(True, which="major", linestyle="-", alpha=0.5)
-        ax.grid(False, which="minor")  # Explicitly disable minor grid
-    else:
-        # Both major and minor for shorter series
-        # Use explicit grid calls to ensure they're visible even with arviz theme
-        ax.minorticks_on()
-        ax.grid(True, which="minor", linestyle=":", alpha=0.3)
-        ax.grid(True, which="major", linestyle="-", alpha=0.5)
+            ax.tick_params(axis="x", labelrotation=0)
 
 
 def format_date_axes(axes: list[plt.Axes], date_index: pd.DatetimeIndex) -> None:
@@ -152,6 +84,8 @@ def format_date_axes(axes: list[plt.Axes], date_index: pd.DatetimeIndex) -> None
     date_index : pd.DatetimeIndex
         The datetime index being plotted on the x-axis
     """
-    # Only format the bottom-most axis to avoid duplicate labels
-    if len(axes) > 0:
-        format_date_axis(axes[-1], date_index)
+    if len(axes) == 0:
+        return
+
+    # Apply formatting to the bottom-most axis
+    format_date_axis(axes[-1], date_index)
