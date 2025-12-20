@@ -199,6 +199,13 @@ def check_convex_hull_violation(
     below = treated_series < control_min
 
     n_points = len(treated_series)
+    if n_points == 0:
+        return {
+            "passes": True,
+            "n_violations": 0,
+            "pct_above": 0.0,
+            "pct_below": 0.0,
+        }
     return {
         "passes": not (above.any() or below.any()),
         "n_violations": int(above.sum() + below.sum()),

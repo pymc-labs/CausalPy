@@ -174,3 +174,18 @@ def test_check_convex_hull_violation_boundary():
     assert result["n_violations"] == 0
     assert result["pct_above"] == 0.0
     assert result["pct_below"] == 0.0
+
+
+def test_check_convex_hull_violation_empty_series():
+    """Test convex hull check with empty arrays (no pre-intervention data)"""
+    # Edge case: empty treated series (can occur when treatment_time is at start)
+    treated = np.array([])
+    controls = np.array([]).reshape(0, 3)  # 0 timepoints, 3 controls
+
+    result = check_convex_hull_violation(treated, controls)
+
+    # Should pass without error and return safe defaults
+    assert result["passes"] is True
+    assert result["n_violations"] == 0
+    assert result["pct_above"] == 0.0
+    assert result["pct_below"] == 0.0
