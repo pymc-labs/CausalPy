@@ -26,7 +26,7 @@ from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import format_date_axes
+from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
@@ -943,9 +943,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Apply intelligent date formatting if data has datetime index
         if isinstance(self.datapre.index, pd.DatetimeIndex):
             # Combine pre and post indices for full date range
-            full_index = pd.DatetimeIndex(
-                self.datapre.index.tolist() + self.datapost.index.tolist()
-            ).sort_values()
+            full_index = _combine_datetime_indices(self.datapre.index, self.datapost.index)
             format_date_axes(ax, full_index)
 
         return fig, ax
@@ -1033,9 +1031,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Apply intelligent date formatting if data has datetime index
         if isinstance(self.datapre.index, pd.DatetimeIndex):
             # Combine pre and post indices for full date range
-            full_index = pd.DatetimeIndex(
-                self.datapre.index.tolist() + self.datapost.index.tolist()
-            ).sort_values()
+            full_index = _combine_datetime_indices(self.datapre.index, self.datapost.index)
             format_date_axes(ax, full_index)
 
         return (fig, ax)

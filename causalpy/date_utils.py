@@ -20,6 +20,27 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+def _combine_datetime_indices(
+    index1: pd.DatetimeIndex, index2: pd.DatetimeIndex
+) -> pd.DatetimeIndex:
+    """
+    Combine two DatetimeIndex objects into a single sorted DatetimeIndex.
+    
+    Parameters
+    ----------
+    index1 : pd.DatetimeIndex
+        First datetime index
+    index2 : pd.DatetimeIndex
+        Second datetime index
+    
+    Returns
+    -------
+    pd.DatetimeIndex
+        Combined and sorted datetime index
+    """
+    return pd.DatetimeIndex(index1.tolist() + index2.tolist()).sort_values()
+
+
 def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
     """
     Apply intelligent date formatting to x-axis based on date range.
