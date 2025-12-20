@@ -629,9 +629,7 @@ def test_synthetic_control_no_warning_when_assumption_satisfied():
         )
 
     # Check that no UserWarning about convex hull was issued
-    convex_hull_warnings = [
-        w for w in warning_list if "Convex hull" in str(w.message)
-    ]
+    convex_hull_warnings = [w for w in warning_list if "Convex hull" in str(w.message)]
     assert len(convex_hull_warnings) == 0
 
     # The model should run successfully
