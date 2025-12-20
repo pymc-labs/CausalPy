@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Utility function for intelligent date axis formatting.
+Utility functions for intelligent date axis formatting.
 """
 
 import matplotlib.dates as mdates
