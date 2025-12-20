@@ -139,10 +139,30 @@ class SyntheticControl(BaseExperiment):
             },
         )
 
-        # Check convex hull assumption
-        hull_check = check_convex_hull_violation(
-            self.datapre_treated.values.flatten(), self.datapre_control.values
-        )
+        # Check convex hull assumption for each treated unit
+        # Aggregate violations across all treated units
+        total_violations = 0
+        total_above = 0
+        total_below = 0
+        n_units = len(self.treated_units)
+        n_pre_points = self.datapre_treated.shape[0]
+
+        for i in range(n_units):
+            unit_check = check_convex_hull_violation(
+                self.datapre_treated.isel(treated_units=i).values,
+                self.datapre_control.values,
+            )
+            total_violations += unit_check["n_violations"]
+            total_above += unit_check["pct_above"] * n_pre_points / 100
+            total_below += unit_check["pct_below"] * n_pre_points / 100
+
+        total_points = n_units * n_pre_points
+        hull_check = {
+            "passes": total_violations == 0,
+            "n_violations": total_violations,
+            "pct_above": 100 * total_above / total_points if total_points > 0 else 0,
+            "pct_below": 100 * total_below / total_points if total_points > 0 else 0,
+        }
 
         if not hull_check["passes"]:
             warnings.warn(
