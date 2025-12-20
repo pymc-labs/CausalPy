@@ -15,6 +15,8 @@
 Synthetic Control Experiment
 """
 
+import warnings
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -25,7 +27,7 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import round_num
+from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -136,6 +138,25 @@ class SyntheticControl(BaseExperiment):
                 "treated_units": self.treated_units,
             },
         )
+
+        # Check convex hull assumption
+        hull_check = check_convex_hull_violation(
+            self.datapre_treated.values.flatten(), self.datapre_control.values
+        )
+
+        if not hull_check["passes"]:
+            warnings.warn(
+                f"Convex hull assumption may be violated: {hull_check['n_violations']} "
+                f"pre-intervention time points ({hull_check['pct_above']:.1f}% above, "
+                f"{hull_check['pct_below']:.1f}% below control range). "
+                "The synthetic control method requires the treated unit to lie within "
+                "the convex hull of control units. Consider: (1) adding more diverse "
+                "control units, (2) using a model with an intercept (e.g., ITS with "
+                "control predictors), or (3) using the Augmented Synthetic Control Method. "
+                "See glossary term 'Convex hull condition' for more details.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):

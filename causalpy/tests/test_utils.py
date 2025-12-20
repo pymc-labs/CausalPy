@@ -15,11 +15,13 @@
 Tests for utility functions
 """
 
+import numpy as np
 import pandas as pd
 
 from causalpy.utils import (
     _is_variable_dummy_coded,
     _series_has_2_levels,
+    check_convex_hull_violation,
     get_interaction_terms,
     round_num,
 )
@@ -102,3 +104,73 @@ def test_get_interaction_terms():
 
     # Formula with subtraction (edge case)
     assert get_interaction_terms("y ~ x1*x2 - x3") == ["x1*x2"]
+
+
+def test_check_convex_hull_violation_passes():
+    """Test convex hull check when treated series is within control range"""
+    # Treated series is within the range of controls at all time points
+    treated = np.array([1.0, 2.0, 3.0])
+    controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
+
+    result = check_convex_hull_violation(treated, controls)
+
+    assert result["passes"] is True
+    assert result["n_violations"] == 0
+    assert result["pct_above"] == 0.0
+    assert result["pct_below"] == 0.0
+
+
+def test_check_convex_hull_violation_above():
+    """Test convex hull check when treated series is above control range"""
+    # Treated series is above the control range for some points
+    treated = np.array([5.0, 2.0, 3.0])
+    controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
+
+    result = check_convex_hull_violation(treated, controls)
+
+    assert result["passes"] is False
+    assert result["n_violations"] == 1
+    assert result["pct_above"] == 100.0 / 3
+    assert result["pct_below"] == 0.0
+
+
+def test_check_convex_hull_violation_below():
+    """Test convex hull check when treated series is below control range"""
+    # Treated series is below the control range for some points
+    treated = np.array([1.0, 0.5, 3.0])
+    controls = np.array([[1.5, 2.5], [1.5, 2.5], [2.5, 3.5]])
+
+    result = check_convex_hull_violation(treated, controls)
+
+    assert result["passes"] is False
+    assert result["n_violations"] == 2
+    assert result["pct_above"] == 0.0
+    assert result["pct_below"] == 200.0 / 3
+
+
+def test_check_convex_hull_violation_both():
+    """Test convex hull check when treated series is both above and below control range"""
+    # Treated series is outside the control range in both directions
+    treated = np.array([5.0, 0.5, 3.0])
+    controls = np.array([[1.0, 2.0], [1.5, 2.5], [2.5, 3.5]])
+
+    result = check_convex_hull_violation(treated, controls)
+
+    assert result["passes"] is False
+    assert result["n_violations"] == 2
+    assert result["pct_above"] == 100.0 / 3
+    assert result["pct_below"] == 100.0 / 3
+
+
+def test_check_convex_hull_violation_boundary():
+    """Test convex hull check when treated series is exactly on control boundaries"""
+    # Treated series is exactly at the min and max of controls (should pass)
+    treated = np.array([0.5, 2.5, 3.5])
+    controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
+
+    result = check_convex_hull_violation(treated, controls)
+
+    assert result["passes"] is True
+    assert result["n_violations"] == 0
+    assert result["pct_above"] == 0.0
+    assert result["pct_below"] == 0.0
