@@ -25,6 +25,7 @@ from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
+from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import check_convex_hull_violation, round_num
@@ -407,6 +408,15 @@ class SyntheticControl(BaseExperiment):
                 zorder=1,
             )
 
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
+
         return fig, ax
 
     def _ols_plot(
@@ -505,6 +515,15 @@ class SyntheticControl(BaseExperiment):
             )
 
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
 
         return (fig, ax)
 
