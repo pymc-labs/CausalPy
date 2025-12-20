@@ -25,14 +25,14 @@ def _combine_datetime_indices(
 ) -> pd.DatetimeIndex:
     """
     Combine two DatetimeIndex objects into a single sorted DatetimeIndex.
-    
+
     Parameters
     ----------
     index1 : pd.DatetimeIndex
         First datetime index
     index2 : pd.DatetimeIndex
         Second datetime index
-    
+
     Returns
     -------
     pd.DatetimeIndex
@@ -72,7 +72,7 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
 
     # Strategy: Use matplotlib's AutoDateLocator and ConciseDateFormatter
     # which provide intelligent automatic date formatting
-    
+
     # Calculate number of years for better decisions
     num_years = days_span / 365.25
 
@@ -132,8 +132,11 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
     if num_years > 6:
         # Only major grid for very long series
         ax.grid(True, which="major", linestyle="-", alpha=0.5)
+        ax.grid(False, which="minor")  # Explicitly disable minor grid
     else:
         # Both major and minor for shorter series
+        # Use explicit grid calls to ensure they're visible even with arviz theme
+        ax.minorticks_on()
         ax.grid(True, which="minor", linestyle=":", alpha=0.3)
         ax.grid(True, which="major", linestyle="-", alpha=0.5)
 

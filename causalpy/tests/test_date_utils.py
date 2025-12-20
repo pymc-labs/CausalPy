@@ -18,11 +18,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-
 from causalpy.date_utils import (
     _combine_datetime_indices,
-    format_date_axis,
     format_date_axes,
+    format_date_axis,
 )
 
 
@@ -33,25 +32,30 @@ class TestCombineDatetimeIndices:
         """Test that indices are combined and sorted correctly"""
         index1 = pd.DatetimeIndex(["2020-03-01", "2020-01-01", "2020-02-01"])
         index2 = pd.DatetimeIndex(["2020-06-01", "2020-04-01", "2020-05-01"])
-        
+
         result = _combine_datetime_indices(index1, index2)
-        
-        expected = pd.DatetimeIndex([
-            "2020-01-01", "2020-02-01", "2020-03-01", 
-            "2020-04-01", "2020-05-01", "2020-06-01"
-        ])
+
+        expected = pd.DatetimeIndex(
+            [
+                "2020-01-01",
+                "2020-02-01",
+                "2020-03-01",
+                "2020-04-01",
+                "2020-05-01",
+                "2020-06-01",
+            ]
+        )
         assert result.equals(expected)
 
     def test_handles_empty_indices(self):
         """Test that empty indices are handled correctly"""
         index1 = pd.DatetimeIndex([])
         index2 = pd.DatetimeIndex(["2020-01-01", "2020-02-01"])
-        
+
         result = _combine_datetime_indices(index1, index2)
-        
+
         assert len(result) == 2
         assert result.equals(pd.DatetimeIndex(["2020-01-01", "2020-02-01"]))
-
 
 
 class TestFormatDateAxis:

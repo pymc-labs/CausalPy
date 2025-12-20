@@ -943,7 +943,10 @@ class InterruptedTimeSeries(BaseExperiment):
         # Apply intelligent date formatting if data has datetime index
         if isinstance(self.datapre.index, pd.DatetimeIndex):
             # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(self.datapre.index, self.datapost.index)
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
             format_date_axes(ax, full_index)
 
         return fig, ax
@@ -1031,7 +1034,10 @@ class InterruptedTimeSeries(BaseExperiment):
         # Apply intelligent date formatting if data has datetime index
         if isinstance(self.datapre.index, pd.DatetimeIndex):
             # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(self.datapre.index, self.datapost.index)
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
             format_date_axes(ax, full_index)
 
         return (fig, ax)
