@@ -84,7 +84,7 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
             major_locator = mdates.YearLocator(2)
         else:
             major_locator = mdates.YearLocator()
-        minor_locator = mdates.YearLocator()  # Minor at every year
+        minor_locator = mdates.MonthLocator(bymonth=[1, 7])  # Semi-annual minor ticks
         major_formatter = mdates.DateFormatter("%Y")
 
     elif days_span > 365:  # 1-6 years
@@ -120,7 +120,11 @@ def format_date_axis(ax: plt.Axes, date_index: pd.DatetimeIndex) -> None:
     # For very long series (>8 years), use vertical rotation to prevent overlap
     if num_years > 8:
         ax.tick_params(axis="x", labelrotation=-90)
-    elif days_span <= 365 * 3:
+    elif num_years > 3:
+        # 3-8 years: use 45 degree rotation
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+    elif days_span > 90:
+        # Less than 3 years but more than 3 months: also use 45 degree rotation
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
     # Enable minor grid lines for better readability
