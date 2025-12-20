@@ -189,7 +189,7 @@ def check_convex_hull_violation(
     >>> treated = np.array([1.0, 2.0, 3.0])
     >>> controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
     >>> result = check_convex_hull_violation(treated, controls)
-    >>> result['passes']
+    >>> result["passes"]
     True
     """
     control_min = control_matrix.min(axis=1)
