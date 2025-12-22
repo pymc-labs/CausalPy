@@ -738,10 +738,17 @@ class InstrumentalVariableRegression(PyMCModel):
                 beta_t = self.vs_prior_treatment.create_prior(
                     name="beta_t", n_params=Z.shape[1], dims="instruments", X=Z
                 )
-
-                beta_z = self.vs_prior_outcome.create_prior(
-                    name="beta_z", n_params=X.shape[1], dims="covariates", X=X
-                )
+                if vs_hyperparams.get("outcome", False):
+                    beta_z = self.vs_prior_outcome.create_prior(
+                        name="beta_z", n_params=X.shape[1], dims="covariates", X=X
+                    )
+                else:  # Fallback to standard normal priors for outcome
+                    beta_z = pm.Normal(
+                        name="beta_z",
+                        mu=priors["mus"][1],
+                        sigma=priors["sigmas"][1],
+                        dims="covariates",
+                    )
             else:
                 # Use standard normal priors
                 beta_t = pm.Normal(
@@ -761,7 +768,12 @@ class InstrumentalVariableRegression(PyMCModel):
                 # Binary treatment formulation with correlated latent errors
                 sigma_U = pm.Exponential("sigma_U", priors.get("sigma_U", 1.0))
 
-                # Correlation parameter with bounds
+                # Correlation/Sensitivity parameter with bounds
+                # 'rho' represents the coupling between the Logistic latent error (V)
+                # and the Normal outcome error (U).
+                # Note: Because V follows a Standard Logistic distribution (heavy tails),
+                # this value is not directly comparable to a Normal-Normal Pearson rho.
+                # It acts as the sensitivity parameter in the Control Function approach.
                 rho_lower = priors.get("rho_bounds", [-0.99, 0.99])[0]
                 rho_upper = priors.get("rho_bounds", [-0.99, 0.99])[1]
 
@@ -772,28 +784,28 @@ class InstrumentalVariableRegression(PyMCModel):
                 # Clip to ensure numerical stability
                 rho_clipped = pt.clip(rho, rho_lower + 0.01, rho_upper - 0.01)
 
-                # Cholesky decomposition for correlated errors
-                inverse_rho = pm.math.sqrt(pm.math.maximum(1 - rho_clipped**2, 1e-12))
-                chol = pt.stack([[sigma_U, 0.0], [sigma_U * rho_clipped, inverse_rho]])
-
-                # Draw latent errors
-                eps_raw = pm.Normal("eps_raw", 0, 1, shape=(X.shape[0], 2))
-                eps = pm.Deterministic("eps", pt.dot(eps_raw, chol.T))
-
-                U = eps[:, 0]  # Outcome error
-                V = eps[:, 1]  # Treatment error
+                u = pm.Uniform("u", 0, 1, shape=X.shape[0])
+                # 2. Transform to Standard Logistic space
+                # This is the "residual" in the treatment equation
+                V = pm.Deterministic("V", pt.log(u / (1 - u)))
 
                 # Treatment equation (logit link for binary treatment)
+                # much more stable than probit link in practice
                 mu_treatment = pm.Deterministic("mu_t", pt.dot(Z, beta_t) + V)
                 p_t = pm.math.invlogit(mu_treatment)
                 pm.Bernoulli("likelihood_treatment", p=p_t, observed=t.flatten())
 
-                # Outcome equation
-                mu_outcome = pm.Deterministic("mu_y", pt.dot(X, beta_z) + U)
+                # Conditional Outcome equation formulation
+                mu_outcome = pm.Deterministic("mu_y", pt.dot(X, beta_z))
+                sigma_v_logistic = pm.math.sqrt(pt.pi**2 / 3)
+                expected_U = rho_clipped * (sigma_U / sigma_v_logistic) * V
+
+                conditional_mu_y = mu_outcome + expected_U
+                conditional_sigma_y = sigma_U * pm.math.sqrt(1 - rho_clipped**2)
                 pm.Normal(
                     "likelihood_outcome",
-                    mu=mu_outcome,
-                    sigma=sigma_U,
+                    mu=conditional_mu_y,
+                    sigma=conditional_sigma_y,
                     observed=y.flatten(),
                 )
 

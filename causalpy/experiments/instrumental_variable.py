@@ -133,6 +133,7 @@ class InstrumentalVariable(BaseExperiment):
         self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
         self.binary_treatment = binary_treatment
+        self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
         self.input_validation()
 
         y, X = dmatrices(formula, self.data)
