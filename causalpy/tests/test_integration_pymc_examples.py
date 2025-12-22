@@ -732,7 +732,7 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
             sample_kwargs=sample_kwargs
         ),
         vs_prior_type="spike_and_slab",
-        vs_hyperparams={"pi_alpha": 5},
+        vs_hyperparams={"pi_alpha": 5, "outcome": True},
     )
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
@@ -772,6 +772,7 @@ def test_iv_reg_vs_prior_hs(mock_pymc_sample):
             sample_kwargs=sample_kwargs
         ),
         vs_prior_type="horseshoe",
+        vs_hyperparams={"outcome": True},
     )
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
