@@ -524,6 +524,130 @@ def test_regression_discontinuity_bool_treatment():
     assert result.data["treated"].dtype == bool
 
 
+def test_rd_donut_hole_zero_same_as_default():
+    """Test that donut_hole=0 reproduces current behavior (no filtering)."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.0,
+    )
+
+    # With donut_hole=0, fit_data should equal data
+    assert len(result.fit_data) == len(result.data)
+
+
+def test_rd_donut_hole_filters_data():
+    """Test that donut_hole filters out observations near threshold."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    # fit_data should have fewer observations than data
+    assert len(result.fit_data) < len(result.data)
+
+    # No observations in fit_data should be within 0.1 of threshold
+    x_vals = result.fit_data["x"]
+    assert all(np.abs(x_vals - threshold) >= 0.1)
+
+
+def test_rd_donut_hole_with_bandwidth():
+    """Test that donut_hole works correctly with bandwidth."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        bandwidth=0.3,
+        donut_hole=0.05,
+    )
+
+    # Check that fit_data respects both constraints
+    x_vals = result.fit_data["x"]
+    assert all(np.abs(x_vals - threshold) <= 0.3)  # within bandwidth
+    assert all(np.abs(x_vals - threshold) >= 0.05)  # outside donut
+
+
+def test_rd_donut_hole_validation_negative():
+    """Test that negative donut_hole raises DataException."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    with pytest.raises(DataException):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            donut_hole=-0.1,
+        )
+
+
+def test_rd_donut_hole_validation_exceeds_bandwidth():
+    """Test that donut_hole >= bandwidth raises DataException."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    with pytest.raises(DataException):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.3,
+            donut_hole=0.3,  # Equal to bandwidth, should fail
+        )
+
+    with pytest.raises(DataException):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.3,
+            donut_hole=0.4,  # Greater than bandwidth, should fail
+        )
+
+
+def test_rd_running_variable_name_not_x():
+    """Test that running_variable_name works correctly with non-default names."""
+    np.random.seed(42)
+    threshold = 21
+    age = np.random.uniform(18, 25, 100)
+    treated = np.where(age >= threshold, 1, 0)
+    y = 2 * age + treated * 0.5 + np.random.normal(0, 1, 100)
+    df = pd.DataFrame({"age": age, "treated": treated, "y": y})
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + age + treated + age:treated",
+        running_variable_name="age",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        bandwidth=2.0,
+        donut_hole=0.5,
+    )
+
+    # Check that filtering works with non-default running variable name
+    age_vals = result.fit_data["age"]
+    assert all(np.abs(age_vals - threshold) <= 2.0)
+    assert all(np.abs(age_vals - threshold) >= 0.5)
+
+
 # Synthetic Control - Convex Hull Assumption
 
 
@@ -582,7 +706,6 @@ def test_synthetic_control_no_warning_when_assumption_satisfied():
     )
 
     # Create treated unit that falls within the control range
-    # Use the middle value to ensure it's within bounds
     treated = 2.0 + 0.5 * time_idx + np.random.normal(0, 0.2, n_time)
 
     df = controls.copy()
