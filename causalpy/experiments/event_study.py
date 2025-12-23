@@ -15,6 +15,8 @@
 Event Study / Dynamic Difference-in-Differences
 """
 
+import warnings
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -247,6 +249,22 @@ class EventStudy(BaseExperiment):
             - self.data.loc[treated_mask, self.treat_time_col]
         )
 
+        # Check for gaps in time periods (per unit)
+        for unit in self.data[self.unit_col].unique():
+            unit_data = self.data[self.data[self.unit_col] == unit]
+            times = sorted(unit_data[self.time_col].unique())
+            if len(times) > 1:
+                time_diffs = np.diff(times)
+                if len(np.unique(time_diffs)) > 1:  # Non-uniform spacing
+                    warnings.warn(
+                        "Non-consecutive time periods detected (gaps in time series). "
+                        "Event time computation assumes time differences are meaningful. "
+                        "Please verify gaps are intentional.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    break  # Only warn once
+
         # Mark observations in the event window
         self.data["_in_event_window"] = (
             self.data["_event_time"] >= self.event_window[0]
@@ -254,6 +272,9 @@ class EventStudy(BaseExperiment):
 
     def _build_design_matrix(self) -> None:
         """Build design matrix using patsy formula plus event-time dummies."""
+        # Store original size for NaN checking
+        original_size = len(self.data)
+
         # Parse formula with patsy to get y and X (including FEs and covariates)
         y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
@@ -261,6 +282,29 @@ class EventStudy(BaseExperiment):
 
         # Filter data to rows that patsy kept (in case NaN values were dropped)
         self.data = self.data.loc[X.index]
+
+        # Check for extreme data loss after filtering
+        filtered_size = len(self.data)
+        pct_lost = (original_size - filtered_size) / original_size * 100
+        if pct_lost > 50:
+            warnings.warn(
+                f"Patsy filtering removed {pct_lost:.1f}% of observations due to NaN values. "
+                "Results may be unreliable with substantial data loss. "
+                "Consider imputation or checking data quality.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Check if panel is balanced
+        unit_counts = self.data.groupby(self.unit_col).size()
+        if unit_counts.nunique() > 1:
+            warnings.warn(
+                "Data contains an unbalanced panel (different units have different numbers of observations). "
+                "Event Study methodology assumes balanced panel data. Results may be unreliable. "
+                "Please verify this is intentional or submit a GitHub issue if you need support for unbalanced panels.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Extract outcome variable name from formula
         self.outcome_variable_name = y.design_info.column_names[0]

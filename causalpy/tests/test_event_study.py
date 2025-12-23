@@ -671,3 +671,417 @@ def test_event_study_get_event_time_summary_rounding():
     if len(non_ref_rows_skl) > 0:
         # Check that we get full precision values
         assert summary_skl_full["mean"].dtype == np.float64
+
+
+# ============================================================================
+# Unit Tests for _compute_event_time Method
+# ============================================================================
+
+
+def test_compute_event_time_treatment_at_boundaries():
+    """Test when treatment occurs at first or last time period in data."""
+    # Test treatment at first time period
+    df_first = generate_event_study_data(
+        n_units=20, n_time=15, treatment_time=0, seed=42
+    )
+
+    result_first = cp.EventStudy(
+        df_first,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-2, 5),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Should work without errors
+    assert hasattr(result_first, "event_time_coeffs")
+    # Check that event times were computed correctly for treated units
+    treated_df = result_first.data[result_first.data["_event_time"].notna()]
+    assert treated_df["_event_time"].min() == 0  # Earliest event time is 0
+
+    # Test treatment at last time period
+    df_last = generate_event_study_data(
+        n_units=20, n_time=15, treatment_time=14, seed=42
+    )
+
+    result_last = cp.EventStudy(
+        df_last,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-5, 2),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Should work without errors
+    assert hasattr(result_last, "event_time_coeffs")
+    # Check that event times were computed correctly
+    treated_df = result_last.data[result_last.data["_event_time"].notna()]
+    assert treated_df["_event_time"].max() == 0  # Latest event time is 0
+
+
+def test_compute_event_time_observations_outside_window():
+    """Verify observations with event times outside window are handled correctly."""
+    df = generate_event_study_data(n_units=20, n_time=30, treatment_time=15, seed=42)
+
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-3, 3),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Check that _in_event_window marks correct observations
+    # For treated units, only observations within [-3, 3] event time should be marked
+    treated_in_window = result.data[
+        result.data["_event_time"].notna() & result.data["_in_event_window"]
+    ]
+    # All observations in window should have event time in [-3, 3]
+    assert (treated_in_window["_event_time"] >= -3).all()
+    assert (treated_in_window["_event_time"] <= 3).all()
+
+    # Check that observations outside window are NOT marked
+    treated_outside_window = result.data[
+        result.data["_event_time"].notna() & ~result.data["_in_event_window"]
+    ]
+    # All observations outside window should have event time outside [-3, 3]
+    assert (
+        (treated_outside_window["_event_time"] < -3)
+        | (treated_outside_window["_event_time"] > 3)
+    ).all()
+
+    # But all data should be retained (not filtered out)
+    assert len(result.data) > 0
+    assert result.data["_event_time"].notna().sum() > 0
+
+
+# ============================================================================
+# Edge Cases for Panel Data Structure (with Warnings)
+# ============================================================================
+
+
+def test_event_study_unbalanced_panel_emits_warning():
+    """Test with unbalanced panel AND verify warning is emitted."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    # Create unbalanced panel by randomly dropping 20% of observations from random units
+    np.random.seed(42)
+    units_to_modify = np.random.choice(df["unit"].unique(), size=5, replace=False)
+    indices_to_drop = []
+    for unit in units_to_modify:
+        unit_indices = df[df["unit"] == unit].index
+        n_to_drop = int(len(unit_indices) * 0.2)
+        drop_indices = np.random.choice(unit_indices, size=n_to_drop, replace=False)
+        indices_to_drop.extend(drop_indices)
+
+    df_unbalanced = df.drop(indices_to_drop)
+
+    # Verify panel is actually unbalanced
+    unit_counts = df_unbalanced.groupby("unit").size()
+    assert unit_counts.nunique() > 1, "Panel should be unbalanced"
+
+    # Should emit warning about unbalanced panel
+    with pytest.warns(UserWarning, match="unbalanced panel"):
+        result = cp.EventStudy(
+            df_unbalanced,
+            formula="y ~ C(unit) + C(time)",
+            unit_col="unit",
+            time_col="time",
+            treat_time_col="treat_time",
+            event_window=(-3, 3),
+            reference_event_time=-1,
+            model=LinearRegression(),
+        )
+
+    # Should still work correctly
+    assert hasattr(result, "event_time_coeffs")
+    assert len(result.event_time_coeffs) == 7  # -3 to 3 inclusive
+
+
+def test_event_study_gaps_in_time_periods_emits_warning():
+    """Test with non-consecutive time periods AND verify warning is emitted."""
+    df = generate_event_study_data(n_units=20, n_time=15, treatment_time=7, seed=42)
+
+    # Keep only specific time values to create gaps
+    time_values_to_keep = [0, 1, 2, 5, 6, 7, 10, 11, 12]
+    df_gaps = df[df["time"].isin(time_values_to_keep)].copy()
+
+    # Adjust treat_time to match available times (treatment still at time 7)
+    # This is already at 7 which is in our list
+
+    # Should emit warning about gaps in time
+    with pytest.warns(UserWarning, match="Non-consecutive time periods"):
+        result = cp.EventStudy(
+            df_gaps,
+            formula="y ~ C(unit) + C(time)",
+            unit_col="unit",
+            time_col="time",
+            treat_time_col="treat_time",
+            event_window=(-3, 3),
+            reference_event_time=-1,
+            model=LinearRegression(),
+        )
+
+    # Event times should still be computed correctly based on actual time differences
+    assert hasattr(result, "event_time_coeffs")
+    # Check that event times are computed correctly (e.g., time 10 - treat_time 7 = event_time 3)
+    treated_df = result.data[result.data["_event_time"].notna()]
+    time_10_rows = treated_df[treated_df["time"] == 10]
+    if len(time_10_rows) > 0:
+        assert (time_10_rows["_event_time"] == 3).all()
+
+
+def test_event_study_single_treated_unit():
+    """Test minimal treated group (only 1 treated unit)."""
+    # Generate data with only 1 treated unit out of 20
+    df = generate_event_study_data(
+        n_units=20, n_time=20, treatment_time=10, treated_fraction=1 / 20, seed=42
+    )
+
+    # Verify only 1 unit is treated
+    n_treated = df[df["treated"] == 1]["unit"].nunique()
+    assert n_treated == 1
+
+    # Test with PyMC
+    result_pymc = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-3, 3),
+        reference_event_time=-1,
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={**sample_kwargs, "random_seed": 42}
+        ),
+    )
+
+    # Should work without errors
+    assert hasattr(result_pymc, "event_time_coeffs")
+    assert len(result_pymc.event_time_coeffs) == 7
+
+    # Test with sklearn
+    result_skl = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-3, 3),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Should work without errors
+    assert hasattr(result_skl, "event_time_coeffs")
+    assert len(result_skl.event_time_coeffs) == 7
+
+
+# ============================================================================
+# Edge Cases for Filtering and Empty Results
+# ============================================================================
+
+
+def test_event_study_no_observations_in_window():
+    """Test when event window excludes all treated observations."""
+    df = generate_event_study_data(n_units=20, n_time=15, treatment_time=10, seed=42)
+
+    # Event window beyond data range - no treated observations will fall in [15, 20]
+    # since time only goes up to 14
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(15, 20),
+        reference_event_time=15,
+        model=LinearRegression(),
+    )
+
+    # Should work, but event-time dummies will be all zeros (no variation)
+    assert hasattr(result, "event_time_coeffs")
+    # All event time dummies should be zero since no observations fall in window
+    # The coefficients might be zero or very small
+    # Just verify the model completed without error
+    assert result.X is not None
+    assert result.y is not None
+
+    # TODO: Consider adding validation to warn when no observations fall in event window
+
+
+def test_event_study_extreme_nan_patterns_emits_warning():
+    """Test with NaN values that filter out >50% of data AND verify warning."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    # Set 60% of outcome values to NaN
+    np.random.seed(42)
+    n_to_nan = int(len(df) * 0.6)
+    indices_to_nan = np.random.choice(df.index, size=n_to_nan, replace=False)
+    df.loc[indices_to_nan, "y"] = np.nan
+
+    # Should emit warning about extreme data loss
+    with pytest.warns(UserWarning, match="removed.*% of observations"):
+        result = cp.EventStudy(
+            df,
+            formula="y ~ C(unit) + C(time)",
+            unit_col="unit",
+            time_col="time",
+            treat_time_col="treat_time",
+            event_window=(-3, 3),
+            reference_event_time=-1,
+            model=LinearRegression(),
+        )
+
+    # Should still work if enough observations remain
+    assert hasattr(result, "event_time_coeffs")
+    # Verify significant data loss occurred
+    original_size = len(df)
+    filtered_size = len(result.data)
+    pct_kept = filtered_size / original_size * 100
+    assert pct_kept < 50  # More than 50% was filtered out
+
+
+def test_event_study_nan_in_treat_time_for_treated_unit():
+    """Test edge case where treated unit has NaN in treat_time_col."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    # Manually set one treated unit's treat_time to NaN in some rows
+    # This creates an inconsistent state (shouldn't happen in valid data)
+    treated_units = df[df["treated"] == 1]["unit"].unique()
+    if len(treated_units) > 0:
+        first_treated = treated_units[0]
+        # Set treat_time to NaN for half the rows of this unit
+        unit_mask = df["unit"] == first_treated
+        unit_indices = df[unit_mask].index
+        indices_to_nan = unit_indices[: len(unit_indices) // 2]
+        df.loc[indices_to_nan, "treat_time"] = np.nan
+
+        # This should cause the unit to be partially treated as control
+        # The behavior depends on how the code handles this edge case
+        result = cp.EventStudy(
+            df,
+            formula="y ~ C(unit) + C(time)",
+            unit_col="unit",
+            time_col="time",
+            treat_time_col="treat_time",
+            event_window=(-3, 3),
+            reference_event_time=-1,
+            model=LinearRegression(),
+        )
+
+        # Document actual behavior: rows with NaN treat_time will have NaN event_time
+        # and will not be marked as in_event_window
+        assert hasattr(result, "event_time_coeffs")
+        # Some rows of the unit should have NaN event_time
+        unit_data = result.data[result.data["unit"] == first_treated]
+        assert unit_data["_event_time"].isna().any()
+
+        # TODO: Consider adding validation to check for inconsistent treat_time
+        # within a unit (some NaN, some not)
+
+
+# ============================================================================
+# Edge Cases for Event Window Boundaries
+# ============================================================================
+
+
+def test_event_study_single_period_window():
+    """Test with minimal event window (just k=-1 and k=0)."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    # Test with PyMC
+    result_pymc = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-1, 0),
+        reference_event_time=-1,
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={**sample_kwargs, "random_seed": 42}
+        ),
+    )
+
+    # Should work with only one non-reference coefficient (k=0)
+    assert hasattr(result_pymc, "event_time_coeffs")
+    assert len(result_pymc.event_time_coeffs) == 2  # k=-1 (reference) and k=0
+    assert -1 in result_pymc.event_time_coeffs
+    assert 0 in result_pymc.event_time_coeffs
+    # Reference should be zero
+    assert float(result_pymc.event_time_coeffs[-1]) == 0.0
+
+    # Test with sklearn
+    result_skl = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-1, 0),
+        reference_event_time=-1,
+        model=LinearRegression(),
+    )
+
+    # Should work with only one non-reference coefficient (k=0)
+    assert hasattr(result_skl, "event_time_coeffs")
+    assert len(result_skl.event_time_coeffs) == 2
+    assert result_skl.event_time_coeffs[-1] == 0.0
+
+
+def test_event_study_reference_at_min_boundary():
+    """Test with reference event time at window minimum."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-5, 5),
+        reference_event_time=-5,
+        model=LinearRegression(),
+    )
+
+    # Coefficient for k=-5 should be zero, all others estimated
+    assert hasattr(result, "event_time_coeffs")
+    assert len(result.event_time_coeffs) == 11  # -5 to 5 inclusive
+    assert result.event_time_coeffs[-5] == 0.0  # Reference is zero
+    # All other event times should be present
+    for k in range(-4, 6):
+        assert k in result.event_time_coeffs
+
+
+def test_event_study_reference_at_max_boundary():
+    """Test with reference event time at window maximum."""
+    df = generate_event_study_data(n_units=20, n_time=20, treatment_time=10, seed=42)
+
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-5, 5),
+        reference_event_time=5,
+        model=LinearRegression(),
+    )
+
+    # Coefficient for k=5 should be zero, all others estimated
+    assert hasattr(result, "event_time_coeffs")
+    assert len(result.event_time_coeffs) == 11  # -5 to 5 inclusive
+    assert result.event_time_coeffs[5] == 0.0  # Reference is zero
+    # All other event times should be present
+    for k in range(-5, 5):
+        assert k in result.event_time_coeffs
