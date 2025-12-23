@@ -205,6 +205,42 @@ def test_event_study_staggered_adoption_not_supported():
         )
 
 
+@pytest.mark.parametrize(
+    "treat_time_values,test_id",
+    [
+        ([10.0, 10.0, np.inf, np.inf, np.inf, np.inf], "all_inf_controls"),
+        ([10.0, 10.0, np.nan, np.nan, np.inf, np.inf], "mixed_nan_inf_controls"),
+        ([10.0, 10.0, np.nan, np.nan, np.nan, np.nan], "all_nan_controls"),
+    ],
+    ids=lambda x: x[1] if isinstance(x, tuple) else x,
+)
+def test_event_study_control_unit_markers(treat_time_values, test_id):
+    """Test that control units marked with np.inf, np.nan, or mixed are correctly handled.
+
+    Regression test for bug where np.inf control units were incorrectly treated as
+    treated units, causing false staggered adoption errors.
+    """
+    df = pd.DataFrame(
+        {
+            "unit": [0, 0, 1, 1, 2, 2],
+            "time": [0, 1, 0, 1, 0, 1],
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "treat_time": treat_time_values,
+        }
+    )
+
+    # Should not raise - all cases have one treatment time (10.0) with different control markers
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        model=LinearRegression(),
+    )
+    assert isinstance(result, cp.EventStudy)
+
+
 # ============================================================================
 # Integration Tests with PyMC
 # ============================================================================

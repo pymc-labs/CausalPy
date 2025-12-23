@@ -219,9 +219,11 @@ class EventStudy(BaseExperiment):
 
         # Check that all treated units have the same treatment time
         # (staggered adoption is not currently supported)
-        treated_times = self.data.loc[
-            ~self.data[self.treat_time_col].isna(), self.treat_time_col
-        ].unique()
+        # Filter out control units (marked with NaN or np.inf)
+        is_control = self.data[self.treat_time_col].apply(
+            lambda x: pd.isna(x) or np.isinf(x)
+        )
+        treated_times = self.data.loc[~is_control, self.treat_time_col].unique()
         if len(treated_times) > 1:
             raise DataException(
                 f"All treated units must have the same treatment time. "
@@ -235,7 +237,11 @@ class EventStudy(BaseExperiment):
         self.data["_event_time"] = np.nan
 
         # For treated units, compute event time
-        treated_mask = ~self.data[self.treat_time_col].isna()
+        # Treated units are those with finite, non-NaN treatment times
+        is_control = self.data[self.treat_time_col].apply(
+            lambda x: pd.isna(x) or np.isinf(x)
+        )
+        treated_mask = ~is_control
         self.data.loc[treated_mask, "_event_time"] = (
             self.data.loc[treated_mask, self.time_col]
             - self.data.loc[treated_mask, self.treat_time_col]
