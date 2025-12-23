@@ -433,18 +433,33 @@ class EventStudy(BaseExperiment):
                 }
             elif isinstance(self.model, PyMCModel):
                 hdi = az.hdi(coeff.values.flatten(), hdi_prob=hdi_prob)
+                mean_val = float(coeff.mean())
+                std_val = float(coeff.std())
+                hdi_lower_val = float(hdi[0])
+                hdi_upper_val = float(hdi[1])
                 row = {
                     "event_time": k,
-                    "mean": float(coeff.mean()),
-                    "std": float(coeff.std()),
-                    hdi_lower_col: hdi[0],
-                    hdi_upper_col: hdi[1],
+                    "mean": np.round(mean_val, round_to)
+                    if round_to is not None
+                    else mean_val,
+                    "std": np.round(std_val, round_to)
+                    if round_to is not None
+                    else std_val,
+                    hdi_lower_col: np.round(hdi_lower_val, round_to)
+                    if round_to is not None
+                    else hdi_lower_val,
+                    hdi_upper_col: np.round(hdi_upper_val, round_to)
+                    if round_to is not None
+                    else hdi_upper_val,
                     "is_reference": False,
                 }
             else:
+                mean_val = float(coeff)
                 row = {
                     "event_time": k,
-                    "mean": float(coeff),
+                    "mean": np.round(mean_val, round_to)
+                    if round_to is not None
+                    else mean_val,
                     "std": np.nan,
                     hdi_lower_col: np.nan,
                     hdi_upper_col: np.nan,
