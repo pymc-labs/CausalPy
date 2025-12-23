@@ -158,7 +158,9 @@ class InterruptedTimeSeries(BaseExperiment):
         self.formula = formula
 
         # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
+        y, X = dmatrices(formula, self.datapre, return_type="dataframe")
+        # Filter datapre to rows that patsy kept (in case NaN values were dropped)
+        self.datapre = self.datapre.loc[X.index]
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -415,6 +417,7 @@ class InterruptedTimeSeries(BaseExperiment):
         relative: bool = True,
         min_effect: float | None = None,
         treated_unit: str | None = None,
+        include_pretrend_check: bool = True,
         period: Literal["intervention", "post", "comparison"] | None = None,
     ):
         """Generate a decision-ready summary of causal effects.
