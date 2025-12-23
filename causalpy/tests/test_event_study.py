@@ -62,11 +62,19 @@ def test_generate_event_study_data_treatment_effect():
     """Test that treatment effect is applied correctly."""
     # Generate data with zero treatment effect
     df_no_effect = generate_event_study_data(
-        n_units=100, n_time=20, treatment_time=10, treatment_effect=0.0, seed=42
+        n_units=100,
+        n_time=20,
+        treatment_time=10,
+        treatment_effects={0: 0.0, 1: 0.0, 2: 0.0},
+        seed=42,
     )
     # Generate data with positive treatment effect
     df_with_effect = generate_event_study_data(
-        n_units=100, n_time=20, treatment_time=10, treatment_effect=5.0, seed=42
+        n_units=100,
+        n_time=20,
+        treatment_time=10,
+        treatment_effects={0: 5.0, 1: 5.0, 2: 5.0},
+        seed=42,
     )
 
     # Post-treatment mean should be higher with treatment effect
@@ -185,6 +193,64 @@ def test_event_study_staggered_adoption():
             treat_time_col="treat_time",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
+
+
+# ============================================================================
+# Unit Tests for NaN Handling
+# ============================================================================
+
+
+@pytest.mark.parametrize("model_type", ["pymc", "sklearn"])
+@pytest.mark.parametrize("nan_location", ["outcome", "unit", "multiple"])
+def test_event_study_handles_nan_values(model_type, nan_location):
+    """Test that EventStudy handles NaN values by filtering rows."""
+    df = generate_event_study_data(n_units=20, n_time=15, seed=42)
+
+    # Inject NaN values based on nan_location
+    # Note: We avoid setting 'time' to NaN because it would create duplicates
+    # in the (unit, time) key, which EventStudy validates against before patsy filtering
+    if nan_location == "outcome":
+        df.loc[5:9, "y"] = np.nan  # 5 rows with NaN in outcome
+    elif nan_location == "unit":
+        df.loc[10:14, "unit"] = np.nan  # 5 rows with NaN in unit
+    else:  # multiple
+        df.loc[5, "y"] = np.nan
+        df.loc[12, "unit"] = np.nan  # 2 rows total
+
+    original_rows = len(df)
+
+    # Choose model based on model_type
+    if model_type == "pymc":
+        model = cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs)
+    else:
+        model = LinearRegression()
+
+    # Should not raise ValueError about shape mismatch
+    result = cp.EventStudy(
+        df,
+        formula="y ~ C(unit) + C(time)",
+        unit_col="unit",
+        time_col="time",
+        treat_time_col="treat_time",
+        event_window=(-5, 5),
+        reference_event_time=-1,
+        model=model,
+    )
+
+    # Verify that NaN rows were filtered
+    if nan_location == "outcome" or nan_location == "unit":
+        expected_rows = original_rows - 5
+    else:  # multiple
+        expected_rows = original_rows - 2
+
+    # Check that arrays have consistent shapes
+    assert result.X.shape[0] == expected_rows
+    assert result.y.shape[0] == expected_rows
+    assert len(result.data) == expected_rows  # Filtered data
+
+    # Check that model was successfully fit
+    assert hasattr(result, "event_time_coeffs")
+    assert len(result.event_time_coeffs) > 0
 
 
 # ============================================================================
@@ -313,7 +379,7 @@ def test_event_study_skl_basic():
         treat_time_col="treat_time",
         event_window=(-5, 5),
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     # Check that event time coefficients were extracted
@@ -336,7 +402,7 @@ def test_event_study_skl_summary():
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     # Summary should not raise
@@ -361,7 +427,7 @@ def test_event_study_skl_plot():
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     # Plot should not raise
@@ -383,7 +449,7 @@ def test_event_study_skl_get_plot_data():
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     plot_data = result.get_plot_data_ols()
@@ -410,7 +476,7 @@ def test_event_study_different_reference():
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-2,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     assert result.event_time_coeffs[-2] == 0.0
@@ -429,7 +495,7 @@ def test_event_study_asymmetric_window():
         treat_time_col="treat_time",
         event_window=(-2, 5),  # Asymmetric
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     # Should have coefficients from -2 to 5
@@ -457,7 +523,7 @@ def test_event_study_with_never_treated():
         treat_time_col="treat_time",
         event_window=(-3, 3),
         reference_event_time=-1,
-        model=cp.skl_models.LinearRegression(),
+        model=LinearRegression(),
     )
 
     # Should work without error

@@ -76,9 +76,15 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(formula, filtered_data)
+            y, X = dmatrices(formula, filtered_data, return_type="dataframe")
+            # Filter data to rows that patsy kept (in case NaN values were dropped)
+            filtered_data = filtered_data.loc[X.index]
+            # Update self.data to match filtered data
+            self.data = filtered_data
         else:
-            y, X = dmatrices(formula, self.data)
+            y, X = dmatrices(formula, self.data, return_type="dataframe")
+            # Filter data to rows that patsy kept (in case NaN values were dropped)
+            self.data = self.data.loc[X.index]
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

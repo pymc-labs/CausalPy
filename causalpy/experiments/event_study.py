@@ -255,17 +255,18 @@ class EventStudy(BaseExperiment):
     def _build_design_matrix(self) -> None:
         """Build design matrix using patsy formula plus event-time dummies."""
         # Parse formula with patsy to get y and X (including FEs and covariates)
-        y, X = dmatrices(self.formula, self.data)
+        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
+
+        # Filter data to rows that patsy kept (in case NaN values were dropped)
+        self.data = self.data.loc[X.index]
 
         # Extract outcome variable name from formula
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # Convert patsy output to DataFrames for manipulation
-        X_df = pd.DataFrame(
-            X, columns=X.design_info.column_names, index=self.data.index
-        )
+        # X is already a DataFrame with correct index from patsy
+        X_df = X.copy()
 
         # Build event-time dummies (excluding reference event time)
         event_times = list(range(self.event_window[0], self.event_window[1] + 1))
