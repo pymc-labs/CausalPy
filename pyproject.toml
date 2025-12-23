@@ -196,3 +196,6 @@ ignore_missing_imports = true
 
 [tool.mypy-scipy]
 ignore_missing_imports = true
+
+[tool.marimo.runtime]
+watcher_on_save = "autorun"

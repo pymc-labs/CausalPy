@@ -48,23 +48,58 @@ def _get_data_home() -> pathlib.Path:
     return pathlib.Path(cp.__file__).parents[1] / "causalpy" / "data"
 
 
-def load_data(dataset: str | None = None) -> pd.DataFrame:
-    """Load the requested dataset and return a pandas DataFrame.
+def load_data(dataset: str) -> pd.DataFrame:
+    """Load example datasets for causal inference analysis.
+
+    This function loads pre-packaged datasets that are used in CausalPy's
+    documentation and examples. These datasets demonstrate various causal
+    inference methods including difference-in-differences, regression
+    discontinuity, synthetic control, interrupted time series, and more.
 
     Parameters
     ----------
-    dataset : str, optional
-        The desired dataset to load. If None, raises ValueError.
+    dataset : str
+        Name of the dataset to load. Available datasets are:
+
+        - ``"banks"`` - Historic banking closures data for difference-in-differences
+        - ``"brexit"`` - UK GDP data for estimating causal impact of Brexit
+        - ``"covid"`` - Deaths and temperature data for England and Wales
+        - ``"did"`` - Difference-in-differences example dataset
+        - ``"drinking"`` - Minimum legal drinking age data for regression discontinuity
+        - ``"its"`` - Interrupted time series example dataset
+        - ``"its simple"`` - Simplified interrupted time series dataset
+        - ``"rd"`` - Regression discontinuity example dataset
+        - ``"sc"`` - Synthetic control example dataset
+        - ``"anova1"`` - ANCOVA example with pre/post treatment nonequivalent groups
+        - ``"geolift1"`` - Single treatment geo-lift dataset for synthetic control
+        - ``"geolift_multi_cell"`` - Multi-cell geo-lift dataset for synthetic control
+        - ``"risk"`` - Acemoglu, Johnson & Robinson (2001) data for instrumental variables
+        - ``"nhefs"`` - National Health and Nutrition Examination Survey data
+        - ``"schoolReturns"`` - Schooling returns data for instrumental variable analysis
+        - ``"pisa18"`` - PISA 2018 sample data
+        - ``"nets"`` - National Supported Work Demonstration dataset
+        - ``"lalonde"`` - LaLonde dataset for propensity score analysis
 
     Returns
     -------
     pd.DataFrame
-        The loaded dataset as a pandas DataFrame.
+        The requested dataset as a pandas DataFrame.
 
     Raises
     ------
     ValueError
-        If the requested dataset is not found.
+        If the requested dataset name is not found in the available datasets.
+
+    Examples
+    --------
+    Load the difference-in-differences example dataset:
+
+    >>> import causalpy as cp
+    >>> df = cp.load_data("did")
+
+    Load the regression discontinuity dataset:
+
+    >>> df = cp.load_data("rd")
     """
 
     if dataset in DATASETS:
