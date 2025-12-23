@@ -64,18 +64,20 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
     Install the package (in editable mode) and its development dependencies. The `--no-deps` flag is used to avoid installing the dependencies of `CausalPy` as they are already installed when installing the development dependencies. This can end up interfering with the conda-only install of pymc.
 
+    **Note:** Use `python -m pip` instead of just `pip` to ensure you're using the conda environment's pip, not a system pip.
+
     ```bash
-    pip install --no-deps -e .
+    python -m pip install --no-deps -e .
     ```
 
 	Install development dependencies
 
 	```bash
-	pip install 'causalpy[dev]'
-	pip install 'causalpy[docs]'
-	pip install 'causalpy[test]'
-	pip install 'causalpy[lint]'
-	pip install 'pylint'
+	python -m pip install 'causalpy[dev]'
+	python -m pip install 'causalpy[docs]'
+	python -m pip install 'causalpy[test]'
+	python -m pip install 'causalpy[lint]'
+	python -m pip install 'pylint'
 	```
 
 	It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, run `brew install pandoc`.
