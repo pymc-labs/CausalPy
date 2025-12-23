@@ -721,7 +721,9 @@ class InstrumentalVariableRegression(PyMCModel):
                 warnings.warn(
                     "Variable selection priors specified. "
                     "The 'mus' and 'sigmas' in the priors dict will be ignored "
-                    "for beta coefficients. Only 'eta' and 'lkj_sd' will be used.",
+                    "for beta coefficients in the treatment equation."
+                    "Only 'eta' and 'lkj_sd' will be used from the priors dict"
+                    "where applicable.",
                     stacklevel=2,
                 )
 
