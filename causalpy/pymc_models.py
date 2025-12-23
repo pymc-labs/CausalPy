@@ -14,7 +14,7 @@
 """Custom PyMC models for causal inference"""
 
 import warnings
-from typing import Any
+from typing import Any, Literal
 
 import arviz as az
 import numpy as np
@@ -678,10 +678,10 @@ class InstrumentalVariableRegression(PyMCModel):
         y: np.ndarray,
         t: np.ndarray,
         coords: dict[str, Any],
-        priors,
-        vs_prior_type=None,
-        vs_hyperparams=None,
-        binary_treatment=False,
+        priors: dict[str, Any],
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
+        binary_treatment: bool = False,
     ) -> None:
         """Specify model with treatment regression and focal regression
         data and priors.
@@ -727,6 +727,8 @@ class InstrumentalVariableRegression(PyMCModel):
 
             # Create coefficient priors
             if vs_prior_type:
+                if vs_hyperparams is None:
+                    vs_hyperparams = {}
                 # Use variable selection priors
                 self.vs_prior_treatment = VariableSelectionPrior(
                     vs_prior_type, vs_hyperparams
@@ -869,17 +871,17 @@ class InstrumentalVariableRegression(PyMCModel):
 
     def fit(  # type: ignore[override]
         self,
-        X,
-        Z,
-        y,
-        t,
-        coords,
-        priors,
-        ppc_sampler=None,
-        vs_prior_type=None,
-        vs_hyperparams=None,
+        X: np.ndarray,
+        Z: np.ndarray,
+        y: np.ndarray,
+        t: np.ndarray,
+        coords: dict[str, Any],
+        priors: dict[str, Any],
+        ppc_sampler: Literal["jax", "pymc"] | None = None,
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
         binary_treatment: bool = False,
-    ):  # type: ignore[override]
+    ) -> az.InferenceData:  # type: ignore[override]
         """Draw samples from posterior distribution and potentially
         from the prior and posterior predictive distributions. The
         fit call can take values for the
