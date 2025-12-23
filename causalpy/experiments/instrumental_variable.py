@@ -181,8 +181,8 @@ class InstrumentalVariable(BaseExperiment):
             t=self.t,
             coords=COORDS,
             priors=self.priors,
-            vs_prior_type=vs_prior_type,
-            vs_hyperparams=vs_hyperparams,
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
             binary_treatment=self.binary_treatment,
         )
 
