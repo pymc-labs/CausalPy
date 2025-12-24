@@ -26,6 +26,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import papermill
+import yaml
 from nbformat.notebooknode import NotebookNode
 from papermill.iorw import load_notebook_node, write_ipynb
 
@@ -35,6 +36,9 @@ KERNEL_NAME = "python3"
 
 INJECTED_CODE_FILE = HERE / "injected.py"
 INJECTED_CODE = INJECTED_CODE_FILE.read_text()
+
+SKIP_NOTEBOOKS_FILE = HERE / "skip_notebooks.yml"
+SKIP_NOTEBOOKS = set(yaml.safe_load(SKIP_NOTEBOOKS_FILE.read_text()))
 
 
 def setup_logging() -> None:
@@ -100,6 +104,9 @@ def get_notebooks(
 ) -> list[Path]:
     """Get list of notebooks to run, optionally filtered."""
     notebooks = list(NOTEBOOKS_PATH.glob("*.ipynb"))
+
+    # Filter out notebooks that are incompatible with the mock
+    notebooks = [nb for nb in notebooks if nb.name not in SKIP_NOTEBOOKS]
 
     if pattern:
         notebooks = [nb for nb in notebooks if Path(nb).match(pattern)]

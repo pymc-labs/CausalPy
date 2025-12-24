@@ -4,7 +4,7 @@ This script runs Jupyter notebooks from `docs/source/notebooks/` to validate the
 
 ## How It Works
 
-1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 500 draws) for speed
+1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 100 draws) for speed
 2. **Uses Papermill** — Executes notebooks programmatically
 3. **Discards outputs** — Only checks for errors, doesn't save results
 
@@ -35,3 +35,4 @@ The GitHub Actions workflow (`.github/workflows/test_notebook.yml`) runs this sc
 
 - `runner.py` — Main script
 - `injected.py` — Code injected into notebooks to mock `pm.sample()`
+- `skip_notebooks.yml` — List of notebooks to skip (incompatible with mock sampling)

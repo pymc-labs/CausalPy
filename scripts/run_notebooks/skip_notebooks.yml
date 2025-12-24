@@ -1,0 +1,10 @@
+# Notebooks that are incompatible with prior predictive sampling mock.
+#
+# These notebooks are skipped because prior samples can produce extreme values
+# that cause numerical issues in the calculations.
+
+# Inverse propensity weighting notebooks require realistic posterior samples.
+# Prior samples can produce extreme propensity scores (very close to 0 or 1),
+# causing infinite values in the inverse weighting calculations.
+- inv_prop_pymc.ipynb
+- inv_prop_latent.ipynb

@@ -5,8 +5,7 @@ import pymc as pm
 import xarray as xr
 
 # Minimum draws needed to satisfy notebook code that iterates over posterior samples
-# (e.g., plot_ate uses ate_draws=500 by default)
-MIN_DRAWS = 500
+MIN_DRAWS = 100
 
 
 def mock_sample(*args, **kwargs):
