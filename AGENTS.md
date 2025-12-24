@@ -88,4 +88,26 @@ When you or the user identify an issue (bug, enhancement, or task), you can auto
    gh issue create --title "<descriptive title>" --body-file issue.md
    ```
 
+   **Adding labels**: Use the `--label` flag to categorize the issue appropriately:
+   ```bash
+   gh issue create --title "<descriptive title>" --body-file issue.md --label "<label>"
+   ```
+
+   Common labels include:
+   - `bug` - Something isn't working correctly
+   - `enhancement` - New feature or improvement request
+   - `documentation` - Documentation improvements or additions
+   - `question` - Further information is requested
+
+   Multiple labels can be added by repeating the flag: `--label "bug" --label "high priority"`
+
+   **Discovering available labels**: To see what labels are available in the repository:
+   ```bash
+   # List all labels defined in the repo, along with their descriptions
+   gh label list --limit 100
+
+   # Find unique labels from existing issues
+   gh issue list --state all --limit 100 --json labels --jq '.[].labels[].name' | sort -u
+   ```
+
 4. **Clean up**: Delete the temporary `issue.md` file after the issue is created.
