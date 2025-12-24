@@ -66,21 +66,32 @@ def run_notebook(notebook_path: Path) -> None:
     nb = load_notebook_node(str(notebook_path))
     inject_mock_code(nb.cells)
 
-    with NamedTemporaryFile(suffix=".ipynb", delete=False) as f:
-        write_ipynb(nb, f.name)
-        try:
-            papermill.execute_notebook(
-                input_path=f.name,
-                output_path=None,  # Discard output
-                kernel_name=KERNEL_NAME,
-                progress_bar=True,
-                cwd=notebook_path.parent,
-            )
-        except Exception as e:
-            logging.error(f"Error running notebook: {notebook_path.name}")
-            raise e
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(suffix=".ipynb", delete=False) as f:
+            temp_path = Path(f.name)
+            write_ipynb(nb, f.name)
 
-
+        papermill.execute_notebook(
+            input_path=str(temp_path),
+            output_path=None,  # Discard output
+            kernel_name=KERNEL_NAME,
+            progress_bar=True,
+            cwd=notebook_path.parent,
+        )
+    except Exception as e:
+        logging.error(f"Error running notebook: {notebook_path.name}")
+        raise e
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                logging.warning(
+                    "Failed to delete temporary notebook file %s: %s",
+                    temp_path,
+                    cleanup_error,
+                )
 def get_notebooks(
     pattern: str | None = None,
     exclude_patterns: list[str] | None = None,
