@@ -9,19 +9,18 @@ def mock_sample(*args, **kwargs):
     """Mock pm.sample using prior predictive sampling for speed."""
     random_seed = kwargs.get("random_seed")
     model = kwargs.get("model")
-    samples = 10
+    n_draws = 10
 
     idata = pm.sample_prior_predictive(
         model=model,
         random_seed=random_seed,
-        draws=samples,
+        draws=n_draws,
     )
     idata.add_groups(posterior=idata.prior)
 
     # Create mock sample stats with diverging data
     if "sample_stats" not in idata:
         n_chains = 1
-        n_draws = samples
         sample_stats = xr.Dataset(
             {
                 "diverging": xr.DataArray(
