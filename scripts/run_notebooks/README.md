@@ -4,7 +4,7 @@ This script runs Jupyter notebooks from `docs/source/notebooks/` to validate the
 
 ## How It Works
 
-1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 10 draws) for speed
+1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 50 draws) for speed
 2. **Uses Papermill** — Executes notebooks programmatically
 3. **Discards outputs** — Only checks for errors, doesn't save results
 
