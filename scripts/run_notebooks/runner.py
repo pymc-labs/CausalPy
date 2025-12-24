@@ -92,6 +92,8 @@ def run_notebook(notebook_path: Path) -> None:
                     temp_path,
                     cleanup_error,
                 )
+
+
 def get_notebooks(
     pattern: str | None = None,
     exclude_patterns: list[str] | None = None,
