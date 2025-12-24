@@ -16,6 +16,7 @@
 import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
+from matplotlib import pyplot as plt
 
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
@@ -646,6 +647,112 @@ def test_rd_running_variable_name_not_x():
     age_vals = result.fit_data["age"]
     assert all(np.abs(age_vals - threshold) <= 2.0)
     assert all(np.abs(age_vals - threshold) >= 0.5)
+
+
+def test_rd_few_datapoints_warning():
+    """Test that a warning is raised when bandwidth/donut_hole filter too aggressively."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    # Use aggressive bandwidth that leaves very few datapoints
+    with pytest.warns(UserWarning, match="remaining datapoints"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.05,  # Very narrow bandwidth
+        )
+
+
+def test_rd_few_datapoints_warning_with_donut():
+    """Test warning when both bandwidth and donut_hole are mentioned."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    # Use aggressive settings that leave very few datapoints
+    with pytest.warns(UserWarning, match="bandwidth.*donut_hole"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.1,
+            donut_hole=0.08,  # Large donut relative to bandwidth
+        )
+
+
+def test_rd_unrecognized_model_type():
+    """Test that an unrecognized model type raises ValueError."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    class FakeModel:
+        """A fake model that is neither PyMCModel nor RegressorMixin."""
+
+        pass
+
+    with pytest.raises(ValueError, match="Model type not recognized"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=FakeModel(),
+            treatment_threshold=threshold,
+        )
+
+
+def test_rd_ols_plot_with_donut_hole():
+    """Test that OLS plot shows donut hole boundary lines."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=LinearRegression(),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+    # Check that donut boundary lines were added (2 orange dashed lines)
+    donut_lines = [
+        line
+        for line in ax.get_lines()
+        if line.get_linestyle() == "--" and line.get_color() == "orange"
+    ]
+    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    plt.close(fig)
+
+
+def test_rd_bayesian_plot_with_donut_hole():
+    """Test that Bayesian plot shows donut hole boundary lines."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+    # Check that donut boundary lines were added (2 orange dashed lines)
+    donut_lines = [
+        line
+        for line in ax.get_lines()
+        if line.get_linestyle() == "--" and line.get_color() == "orange"
+    ]
+    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    plt.close(fig)
 
 
 # Synthetic Control - Convex Hull Assumption
