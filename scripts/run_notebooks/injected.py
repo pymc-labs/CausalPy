@@ -9,6 +9,12 @@ def mock_sample(*args, **kwargs):
     """Mock pm.sample using prior predictive sampling for speed."""
     random_seed = kwargs.get("random_seed")
     model = kwargs.get("model")
+
+    # If no model is provided via kwargs, try to infer it from positional args
+    if model is None and args:
+        first_arg = args[0]
+        if isinstance(first_arg, pm.Model):
+            model = first_arg
     n_draws = 10
 
     idata = pm.sample_prior_predictive(
