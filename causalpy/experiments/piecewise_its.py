@@ -294,6 +294,8 @@ class PiecewiseITS(BaseExperiment):
         Compute the counterfactual (no intervention) and causal effects.
 
         The counterfactual is computed by setting step/ramp terms to zero.
+        Also creates post_impact, datapost, and post_pred attributes for
+        compatibility with effect_summary() from BaseExperiment.
         """
         # Create design matrix for counterfactual (zero out interruption columns)
         X_cf = self.X.copy()
@@ -328,6 +330,82 @@ class PiecewiseITS(BaseExperiment):
 
             # Cumulative effect
             self.cumulative_effect = np.cumsum(self.effect)
+
+        # Create compatibility attributes for effect_summary() from BaseExperiment
+        # These represent the post-intervention portion (after the first interruption)
+        self._create_post_intervention_attributes()
+
+    def _create_post_intervention_attributes(self) -> None:
+        """
+        Create post_impact, datapost, and post_pred attributes for effect_summary().
+
+        These attributes make PiecewiseITS compatible with the effect_summary()
+        method inherited from BaseExperiment, which expects ITS-like attributes.
+
+        The "post-intervention" portion is defined as all observations at or after
+        the first interruption time.
+        """
+        if not self.interruption_times:
+            # No interruptions - all data is "pre-intervention"
+            # Create empty post-intervention attributes
+            self.datapost = self.data.iloc[0:0]  # Empty DataFrame
+            return
+
+        # Get the first interruption time
+        first_interruption = self.interruption_times[0]
+        time_col = self.time_col
+
+        # Create boolean mask for post-intervention period
+        # Post-intervention = time >= first_interruption (inclusive)
+        if isinstance(first_interruption, str):
+            # String threshold (e.g., '2020-06-01')
+            try:
+                threshold = pd.Timestamp(first_interruption)
+                post_mask = self.data[time_col] >= threshold
+            except Exception:
+                # Fallback: try direct comparison
+                post_mask = self.data[time_col] >= first_interruption
+        else:
+            # Numeric threshold
+            post_mask = self.data[time_col] >= first_interruption
+
+        # Create datapost - the post-intervention data
+        self.datapost = self.data[post_mask].copy()
+        self.datapost.index.name = "obs_ind"
+
+        # Get indices for post-intervention period
+        post_indices = np.where(np.asarray(post_mask))[0]
+
+        # Create post_impact - the effects after the first interruption
+        if isinstance(self.model, PyMCModel):
+            # For PyMC models, effect is an xarray.DataArray
+            # Select using obs_ind coordinate
+            self.post_impact = self.effect.isel(obs_ind=post_indices)
+
+            # Create post_pred - counterfactual predictions for post-intervention
+            # This needs to be an InferenceData-like object for extract_counterfactual
+            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
+            if "treated_units" in y_cf_mu.dims:
+                y_cf_mu = y_cf_mu.isel(treated_units=0)
+            post_cf_mu = y_cf_mu.isel(obs_ind=post_indices)
+
+            # Update the coordinates to match datapost.index
+            post_cf_mu = post_cf_mu.assign_coords(obs_ind=self.datapost.index)
+
+            # Create an InferenceData-like dict structure
+            self.post_pred = {
+                "posterior_predictive": {"mu": post_cf_mu},
+            }
+
+            # Update post_impact coordinates to match datapost.index
+            self.post_impact = self.post_impact.assign_coords(
+                obs_ind=self.datapost.index
+            )
+
+        elif isinstance(self.model, RegressorMixin):
+            # For OLS models, effect and counterfactual are numpy arrays
+            self.post_impact = self.effect[post_indices]
+            self.post_pred = np.squeeze(self.y_counterfactual)[post_indices]
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.

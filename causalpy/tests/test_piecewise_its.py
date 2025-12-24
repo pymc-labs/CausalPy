@@ -770,3 +770,118 @@ def test_piecewise_its_datetime_multiple_interruptions():
     )
 
     assert len(result.interruption_times) == 2
+
+
+# ==============================================================================
+# Test effect_summary compatibility
+# ==============================================================================
+
+
+def test_piecewise_its_effect_summary_ols():
+    """Test that effect_summary works for PiecewiseITS with OLS model."""
+    np.random.seed(42)
+    t = np.arange(100)
+    y = (
+        10
+        + 0.1 * t
+        + 5 * (t >= 50)
+        + 0.2 * np.maximum(0, t - 50)
+        + np.random.randn(100)
+    )
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # effect_summary should not raise an error
+    summary = result.effect_summary()
+
+    # Check that summary has expected attributes
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+
+    # Check table has expected rows
+    assert "average" in summary.table.index
+    assert "cumulative" in summary.table.index
+
+    # Check table has expected columns for OLS
+    assert "mean" in summary.table.columns
+    assert "ci_lower" in summary.table.columns
+    assert "ci_upper" in summary.table.columns
+
+    # Text should not be empty
+    assert len(summary.text) > 0
+    assert "Post-period" in summary.text
+
+
+def test_piecewise_its_effect_summary_pymc():
+    """Test that effect_summary works for PiecewiseITS with PyMC model."""
+    np.random.seed(42)
+    t = np.arange(100)
+    y = (
+        10
+        + 0.1 * t
+        + 5 * (t >= 50)
+        + 0.2 * np.maximum(0, t - 50)
+        + np.random.randn(100)
+    )
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={"random_seed": 42, "progressbar": False, **sample_kwargs}
+        ),
+    )
+
+    # effect_summary should not raise an error
+    summary = result.effect_summary()
+
+    # Check that summary has expected attributes
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+
+    # Check table has expected rows
+    assert "average" in summary.table.index
+    assert "cumulative" in summary.table.index
+
+    # Check table has expected columns for PyMC
+    assert "mean" in summary.table.columns
+    assert "hdi_lower" in summary.table.columns
+    assert "hdi_upper" in summary.table.columns
+
+    # Text should not be empty
+    assert len(summary.text) > 0
+    assert "Post-period" in summary.text
+
+
+def test_piecewise_its_post_impact_attributes():
+    """Test that PiecewiseITS creates post_impact and datapost attributes."""
+    np.random.seed(42)
+    t = np.arange(100)
+    y = 10 + 0.1 * t + 5 * (t >= 50) + np.random.randn(100)
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Check that post_impact and datapost are created
+    assert hasattr(result, "post_impact")
+    assert hasattr(result, "datapost")
+    assert hasattr(result, "post_pred")
+
+    # datapost should have 50 rows (t >= 50)
+    assert len(result.datapost) == 50
+
+    # post_impact should have same length as datapost
+    assert len(result.post_impact) == len(result.datapost)
+
+    # post_pred should have same length as datapost
+    assert len(result.post_pred) == len(result.datapost)
