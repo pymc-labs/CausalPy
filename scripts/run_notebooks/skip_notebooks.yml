@@ -10,3 +10,4 @@
 
 # Requires JAX which is not installed in the test environment.
 - iv_pymc.ipynb
+- iv_weak_instruments.ipynb
