@@ -15,7 +15,7 @@ def mock_sample(*args, **kwargs):
         first_arg = args[0]
         if isinstance(first_arg, pm.Model):
             model = first_arg
-    n_draws = 50
+    n_draws = 100
 
     idata = pm.sample_prior_predictive(
         model=model,
