@@ -15,6 +15,7 @@
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
 from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.transforms import ramp, step
 from causalpy.version import __version__
 
 from .data import load_data
@@ -39,8 +40,10 @@ __all__ = [
     "PiecewiseITS",
     "PrePostNEGD",
     "pymc_models",
+    "ramp",
     "RegressionDiscontinuity",
     "RegressionKink",
     "skl_models",
+    "step",
     "SyntheticControl",
 ]

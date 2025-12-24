@@ -15,7 +15,7 @@
 Piecewise Interrupted Time Series Analysis (Segmented Regression)
 """
 
-import warnings
+import re
 from typing import Any
 
 import arviz as az
@@ -23,11 +23,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
+from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
-from causalpy.custom_exceptions import BadIndexException, DataException
+from causalpy.custom_exceptions import FormulaException
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -46,36 +48,21 @@ class PiecewiseITS(BaseExperiment):
     full time series** and estimates explicit level and/or slope changes at each
     interruption.
 
-    The model specification is:
+    The model uses patsy formulas with custom `step()` and `ramp()` transforms:
 
-    .. math::
-
-        y_t = \\beta_0 + \\beta_1 t + \\sum_{k=1}^{K} (\\beta_{2k} I_k(t) + \\beta_{3k} R_k(t)) + \\epsilon_t
-
-    Where:
-    - :math:`\\beta_0` is the baseline intercept
-    - :math:`\\beta_1` is the baseline slope
-    - :math:`I_k(t) = 1[t \\geq T_k]` is a step function for level change at interruption k
-    - :math:`R_k(t) = \\max(0, t - T_k)` is a ramp function for slope change at interruption k
-    - :math:`T_k` are the known interruption times
+    - ``step(time, threshold)``: Creates a binary indicator (1 if time >= threshold)
+      for level changes
+    - ``ramp(time, threshold)``: Creates a ramp function (max(0, time - threshold))
+      for slope changes
 
     Parameters
     ----------
     data : pd.DataFrame
         A pandas DataFrame containing the time series data.
-    outcome : str
-        Column name for the outcome variable.
-    time : str
-        Column name for the time variable. Can be numeric or datetime.
-    interruption_times : list
-        List of known interruption times. Must be sorted and within data range.
-        Type should match the time column (int/float or pd.Timestamp).
-    include_level_change : bool, default=True
-        Whether to include step functions (immediate level changes) at interruptions.
-    include_slope_change : bool, default=True
-        Whether to include ramp functions (slope changes) at interruptions.
-    controls : list[str], optional
-        List of control variable column names to include in the model.
+    formula : str
+        A patsy formula specifying the model. Must include at least one
+        ``step()`` or ``ramp()`` term. Example:
+        ``"y ~ 1 + t + step(t, 50) + ramp(t, 50)"``
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model.
@@ -84,8 +71,10 @@ class PiecewiseITS(BaseExperiment):
 
     Attributes
     ----------
+    formula : str
+        The patsy formula used for the model.
     interruption_times : list
-        The known interruption times.
+        List of interruption times extracted from the formula.
     labels : list[str]
         Names of all coefficients in the design matrix.
     effect : xr.DataArray or np.ndarray
@@ -111,18 +100,38 @@ class PiecewiseITS(BaseExperiment):
     >>> df = pd.DataFrame({"t": t, "y": y})
     >>> result = cp.PiecewiseITS(
     ...     df,
-    ...     outcome="y",
-    ...     time="t",
-    ...     interruption_times=[50],
+    ...     formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
     ... )
 
+    **Different effects per intervention:**
+
+    >>> # Level change only at t=50, level + slope change at t=100
+    >>> result = cp.PiecewiseITS(
+    ...     df,
+    ...     formula="y ~ 1 + t + step(t, 50) + step(t, 100) + ramp(t, 100)",
+    ...     model=...,
+    ... )  # doctest: +SKIP
+
+    **With datetime thresholds:**
+
+    >>> df["date"] = pd.date_range("2020-01-01", periods=100, freq="D")
+    >>> result = cp.PiecewiseITS(
+    ...     df,
+    ...     formula="y ~ 1 + date + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
+    ...     model=...,
+    ... )  # doctest: +SKIP
+
     Notes
     -----
-    The counterfactual is computed by setting all interruption terms to zero,
+    The counterfactual is computed by setting all step/ramp terms to zero,
     representing what would have happened without the interventions.
+
+    The `step` and `ramp` transforms are patsy stateful transforms that handle
+    both numeric and datetime time columns. For datetime, thresholds can be
+    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
 
     References
     ----------
@@ -140,34 +149,59 @@ class PiecewiseITS(BaseExperiment):
     def __init__(
         self,
         data: pd.DataFrame,
-        outcome: str,
-        time: str,
-        interruption_times: list[int | float | pd.Timestamp],
-        include_level_change: bool = True,
-        include_slope_change: bool = True,
-        controls: list[str] | None = None,
+        formula: str,
         model: PyMCModel | RegressorMixin | None = None,
         **kwargs: dict[str, Any],
     ) -> None:
         super().__init__(model=model)
 
         # Store configuration
-        self.outcome = outcome
-        self.time_col = time
-        self.interruption_times = list(interruption_times)
-        self.include_level_change = include_level_change
-        self.include_slope_change = include_slope_change
-        self.controls = controls or []
+        self.formula = formula
         self.data = data.copy()
-
-        # Input validation
-        self._validate_inputs()
 
         # Rename the index to "obs_ind" for consistency
         self.data.index.name = "obs_ind"
 
-        # Generate design matrix with step and ramp features
-        self.X, self.y, self.labels = self._generate_design_matrix()
+        # Input validation
+        self._validate_inputs()
+
+        # Extract interruption times from formula for plotting
+        self.interruption_times = self._extract_interruption_times()
+
+        # Detect time column from step/ramp usage
+        self.time_col = self._extract_time_column()
+
+        # Parse formula with patsy (step and ramp are available in namespace)
+        y, X = dmatrices(formula, self.data)
+        self.outcome_variable_name = y.design_info.column_names[0]
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = list(X.design_info.column_names)
+
+        # Convert to numpy arrays
+        y_array = np.asarray(y)
+        X_array = np.asarray(X)
+
+        n_obs = X_array.shape[0]
+
+        # Convert to xarray DataArrays
+        self.X = xr.DataArray(
+            X_array,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(n_obs),
+                "coeffs": self.labels,
+            },
+        )
+
+        self.y = xr.DataArray(
+            y_array,
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": np.arange(n_obs),
+                "treated_units": ["unit_0"],
+            },
+        )
 
         # Track which columns are interruption-related (for counterfactual)
         self._interruption_cols = self._get_interruption_column_indices()
@@ -200,182 +234,58 @@ class PiecewiseITS(BaseExperiment):
         self._compute_counterfactual_and_effects()
 
     def _validate_inputs(self) -> None:
-        """Validate input data and configuration."""
-        # Check outcome column exists
-        if self.outcome not in self.data.columns:
-            raise DataException(f"Outcome column '{self.outcome}' not found in data.")
-
-        # Check time column exists
-        if self.time_col not in self.data.columns:
-            raise DataException(f"Time column '{self.time_col}' not found in data.")
-
-        # Check control columns exist
-        for ctrl in self.controls:
-            if ctrl not in self.data.columns:
-                raise DataException(f"Control column '{ctrl}' not found in data.")
-
-        # Check at least one change type is enabled
-        if not self.include_level_change and not self.include_slope_change:
-            raise ValueError(
-                "At least one of include_level_change or include_slope_change must be True."
+        """Validate input data and formula."""
+        # Check formula contains at least one step() or ramp() term
+        if "step(" not in self.formula and "ramp(" not in self.formula:
+            raise FormulaException(
+                "Formula must contain at least one step() or ramp() term. "
+                "Example: 'y ~ 1 + t + step(t, 50) + ramp(t, 50)'"
             )
 
-        # Check interruption times is non-empty
-        if not self.interruption_times:
-            raise ValueError("interruption_times must contain at least one time point.")
+    def _extract_interruption_times(self) -> list[int | float | str]:
+        """Extract interruption times from step() and ramp() calls in formula.
 
-        # Check interruption times are sorted
-        if self.interruption_times != sorted(self.interruption_times):
-            raise ValueError("interruption_times must be sorted in ascending order.")
+        Returns a list of unique threshold values found in the formula.
+        """
+        # Match step(var, threshold) and ramp(var, threshold)
+        # Threshold can be: numeric (50, 50.0), string ('2020-01-01'), or expression
+        pattern = r"(?:step|ramp)\s*\(\s*\w+\s*,\s*([^)]+)\s*\)"
+        matches = re.findall(pattern, self.formula)
 
-        # Validate time types match
-        time_values = self.data[self.time_col]
-        is_datetime_time = pd.api.types.is_datetime64_any_dtype(time_values)
-        first_interrupt = self.interruption_times[0]
-        is_datetime_interrupt = isinstance(first_interrupt, pd.Timestamp)
-
-        if is_datetime_time and not is_datetime_interrupt:
-            raise BadIndexException(
-                "If time column is datetime, interruption_times must be pd.Timestamp."
-            )
-        if not is_datetime_time and is_datetime_interrupt:
-            raise BadIndexException(
-                "If time column is numeric, interruption_times must not be pd.Timestamp."
-            )
-
-        # Check interruption times are within data range
-        time_min = time_values.min()
-        time_max = time_values.max()
-        for t_k in self.interruption_times:
-            if t_k < time_min or t_k > time_max:
-                raise ValueError(
-                    f"Interruption time {t_k} is outside data range [{time_min}, {time_max}]."
-                )
-
-        # Warn about closely spaced interruptions (potential collinearity)
-        if len(self.interruption_times) > 1:
-            if is_datetime_time:
-                time_range_val = (
-                    pd.Timestamp(time_max) - pd.Timestamp(time_min)
-                ).total_seconds()
-            else:
-                time_range_val = float(time_max) - float(time_min)
-            for i in range(1, len(self.interruption_times)):
-                if is_datetime_time:
-                    diff_val = (
-                        pd.Timestamp(self.interruption_times[i])
-                        - pd.Timestamp(self.interruption_times[i - 1])
-                    ).total_seconds()
+        thresholds: list[int | float | str] = []
+        for match in matches:
+            match = match.strip()
+            # Try to parse as numeric
+            try:
+                if "." in match:
+                    val: int | float | str = float(match)
                 else:
-                    diff_val = float(self.interruption_times[i]) - float(
-                        self.interruption_times[i - 1]
-                    )
-                if diff_val < time_range_val * 0.05:  # Less than 5% of total range
-                    warnings.warn(
-                        f"Interruption times {self.interruption_times[i - 1]} and "
-                        f"{self.interruption_times[i]} are very close together. "
-                        "This may cause collinearity issues.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
+                    val = int(match)
+            except ValueError:
+                # Keep as string (e.g., "'2020-01-01'" or "pd.Timestamp(...)")
+                # Strip quotes if present
+                val = match.strip("'\"")
+            if val not in thresholds:
+                thresholds.append(val)
 
-    def _generate_design_matrix(
-        self,
-    ) -> tuple[xr.DataArray, xr.DataArray, list[str]]:
-        """
-        Generate the design matrix with intercept, time, step/ramp features,
-        and optional control variables.
+        return thresholds
 
-        Returns
-        -------
-        X : xr.DataArray
-            Design matrix with shape (n_obs, n_features).
-        y : xr.DataArray
-            Outcome variable with shape (n_obs, 1).
-        labels : list[str]
-            Names of the columns in X.
-        """
-        n_obs = len(self.data)
-        time_values = self.data[self.time_col].values
-
-        # Convert datetime to numeric for model fitting
-        time_numeric: np.ndarray
-        self._time_origin: pd.Timestamp | None
-        if pd.api.types.is_datetime64_any_dtype(time_values):
-            dt_index = pd.to_datetime(time_values)
-            time_numeric = (dt_index - dt_index.min()).total_seconds().values / (
-                24 * 3600
-            )  # Convert to days
-            self._time_is_datetime = True
-            self._time_origin = dt_index.min()
-        else:
-            time_numeric = np.asarray(time_values, dtype=float)
-            self._time_is_datetime = False
-            self._time_origin = None
-
-        # Store numeric time for later use
-        self._time_numeric = time_numeric
-
-        # Build design matrix columns
-        columns = {"Intercept": np.ones(n_obs), "time": time_numeric}
-        labels = ["Intercept", "time"]
-
-        # Add step and ramp features for each interruption
-        for k, t_k in enumerate(self.interruption_times):
-            if self._time_is_datetime and self._time_origin is not None:
-                t_k_numeric = (
-                    pd.Timestamp(t_k) - self._time_origin
-                ).total_seconds() / (24 * 3600)
-            else:
-                t_k_numeric = float(t_k)
-
-            if self.include_level_change:
-                col_name = f"level_{k}"
-                columns[col_name] = (time_numeric >= t_k_numeric).astype(float)
-                labels.append(col_name)
-
-            if self.include_slope_change:
-                col_name = f"slope_{k}"
-                columns[col_name] = np.maximum(0, time_numeric - t_k_numeric)
-                labels.append(col_name)
-
-        # Add control variables
-        for ctrl in self.controls:
-            columns[ctrl] = np.asarray(self.data[ctrl].values, dtype=float)
-            labels.append(ctrl)
-
-        # Create design matrix
-        X_array: np.ndarray = np.column_stack(
-            [np.asarray(columns[label]) for label in labels]
-        )
-
-        X = xr.DataArray(
-            X_array,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(n_obs),
-                "coeffs": labels,
-            },
-        )
-
-        # Create outcome array
-        y_array: np.ndarray = np.asarray(self.data[self.outcome].values).reshape(-1, 1)
-        y = xr.DataArray(
-            y_array,
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": np.arange(n_obs),
-                "treated_units": ["unit_0"],
-            },
-        )
-
-        return X, y, labels
+    def _extract_time_column(self) -> str:
+        """Extract the time column name from step/ramp calls in formula."""
+        # Match step(var, ...) or ramp(var, ...)
+        pattern = r"(?:step|ramp)\s*\(\s*(\w+)\s*,"
+        matches = re.findall(pattern, self.formula)
+        if matches:
+            return matches[0]
+        # Fallback: try to find a time-like column
+        return "t"
 
     def _get_interruption_column_indices(self) -> list[int]:
-        """Get indices of columns related to interruptions (for counterfactual)."""
+        """Get indices of columns related to interruptions (step/ramp terms)."""
         indices = []
         for i, label in enumerate(self.labels):
-            if label.startswith("level_") or label.startswith("slope_"):
+            # Patsy labels step/ramp terms like "step(t, 50)" or "ramp(t, 50)"
+            if "step(" in label or "ramp(" in label:
                 indices.append(i)
         return indices
 
@@ -383,7 +293,7 @@ class PiecewiseITS(BaseExperiment):
         """
         Compute the counterfactual (no intervention) and causal effects.
 
-        The counterfactual is computed by setting interruption terms to zero.
+        The counterfactual is computed by setting step/ramp terms to zero.
         """
         # Create design matrix for counterfactual (zero out interruption columns)
         X_cf = self.X.copy()
@@ -428,13 +338,8 @@ class PiecewiseITS(BaseExperiment):
             Number of decimals used to round results. Defaults to 2.
         """
         print(f"{self.expt_type:=^80}")
-        print(f"Outcome: {self.outcome}")
-        print(f"Time column: {self.time_col}")
+        print(f"Formula: {self.formula}")
         print(f"Interruption times: {self.interruption_times}")
-        print(f"Level change: {self.include_level_change}")
-        print(f"Slope change: {self.include_slope_change}")
-        if self.controls:
-            print(f"Controls: {self.controls}")
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
@@ -504,7 +409,7 @@ class PiecewiseITS(BaseExperiment):
         title_str = "Piecewise ITS: Bayesian $R^2$"
         if r2_val is not None:
             title_str += f" = {round_num(r2_val, round_to)}"
-        ax[0].set(title=title_str, ylabel=self.outcome)
+        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         handles = [h_obs, (h_line_fit, h_patch_fit), (h_line_cf, h_patch_cf)]
         labels_legend = ["Observations", "Fitted", "Counterfactual"]
@@ -537,9 +442,11 @@ class PiecewiseITS(BaseExperiment):
 
         # Add vertical lines for interruptions
         for i, t_k in enumerate(self.interruption_times):
+            # Convert string thresholds to appropriate type for plotting
+            plot_threshold = self._convert_threshold_for_plotting(t_k)
             for a in ax:
                 a.axvline(
-                    x=t_k,
+                    x=plot_threshold,
                     ls="-",
                     lw=2,
                     color="red",
@@ -588,7 +495,7 @@ class PiecewiseITS(BaseExperiment):
         )
 
         title_str = f"Piecewise ITS: $R^2$ = {round_num(float(self.score), round_to)}"
-        ax[0].set(title=title_str, ylabel=self.outcome)
+        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect
         ax[1].plot(time_values, self.effect, "C2-", linewidth=2)
@@ -603,9 +510,10 @@ class PiecewiseITS(BaseExperiment):
 
         # Add vertical lines for interruptions
         for i, t_k in enumerate(self.interruption_times):
+            plot_threshold = self._convert_threshold_for_plotting(t_k)
             for a in ax:
                 a.axvline(
-                    x=t_k,
+                    x=plot_threshold,
                     ls="-",
                     lw=2,
                     color="red",
@@ -617,6 +525,18 @@ class PiecewiseITS(BaseExperiment):
 
         plt.tight_layout()
         return fig, ax
+
+    def _convert_threshold_for_plotting(
+        self, threshold: int | float | str
+    ) -> int | float | pd.Timestamp:
+        """Convert threshold to appropriate type for matplotlib plotting."""
+        if isinstance(threshold, str):
+            # Try to parse as datetime
+            try:
+                return pd.Timestamp(threshold)
+            except Exception:
+                return threshold  # type: ignore[return-value]
+        return threshold
 
     def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
@@ -678,7 +598,7 @@ class PiecewiseITS(BaseExperiment):
         result = pd.DataFrame(
             {
                 self.time_col: time_values,
-                self.outcome: self.y.isel(treated_units=0).values,
+                self.outcome_variable_name: self.y.isel(treated_units=0).values,
                 "fitted": fitted_mean,
                 f"fitted_hdi_lower_{hdi_pct}": fitted_lower,
                 f"fitted_hdi_upper_{hdi_pct}": fitted_upper,
@@ -711,7 +631,7 @@ class PiecewiseITS(BaseExperiment):
         result = pd.DataFrame(
             {
                 self.time_col: time_values,
-                self.outcome: self.y.values.flatten(),
+                self.outcome_variable_name: self.y.values.flatten(),
                 "fitted": np.squeeze(self.y_pred),
                 "counterfactual": np.squeeze(self.y_counterfactual),
                 "effect": self.effect,
