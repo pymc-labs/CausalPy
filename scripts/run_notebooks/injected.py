@@ -4,6 +4,10 @@ import numpy as np
 import pymc as pm
 import xarray as xr
 
+# Minimum draws needed to satisfy notebook code that iterates over posterior samples
+# (e.g., plot_ate uses ate_draws=500 by default)
+MIN_DRAWS = 500
+
 
 def mock_sample(*args, **kwargs):
     """Mock pm.sample using prior predictive sampling for speed."""
@@ -15,7 +19,10 @@ def mock_sample(*args, **kwargs):
         first_arg = args[0]
         if isinstance(first_arg, pm.Model):
             model = first_arg
-    n_draws = 100
+
+    # Always use MIN_DRAWS to ensure compatibility with code that iterates
+    # over posterior samples (ignoring the requested draws for speed)
+    n_draws = MIN_DRAWS
 
     idata = pm.sample_prior_predictive(
         model=model,
