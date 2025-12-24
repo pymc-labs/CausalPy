@@ -59,3 +59,33 @@
     - `ignore-missing-imports`: Enabled to allow for gradual adoption of type hints without requiring all third-party libraries to have stubs.
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
 - **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
+
+## GitHub Issue Creation
+
+When you or the user identify an issue (bug, enhancement, or task), you can automatically create a GitHub issue using the GitHub CLI.
+
+### Prerequisites
+
+- **Install GitHub CLI**: If `gh` is not available, install it:
+  - macOS: `brew install gh`
+  - Linux: See https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+  - Windows: `winget install --id GitHub.cli`
+- **Authenticate**: Run `gh auth login` and follow the prompts to authorize access to the repository.
+
+### Creating an Issue
+
+1. **Generate the issue body**: Create a markdown file (e.g., `issue.md`) describing the issue with:
+   - A clear problem statement or feature request
+   - Steps to reproduce (for bugs)
+   - Expected vs actual behavior (for bugs)
+   - Relevant code snippets or error messages
+   - Proposed solution (if applicable)
+
+2. **User review**: Always present the draft issue to the user for review before filing. The user should have the opportunity to view, modify, or approve the issue content before it is submitted.
+
+3. **Create the issue**: After the user approves, run the following command:
+   ```bash
+   gh issue create --title "<descriptive title>" --body-file issue.md
+   ```
+
+4. **Clean up**: Delete the temporary `issue.md` file after the issue is created.
