@@ -885,3 +885,527 @@ def test_piecewise_its_post_impact_attributes():
 
     # post_pred should have same length as datapost
     assert len(result.post_pred) == len(result.datapost)
+
+
+# ==============================================================================
+# Additional coverage tests
+# ==============================================================================
+
+
+def test_piecewise_its_class_attributes():
+    """Test that class-level attributes are correctly set."""
+    assert cp.PiecewiseITS.expt_type == "Piecewise Interrupted Time Series"
+    assert cp.PiecewiseITS.supports_ols is True
+    assert cp.PiecewiseITS.supports_bayes is True
+
+
+def test_piecewise_its_instance_attributes():
+    """Test that instance attributes are correctly created."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Check formula and time column extraction
+    assert result.formula == "y ~ 1 + t + step(t, 50) + ramp(t, 50)"
+    assert result.time_col == "t"
+    assert result.outcome_variable_name == "y"
+
+    # Check X and y are xarray DataArrays
+    assert hasattr(result.X, "dims")
+    assert hasattr(result.y, "dims")
+    assert "obs_ind" in result.X.dims
+    assert "coeffs" in result.X.dims
+
+    # Check design info stored
+    assert hasattr(result, "_x_design_info")
+    assert hasattr(result, "_y_design_info")
+
+
+def test_piecewise_its_float_threshold():
+    """Test formula parsing with float threshold values."""
+    np.random.seed(42)
+    t = np.arange(100).astype(float)
+    y = 10 + 0.1 * t + 5 * (t >= 50.5) + np.random.randn(100)
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50.5) + ramp(t, 50.5)",
+        model=LinearRegression(),
+    )
+
+    # Float threshold should be extracted correctly
+    assert 50.5 in result.interruption_times
+
+
+def test_piecewise_its_summary_with_round_to():
+    """Test summary method with explicit round_to parameter."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Should not raise with explicit round_to
+    result.summary(round_to=3)
+
+
+def test_piecewise_its_plot_with_round_to():
+    """Test plotting with explicit round_to parameter."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    fig, ax = result.plot(round_to=3)
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
+
+
+def test_piecewise_its_ols_multiple_interruptions_plot():
+    """Test plotting with multiple interruptions for OLS models."""
+    df, _ = generate_piecewise_its_data(
+        N=150,
+        interruption_times=[50, 100],
+        level_changes=[3.0, 2.0],
+        slope_changes=[0.1, 0.05],
+        seed=42,
+    )
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50) + step(t, 100) + ramp(t, 100)",
+        model=LinearRegression(),
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert len(ax) == 3
+    plt.close(fig)
+
+
+def test_piecewise_its_datetime_plot():
+    """Test plotting with datetime time column."""
+    np.random.seed(42)
+    dates = pd.date_range("2020-01-01", periods=100, freq="D")
+    t_numeric = np.arange(100)
+    y = 10 + 0.1 * t_numeric + 5 * (t_numeric >= 50) + np.random.randn(100)
+
+    df = pd.DataFrame({"date": dates, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
+        model=LinearRegression(),
+    )
+
+    # Plotting with datetime thresholds should work
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_piecewise_its_pymc_get_plot_data_custom_hdi(mock_pymc_sample):
+    """Test get_plot_data with custom hdi_prob for PyMC models."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Test with different hdi_prob
+    plot_data = result.get_plot_data(hdi_prob=0.89)
+    assert isinstance(plot_data, pd.DataFrame)
+
+    # Check HDI columns have correct naming based on hdi_prob
+    assert "fitted_hdi_lower_89" in plot_data.columns
+    assert "fitted_hdi_upper_89" in plot_data.columns
+    assert "effect_hdi_lower_89" in plot_data.columns
+    assert "effect_hdi_upper_89" in plot_data.columns
+    assert "cumulative_effect_hdi_lower_89" in plot_data.columns
+    assert "cumulative_effect_hdi_upper_89" in plot_data.columns
+
+
+@pytest.mark.integration
+def test_piecewise_its_pymc_multiple_interruptions_plot(mock_pymc_sample):
+    """Test plotting with multiple interruptions for PyMC models."""
+    df, _ = generate_piecewise_its_data(
+        N=150,
+        interruption_times=[50, 100],
+        level_changes=[3.0, 2.0],
+        slope_changes=[0.1, 0.05],
+        seed=42,
+    )
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50) + step(t, 100) + ramp(t, 100)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert len(ax) == 3
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
+    """Test post_impact attributes for PyMC models."""
+    np.random.seed(42)
+    t = np.arange(100)
+    y = 10 + 0.1 * t + 5 * (t >= 50) + np.random.randn(100)
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Check attributes exist
+    assert hasattr(result, "post_impact")
+    assert hasattr(result, "datapost")
+    assert hasattr(result, "post_pred")
+
+    # datapost should have 50 rows (t >= 50)
+    assert len(result.datapost) == 50
+
+    # post_pred should be dict-like with posterior_predictive
+    assert "posterior_predictive" in result.post_pred
+    assert "mu" in result.post_pred["posterior_predictive"]
+
+
+def test_piecewise_its_datetime_post_intervention_attributes():
+    """Test post_intervention attributes with datetime threshold."""
+    np.random.seed(42)
+    dates = pd.date_range("2020-01-01", periods=100, freq="D")
+    t_numeric = np.arange(100)
+    y = 10 + 0.1 * t_numeric + 5 * (t_numeric >= 50) + np.random.randn(100)
+
+    df = pd.DataFrame({"date": dates, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
+        model=LinearRegression(),
+    )
+
+    # Check that datapost is correctly created with datetime threshold
+    assert hasattr(result, "datapost")
+    assert len(result.datapost) == 50  # 2020-02-20 is day 50
+
+
+def test_piecewise_its_interruption_column_indices():
+    """Test that interruption column indices are correctly identified."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Should have 2 interruption columns (step and ramp)
+    assert len(result._interruption_cols) == 2
+
+    # Labels at those indices should contain step or ramp
+    for idx in result._interruption_cols:
+        label = result.labels[idx]
+        assert "step(" in label or "ramp(" in label
+
+
+def test_piecewise_its_counterfactual_zeros_interruption_terms():
+    """Test that counterfactual correctly zeros out interruption terms."""
+    df, _ = generate_piecewise_its_data(
+        N=100,
+        interruption_times=[50],
+        level_changes=[5.0],
+        slope_changes=[0.2],
+        noise_sigma=0.0,  # No noise for deterministic test
+        seed=42,
+    )
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Pre-intervention: effect should be approximately 0
+    pre_effect = result.effect[:50]
+    assert np.allclose(pre_effect, 0, atol=1e-10)
+
+    # Post-intervention: effect should be non-zero
+    post_effect = result.effect[50:]
+    assert not np.allclose(post_effect, 0)
+
+
+def test_piecewise_its_data_index_name():
+    """Test that data index is correctly named 'obs_ind'."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    assert result.data.index.name == "obs_ind"
+    assert result.datapost.index.name == "obs_ind"
+
+
+@pytest.mark.parametrize(
+    "level_change,slope_change",
+    [
+        (5.0, 0.0),  # Level change only
+        (0.0, 0.2),  # Slope change only
+        (5.0, 0.2),  # Both
+        (-3.0, -0.1),  # Negative effects
+    ],
+)
+def test_piecewise_its_ols_various_effects(level_change, slope_change):
+    """Parameterized test for various effect configurations."""
+    df, _ = generate_piecewise_its_data(
+        N=100,
+        interruption_times=[50],
+        level_changes=[level_change],
+        slope_changes=[slope_change],
+        noise_sigma=0.5,
+        seed=42,
+    )
+
+    formula = "y ~ 1 + t"
+    if level_change != 0:
+        formula += " + step(t, 50)"
+    if slope_change != 0:
+        formula += " + ramp(t, 50)"
+
+    # Need at least step or ramp
+    if level_change == 0 and slope_change == 0:
+        formula += " + step(t, 50)"
+
+    result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
+
+    assert isinstance(result, cp.PiecewiseITS)
+    assert result.score > 0.5  # Should have reasonable fit
+
+
+@pytest.mark.parametrize(
+    "n_interruptions,interruption_times,level_changes,slope_changes",
+    [
+        (1, [50], [5.0], [0.2]),
+        (2, [30, 70], [3.0, 2.0], [0.1, 0.15]),
+        (3, [25, 50, 75], [2.0, 3.0, 1.0], [0.05, 0.1, 0.08]),
+    ],
+)
+def test_piecewise_its_ols_multiple_interruption_configs(
+    n_interruptions, interruption_times, level_changes, slope_changes
+):
+    """Parameterized test for various numbers of interruptions."""
+    df, _ = generate_piecewise_its_data(
+        N=100,
+        interruption_times=interruption_times,
+        level_changes=level_changes,
+        slope_changes=slope_changes,
+        noise_sigma=0.5,
+        seed=42,
+    )
+
+    # Build formula with all interruptions
+    formula = "y ~ 1 + t"
+    for t_k in interruption_times:
+        formula += f" + step(t, {t_k}) + ramp(t, {t_k})"
+
+    result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
+
+    assert len(result.interruption_times) == n_interruptions
+    # 2 terms (step + ramp) per interruption + intercept + t
+    assert len(result._interruption_cols) == 2 * n_interruptions
+
+
+def test_generate_piecewise_its_data_slope_changes_mismatched():
+    """Test that mismatched slope_changes length raises error."""
+    with pytest.raises(ValueError, match="slope_changes length"):
+        generate_piecewise_its_data(
+            N=100,
+            interruption_times=[50],
+            level_changes=[5.0],
+            slope_changes=[0.1, 0.2],  # Wrong length
+        )
+
+
+def test_generate_piecewise_its_data_default_values():
+    """Test data generation with default values."""
+    df, params = generate_piecewise_its_data(N=100, seed=42)
+
+    # Check defaults are applied
+    assert params["interruption_times"] == [50]
+    assert params["level_changes"] == [5.0]
+    assert params["slope_changes"] == [0.0]
+    assert params["baseline_intercept"] == 10.0
+    assert params["baseline_slope"] == 0.1
+    assert params["noise_sigma"] == 1.0
+
+
+def test_piecewise_its_unrecognized_model_type():
+    """Test that unrecognized model type raises error."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    # Create a model that is neither PyMCModel nor RegressorMixin
+    class FakeModel:
+        pass
+
+    with pytest.raises(ValueError, match="Model type not recognized"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + t + step(t, 50)",
+            model=FakeModel(),
+        )
+
+
+def test_piecewise_its_score_attribute_ols():
+    """Test that score attribute is correctly computed for OLS."""
+    df, _ = generate_piecewise_its_data(
+        N=100,
+        interruption_times=[50],
+        level_changes=[5.0],
+        slope_changes=[0.2],
+        noise_sigma=0.1,  # Low noise for high R²
+        seed=42,
+    )
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Score should be a float for OLS
+    assert isinstance(result.score, float)
+    assert 0 <= result.score <= 1
+
+
+def test_piecewise_its_ols_model_without_fit_intercept():
+    """Test OLS model that doesn't have fit_intercept attribute."""
+    from sklearn.base import RegressorMixin
+
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    class MinimalRegressor(RegressorMixin):
+        """Minimal regressor without fit_intercept attribute."""
+
+        def __init__(self):
+            self.coef_ = None
+
+        def fit(self, X, y):
+            X = np.asarray(X)
+            y = np.asarray(y)
+            self.coef_ = np.linalg.lstsq(X, y, rcond=None)[0]
+            return self
+
+        def predict(self, X):
+            X = np.asarray(X)
+            return X @ self.coef_
+
+        def score(self, X, y):
+            X = np.asarray(X)
+            y = np.asarray(y)
+            pred = self.predict(X)
+            ss_res = np.sum((y - pred) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            return 1 - (ss_res / ss_tot)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=MinimalRegressor(),
+    )
+
+    # Should work without fit_intercept attribute
+    assert isinstance(result, cp.PiecewiseITS)
+
+
+def test_piecewise_its_x_y_shapes():
+    """Test that X and y have correct shapes."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # X should be (n_obs, n_coeffs)
+    assert result.X.shape == (100, 4)
+
+    # y should be (n_obs, 1) for treated_units
+    assert result.y.shape == (100, 1)
+
+    # Check coordinates
+    assert list(result.X.coords["coeffs"].values) == result.labels
+
+
+def test_piecewise_its_y_pred_shape():
+    """Test that y_pred has correct shape for OLS."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # y_pred should have same length as data
+    assert len(np.squeeze(result.y_pred)) == 100
+
+
+def test_piecewise_its_effect_pre_intervention_zero():
+    """Test that effect is zero before first interruption."""
+    df, _ = generate_piecewise_its_data(
+        N=100,
+        interruption_times=[50],
+        level_changes=[5.0],
+        slope_changes=[0.0],
+        noise_sigma=0.0,  # No noise
+        seed=42,
+    )
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    # Effect before interruption should be zero
+    pre_effect = result.effect[:50]
+    np.testing.assert_allclose(pre_effect, 0, atol=1e-10)
+
+
+def test_piecewise_its_get_plot_data_stores_attribute():
+    """Test that get_plot_data stores result in plot_data attribute."""
+    df, _ = generate_piecewise_its_data(N=100, seed=42)
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    plot_df = result.get_plot_data()
+
+    # Should store in plot_data attribute
+    assert hasattr(result, "plot_data")
+    pd.testing.assert_frame_equal(result.plot_data, plot_df)
