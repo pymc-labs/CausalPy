@@ -91,7 +91,7 @@ docs = [
     "sphinx-togglebutton",
 ]
 lint = ["interrogate", "pre-commit", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
+test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
