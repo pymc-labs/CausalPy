@@ -148,6 +148,9 @@ class BaseExperiment:
         relative: bool = True,
         min_effect: float | None = None,
         treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: dict,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects.
@@ -181,6 +184,12 @@ class BaseExperiment:
         treated_unit : str, optional
             For multi-unit experiments (Synthetic Control), specify which treated unit
             to analyze. If None and multiple units exist, uses first unit.
+        period : {"intervention", "post", "comparison"}, optional
+            For experiments with multiple periods (e.g., three-period ITS), specify
+            which period to summarize. Defaults to None for standard behavior.
+        prefix : str, optional
+            Prefix for prose generation (e.g., "During intervention", "Post-intervention").
+            Defaults to "Post-period".
 
         Returns
         -------
@@ -226,15 +235,81 @@ class BaseExperiment:
                 return EffectSummary(table=table, text=text)
         else:
             # ITS or Synthetic Control: time-series effects
-            # Extract windowed impact data
-            windowed_impact, window_coords = _extract_window(
-                self, window, treated_unit=treated_unit
-            )
+            # Handle period parameter for three-period designs (e.g., ITS with treatment_end_time)
+            if period is not None:
+                # Validate period parameter
+                valid_periods = ["intervention", "post", "comparison"]
+                if period not in valid_periods:
+                    raise ValueError(
+                        f"period must be one of {valid_periods}, got '{period}'"
+                    )
 
-            # Extract counterfactual for relative effects
-            counterfactual = _extract_counterfactual(
-                self, window_coords, treated_unit=treated_unit
-            )
+                # Check if this experiment supports three-period designs (has treatment_end_time)
+                if not (
+                    hasattr(self, "treatment_end_time")
+                    and self.treatment_end_time is not None
+                ):
+                    raise ValueError(
+                        f"Period '{period}' not available. This experiment may not support three-period designs. "
+                        "Provide treatment_end_time to enable period-specific analysis."
+                    )
+
+                if period == "comparison":
+                    # Comparison period: delegate to subclass method
+                    if hasattr(self, "_comparison_period_summary"):
+                        return self._comparison_period_summary(
+                            direction=direction,
+                            alpha=alpha,
+                            cumulative=cumulative,
+                            relative=relative,
+                            min_effect=min_effect,
+                        )
+                    else:
+                        raise NotImplementedError(
+                            "comparison period summary not implemented for this experiment type"
+                        )
+
+                # For "intervention" or "post" periods, use _extract_window with tuple windows
+                # At this point we know treatment_end_time exists (checked above)
+                # These attributes are specific to ITS experiments with three-period designs
+                if period == "intervention":
+                    # Intervention period: treatment_time <= index < treatment_end_time
+                    # Since _extract_window uses <= end (inclusive), we need to exclude treatment_end_time
+                    # Find the last index that is < treatment_end_time
+                    # Note: treatment_end_time > treatment_time is already validated in __init__
+                    datapost = self.datapost  # type: ignore[attr-defined]
+                    treatment_end_time = self.treatment_end_time  # type: ignore[attr-defined]
+                    treatment_time = self.treatment_time  # type: ignore[attr-defined]
+                    intervention_indices = datapost.index[
+                        datapost.index < treatment_end_time
+                    ]
+                    # Use the last index before treatment_end_time as the end bound
+                    window = (treatment_time, intervention_indices.max())
+                    prefix = "During intervention"
+                elif period == "post":
+                    # Post-intervention period: index >= treatment_end_time (inclusive)
+                    datapost = self.datapost  # type: ignore[attr-defined]
+                    treatment_end_time = self.treatment_end_time  # type: ignore[attr-defined]
+                    window = (treatment_end_time, datapost.index.max())
+                    prefix = "Post-intervention"
+
+                # Extract windowed impact data using calculated window
+                windowed_impact, window_coords = _extract_window(
+                    self, window, treated_unit=treated_unit
+                )
+
+                # Extract counterfactual for relative effects
+                counterfactual = _extract_counterfactual(
+                    self, window_coords, treated_unit=treated_unit
+                )
+            else:
+                # No period specified, use standard flow
+                windowed_impact, window_coords = _extract_window(
+                    self, window, treated_unit=treated_unit
+                )
+                counterfactual = _extract_counterfactual(
+                    self, window_coords, treated_unit=treated_unit
+                )
 
             if is_pymc:
                 # PyMC model: use posterior draws
@@ -260,6 +335,7 @@ class BaseExperiment:
                     direction=direction,
                     cumulative=cumulative,
                     relative=relative,
+                    prefix=prefix,
                 )
             else:
                 # OLS model: use point estimates and CIs
@@ -293,6 +369,7 @@ class BaseExperiment:
                     alpha=alpha,
                     cumulative=cumulative,
                     relative=relative,
+                    prefix=prefix,
                 )
 
             return EffectSummary(table=table, text=text)
