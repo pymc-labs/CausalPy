@@ -89,6 +89,8 @@ docs = [
     "ipywidgets",
     "sphinx-design",
     "sphinx-togglebutton",
+    "marimo>=0.18.0",
+    "sphinx-marimo>=0.3.0",
 ]
 lint = ["interrogate", "pre-commit", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]

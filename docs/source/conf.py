@@ -64,9 +64,15 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_design",
     "sphinx_togglebutton",
+    "sphinx_marimo",
 ]
 
 nb_execution_mode = "off"
+
+# Marimo configuration
+marimo_notebook_dir = "notebooks"
+marimo_default_height = "800px"
+marimo_default_width = "100%"
 
 # configure copy button to avoid copying sphinx or console characters
 copybutton_exclude = ".linenos, .gp"
