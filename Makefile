@@ -15,7 +15,7 @@ init: ## Install the package in editable mode
 
 setup: ## Set up complete dev environment (run after conda activate CausalPy)
 	python -m pip install --no-deps -e .
-	pip install -e '.[dev,docs,test,lint]'
+	python -m pip install -e '.[dev,docs,test,lint]'
 	pre-commit install
 	@echo "Development environment ready!"
 
