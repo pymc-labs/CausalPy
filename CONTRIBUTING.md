@@ -4,7 +4,7 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 
 ## Quick Start
 
-Get up and running in 4 commands:
+After forking this repository on GitHub, get up and running in 4 commands:
 
 ```bash
 git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
