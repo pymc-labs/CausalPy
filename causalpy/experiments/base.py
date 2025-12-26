@@ -112,10 +112,11 @@ class BaseExperiment:
             else:
                 raise ValueError("Unsupported model type")
 
-            if show:
-                plt.show()
+        # Show the plot after exiting the style context to avoid style interference
+        if show:
+            plt.show()
 
-            return fig, ax
+        return fig, ax
 
     @abstractmethod
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
