@@ -89,7 +89,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     - Installs all development extras (`dev`, `docs`, `test`, `lint`)
     - Sets up pre-commit hooks
 
-    It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, run `brew install pandoc`.
+    It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
 	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
