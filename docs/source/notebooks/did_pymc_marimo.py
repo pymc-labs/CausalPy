@@ -21,6 +21,7 @@ def _():
     import arviz as az
 
     import causalpy as cp
+
     return az, cp
 
 
@@ -89,7 +90,7 @@ def _(result):
 @app.cell
 def _(az, result):
     _ax = az.plot_posterior(result.causal_impact, ref_val=0)
-    _ax.set(title='Posterior estimate of causal impact')
+    _ax.set(title="Posterior estimate of causal impact")
     return
 
 
@@ -132,20 +133,21 @@ def _(mo):
 @app.cell
 def _(result):
     # Example: Two-sided test with ROPE
-    stats_1 = result.effect_summary(direction='two-sided', alpha=0.05, min_effect=0.3)
+    stats_1 = result.effect_summary(direction="two-sided", alpha=0.05, min_effect=0.3)
     stats_1.table  # Region of Practical Equivalence
     return (stats_1,)
 
 
 @app.cell
 def _(stats_1):
-    print('\n' + stats_1.text)
+    print("\n" + stats_1.text)
     return
 
 
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
