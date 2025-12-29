@@ -25,6 +25,7 @@ from .experiments.inverse_propensity_weighting import InversePropensityWeighting
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
+from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
 
 __all__ = [
@@ -40,5 +41,6 @@ __all__ = [
     "RegressionDiscontinuity",
     "RegressionKink",
     "skl_models",
+    "StaggeredDifferenceInDifferences",
     "SyntheticControl",
 ]

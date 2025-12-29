@@ -296,6 +296,8 @@ def _detect_experiment_type(result):
         return "rd"  # Regression Discontinuity
     elif hasattr(result, "gradient_change"):
         return "rkink"  # Regression Kink
+    elif hasattr(result, "att_event_time_"):
+        return "staggered_did"  # Staggered Difference-in-Differences
     elif hasattr(result, "causal_impact") and not hasattr(result, "post_impact"):
         return "did"  # Difference-in-Differences or ANCOVA/PrePostNEGD
     elif hasattr(result, "post_impact"):
@@ -303,8 +305,8 @@ def _detect_experiment_type(result):
     else:
         raise ValueError(
             "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
-            "'gradient_change' (Regression Kink), 'causal_impact' (DiD/ANCOVA), "
-            "or 'post_impact' (ITS/Synthetic Control) attribute."
+            "'gradient_change' (Regression Kink), 'att_event_time_' (Staggered DiD), "
+            "'causal_impact' (DiD/ANCOVA), or 'post_impact' (ITS/Synthetic Control) attribute."
         )
 
 
@@ -336,6 +338,92 @@ def _effect_summary_did(
     text = _generate_prose_scalar(
         stats, "average treatment effect", alpha=alpha, direction=direction
     )
+
+    return EffectSummary(table=table, text=text)
+
+
+def _effect_summary_staggered_did(
+    result,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: float | None = None,
+):
+    """Generate effect summary for Staggered Difference-in-Differences experiments.
+
+    Reports event-time ATT estimates with pre-treatment placebo check and
+    post-treatment dynamic effects.
+
+    Parameters
+    ----------
+    result
+        StaggeredDifferenceInDifferences experiment result
+    direction : {"increase", "decrease", "two-sided"}
+        Direction for interpretation
+    alpha : float
+        Significance level for intervals
+    min_effect : float, optional
+        Not used for staggered DiD, kept for API consistency
+
+    Returns
+    -------
+    EffectSummary
+        Summary with table of event-time ATTs and prose interpretation
+    """
+    att_et = result.att_event_time_.copy()
+
+    # Separate pre-treatment (placebo) and post-treatment effects
+    pre_treatment = att_et[att_et["event_time"] < 0]
+    post_treatment = att_et[att_et["event_time"] >= 0]
+
+    # Build summary table with all event-time effects
+    table = att_et.copy()
+
+    # Generate prose summary
+    prose_parts = []
+
+    # Overall ATT (average across all post-treatment periods)
+    if len(post_treatment) > 0:
+        avg_post_att = post_treatment["att"].mean()
+        if "att_lower" in post_treatment.columns:
+            # Bayesian model
+            avg_lower = post_treatment["att_lower"].mean()
+            avg_upper = post_treatment["att_upper"].mean()
+            hdi_pct = int((1 - alpha) * 100)
+            prose_parts.append(
+                f"Staggered DiD analysis: The average post-treatment effect "
+                f"across event-times was {avg_post_att:.2f} "
+                f"(average {hdi_pct}% HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
+            )
+        else:
+            # OLS model
+            prose_parts.append(
+                f"Staggered DiD analysis: The average post-treatment effect "
+                f"across event-times was {avg_post_att:.2f}."
+            )
+
+    # Pre-treatment placebo check
+    if len(pre_treatment) > 0:
+        avg_pre_att = pre_treatment["att"].mean()
+        if (
+            abs(avg_pre_att) < 0.1 * abs(avg_post_att)
+            if len(post_treatment) > 0
+            else True
+        ):
+            prose_parts.append(
+                f"Pre-treatment placebo check: Average pre-treatment effect was "
+                f"{avg_pre_att:.2f}, consistent with parallel trends assumption."
+            )
+        else:
+            prose_parts.append(
+                f"Pre-treatment placebo check: Average pre-treatment effect was "
+                f"{avg_pre_att:.2f}. This may indicate violation of parallel trends."
+            )
+
+    # Number of cohorts
+    n_cohorts = len(result.cohorts)
+    prose_parts.append(f"Analysis includes {n_cohorts} treatment cohort(s).")
+
+    text = " ".join(prose_parts)
 
     return EffectSummary(table=table, text=text)
 

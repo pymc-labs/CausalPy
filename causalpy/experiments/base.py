@@ -34,6 +34,7 @@ from causalpy.reporting import (
     _effect_summary_did,
     _effect_summary_rd,
     _effect_summary_rkink,
+    _effect_summary_staggered_did,
     _extract_counterfactual,
     _extract_window,
     _generate_prose,
@@ -224,6 +225,14 @@ class BaseExperiment:
                 table = _generate_table_did_ols(stats)
                 text = _generate_prose_did_ols(stats, alpha=alpha)
                 return EffectSummary(table=table, text=text)
+        elif experiment_type == "staggered_did":
+            # Staggered Difference-in-Differences: event-time ATTs
+            return _effect_summary_staggered_did(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+            )
         else:
             # ITS or Synthetic Control: time-series effects
             # Extract windowed impact data
