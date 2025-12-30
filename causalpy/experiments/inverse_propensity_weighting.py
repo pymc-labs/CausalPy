@@ -15,6 +15,8 @@
 Inverse propensity weighting
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,10 +26,9 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
-from causalpy.reporting import EffectSummary
-from typing import Any, Literal
 
 
 class InversePropensityWeighting(BaseExperiment):

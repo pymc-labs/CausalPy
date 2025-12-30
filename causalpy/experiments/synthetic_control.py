@@ -15,6 +15,8 @@
 Synthetic Control Experiment
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -30,7 +32,6 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-from typing import Any, Literal
 
 LEGEND_FONT_SIZE = 12
 
@@ -731,9 +732,7 @@ class SyntheticControl(BaseExperiment):
             )
 
             # Generate table
-            table = _generate_table_ols(
-                stats, cumulative=cumulative, relative=relative
-            )
+            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
             # Generate prose
             text = _generate_prose_ols(

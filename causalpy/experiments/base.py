@@ -20,7 +20,6 @@ from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from sklearn.base import RegressorMixin
 

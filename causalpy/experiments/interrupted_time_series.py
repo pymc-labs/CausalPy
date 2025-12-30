@@ -1354,9 +1354,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
             # Generate table
-            table = _generate_table_ols(
-                stats, cumulative=cumulative, relative=relative
-            )
+            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
             # Generate prose
             text = _generate_prose_ols(

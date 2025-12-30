@@ -15,6 +15,8 @@
 Difference in differences
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -30,6 +32,13 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import (
+    EffectSummary,
+    _compute_statistics_did_ols,
+    _effect_summary_did,
+    _generate_prose_did_ols,
+    _generate_table_did_ols,
+)
 from causalpy.utils import (
     _is_variable_dummy_coded,
     convert_to_string,
@@ -38,14 +47,6 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
-from causalpy.reporting import (
-    EffectSummary,
-    _compute_statistics_did_ols,
-    _effect_summary_did,
-    _generate_prose_did_ols,
-    _generate_table_did_ols,
-)
-from typing import Any, Literal
 
 LEGEND_FONT_SIZE = 12
 

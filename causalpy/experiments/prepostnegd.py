@@ -15,6 +15,8 @@
 Pretest/posttest nonequivalent group design
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -29,11 +31,10 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
-from causalpy.reporting import EffectSummary, _effect_summary_did
-from typing import Any, Literal
 
 LEGEND_FONT_SIZE = 12
 
