@@ -26,6 +26,8 @@ from sklearn.linear_model import LinearRegression as sk_lin_reg
 from causalpy.custom_exceptions import DataException
 
 from .base import BaseExperiment
+from causalpy.reporting import EffectSummary
+from typing import Any, Literal
 
 
 class InversePropensityWeighting(BaseExperiment):
@@ -483,3 +485,26 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].legend()
         # TODO: for some reason ax is type numpy.ndarray, so we need to convert this back to a list to conform to the expected return type.
         return fig, list(axs)
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects.
+
+        Note: effect_summary is not yet implemented for InversePropensityWeighting experiments.
+        """
+        raise NotImplementedError(
+            "effect_summary is not yet implemented for InversePropensityWeighting experiments."
+        )
