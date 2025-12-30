@@ -1146,6 +1146,64 @@ def test_staggered_did_get_plot_data_bayesian(mock_pymc_sample):
     assert "att_upper" in plot_data.columns
 
 
+@pytest.mark.integration
+def test_staggered_did_get_plot_data_bayesian_hdi_prob_respected(mock_pymc_sample):
+    """Test that get_plot_data_bayesian respects the hdi_prob parameter.
+
+    This verifies the fix for the bug where hdi_prob was accepted but ignored,
+    always returning pre-computed 94% intervals.
+    """
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=15,
+        treatment_cohorts={5: 15},
+        seed=42,
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Get intervals with default 94% HDI
+    plot_data_94 = result.get_plot_data_bayesian(hdi_prob=0.94)
+
+    # Get intervals with narrower 80% HDI
+    plot_data_80 = result.get_plot_data_bayesian(hdi_prob=0.80)
+
+    # Get intervals with wider 99% HDI
+    plot_data_99 = result.get_plot_data_bayesian(hdi_prob=0.99)
+
+    # Verify structure is correct for all
+    for df_plot in [plot_data_94, plot_data_80, plot_data_99]:
+        assert "att_lower" in df_plot.columns
+        assert "att_upper" in df_plot.columns
+
+    # Point estimates should be the same regardless of hdi_prob
+    assert np.allclose(plot_data_94["att"].values, plot_data_80["att"].values)
+    assert np.allclose(plot_data_94["att"].values, plot_data_99["att"].values)
+
+    # Narrower HDI (80%) should have smaller intervals than 94%
+    # interval_width = upper - lower
+    width_94 = plot_data_94["att_upper"] - plot_data_94["att_lower"]
+    width_80 = plot_data_80["att_upper"] - plot_data_80["att_lower"]
+    width_99 = plot_data_99["att_upper"] - plot_data_99["att_lower"]
+
+    # 80% intervals should be narrower than 94%
+    assert all(width_80 <= width_94), (
+        "80% HDI intervals should be narrower than 94% HDI intervals"
+    )
+
+    # 99% intervals should be wider than 94%
+    assert all(width_99 >= width_94), (
+        "99% HDI intervals should be wider than 94% HDI intervals"
+    )
+
+
 def test_staggered_did_get_plot_data_ols():
     """Test get_plot_data_ols method."""
     df = generate_staggered_did_data(

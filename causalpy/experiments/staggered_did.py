@@ -672,7 +672,63 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         pd.DataFrame
             DataFrame with event_time, att, att_lower, att_upper columns.
         """
-        return self.att_event_time_.copy()
+        # If the requested hdi_prob matches what was used during aggregation,
+        # return the pre-computed results
+        stored_hdi_prob = getattr(self, "hdi_prob_", 0.94)
+        if np.isclose(hdi_prob, stored_hdi_prob):
+            return self.att_event_time_.copy()
+
+        # Recompute intervals with the requested hdi_prob
+        lower_pct = (1 - hdi_prob) / 2 * 100
+        upper_pct = (1 + hdi_prob) / 2 * 100
+
+        # Get posterior draws for mu
+        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+
+        # Get observed y for treated observations
+        _is_untreated = np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        treated_mask = ~_is_untreated
+        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+
+        # Compute tau draws for all observations
+        tau_draws_all = y_observed - mu_draws.values
+
+        # Extract only treated observations
+        treated_indices = np.where(treated_mask)[0]
+        tau_draws_treated = tau_draws_all[:, :, treated_indices]
+
+        # Get treated data for event-time grouping
+        treated_data = self.data[~self.data["_is_untreated"]].copy()
+        event_time_treated = np.asarray(treated_data["event_time"].values)
+
+        # Apply event window filter if specified
+        event_times_unique = np.unique(
+            event_time_treated[~np.isnan(event_time_treated)]
+        )
+        if self.event_window is not None:
+            event_times_unique = event_times_unique[
+                (event_times_unique >= self.event_window[0])
+                & (event_times_unique <= self.event_window[1])
+            ]
+
+        att_et_rows: list[dict] = []
+        for e in sorted(event_times_unique):
+            e_mask = event_time_treated == e
+            if e_mask.sum() == 0:
+                continue
+            positions_arr = np.where(e_mask)[0]
+            tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
+            att_et_rows.append(
+                {
+                    "event_time": int(e),
+                    "att": float(tau_e.mean()),
+                    "att_lower": float(np.percentile(tau_e, lower_pct)),
+                    "att_upper": float(np.percentile(tau_e, upper_pct)),
+                    "n_obs": int(e_mask.sum()),
+                }
+            )
+
+        return pd.DataFrame(att_et_rows)
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """Get plotting data for OLS model.
