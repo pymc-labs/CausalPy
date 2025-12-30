@@ -380,23 +380,49 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self.data_ = self.data.copy()
 
     def _aggregate_effects(self) -> None:
-        """Aggregate effects to group-time and event-time ATTs."""
+        """Aggregate effects to group-time and event-time ATTs.
+
+        This method aggregates individual treatment effects into:
+        1. Group-time ATTs: ATT(g, t) for each cohort g and calendar time t
+        2. Event-time ATTs: ATT(e) for each event-time e = t - G
+
+        For event-time ATTs, this includes both:
+        - Post-treatment effects (event_time >= 0): actual treatment effects
+        - Pre-treatment effects (event_time < 0): placebo/residual checks
+
+        Pre-treatment effects are computed as residuals (y - y_hat0) for
+        eventually-treated units before they receive treatment. These serve
+        as a placebo check - if the parallel trends assumption holds, they
+        should be centered around zero.
+        """
         treated_data = self.data[~self.data["_is_untreated"]].copy()
 
+        # Also get pre-treatment data for eventually-treated units (placebo check)
+        # These are observations where: G != never_treated_value AND event_time < 0
+        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_pre_treatment = self.data["event_time"] < 0
+        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+
         if isinstance(self.model, PyMCModel):
-            self._aggregate_effects_bayesian(treated_data)
+            self._aggregate_effects_bayesian(treated_data, pretreatment_data)
         else:
-            self._aggregate_effects_ols(treated_data)
+            self._aggregate_effects_ols(treated_data, pretreatment_data)
 
     def _aggregate_effects_bayesian(
-        self, treated_data: pd.DataFrame, hdi_prob: float = 0.94
+        self,
+        treated_data: pd.DataFrame,
+        pretreatment_data: pd.DataFrame,
+        hdi_prob: float = 0.94,
     ) -> None:
         """Aggregate effects for Bayesian model with posterior uncertainty.
 
         Parameters
         ----------
         treated_data : pd.DataFrame
-            DataFrame containing only treated observations
+            DataFrame containing only treated observations (event_time >= 0)
+        pretreatment_data : pd.DataFrame
+            DataFrame containing pre-treatment observations from eventually-treated
+            units (event_time < 0) for placebo check
         hdi_prob : float, optional
             Probability mass for the HDI interval bounds, by default 0.94
         """
@@ -408,23 +434,21 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Get posterior draws for mu
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
-        # Get observed y for treated observations
-        _is_untreated = np.asarray(self.data["_is_untreated"].values, dtype=bool)
-        treated_mask = ~_is_untreated
+        # Get observed y for all observations
         y_observed = np.asarray(self.data[self.outcome_variable_name].values)
 
         # Compute tau draws for all observations
         # tau_draws has shape (chain, draw, obs_ind)
         tau_draws_all = y_observed - mu_draws.values
 
-        # Extract only treated observations
+        # Get treated observation indices for group-time ATTs
+        _is_untreated = np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        treated_mask = ~_is_untreated
         treated_indices = np.where(treated_mask)[0]
         tau_draws_treated = tau_draws_all[:, :, treated_indices]
-
-        # Get corresponding event-time values for treated observations
         event_time_treated = np.asarray(treated_data["event_time"].values)
 
-        # --- Group-time ATTs ---
+        # --- Group-time ATTs (post-treatment only) ---
         gt_groups = treated_data.groupby(["G", self.time_variable_name]).groups
         att_gt_rows: list[dict] = []
         for key, idx in gt_groups.items():
@@ -444,19 +468,53 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
         self.att_group_time_ = pd.DataFrame(att_gt_rows)
 
-        # --- Event-time ATTs ---
-        # Apply event window filter if specified
-        event_times_unique = np.unique(
-            event_time_treated[~np.isnan(event_time_treated)]
-        )
+        # --- Event-time ATTs (including pre-treatment placebo) ---
+        att_et_rows: list[dict] = []
+
+        # Pre-treatment placebo effects (event_time < 0)
+        if len(pretreatment_data) > 0:
+            pretreat_indices = pretreatment_data.index.values
+            pretreat_idx_positions = np.array(
+                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
+            )
+            tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
+            event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
+
+            event_times_pre = np.unique(
+                event_time_pretreat[~np.isnan(event_time_pretreat)]
+            )
+            # Apply event window filter if specified
+            if self.event_window is not None:
+                event_times_pre = event_times_pre[
+                    (event_times_pre >= self.event_window[0])
+                    & (event_times_pre <= self.event_window[1])
+                ]
+
+            for e in sorted(event_times_pre):
+                e_mask = event_time_pretreat == e
+                if e_mask.sum() == 0:
+                    continue
+                positions_arr = np.where(e_mask)[0]
+                tau_e = tau_draws_pretreat[:, :, positions_arr].mean(axis=2)
+                att_et_rows.append(
+                    {
+                        "event_time": int(e),
+                        "att": float(tau_e.mean()),
+                        "att_lower": float(np.percentile(tau_e, lower_pct)),
+                        "att_upper": float(np.percentile(tau_e, upper_pct)),
+                        "n_obs": int(e_mask.sum()),
+                    }
+                )
+
+        # Post-treatment effects (event_time >= 0)
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
         if self.event_window is not None:
-            event_times_unique = event_times_unique[
-                (event_times_unique >= self.event_window[0])
-                & (event_times_unique <= self.event_window[1])
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
             ]
 
-        att_et_rows: list[dict] = []
-        for e in sorted(event_times_unique):
+        for e in sorted(event_times_post):
             e_mask = event_time_treated == e
             if e_mask.sum() == 0:
                 continue
@@ -471,11 +529,23 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "n_obs": int(e_mask.sum()),
                 }
             )
+
         self.att_event_time_ = pd.DataFrame(att_et_rows)
 
-    def _aggregate_effects_ols(self, treated_data: pd.DataFrame) -> None:
-        """Aggregate effects for OLS model (point estimates only)."""
-        # --- Group-time ATTs ---
+    def _aggregate_effects_ols(
+        self, treated_data: pd.DataFrame, pretreatment_data: pd.DataFrame
+    ) -> None:
+        """Aggregate effects for OLS model (point estimates only).
+
+        Parameters
+        ----------
+        treated_data : pd.DataFrame
+            DataFrame containing only treated observations (event_time >= 0)
+        pretreatment_data : pd.DataFrame
+            DataFrame containing pre-treatment observations from eventually-treated
+            units (event_time < 0) for placebo check
+        """
+        # --- Group-time ATTs (post-treatment only) ---
         att_gt = (
             treated_data.groupby(["G", self.time_variable_name])["tau_hat"]
             .agg(["mean", "std", "count"])
@@ -484,15 +554,24 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_gt.columns = ["cohort", "time", "att", "att_std", "n_obs"]
         self.att_group_time_ = att_gt
 
-        # --- Event-time ATTs ---
+        # --- Event-time ATTs (including pre-treatment placebo) ---
+        # Compute tau_hat for pre-treatment observations (residuals)
+        if len(pretreatment_data) > 0:
+            pretreatment_data = pretreatment_data.copy()
+            pretreatment_data["tau_hat"] = (
+                pretreatment_data[self.outcome_variable_name]
+                - pretreatment_data["y_hat0"]
+            )
+
+        # Combine pre-treatment and post-treatment for event-time aggregation
+        event_data = pd.concat([pretreatment_data, treated_data], ignore_index=True)
+
         # Apply event window filter if specified
         if self.event_window is not None:
-            event_data = treated_data[
-                (treated_data["event_time"] >= self.event_window[0])
-                & (treated_data["event_time"] <= self.event_window[1])
+            event_data = event_data[
+                (event_data["event_time"] >= self.event_window[0])
+                & (event_data["event_time"] <= self.event_window[1])
             ]
-        else:
-            event_data = treated_data
 
         att_et = (
             event_data.groupby("event_time")["tau_hat"]
@@ -519,8 +598,17 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print(
             f"Never-treated units: {(self.data['G'] == self.never_treated_value).sum() // self.data[self.time_variable_name].nunique()}"
         )
-        print("\nEvent-time ATT estimates:")
-        print(self.att_event_time_.to_string(index=False))
+        print("\nEvent-time estimates:")
+        att_et = self.att_event_time_.copy()
+        # Add indicator column for clarity
+        att_et["type"] = att_et["event_time"].apply(
+            lambda x: "placebo" if x < 0 else "ATT"
+        )
+        # Reorder columns to put type first
+        cols = ["event_time", "type"] + [
+            c for c in att_et.columns if c not in ["event_time", "type"]
+        ]
+        print(att_et[cols].to_string(index=False))
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
@@ -543,21 +631,44 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         att_et = self.att_event_time_.copy()
 
-        # Plot point estimates with error bars
-        ax.errorbar(
-            att_et["event_time"],
-            att_et["att"],
-            yerr=[
-                att_et["att"] - att_et["att_lower"],
-                att_et["att_upper"] - att_et["att"],
-            ],
-            fmt="o",
-            capsize=4,
-            capthick=2,
-            markersize=8,
-            color="C0",
-            label="ATT estimate (94% HDI)",
-        )
+        # Separate pre-treatment (placebo) and post-treatment (ATT)
+        pre_treatment = att_et[att_et["event_time"] < 0]
+        post_treatment = att_et[att_et["event_time"] >= 0]
+
+        # Plot pre-treatment placebo estimates (different style)
+        if len(pre_treatment) > 0:
+            ax.errorbar(
+                pre_treatment["event_time"],
+                pre_treatment["att"],
+                yerr=[
+                    pre_treatment["att"] - pre_treatment["att_lower"],
+                    pre_treatment["att_upper"] - pre_treatment["att"],
+                ],
+                fmt="s",  # Square markers for placebo
+                capsize=4,
+                capthick=2,
+                markersize=7,
+                color="gray",
+                alpha=0.7,
+                label="Placebo estimate (94% HDI)",
+            )
+
+        # Plot post-treatment ATT estimates
+        if len(post_treatment) > 0:
+            ax.errorbar(
+                post_treatment["event_time"],
+                post_treatment["att"],
+                yerr=[
+                    post_treatment["att"] - post_treatment["att_lower"],
+                    post_treatment["att_upper"] - post_treatment["att"],
+                ],
+                fmt="o",
+                capsize=4,
+                capthick=2,
+                markersize=8,
+                color="C0",
+                label="ATT estimate (94% HDI)",
+            )
 
         # Add horizontal line at zero
         ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
@@ -573,12 +684,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 -0.5,
                 alpha=0.1,
                 color="gray",
-                label="Pre-treatment",
             )
 
         # Labels and formatting
         ax.set_xlabel("Event Time (periods relative to treatment)", fontsize=12)
-        ax.set_ylabel("Average Treatment Effect", fontsize=12)
+        ax.set_ylabel("Effect Estimate", fontsize=12)
         ax.set_title("Staggered DiD Event Study", fontsize=14)
         ax.legend(fontsize=LEGEND_FONT_SIZE)
 
@@ -606,30 +716,59 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         att_et = self.att_event_time_.copy()
 
-        # Plot point estimates
-        ax.scatter(
-            att_et["event_time"],
-            att_et["att"],
-            s=80,
-            color="C0",
-            zorder=3,
-            label="ATT estimate",
-        )
+        # Separate pre-treatment (placebo) and post-treatment (ATT)
+        pre_treatment = att_et[att_et["event_time"] < 0]
+        post_treatment = att_et[att_et["event_time"] >= 0]
 
-        # Add error bars if std available
-        if "att_std" in att_et.columns:
-            # Use 1.96 * SE for approximate 95% CI
-            se = att_et["att_std"] / np.sqrt(att_et["n_obs"])
-            ax.errorbar(
-                att_et["event_time"],
-                att_et["att"],
-                yerr=1.96 * se,
-                fmt="none",
-                capsize=4,
-                capthick=2,
-                color="C0",
+        # Plot pre-treatment placebo estimates (different style)
+        if len(pre_treatment) > 0:
+            ax.scatter(
+                pre_treatment["event_time"],
+                pre_treatment["att"],
+                s=60,
+                color="gray",
+                marker="s",  # Square markers for placebo
+                zorder=3,
                 alpha=0.7,
+                label="Placebo estimate",
             )
+            # Add error bars if std available
+            if "att_std" in pre_treatment.columns:
+                se = pre_treatment["att_std"] / np.sqrt(pre_treatment["n_obs"])
+                ax.errorbar(
+                    pre_treatment["event_time"],
+                    pre_treatment["att"],
+                    yerr=1.96 * se,
+                    fmt="none",
+                    capsize=4,
+                    capthick=2,
+                    color="gray",
+                    alpha=0.5,
+                )
+
+        # Plot post-treatment ATT estimates
+        if len(post_treatment) > 0:
+            ax.scatter(
+                post_treatment["event_time"],
+                post_treatment["att"],
+                s=80,
+                color="C0",
+                zorder=3,
+                label="ATT estimate",
+            )
+            # Add error bars if std available
+            if "att_std" in post_treatment.columns:
+                se = post_treatment["att_std"] / np.sqrt(post_treatment["n_obs"])
+                ax.errorbar(
+                    post_treatment["event_time"],
+                    post_treatment["att"],
+                    yerr=1.96 * se,
+                    fmt="none",
+                    capsize=4,
+                    capthick=2,
+                    color="C0",
+                    alpha=0.7,
+                )
 
         # Add horizontal line at zero
         ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
@@ -645,12 +784,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 -0.5,
                 alpha=0.1,
                 color="gray",
-                label="Pre-treatment",
             )
 
         # Labels and formatting
         ax.set_xlabel("Event Time (periods relative to treatment)", fontsize=12)
-        ax.set_ylabel("Average Treatment Effect", fontsize=12)
+        ax.set_ylabel("Effect Estimate", fontsize=12)
         ax.set_title("Staggered DiD Event Study", fontsize=14)
         ax.legend(fontsize=LEGEND_FONT_SIZE)
 
@@ -671,6 +809,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         -------
         pd.DataFrame
             DataFrame with event_time, att, att_lower, att_upper columns.
+            Includes both pre-treatment (placebo) and post-treatment effects.
         """
         # If the requested hdi_prob matches what was used during aggregation,
         # return the pre-computed results
@@ -685,34 +824,69 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Get posterior draws for mu
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
-        # Get observed y for treated observations
-        _is_untreated = np.asarray(self.data["_is_untreated"].values, dtype=bool)
-        treated_mask = ~_is_untreated
+        # Get observed y for all observations
         y_observed = np.asarray(self.data[self.outcome_variable_name].values)
 
         # Compute tau draws for all observations
         tau_draws_all = y_observed - mu_draws.values
 
-        # Extract only treated observations
+        att_et_rows: list[dict] = []
+
+        # Pre-treatment placebo effects (eventually-treated units, event_time < 0)
+        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_pre_treatment = self.data["event_time"] < 0
+        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+
+        if len(pretreatment_data) > 0:
+            pretreat_indices = pretreatment_data.index.values
+            pretreat_idx_positions = np.array(
+                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
+            )
+            tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
+            event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
+
+            event_times_pre = np.unique(
+                event_time_pretreat[~np.isnan(event_time_pretreat)]
+            )
+            if self.event_window is not None:
+                event_times_pre = event_times_pre[
+                    (event_times_pre >= self.event_window[0])
+                    & (event_times_pre <= self.event_window[1])
+                ]
+
+            for e in sorted(event_times_pre):
+                e_mask = event_time_pretreat == e
+                if e_mask.sum() == 0:
+                    continue
+                positions_arr = np.where(e_mask)[0]
+                tau_e = tau_draws_pretreat[:, :, positions_arr].mean(axis=2)
+                att_et_rows.append(
+                    {
+                        "event_time": int(e),
+                        "att": float(tau_e.mean()),
+                        "att_lower": float(np.percentile(tau_e, lower_pct)),
+                        "att_upper": float(np.percentile(tau_e, upper_pct)),
+                        "n_obs": int(e_mask.sum()),
+                    }
+                )
+
+        # Post-treatment effects (treated observations, event_time >= 0)
+        _is_untreated = np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        treated_mask = ~_is_untreated
         treated_indices = np.where(treated_mask)[0]
         tau_draws_treated = tau_draws_all[:, :, treated_indices]
 
-        # Get treated data for event-time grouping
         treated_data = self.data[~self.data["_is_untreated"]].copy()
         event_time_treated = np.asarray(treated_data["event_time"].values)
 
-        # Apply event window filter if specified
-        event_times_unique = np.unique(
-            event_time_treated[~np.isnan(event_time_treated)]
-        )
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
         if self.event_window is not None:
-            event_times_unique = event_times_unique[
-                (event_times_unique >= self.event_window[0])
-                & (event_times_unique <= self.event_window[1])
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
             ]
 
-        att_et_rows: list[dict] = []
-        for e in sorted(event_times_unique):
+        for e in sorted(event_times_post):
             e_mask = event_time_treated == e
             if e_mask.sum() == 0:
                 continue

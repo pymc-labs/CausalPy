@@ -155,12 +155,22 @@ def test_staggered_did_recovers_known_effect_sklearn():
         model=LinearRegression(),
     )
 
-    # Check that recovered effects are close to true effect
+    # Check that recovered post-treatment effects are close to true effect
     # (with some tolerance for noise)
-    avg_att = result.att_event_time_["att"].mean()
+    # Note: att_event_time_ now includes pre-treatment placebo effects, so filter to post
+    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    avg_att = post_treatment["att"].mean()
     assert abs(avg_att - constant_effect) < 0.5, (
         f"Recovered ATT {avg_att:.2f} is too far from true effect {constant_effect}"
     )
+
+    # Verify pre-treatment placebo effects are close to zero
+    pre_treatment = result.att_event_time_[result.att_event_time_["event_time"] < 0]
+    if len(pre_treatment) > 0:
+        avg_pre_att = pre_treatment["att"].mean()
+        assert abs(avg_pre_att) < 0.5, (
+            f"Pre-treatment placebo effect {avg_pre_att:.2f} should be close to zero"
+        )
 
 
 # ==============================================================================
@@ -873,7 +883,7 @@ def test_staggered_did_plot_elements_ols():
 
     # Check axis labels
     assert "Event Time" in ax.get_xlabel()
-    assert "Treatment Effect" in ax.get_ylabel()
+    assert "Effect Estimate" in ax.get_ylabel()
 
     # Check title
     assert "Staggered DiD" in ax.get_title()
@@ -911,7 +921,7 @@ def test_staggered_did_plot_elements_bayesian(mock_pymc_sample):
 
     # Check axis labels
     assert "Event Time" in ax.get_xlabel()
-    assert "Treatment Effect" in ax.get_ylabel()
+    assert "Effect Estimate" in ax.get_ylabel()
 
     plt.close(fig)
 
@@ -1563,11 +1573,12 @@ def test_staggered_did_sklearn_model_without_fit_intercept():
     assert len(result.att_event_time_) > 0
 
 
-def test_staggered_did_att_event_time_only_post_treatment():
-    """Test that att_event_time_ only includes post-treatment event times.
+def test_staggered_did_att_event_time_includes_pre_and_post_treatment():
+    """Test that att_event_time_ includes both pre and post-treatment event times.
 
-    This verifies the design: ATT estimates are only computed for treated
-    observations (event_time >= 0), not for pre-treatment periods.
+    This verifies the design: ATT estimates are computed for both:
+    - Post-treatment periods (event_time >= 0): actual treatment effects
+    - Pre-treatment periods (event_time < 0): placebo check for parallel trends
     """
     df = generate_staggered_did_data(
         n_units=30,
@@ -1585,13 +1596,27 @@ def test_staggered_did_att_event_time_only_post_treatment():
         model=LinearRegression(),
     )
 
-    # ATT table should only include post-treatment event times
     att_et = result.att_event_time_
-    assert all(att_et["event_time"] >= 0), (
-        "ATT table should only include post-treatment event times"
+
+    # ATT table should include both pre-treatment (placebo) and post-treatment effects
+    pre_treatment_et = att_et[att_et["event_time"] < 0]
+    post_treatment_et = att_et[att_et["event_time"] >= 0]
+
+    assert len(pre_treatment_et) > 0, (
+        "ATT table should include pre-treatment event times for placebo check"
+    )
+    assert len(post_treatment_et) > 0, (
+        "ATT table should include post-treatment event times"
     )
 
-    # Plot should work without pre-treatment shading
+    # Pre-treatment effects should be close to zero (placebo check)
+    # Since data is simulated with true treatment effect only after treatment
+    avg_pre_effect = pre_treatment_et["att"].mean()
+    assert abs(avg_pre_effect) < 1.0, (
+        f"Pre-treatment placebo effects should be close to zero, got {avg_pre_effect}"
+    )
+
+    # Plot should work with pre-treatment shading
     fig, axes = result.plot()
     assert len(axes) == 1
     plt.close(fig)
