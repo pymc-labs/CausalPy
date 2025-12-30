@@ -29,6 +29,7 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -434,7 +435,7 @@ class InterruptedTimeSeries(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        from causalpy.reporting import EffectSummary, _extract_hdi_bounds
+        from causalpy.reporting import _extract_hdi_bounds
 
         is_pymc = isinstance(self.model, PyMCModel)
         time_dim = "obs_ind"
@@ -1233,7 +1234,6 @@ class InterruptedTimeSeries(BaseExperiment):
             Object with .table (DataFrame) and .text (str) attributes
         """
         from causalpy.reporting import (
-            EffectSummary,
             _compute_statistics,
             _compute_statistics_ols,
             _extract_counterfactual,
