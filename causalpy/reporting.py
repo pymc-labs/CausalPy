@@ -345,7 +345,7 @@ def _effect_summary_did(
 def _effect_summary_staggered_did(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    alpha: float = 0.05,
+    alpha: float = 0.06,
     min_effect: float | None = None,
 ):
     """Generate effect summary for Staggered Difference-in-Differences experiments.
@@ -359,8 +359,11 @@ def _effect_summary_staggered_did(
         StaggeredDifferenceInDifferences experiment result
     direction : {"increase", "decrease", "two-sided"}
         Direction for interpretation
-    alpha : float
-        Significance level for intervals
+    alpha : float, default=0.06
+        Probability mass outside the credible interval. The HDI probability
+        is computed as (1 - alpha). Default 0.06 gives 94% HDI, matching
+        ArviZ's default. Only used as fallback if the result doesn't store
+        the HDI probability used during interval computation.
     min_effect : float, optional
         Not used for staggered DiD, kept for API consistency
 
@@ -385,10 +388,12 @@ def _effect_summary_staggered_did(
     if len(post_treatment) > 0:
         avg_post_att = post_treatment["att"].mean()
         if "att_lower" in post_treatment.columns:
-            # Bayesian model
+            # Bayesian model - use stored hdi_prob from experiment
             avg_lower = post_treatment["att_lower"].mean()
             avg_upper = post_treatment["att_upper"].mean()
-            hdi_pct = int((1 - alpha) * 100)
+            # Use the HDI probability that was actually used to compute the intervals
+            hdi_prob = getattr(result, "hdi_prob_", 1 - alpha)
+            hdi_pct = int(hdi_prob * 100)
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
                 f"across event-times was {avg_post_att:.2f} "

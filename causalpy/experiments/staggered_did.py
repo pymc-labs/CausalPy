@@ -388,8 +388,23 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         else:
             self._aggregate_effects_ols(treated_data)
 
-    def _aggregate_effects_bayesian(self, treated_data: pd.DataFrame) -> None:
-        """Aggregate effects for Bayesian model with posterior uncertainty."""
+    def _aggregate_effects_bayesian(
+        self, treated_data: pd.DataFrame, hdi_prob: float = 0.94
+    ) -> None:
+        """Aggregate effects for Bayesian model with posterior uncertainty.
+
+        Parameters
+        ----------
+        treated_data : pd.DataFrame
+            DataFrame containing only treated observations
+        hdi_prob : float, optional
+            Probability mass for the HDI interval bounds, by default 0.94
+        """
+        # Store the HDI probability used for interval computation
+        self.hdi_prob_ = hdi_prob
+        lower_pct = (1 - hdi_prob) / 2 * 100
+        upper_pct = (1 + hdi_prob) / 2 * 100
+
         # Get posterior draws for mu
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
@@ -423,8 +438,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "cohort": g_val,
                     "time": t_val,
                     "att": float(tau_gt.mean()),
-                    "att_lower": float(np.percentile(tau_gt, 3)),
-                    "att_upper": float(np.percentile(tau_gt, 97)),
+                    "att_lower": float(np.percentile(tau_gt, lower_pct)),
+                    "att_upper": float(np.percentile(tau_gt, upper_pct)),
                 }
             )
         self.att_group_time_ = pd.DataFrame(att_gt_rows)
@@ -451,8 +466,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 {
                     "event_time": int(e),
                     "att": float(tau_e.mean()),
-                    "att_lower": float(np.percentile(tau_e, 3)),
-                    "att_upper": float(np.percentile(tau_e, 97)),
+                    "att_lower": float(np.percentile(tau_e, lower_pct)),
+                    "att_upper": float(np.percentile(tau_e, upper_pct)),
                     "n_obs": int(e_mask.sum()),
                 }
             )

@@ -494,6 +494,37 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
     assert "Staggered DiD" in summary.text
 
 
+@pytest.mark.integration
+def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
+    """Test that Bayesian results store hdi_prob_ and report it correctly in prose.
+
+    This verifies the fix for the mismatch between computed interval bounds
+    (94% by default) and reported percentage in effect_summary prose.
+    """
+    df = generate_staggered_did_data(
+        n_units=30, n_time_periods=10, treatment_cohorts={5: 10, 8: 10}, seed=42
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    # Verify hdi_prob_ is stored on the result
+    assert hasattr(result, "hdi_prob_"), "Bayesian result should have hdi_prob_ attr"
+    assert result.hdi_prob_ == 0.94, "Default hdi_prob_ should be 0.94"
+
+    # Verify effect summary prose reports the correct percentage
+    summary = result.effect_summary()
+    assert "94% HDI" in summary.text, (
+        f"Effect summary should report '94% HDI' but got: {summary.text}"
+    )
+
+
 # ==============================================================================
 # Synthetic Data Generator Tests
 # ==============================================================================
