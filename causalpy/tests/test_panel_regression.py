@@ -235,6 +235,17 @@ def test_panel_regression_validation_errors(small_panel_data):
             model=LinearRegression(),
         )
 
+    # C(time) in formula with within method
+    with pytest.raises(ValueError, match="do not include C\\(time\\)"):
+        cp.PanelRegression(
+            data=small_panel_data,
+            formula="y ~ C(time) + treatment + x1",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="within",
+            model=LinearRegression(),
+        )
+
 
 @pytest.mark.integration
 def test_panel_regression_plot_coefficients(mock_pymc_sample, small_panel_data):

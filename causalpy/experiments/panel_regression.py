@@ -245,11 +245,21 @@ class PanelRegression(BaseExperiment):
         if self.fe_method not in ["dummies", "within"]:
             raise ValueError("fe_method must be 'dummies' or 'within'")
 
-        # Check if formula includes C(unit_var) when using within method
+        # Check if formula includes C(unit_var) or C(time_var) when using within method
         if self.fe_method == "within" and f"C({self.unit_fe_variable})" in self.formula:
             raise ValueError(
                 f"When using fe_method='within', do not include C({self.unit_fe_variable}) "
                 "in the formula. The within transformation handles unit fixed effects automatically."
+            )
+
+        if (
+            self.fe_method == "within"
+            and self.time_fe_variable
+            and f"C({self.time_fe_variable})" in self.formula
+        ):
+            raise ValueError(
+                f"When using fe_method='within', do not include C({self.time_fe_variable}) "
+                "in the formula. The within transformation handles time fixed effects automatically."
             )
 
     def _within_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
