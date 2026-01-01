@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from patsy import dmatrices
+from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException
@@ -502,7 +503,9 @@ class PanelRegression(BaseExperiment):
                     float(beta.sel(coeffs=self.labels[idx]).mean(dim=["chain", "draw"]))
                 )
 
-            ax.hist(fe_means, bins=min(30, len(fe_means) // 2), edgecolor="black")
+            ax.hist(
+                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
+            )
             ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
 
         else:
@@ -510,7 +513,9 @@ class PanelRegression(BaseExperiment):
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
             fe_values = [self.model.coef_[idx] for idx in unit_fe_indices]
 
-            ax.hist(fe_values, bins=min(30, len(fe_values) // 2), edgecolor="black")
+            ax.hist(
+                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
+            )
             ax.set_xlabel("Unit Fixed Effect")
 
         ax.set_ylabel("Count")
@@ -641,7 +646,6 @@ class PanelRegression(BaseExperiment):
     def plot_residuals(
         self,
         kind: Literal["scatter", "histogram", "qq"] = "scatter",
-        by: str | None = None,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Plot residual diagnostics.
 
@@ -652,8 +656,6 @@ class PanelRegression(BaseExperiment):
             - "scatter": Residuals vs fitted values
             - "histogram": Distribution of residuals
             - "qq": Q-Q plot for normality check
-        by : str, optional
-            Group residuals by a variable (e.g., unit or time).
 
         Returns
         -------
@@ -685,8 +687,6 @@ class PanelRegression(BaseExperiment):
             ax.set_title("Distribution of Residuals")
 
         elif kind == "qq":
-            from scipy import stats
-
             stats.probplot(residuals, dist="norm", plot=ax)
             ax.set_title("Q-Q Plot")
 
