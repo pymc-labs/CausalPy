@@ -201,7 +201,7 @@ class PanelRegression(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
 
         # Convert to xarray
-        self.X = xr.DataArray(
+        self.X = xr.DataArray(  # type: ignore[assignment]
             self.X,
             dims=["obs_ind", "coeffs"],
             coords={
@@ -209,7 +209,7 @@ class PanelRegression(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
-        self.y = xr.DataArray(
+        self.y = xr.DataArray(  # type: ignore[assignment]
             self.y,
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
@@ -222,12 +222,12 @@ class PanelRegression(BaseExperiment):
                 "obs_ind": np.arange(self.X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
+            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
         elif isinstance(self.model, RegressorMixin):
             # For scikit-learn models, set fit_intercept=False to include intercept in coefficients
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
-            self.model.fit(X=self.X.values, y=self.y.values.ravel())
+            self.model.fit(X=self.X.values, y=self.y.values.ravel())  # type: ignore[attr-defined]
 
     def _validate_inputs(self, data: pd.DataFrame) -> None:
         """Validate input parameters."""
@@ -380,7 +380,7 @@ class PanelRegression(BaseExperiment):
         """
         # Get posterior predictions
         if isinstance(self.model, PyMCModel):
-            mu = self.model.idata.posterior["mu"]
+            mu = self.model.idata.posterior["mu"]  # type: ignore[attr-defined]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
             pred_upper = mu.quantile(0.975, dim=["chain", "draw"]).values.flatten()
@@ -389,7 +389,7 @@ class PanelRegression(BaseExperiment):
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),
+                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
                 "y_fitted": pred_mean,
                 "y_fitted_lower": pred_lower,
                 "y_fitted_upper": pred_upper,
@@ -411,13 +411,13 @@ class PanelRegression(BaseExperiment):
             DataFrame with fitted values
         """
         if isinstance(self.model, RegressorMixin):
-            y_fitted = self.model.predict(self.X.values)
+            y_fitted = self.model.predict(self.X.values)  # type: ignore[attr-defined]
         else:
             raise ValueError("Model is not an OLS model")
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),
+                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
                 "y_fitted": y_fitted,
                 self.unit_fe_variable: self.data[self.unit_fe_variable].values,
             }
@@ -492,7 +492,7 @@ class PanelRegression(BaseExperiment):
 
         if isinstance(self.model, PyMCModel):
             # Bayesian: get posterior means
-            beta = self.model.idata.posterior["beta"]
+            beta = self.model.idata.posterior["beta"]  # type: ignore[attr-defined]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
 
             # Get mean and std for each unit FE
@@ -569,17 +569,18 @@ class PanelRegression(BaseExperiment):
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
 
+        selected_units: np.ndarray | list[str]
         if units is not None:
             selected_units = units
         elif self.n_units <= n_sample:
-            selected_units = all_units
+            selected_units = all_units  # type: ignore[assignment]
         else:
             if select == "random":
                 rng = np.random.default_rng(42)
-                selected_units = rng.choice(all_units, size=n_sample, replace=False)
+                selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
             else:
                 # For extreme/high_variance, just take first n_sample for now
-                selected_units = all_units[:n_sample]
+                selected_units = all_units[:n_sample]  # type: ignore[assignment]
 
         # Create subplots
         n_units_plot = len(selected_units)
