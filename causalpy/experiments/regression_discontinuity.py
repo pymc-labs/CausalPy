@@ -106,7 +106,7 @@ class RegressionDiscontinuity(BaseExperiment):
         if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
             fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+            filtered_data = self.data.query(f"{fmin} <= {self.running_variable_name} <= {fmax}")
             if len(filtered_data) <= 10:
                 warnings.warn(
                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
