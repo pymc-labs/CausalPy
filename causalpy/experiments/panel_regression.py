@@ -287,8 +287,15 @@ class PanelRegression(BaseExperiment):
 
         return data
 
-    def summary(self) -> None:
-        """Print a summary of the panel regression results."""
+    def summary(self, round_to: int | None = None) -> None:
+        """Print a summary of the panel regression results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         print(f"\n{self.expt_type}")
         print("=" * 60)
         print(f"Units: {self.n_units} ({self.unit_fe_variable})")
@@ -297,8 +304,29 @@ class PanelRegression(BaseExperiment):
         print(f"FE method: {self.fe_method}")
         print(f"Observations: {len(self.data)}")
         print("=" * 60)
-        print("\nModel Coefficients:")
-        self.print_coefficients()
+
+        # Filter out fixed effect dummy coefficients for cleaner output
+        coeff_labels = self.labels.copy()
+        if self.fe_method == "dummies":
+            coeff_labels = [
+                c
+                for c in coeff_labels
+                if not c.startswith(f"C({self.unit_fe_variable})")
+            ]
+            if self.time_fe_variable:
+                coeff_labels = [
+                    c
+                    for c in coeff_labels
+                    if not c.startswith(f"C({self.time_fe_variable})")
+                ]
+            if len(coeff_labels) < len(self.labels):
+                print(
+                    f"\nNote: {len(self.labels) - len(coeff_labels)} fixed effect "
+                    "coefficients not shown (use print_coefficients() to see all)"
+                )
+
+        print("\nModel Coefficients (excluding FE dummies):")
+        self.model.print_coefficients(coeff_labels, round_to)
 
     def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for Bayesian model.
@@ -349,9 +377,10 @@ class PanelRegression(BaseExperiment):
                 var_names=["beta"],
                 coords={"coeffs": coeff_names},
                 combined=True,
-                hdi_prob=0.95,
+                hdi_prob=0.94,  # 94% HDI to match print_coefficients
                 ax=ax,
             )
+            ax.set_title("Model Coefficients with 94% HDI (excluding FE dummies)")
         else:
             # OLS: point estimates with confidence intervals
             # Get coefficient values
@@ -365,8 +394,8 @@ class PanelRegression(BaseExperiment):
             ax.set_yticklabels(coeff_names)
             ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8)
             ax.set_xlabel("Coefficient Value")
+            ax.set_title("Model Coefficients (excluding FE dummies)")
 
-        ax.set_title("Model Coefficients (excluding FE dummies)")
         plt.tight_layout()
 
         return fig, ax
