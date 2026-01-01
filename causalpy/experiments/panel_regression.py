@@ -378,26 +378,23 @@ class PanelRegression(BaseExperiment):
                     if not c.startswith(f"C({self.time_fe_variable})")
                 ]
 
-        fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
-
         if isinstance(self.model, PyMCModel):
-            # Bayesian: forest plot with HDI
-            az.plot_forest(
+            # Bayesian: use az.plot_forest directly
+            axes = az.plot_forest(
                 self.model.idata,
                 var_names=["beta"],
                 coords={"coeffs": coeff_names},
                 combined=True,
-                hdi_prob=0.94,  # 94% HDI to match print_coefficients
-                ax=ax,
+                hdi_prob=0.94,
             )
+            ax = axes.ravel()[0]
+            fig = ax.figure
             ax.set_title("Model Coefficients with 94% HDI (excluding FE dummies)")
         else:
-            # OLS: point estimates with confidence intervals
-            # Get coefficient values
+            # OLS: point estimates
+            fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
             coefs = self.model.coef_[coef_indices]
-
-            # Plot
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -407,7 +404,6 @@ class PanelRegression(BaseExperiment):
             ax.set_title("Model Coefficients (excluding FE dummies)")
 
         plt.tight_layout()
-
         return fig, ax
 
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
@@ -569,6 +565,7 @@ class PanelRegression(BaseExperiment):
         n_sample: int = 10,
         select: Literal["random", "extreme", "high_variance"] = "random",
         show_mean: bool = True,
+        hdi_prob: float = 0.94,
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
 
@@ -588,6 +585,9 @@ class PanelRegression(BaseExperiment):
             - "high_variance": Units with most within-unit variation
         show_mean : bool, default=True
             Whether to show the overall mean trajectory.
+        hdi_prob : float, default=0.94
+            Probability mass for the HDI credible interval (Bayesian models only).
+            Common values are 0.94 (default) or 0.89.
 
         Returns
         -------
@@ -604,11 +604,12 @@ class PanelRegression(BaseExperiment):
                 "plot_trajectories() requires time_fe_variable to be specified"
             )
 
-        # Get plot data
-        if isinstance(self.model, PyMCModel):
-            plot_data = self.get_plot_data_bayesian()
-        else:
-            plot_data = self.get_plot_data_ols()
+        # Check if model is Bayesian
+        is_bayesian = isinstance(self.model, PyMCModel)
+
+        # Get posterior for HDI plotting (Bayesian only)
+        if is_bayesian:
+            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
 
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
@@ -639,34 +640,63 @@ class PanelRegression(BaseExperiment):
         # Plot each unit
         for idx, unit in enumerate(selected_units):
             ax = axes[idx]
-            unit_data = plot_data[plot_data[self.unit_fe_variable] == unit]
 
-            # Sort by time
-            unit_data = unit_data.sort_values(self.time_fe_variable)
+            # Get indices for this unit in original data order
+            unit_mask = self.data[self.unit_fe_variable] == unit
+            unit_obs_indices = np.where(unit_mask)[0]
 
-            # Plot actual and fitted
+            # Get time values and compute sort order
+            time_vals = self.data.loc[unit_mask, self.time_fe_variable].values
+            sort_order = np.argsort(time_vals)
+            sorted_time_vals = time_vals[sort_order]
+            sorted_obs_indices = unit_obs_indices[sort_order]
+
+            # Get actual y values (sorted by time)
+            y_actual = self.y.values.flatten()[sorted_obs_indices]  # type: ignore[attr-defined]
+
+            # Plot actual
             ax.plot(
-                unit_data[self.time_fe_variable],
-                unit_data["y_actual"],
+                sorted_time_vals,
+                y_actual,
                 "o-",
                 label="Actual",
                 alpha=0.7,
             )
-            ax.plot(
-                unit_data[self.time_fe_variable],
-                unit_data["y_fitted"],
-                "s--",
-                label="Fitted",
-                alpha=0.7,
-            )
 
-            # Add credible interval if Bayesian
-            if "y_fitted_lower" in unit_data.columns:
-                ax.fill_between(
-                    unit_data[self.time_fe_variable],
-                    unit_data["y_fitted_lower"],
-                    unit_data["y_fitted_upper"],
-                    alpha=0.2,
+            if is_bayesian:
+                # Get posterior mu for this unit's observations in sorted order
+                # Squeeze out treated_units dimension (always "unit_0" for panel regression)
+                unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
+                if "treated_units" in unit_mu.dims:
+                    unit_mu = unit_mu.squeeze("treated_units", drop=True)
+
+                # Plot fitted mean
+                ax.plot(
+                    sorted_time_vals,
+                    unit_mu.mean(dim=["chain", "draw"]).values,
+                    "s--",
+                    label="Fitted",
+                    alpha=0.7,
+                )
+
+                # Plot HDI using az.plot_hdi
+                az.plot_hdi(
+                    sorted_time_vals,
+                    unit_mu,
+                    hdi_prob=hdi_prob,
+                    ax=ax,
+                    smooth=False,
+                    fill_kwargs={"alpha": 0.2},
+                )
+            else:
+                # OLS: get fitted values for this unit
+                y_fitted = self.model.predict(self.X.values)[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
+                ax.plot(
+                    sorted_time_vals,
+                    y_fitted,
+                    "s--",
+                    label="Fitted",
+                    alpha=0.7,
                 )
 
             ax.set_title(f"Unit: {unit}", fontsize=10)
