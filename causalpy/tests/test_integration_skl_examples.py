@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -241,12 +241,14 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
     3. Plot can be generated
     """
     # Create synthetic data with custom running variable name
-    df = pd.DataFrame({
-        "my_running_var": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-        "outcome": [1, 2, 3, 4, 10, 11, 12],
-        "treated": [False, False, False, False, True, True, True],
-    })
-    
+    df = pd.DataFrame(
+        {
+            "my_running_var": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "outcome": [1, 2, 3, 4, 10, 11, 12],
+            "treated": [False, False, False, False, True, True, True],
+        }
+    )
+
     # This should work without errors (previously failed with "name 'x' is not defined")
     result = cp.RegressionDiscontinuity(
         df,
@@ -256,7 +258,7 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
         treatment_threshold=0.45,
         bandwidth=0.2,
     )
-    
+
     assert isinstance(result, cp.RegressionDiscontinuity)
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
