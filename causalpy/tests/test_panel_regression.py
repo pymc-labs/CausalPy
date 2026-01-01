@@ -64,7 +64,7 @@ def large_panel_data():
     periods = range(10)
 
     data = []
-    for u_idx, u in enumerate(units):
+    for _u_idx, u in enumerate(units):
         unit_effect = np.random.randn()
         for t in periods:
             time_effect = 0.2 * t
