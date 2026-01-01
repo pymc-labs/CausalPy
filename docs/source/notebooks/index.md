@@ -8,6 +8,13 @@ ancova_pymc.ipynb
 :::
 
 :::{toctree}
+:caption: Panel Fixed Effects
+:maxdepth: 1
+
+panel_fixed_effects.ipynb
+:::
+
+:::{toctree}
 :caption: Synthetic Control
 :maxdepth: 1
 
