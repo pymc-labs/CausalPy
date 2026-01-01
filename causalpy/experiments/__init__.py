@@ -17,6 +17,7 @@ from .diff_in_diff import DifferenceInDifferences
 from .instrumental_variable import InstrumentalVariable
 from .interrupted_time_series import InterruptedTimeSeries
 from .inverse_propensity_weighting import InversePropensityWeighting
+from .panel_regression import PanelRegression
 from .prepostnegd import PrePostNEGD
 from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
@@ -26,6 +27,7 @@ __all__ = [
     "DifferenceInDifferences",
     "InstrumentalVariable",
     "InversePropensityWeighting",
+    "PanelRegression",
     "PrePostNEGD",
     "RegressionDiscontinuity",
     "RegressionKink",
