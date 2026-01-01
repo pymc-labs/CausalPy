@@ -302,7 +302,7 @@ class PanelRegression(BaseExperiment):
         if self.n_periods:
             print(f"Periods: {self.n_periods} ({self.time_fe_variable})")
         print(f"FE method: {self.fe_method}")
-        print(f"Observations: {len(self.data)}")
+        print(f"Observations: {self.X.shape[0]}")
         print("=" * 60)
 
         # Filter out fixed effect dummy coefficients for cleaner output
