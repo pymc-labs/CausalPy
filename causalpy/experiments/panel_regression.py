@@ -757,6 +757,10 @@ class PanelRegression(BaseExperiment):
 
         elif kind == "qq":
             stats.probplot(residuals, dist="norm", plot=ax)
+            # Update colors to match the rest of the plots
+            ax.get_lines()[0].set_markerfacecolor("C0")
+            ax.get_lines()[0].set_markeredgecolor("C0")
+            ax.get_lines()[1].set_color("C1")
             ax.set_title("Q-Q Plot")
 
         plt.tight_layout()
