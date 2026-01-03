@@ -14,6 +14,7 @@
 
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
+import causalpy.variable_selection_priors as variable_selection_priors
 from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.version import __version__
 
@@ -41,4 +42,5 @@ __all__ = [
     "RegressionKink",
     "skl_models",
     "SyntheticControl",
+    "variable_selection_priors",
 ]
