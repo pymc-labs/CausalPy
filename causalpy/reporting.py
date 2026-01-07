@@ -409,11 +409,20 @@ def _effect_summary_staggered_did(
     # Pre-treatment placebo check
     if len(pre_treatment) > 0:
         avg_pre_att = pre_treatment["att"].mean()
-        if (
-            abs(avg_pre_att) < 0.1 * abs(avg_post_att)
-            if len(post_treatment) > 0
-            else True
-        ):
+        # When post-treatment effects exist and are non-zero, use a relative threshold.
+        # When the average post-treatment effect is (near) zero, fall back to a small
+        # absolute threshold for the placebo to avoid spuriously flagging violations.
+        if len(post_treatment) > 0:
+            if abs(avg_post_att) > 0:
+                placebo_ok = abs(avg_pre_att) < 0.1 * abs(avg_post_att)
+            else:
+                # No detectable average treatment effect; treat very small pre-treatment
+                # effects as consistent with parallel trends.
+                placebo_ok = abs(avg_pre_att) < 1e-6
+        else:
+            placebo_ok = True
+
+        if placebo_ok:
             prose_parts.append(
                 f"Pre-treatment placebo check: Average pre-treatment effect was "
                 f"{avg_pre_att:.2f}, consistent with parallel trends assumption."
