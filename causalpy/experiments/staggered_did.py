@@ -70,7 +70,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Tuple (min_event_time, max_event_time) to restrict event-time aggregation.
         If None, uses all available event-times.
     reference_event_time : int, optional
-        Event-time to use as reference (normalized to zero effect) in plots.
+        Event-time index associated with plots (reserved for future use).
         Defaults to -1.
 
     Attributes
