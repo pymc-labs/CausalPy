@@ -1,4 +1,4 @@
-#   Copyright 2025 - 2025 The PyMC Labs Developers
+#   Copyright 2025 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 Synthetic Control Experiment
 """
 
+import warnings
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -23,9 +25,10 @@ from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
+from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import round_num
+from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -136,6 +139,45 @@ class SyntheticControl(BaseExperiment):
                 "treated_units": self.treated_units,
             },
         )
+
+        # Check convex hull assumption for each treated unit
+        # Aggregate violations across all treated units
+        total_violations = 0
+        total_above = 0
+        total_below = 0
+        n_units = len(self.treated_units)
+        n_pre_points = self.datapre_treated.shape[0]
+
+        for i in range(n_units):
+            unit_check = check_convex_hull_violation(
+                self.datapre_treated.isel(treated_units=i).values,
+                self.datapre_control.values,
+            )
+            total_violations += unit_check["n_violations"]
+            total_above += unit_check["pct_above"] * n_pre_points / 100
+            total_below += unit_check["pct_below"] * n_pre_points / 100
+
+        total_points = n_units * n_pre_points
+        hull_check = {
+            "passes": total_violations == 0,
+            "n_violations": total_violations,
+            "pct_above": 100 * total_above / total_points if total_points > 0 else 0,
+            "pct_below": 100 * total_below / total_points if total_points > 0 else 0,
+        }
+
+        if not hull_check["passes"]:
+            warnings.warn(
+                f"Convex hull assumption may be violated: {hull_check['n_violations']} "
+                f"pre-intervention time points ({hull_check['pct_above']:.1f}% above, "
+                f"{hull_check['pct_below']:.1f}% below control range). "
+                "The synthetic control method requires the treated unit to lie within "
+                "the convex hull of control units. Consider: (1) adding more diverse "
+                "control units, (2) using a model with an intercept (e.g., ITS with "
+                "control predictors), or (3) using the Augmented Synthetic Control Method. "
+                "See glossary term 'Convex hull condition' for more details.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
@@ -366,6 +408,15 @@ class SyntheticControl(BaseExperiment):
                 zorder=1,
             )
 
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
+
         return fig, ax
 
     def _ols_plot(
@@ -464,6 +515,15 @@ class SyntheticControl(BaseExperiment):
             )
 
         ax[0].legend(fontsize=LEGEND_FONT_SIZE)
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
 
         return (fig, ax)
 
