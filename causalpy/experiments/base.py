@@ -305,3 +305,126 @@ class BaseExperiment:
                 )
 
             return EffectSummary(table=table, text=text)
+
+    # =========================================================================
+    # maketables plugin support (zero-coupling approach)
+    # These dunder attributes enable automatic integration with maketables
+    # for generating publication-ready coefficient tables.
+    # See: https://py-econometrics.github.io/maketables/docs/AddingMethods.html
+    # =========================================================================
+
+    @property
+    def __maketables_coef_table__(self) -> pd.DataFrame:
+        """Return coefficient table for maketables integration.
+
+        Returns a DataFrame with columns:
+        - b: coefficient estimate (posterior mean for Bayesian, point estimate for OLS)
+        - se: standard error (posterior std for Bayesian, None for OLS)
+        - t: t-statistic (None for Bayesian, None for OLS currently)
+        - p: p-value (two-tailed posterior probability for Bayesian, None for OLS)
+        - ci_lower: lower bound of 94% HDI (Bayesian) or None (OLS)
+        - ci_upper: upper bound of 94% HDI (Bayesian) or None (OLS)
+        """
+        if isinstance(self.model, PyMCModel):
+            return self._maketables_coef_table_bayesian()
+        else:
+            return self._maketables_coef_table_ols()
+
+    def _maketables_coef_table_bayesian(self) -> pd.DataFrame:
+        """Build coefficient table from PyMC posterior."""
+        # Get flattened samples for statistics calculations
+        beta_samples = az.extract(self.model.idata.posterior, var_names="beta")
+
+        # Handle multi-unit case: select first treated unit if multiple exist
+        if "treated_units" in beta_samples.dims:
+            beta_samples = beta_samples.isel(treated_units=0)
+
+        # Compute statistics for each coefficient
+        rows = []
+        for i, label in enumerate(self.labels):
+            # Use flattened samples for mean, std, probabilities
+            coef_samples = beta_samples.isel(coeffs=i)
+            mean_val = float(coef_samples.mean())
+            std_val = float(coef_samples.std())
+            p_pos = float((coef_samples > 0).mean())
+            p_neg = float((coef_samples < 0).mean())
+            p_two_sided = min(p_pos, p_neg) * 2
+
+            # Compute HDI from samples using numpy for simplicity
+            sorted_samples = np.sort(coef_samples.values)
+            n = len(sorted_samples)
+            interval_size = int(np.ceil(0.94 * n))
+            n_intervals = n - interval_size
+            widths = sorted_samples[interval_size:] - sorted_samples[:n_intervals]
+            min_idx = np.argmin(widths)
+            ci_lower = float(sorted_samples[min_idx])
+            ci_upper = float(sorted_samples[min_idx + interval_size])
+
+            rows.append(
+                {
+                    "b": mean_val,
+                    "se": std_val,
+                    "t": None,  # Not applicable for Bayesian
+                    "p": p_two_sided,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                }
+            )
+
+        df = pd.DataFrame(rows, index=self.labels)
+        df.index.name = "Coefficient"
+        return df
+
+    def _maketables_coef_table_ols(self) -> pd.DataFrame:
+        """Build coefficient table from OLS model."""
+        coeffs = self.model.get_coeffs()
+        # Note: OLS SE/t/p require access to residuals which we don't store
+        rows = []
+        for label, coef in zip(self.labels, coeffs, strict=False):
+            rows.append(
+                {
+                    "b": coef,
+                    "se": None,  # OLS SE requires access to residuals
+                    "t": None,
+                    "p": None,
+                    "ci_lower": None,
+                    "ci_upper": None,
+                }
+            )
+        df = pd.DataFrame(rows, index=self.labels)
+        df.index.name = "Coefficient"
+        return df
+
+    def __maketables_stat__(self, key: str):
+        """Return statistics for maketables integration.
+
+        Supported keys:
+        - N: number of observations
+        - model_type: "PyMC" or "OLS"
+        - experiment_type: type of causal experiment
+        - r2: R-squared (if available)
+        """
+        stat_map = {
+            "N": len(self.data) if hasattr(self, "data") else None,
+            "model_type": "PyMC" if isinstance(self.model, PyMCModel) else "OLS",
+            "experiment_type": getattr(self, "expt_type", self.__class__.__name__),
+        }
+        # Add R² if available
+        if hasattr(self, "score") and self.score is not None:
+            stat_map["r2"] = self.score
+        return stat_map.get(key)
+
+    @property
+    def __maketables_depvar__(self) -> str:
+        """Return dependent variable name for maketables integration."""
+        if hasattr(self, "outcome_variable_name"):
+            return self.outcome_variable_name
+        return "y"
+
+    @property
+    def __maketables_vcov_info__(self) -> dict:
+        """Return variance-covariance info for maketables integration."""
+        return {
+            "vcov_type": "Bayesian" if isinstance(self.model, PyMCModel) else "OLS",
+            "clustervar": None,
+        }
