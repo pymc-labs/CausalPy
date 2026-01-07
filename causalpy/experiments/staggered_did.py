@@ -83,6 +83,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     att_event_time_ : pd.DataFrame
         Event-time ATT estimates: ATT(e) for each event-time e = t - G.
 
+    Notes
+    -----
+    **Panel Balance**: This implementation supports both balanced and unbalanced panel
+    data. While balanced panels (where each unit is observed in every time period) are
+    common in staggered DiD applications, the imputation-based approach of Borusyak et
+    al. (2024) can accommodate unbalanced panels. The key requirement is that treatment
+    timing is well-defined for each unit, not that all units are observed in all periods.
+    Unit and observation counts in the summary output are computed without assuming
+    balanced panels.
+
     Example
     -------
     >>> import causalpy as cp
@@ -597,9 +607,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print(f"Number of units: {self.data[self.unit_variable_name].nunique()}")
         print(f"Number of time periods: {self.data[self.time_variable_name].nunique()}")
         print(f"Treatment cohorts: {self.cohorts}")
-        print(
-            f"Never-treated units: {(self.data['G'] == self.never_treated_value).sum() // self.data[self.time_variable_name].nunique()}"
-        )
+        n_never_treated = self.data.loc[
+            self.data["G"] == self.never_treated_value, self.unit_variable_name
+        ].nunique()
+        print(f"Never-treated units: {n_never_treated}")
         print("\nEvent-time estimates:")
         att_et = self.att_event_time_.copy()
         # Add indicator column for clarity

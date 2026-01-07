@@ -433,6 +433,46 @@ def test_event_window_filtering():
     assert all(event_times <= 3), "Event times should be <= 3"
 
 
+def test_staggered_did_unbalanced_panel():
+    """Test that StaggeredDifferenceInDifferences handles unbalanced panel data.
+
+    Verifies that the implementation correctly handles panels where units are not
+    observed in all time periods. This tests the fix for summary() which previously
+    assumed balanced panels when counting never-treated units.
+    """
+    # Generate balanced panel
+    df = generate_staggered_did_data(
+        n_units=20, n_time_periods=10, treatment_cohorts={5: 10}, seed=42
+    )
+
+    # Create unbalanced panel by dropping some observations randomly
+    rng = np.random.default_rng(123)
+    drop_mask = rng.random(len(df)) < 0.1  # Drop ~10% of observations
+    df_unbalanced = df[~drop_mask].reset_index(drop=True)
+
+    # Verify we actually have unbalanced data
+    obs_per_unit = df_unbalanced.groupby("unit").size()
+    assert obs_per_unit.nunique() > 1, "Panel should be unbalanced"
+
+    # Run experiment - should not error
+    result = cp.StaggeredDifferenceInDifferences(
+        df_unbalanced,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        treatment_time_variable_name="treatment_time",
+        model=LinearRegression(),
+    )
+
+    # Basic sanity checks
+    assert result.att_event_time_ is not None
+    assert len(result.att_event_time_) > 0
+
+    # Verify summary runs without error (this exercises the fixed counting logic)
+    result.summary()
+
+
 # ==============================================================================
 # Unit Tests - Summary and Reporting
 # ==============================================================================
