@@ -128,6 +128,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         reference_event_time: int = -1,
         **kwargs: dict,
     ) -> None:
+        # NOTE: kwargs is accepted for API compatibility with other experiment classes
+        # and is intentionally not used inside this constructor.
         super().__init__(model=model)
 
         # Store parameters
