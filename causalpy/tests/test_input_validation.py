@@ -547,3 +547,90 @@ def test_regression_discontinuity_bool_treatment():
 
     # Check that the treatment variable is still bool
     assert result.data["treated"].dtype == bool
+
+
+# Synthetic Control - Convex Hull Assumption
+
+
+def test_synthetic_control_convex_hull_warning():
+    """Test that SyntheticControl issues a warning when convex hull assumption is violated"""
+    # Create synthetic data where treated is above all controls
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    # Create control units that are consistently lower than the treated
+    controls = pd.DataFrame(
+        {
+            "control_1": 1.0 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+            "control_2": 0.5 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+            "control_3": 0.8 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+        }
+    )
+
+    # Create treated unit that is consistently above all controls
+    treated = 5.0 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time)
+
+    df = controls.copy()
+    df["treated"] = treated
+
+    treatment_time = 30
+
+    # Should issue a warning
+    with pytest.warns(UserWarning, match="Convex hull assumption may be violated"):
+        result = cp.SyntheticControl(
+            df,
+            treatment_time,
+            control_units=["control_1", "control_2", "control_3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    # The model should still run and produce results
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_no_warning_when_assumption_satisfied():
+    """Test that SyntheticControl does not issue a warning when assumption is satisfied"""
+    # Create synthetic data where treated is within control range
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    # Create control units with varying levels that span a wide range
+    controls = pd.DataFrame(
+        {
+            "control_1": 1.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+            "control_2": 0.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+            "control_3": 4.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    # Create treated unit that falls within the control range
+    # Use the middle value to ensure it's within bounds
+    treated = 2.0 + 0.5 * time_idx + np.random.normal(0, 0.2, n_time)
+
+    df = controls.copy()
+    df["treated"] = treated
+
+    treatment_time = 30
+
+    # Should NOT issue a warning
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter("always")
+        result = cp.SyntheticControl(
+            df,
+            treatment_time,
+            control_units=["control_1", "control_2", "control_3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    # Check that no UserWarning about convex hull was issued
+    convex_hull_warnings = [w for w in warning_list if "Convex hull" in str(w.message)]
+    assert len(convex_hull_warnings) == 0
+
+    # The model should run successfully
+    assert isinstance(result, cp.SyntheticControl)
