@@ -1,0 +1,59 @@
+name: Welcome New Contributors
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+
+            Thank you for opening your first issue! We appreciate you taking the time to post this.
+
+            Here are a few things that might help:
+            - 📖 Check out our [documentation](https://causalpy.readthedocs.io/)
+            - 💬 Feel free to ask questions - we're happy to help!
+            - 🐛 If this is a bug report, please ensure you've included steps to reproduce it
+
+            A maintainer will take a look soon. Thanks for being part of the CausalPy community! 🎉
+
+          pr-message: |
+            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+
+            Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
+
+            Here are a few tips to help your PR get merged smoothly:
+            - ✅ Make sure all CI checks pass (tests, linting, type checking)
+            - 📝 Run `pre-commit run --all-files` locally before pushing
+            - 📖 Check our [Contributing Guide](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md) for more details
+
+            A maintainer will review your changes soon. Thanks for helping make CausalPy better! 🚀
+
+            ---
+
+            💼 **LinkedIn Shoutout**: Once your PR is merged, we'd love to give you a shoutout on LinkedIn to thank you for your contribution! If you're interested, just drop your LinkedIn profile URL in a comment below.
+
+      # Add label for first-time contributors on PRs
+      - name: Add first-time-contributor label
+        if: github.event_name == 'pull_request_target' && github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['first-time-contributor']
+            });
