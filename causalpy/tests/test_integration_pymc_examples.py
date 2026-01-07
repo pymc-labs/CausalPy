@@ -725,6 +725,117 @@ def test_iv_reg(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_iv_binary_treatment(mock_pymc_sample):
+    df = cp.load_data("risk")
+    df["binary_trt"] = np.random.binomial(1, 0.5, len(df))
+    instruments_formula = "binary_trt  ~ 1 + risk + logmort0"
+    formula = "loggdp ~  1 + binary_trt + risk"
+    instruments_data = df[["risk", "logmort0", "binary_trt"]]
+    data = df[["loggdp", "risk", "binary_trt"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        binary_treatment=True,
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "rho" in result.model.named_vars
+
+
+@pytest.mark.integration
+def test_iv_reg_vs_prior(mock_pymc_sample):
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        vs_prior_type="spike_and_slab",
+        vs_hyperparams={"pi_alpha": 5, "outcome": True},
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "gamma_beta_t" in result.model.named_vars
+    assert "pi_beta_t" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+            result.idata, "beta_z"
+        )
+
+
+@pytest.mark.integration
+def test_iv_reg_vs_prior_hs(mock_pymc_sample):
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        vs_prior_type="horseshoe",
+        vs_hyperparams={"outcome": True},
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "tau_beta_t" in result.model.named_vars
+    assert "tau_beta_z" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+            result.idata, "beta_z"
+        )
+
+
+@pytest.mark.integration
 def test_inverse_prop(mock_pymc_sample):
     """Test the InversePropensityWeighting class."""
     df = cp.load_data("nhefs")
