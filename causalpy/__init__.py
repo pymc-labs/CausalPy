@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
+import causalpy.variable_selection_priors as variable_selection_priors
 from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.version import __version__
 
@@ -43,4 +44,5 @@ __all__ = [
     "skl_models",
     "StaggeredDifferenceInDifferences",
     "SyntheticControl",
+    "variable_selection_priors",
 ]

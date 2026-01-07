@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -652,7 +652,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 markersize=7,
                 color="gray",
                 alpha=0.7,
-                label="Placebo estimate (94% HDI)",
+                label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
             )
 
         # Plot post-treatment ATT estimates
@@ -669,7 +669,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 capthick=2,
                 markersize=8,
                 color="C0",
-                label="ATT estimate (94% HDI)",
+                label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
             )
 
         # Add horizontal line at zero
