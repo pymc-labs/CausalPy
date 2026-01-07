@@ -32,6 +32,9 @@ Glossary
    Confound
       Anything besides the treatment which varies across the treatment and control conditions.
 
+   Convex hull condition
+      In synthetic control methods, the requirement that the treated unit's pre-intervention outcomes can be expressed as a convex combination (non-negative weights summing to one) of control units' outcomes. This is a necessary condition for the weighted sum approach to produce a valid synthetic control. When violated—such as when all control series are consistently above or below the treated series—the method cannot construct an accurate counterfactual :footcite:p:`abadie2010synthetic`.
+
    Counterfactual
       A hypothetical outcome that could or will occur under specific hypothetical circumstances.
 
