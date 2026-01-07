@@ -614,15 +614,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _bayesian_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for Bayesian model.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals for rounding in plot titles.
 
         Returns
         -------
@@ -699,15 +692,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def _ols_plot(
-        self, round_to: int | None = None, **kwargs: dict
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _ols_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for OLS model.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals for rounding in plot titles.
 
         Returns
         -------
