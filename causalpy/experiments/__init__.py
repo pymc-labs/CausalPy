@@ -20,6 +20,7 @@ from .inverse_propensity_weighting import InversePropensityWeighting
 from .prepostnegd import PrePostNEGD
 from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
+from .staggered_did import StaggeredDifferenceInDifferences
 from .synthetic_control import SyntheticControl
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "PrePostNEGD",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "StaggeredDifferenceInDifferences",
     "SyntheticControl",
     "InterruptedTimeSeries",
 ]
