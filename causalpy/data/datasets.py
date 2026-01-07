@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ DATASETS = {
     "pisa18": {"filename": "PISA18sampleScale.csv"},
     "nets": {"filename": "nets_df.csv"},
     "lalonde": {"filename": "lalonde.csv"},
+    "nevo": {"filename": "data_nevo.csv"},
 }
 
 
