@@ -67,3 +67,11 @@ repos:
     rev: v0.24.1
     hooks:
       - id: validate-pyproject
+  - repo: local
+    hooks:
+      - id: validate-bibtex
+        name: Validate BibTeX files
+        entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
+        language: python
+        files: \.bib$
+        additional_dependencies: [pybtex]

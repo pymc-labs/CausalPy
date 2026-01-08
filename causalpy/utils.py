@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -154,3 +154,61 @@ def get_interaction_terms(formula: str) -> list[str]:
             interaction_terms.append(clean_term)
 
     return interaction_terms
+
+
+def check_convex_hull_violation(
+    treated_series: np.ndarray, control_matrix: np.ndarray
+) -> dict:
+    """
+    Check if treated series values fall within the range of control series.
+
+    For each time point, verify that:
+    min(controls) <= treated <= max(controls)
+
+    This is a necessary (but not sufficient) condition for the treated unit
+    to lie within the convex hull of control units.
+
+    Parameters
+    ----------
+    treated_series : np.ndarray
+        1D array of treated unit values (shape: n_timepoints)
+    control_matrix : np.ndarray
+        2D array of control unit values (shape: n_timepoints x n_controls)
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+        - 'passes': bool - whether the check passes
+        - 'n_violations': int - number of time points with violations
+        - 'pct_above': float - percentage of points where treated > max(controls)
+        - 'pct_below': float - percentage of points where treated < min(controls)
+
+    Examples
+    --------
+    >>> treated = np.array([1.0, 2.0, 3.0])
+    >>> controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
+    >>> result = check_convex_hull_violation(treated, controls)
+    >>> result["passes"]
+    True
+    """
+    control_min = control_matrix.min(axis=1)
+    control_max = control_matrix.max(axis=1)
+
+    above = treated_series > control_max
+    below = treated_series < control_min
+
+    n_points = len(treated_series)
+    if n_points == 0:
+        return {
+            "passes": True,
+            "n_violations": 0,
+            "pct_above": 0.0,
+            "pct_below": 0.0,
+        }
+    return {
+        "passes": not (above.any() or below.any()),
+        "n_violations": int(above.sum() + below.sum()),
+        "pct_above": float(100 * above.sum() / n_points),
+        "pct_below": float(100 * below.sum() / n_points),
+    }

@@ -2,6 +2,27 @@
 
 CausalPy welcomes contributions from interested individuals or groups. These guidelines are provided to give potential contributors information to make their contribution compliant with the conventions of the CausalPy project, and maximize the probability of such contributions are merged as quickly and efficiently as possible. Contributors need not be experts, but should be interested in the project, willing to learn, and share knowledge.
 
+## Quick Start
+
+After forking this repository on GitHub, get up and running in 4 commands:
+
+```bash
+git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
+mamba env create -f environment.yml
+conda activate CausalPy
+make setup  # Installs package + all dev dependencies + pre-commit hooks
+```
+
+Verify everything works:
+
+```bash
+make test
+```
+
+For the complete setup instructions, see [Local development steps](#local-development-steps).
+
+---
+
 There are 4 main ways of contributing to the CausalPy project (in ascending order of difficulty or scope):
 
 1. Submitting issues related to bugs or desired enhancements.
@@ -50,45 +71,29 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create the environment from the `environment.yml` file.
+1. Create the environment from the `environment.yml` file and activate it:
 
     ```bash
     mamba env create -f environment.yml
-    ```
-
-    Activate the environment.
-
-    ```bash
     conda activate CausalPy
     ```
 
-    Install the package (in editable mode) and its development dependencies. The `--no-deps` flag is used to avoid installing the dependencies of `CausalPy` as they are already installed when installing the development dependencies. This can end up interfering with the conda-only install of pymc.
+1. Install the package and all development dependencies using the automated setup:
 
     ```bash
-    pip install --no-deps -e .
+    make setup
     ```
 
-	Install development dependencies
+    This single command:
+    - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
+    - Installs all development extras (`dev`, `docs`, `test`, `lint`)
+    - Sets up pre-commit hooks
 
-	```bash
-	pip install 'causalpy[dev]'
-	pip install 'causalpy[docs]'
-	pip install 'causalpy[test]'
-	pip install 'causalpy[lint]'
-	pip install 'pylint'
-	```
-
-	It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, run `brew install pandoc`.
-
-    Set [pre-commit hooks](https://pre-commit.com/)
-
-    ```bash
-    pre-commit install
-    ```
+    It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
 	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
-	```
+	```bash
 	python -m ipykernel install --user --name CausalPy
 	```
 
