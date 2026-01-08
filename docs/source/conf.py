@@ -43,6 +43,15 @@ copyright = f"2024, {author}"
 release = __version__
 version = release
 
+# The version info for the project you're documenting
+if os.environ.get("READTHEDOCS", False):
+    rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
+    elif rtd_version.lower() == "latest":
+        version = "dev"
+else:
+    version = "local"
+    rtd_version = version
+
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
@@ -137,7 +146,7 @@ myst_enable_extensions = [
 
 # sitemap extension configuration
 site_url = "https://causalpy.readthedocs.io/"
-sitemap_url_scheme = f"{{lang}}{version}/{{link}}"
+sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
