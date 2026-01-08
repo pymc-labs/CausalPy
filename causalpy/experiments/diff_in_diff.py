@@ -15,6 +15,8 @@
 Difference in differences
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -30,6 +32,13 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import (
+    EffectSummary,
+    _compute_statistics_did_ols,
+    _effect_summary_did,
+    _generate_prose_did_ols,
+    _generate_table_did_ols,
+)
 from causalpy.utils import (
     _is_variable_dummy_coded,
     convert_to_string,
@@ -547,3 +556,46 @@ class DifferenceInDifferences(BaseExperiment):
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Difference-in-Differences.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.pymc_models import PyMCModel
+
+        is_pymc = isinstance(self.model, PyMCModel)
+
+        if is_pymc:
+            return _effect_summary_did(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+            )
+        else:
+            # OLS DiD
+            stats = _compute_statistics_did_ols(self, alpha=alpha)
+            table = _generate_table_did_ols(stats)
+            text = _generate_prose_did_ols(stats, alpha=alpha)
+            return EffectSummary(table=table, text=text)
