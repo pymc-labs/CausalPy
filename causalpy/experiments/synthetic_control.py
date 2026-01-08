@@ -713,6 +713,16 @@ class SyntheticControl(BaseExperiment):
             _generate_table_ols,
         )
 
+        # Warn if period parameter is provided (not supported for Synthetic Control)
+        if period is not None:
+            warnings.warn(
+                f"period='{period}' is ignored for SyntheticControl (two-period design only). "
+                "Results reflect the entire post-treatment period. "
+                "Use the 'window' parameter to analyze specific time ranges.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         is_pymc = isinstance(self.model, PyMCModel)
 
         # Extract windowed impact data
