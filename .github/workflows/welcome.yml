@@ -46,8 +46,10 @@ jobs:
             💼 **LinkedIn Shoutout**: Once your PR is merged, we'd love to give you a shoutout on LinkedIn to thank you for your contribution! If you're interested, just drop your LinkedIn profile URL in a comment below.
 
       # Add label for first-time contributors on PRs
+      # FIRST_TIMER: never contributed to any GitHub repo
+      # FIRST_TIME_CONTRIBUTOR: contributed elsewhere but not to this repo
       - name: Add first-time-contributor label
-        if: github.event_name == 'pull_request_target' && github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+        if: github.event_name == 'pull_request_target' && (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' || github.event.pull_request.author_association == 'FIRST_TIMER')
         uses: actions/github-script@v7
         with:
           script: |
