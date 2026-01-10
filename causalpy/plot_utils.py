@@ -37,10 +37,13 @@ def add_hdi_annotation(
 ) -> None:
     """Add a text annotation to a figure explaining what the HDI represents.
 
-    This function adds small text at the bottom of the figure to indicate
+    This function adds small text below the figure to indicate
     whether the HDI (Highest Density Interval) represents:
     - Model expectation (μ): excludes observation noise
     - Posterior predictive (ŷ): includes observation noise
+
+    The function adjusts the figure's bottom margin to make room for the
+    annotation text below the axis labels.
 
     Parameters
     ----------
@@ -75,15 +78,20 @@ def add_hdi_annotation(
             "including observation noise"
         )
 
+    # Adjust bottom margin to make room for the annotation
+    fig.subplots_adjust(bottom=0.12)
+
+    # Position text below the figure, outside the axes area
     fig.text(
         0.5,
-        0.01,
+        0.02,
         text,
         ha="center",
         va="bottom",
         fontsize=8,
         fontstyle="italic",
         color="gray",
+        transform=fig.transFigure,
     )
 
 

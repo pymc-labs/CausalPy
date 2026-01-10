@@ -253,6 +253,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self,
         round_to: int | None = 2,
         hdi_type: HdiType = "expectation",
+        show_hdi_annotation: bool = True,
         **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs.
@@ -273,6 +274,9 @@ class RegressionDiscontinuity(BaseExperiment):
               observation noise (σ) in addition to parameter uncertainty, resulting
               in wider intervals that represent the full predictive uncertainty
               for new observations.
+        show_hdi_annotation : bool, default=True
+            Whether to display a text annotation at the bottom of the figure
+            explaining what the HDI represents. Set to False to hide the annotation.
         **kwargs : dict
             Additional keyword arguments.
 
@@ -331,7 +335,8 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Add HDI type annotation
-        add_hdi_annotation(fig, hdi_type)
+        if show_hdi_annotation:
+            add_hdi_annotation(fig, hdi_type)
 
         return (fig, ax)
 
