@@ -142,6 +142,10 @@ class DifferenceInDifferences(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit model
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -251,8 +255,6 @@ class DifferenceInDifferences(BaseExperiment):
             self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
-
-        return
 
     def input_validation(self) -> None:
         # Validate formula structure and interaction interaction terms

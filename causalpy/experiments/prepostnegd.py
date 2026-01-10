@@ -132,6 +132,10 @@ class PrePostNEGD(BaseExperiment):
             coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
         )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {

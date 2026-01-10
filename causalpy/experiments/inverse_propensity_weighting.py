@@ -103,7 +103,12 @@ class InversePropensityWeighting(BaseExperiment):
         self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
-        self.model.fit(X=self.X, t=self.t, coords=COORDS)  # type: ignore[call-arg]
+
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit propensity score model."""
+        self.model.fit(X=self.X, t=self.t, coords=self.coords)  # type: ignore[call-arg]
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""

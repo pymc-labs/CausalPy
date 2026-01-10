@@ -142,6 +142,10 @@ class RegressionDiscontinuity(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""
         # fit model
         if isinstance(self.model, PyMCModel):
             # fit the model to the observed (pre-intervention) data
@@ -161,6 +165,8 @@ class RegressionDiscontinuity(BaseExperiment):
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(

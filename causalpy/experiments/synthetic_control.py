@@ -181,6 +181,10 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {

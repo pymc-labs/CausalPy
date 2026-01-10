@@ -103,6 +103,10 @@ class RegressionKink(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
         COORDS = {
             "coeffs": self.labels,
             "obs_ind": np.arange(self.X.shape[0]),
@@ -115,6 +119,8 @@ class RegressionKink(BaseExperiment):
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
@@ -131,7 +137,7 @@ class RegressionKink(BaseExperiment):
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
         self.gradient_change = self._eval_gradient_change(
-            mu_kink_left, mu_kink, mu_kink_right, epsilon
+            mu_kink_left, mu_kink, mu_kink_right, self.epsilon
         )
 
     def input_validation(self) -> None:

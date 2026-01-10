@@ -152,16 +152,24 @@ class InstrumentalVariable(BaseExperiment):
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
 
+        # Store user-provided priors (will set defaults in algorithm() if None)
+        self.priors = priors
+
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
         self.get_naive_OLS_fit()
         self.get_2SLS_fit()
 
         # fit the model to the data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
-        if priors is None:
-            if binary_treatment:
+        # Only set default priors if user didn't provide custom priors
+        if self.priors is None:
+            if self.binary_treatment:
                 # Different default priors for binary treatment
-                priors = {
+                self.priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "sigma_U": 1.0,
@@ -169,13 +177,12 @@ class InstrumentalVariable(BaseExperiment):
                 }
             else:
                 # Original continuous treatment priors
-                priors = {
+                self.priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "eta": 2,
                     "lkj_sd": 1,
                 }
-        self.priors = priors
         self.model.fit(  # type: ignore[call-arg,union-attr]
             X=self.X,
             Z=self.Z,

@@ -199,6 +199,10 @@ class InterruptedTimeSeries(BaseExperiment):
             coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
         )
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         # All PyMC models now accept xr.DataArray with consistent API
         if isinstance(self.model, PyMCModel):
