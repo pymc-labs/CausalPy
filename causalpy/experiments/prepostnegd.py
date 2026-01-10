@@ -29,7 +29,7 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import (
     DataException,
 )
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import HdiType, add_hdi_annotation, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -227,9 +227,40 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self,
+        round_to: int | None = None,
+        hdi_type: HdiType = "expectation",
+        **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
+        """Generate plot for ANOVA-like experiments with non-equivalent group designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI (Highest Density Interval) to display:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, list[plt.Axes]]
+            The matplotlib figure and axes.
+        """
+        # Select the variable name based on hdi_type
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -249,7 +280,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of untreated
         h_line, h_patch = plot_xY(
             self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred_untreated["posterior_predictive"][var_name].isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
@@ -260,7 +291,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of treated
         h_line, h_patch = plot_xY(
             self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred_treated["posterior_predictive"][var_name].isel(treated_units=0),
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
@@ -274,9 +305,13 @@ class PrePostNEGD(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        # Plot estimated caual impact / treatment effect
+        # Plot estimated causal impact / treatment effect
         az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
         ax[1].set(title="Estimated treatment effect")
+
+        # Add HDI type annotation
+        add_hdi_annotation(fig, hdi_type)
+
         return fig, ax
 
     def effect_summary(

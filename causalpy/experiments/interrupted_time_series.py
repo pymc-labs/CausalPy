@@ -27,7 +27,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import get_hdi_to_df, plot_xY
+from causalpy.plot_utils import HdiType, add_hdi_annotation, get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -582,26 +582,55 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self,
+        round_to: int | None = 2,
+        hdi_type: HdiType = "expectation",
+        **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI (Highest Density Interval) to display:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, list[plt.Axes]]
+            The matplotlib figure and axes.
         """
         counterfactual_label = "Counterfactual"
+
+        # Select the variable name based on hdi_type
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
-        pre_mu = self.pre_pred["posterior_predictive"].mu
-        pre_mu_plot = (
-            pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
+        pre_pred_var = self.pre_pred["posterior_predictive"][var_name]
+        pre_pred_plot = (
+            pre_pred_var.isel(treated_units=0)
+            if "treated_units" in pre_pred_var.dims
+            else pre_pred_var
         )
         h_line, h_patch = plot_xY(
             self.datapre.index,
-            pre_mu_plot,
+            pre_pred_plot,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C0"},
         )
@@ -620,15 +649,15 @@ class InterruptedTimeSeries(BaseExperiment):
         labels.append("Observations")
 
         # post intervention period
-        post_mu = self.post_pred["posterior_predictive"].mu
-        post_mu_plot = (
-            post_mu.isel(treated_units=0)
-            if "treated_units" in post_mu.dims
-            else post_mu
+        post_pred_var = self.post_pred["posterior_predictive"][var_name]
+        post_pred_plot = (
+            post_pred_var.isel(treated_units=0)
+            if "treated_units" in post_pred_var.dims
+            else post_pred_var
         )
         h_line, h_patch = plot_xY(
             self.datapost.index,
-            post_mu_plot,
+            post_pred_plot,
             ax=ax[0],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -642,7 +671,7 @@ class InterruptedTimeSeries(BaseExperiment):
             else self.post_y[:, 0],
             "k.",
         )
-        # Shaded causal effect
+        # Shaded causal effect - always use mu for the fill_between mean line
         post_pred_mu = az.extract(
             self.post_pred, group="posterior_predictive", var_names="mu"
         )
@@ -774,6 +803,9 @@ class InterruptedTimeSeries(BaseExperiment):
                 pd.DatetimeIndex(self.datapost.index),
             )
             format_date_axes(ax, full_index)
+
+        # Add HDI type annotation
+        add_hdi_annotation(fig, hdi_type)
 
         return fig, ax
 

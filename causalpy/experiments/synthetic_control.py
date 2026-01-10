@@ -27,7 +27,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import get_hdi_to_df, plot_xY
+from causalpy.plot_utils import HdiType, add_hdi_annotation, get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
@@ -262,18 +262,43 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        hdi_type: HdiType = "expectation",
         **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for a specific treated unit
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI (Highest Density Interval) to display:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, list[plt.Axes]]
+            The matplotlib figure and axes.
         """
         counterfactual_label = "Counterfactual"
+
+        # Select the variable name based on hdi_type
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
@@ -289,10 +314,10 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
+        pre_pred = self.pre_pred["posterior_predictive"][var_name].sel(
             treated_units=treated_unit
         )
-        post_pred = self.post_pred["posterior_predictive"].mu.sel(
+        post_pred = self.post_pred["posterior_predictive"][var_name].sel(
             treated_units=treated_unit
         )
 
@@ -418,6 +443,9 @@ class SyntheticControl(BaseExperiment):
                 pd.DatetimeIndex(self.datapost.index),
             )
             format_date_axes(ax, full_index)
+
+        # Add HDI type annotation
+        add_hdi_annotation(fig, hdi_type)
 
         return fig, ax
 

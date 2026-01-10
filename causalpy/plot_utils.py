@@ -15,7 +15,7 @@
 Plotting utility functions.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -25,6 +25,66 @@ import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
+
+# Type alias for HDI type parameter
+HdiType = Literal["expectation", "prediction"]
+
+
+def add_hdi_annotation(
+    fig: plt.Figure,
+    hdi_type: HdiType,
+    hdi_prob: float = 0.94,
+) -> None:
+    """Add a text annotation to a figure explaining what the HDI represents.
+
+    This function adds small text at the bottom of the figure to indicate
+    whether the HDI (Highest Density Interval) represents:
+    - Model expectation (μ): excludes observation noise
+    - Posterior predictive (ŷ): includes observation noise
+
+    Parameters
+    ----------
+    fig : plt.Figure
+        The matplotlib figure to annotate.
+    hdi_type : {"expectation", "prediction"}
+        The type of HDI being displayed:
+        - "expectation": HDI of the model expectation (μ), which excludes
+          observation noise. Shows uncertainty from model parameters only.
+        - "prediction": HDI of the posterior predictive (ŷ), which includes
+          observation noise. Shows the full predictive uncertainty.
+    hdi_prob : float, optional
+        The probability mass of the HDI. Default is 0.94.
+
+    Examples
+    --------
+    >>> import matplotlib.pyplot as plt
+    >>> fig, ax = plt.subplots()
+    >>> add_hdi_annotation(fig, "expectation")  # doctest: +SKIP
+    >>> add_hdi_annotation(fig, "prediction", hdi_prob=0.89)  # doctest: +SKIP
+    """
+    hdi_pct = int(hdi_prob * 100)
+
+    if hdi_type == "expectation":
+        text = (
+            f"Shaded regions show {hdi_pct}% HDI of model expectation (μ), "
+            "excluding observation noise"
+        )
+    else:
+        text = (
+            f"Shaded regions show {hdi_pct}% HDI of posterior predictive (ŷ), "
+            "including observation noise"
+        )
+
+    fig.text(
+        0.5,
+        0.01,
+        text,
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        fontstyle="italic",
+        color="gray",
+    )
 
 
 def plot_xY(

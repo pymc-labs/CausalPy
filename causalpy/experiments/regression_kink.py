@@ -25,7 +25,7 @@ import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 import xarray as xr
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import HdiType, add_hdi_annotation, plot_xY
 
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -218,9 +218,40 @@ class RegressionKink(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self,
+        round_to: int | None = 2,
+        hdi_type: HdiType = "expectation",
+        **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression kink designs."""
+        """Generate plot for regression kink designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI (Highest Density Interval) to display:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+            The matplotlib figure and axes.
+        """
+        # Select the variable name based on hdi_type
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -234,7 +265,7 @@ class RegressionKink(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_xY(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred["posterior_predictive"][var_name].isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -266,6 +297,10 @@ class RegressionKink(BaseExperiment):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
+
+        # Add HDI type annotation
+        add_hdi_annotation(fig, hdi_type)
+
         return fig, ax
 
     def effect_summary(
