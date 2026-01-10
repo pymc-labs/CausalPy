@@ -79,12 +79,12 @@ def add_hdi_annotation(
         )
 
     # Adjust bottom margin to make room for the annotation
-    fig.subplots_adjust(bottom=0.12)
+    fig.subplots_adjust(bottom=0.15)
 
     # Position text below the figure, outside the axes area
     fig.text(
         0.5,
-        0.02,
+        0.01,
         text,
         ha="center",
         va="bottom",
