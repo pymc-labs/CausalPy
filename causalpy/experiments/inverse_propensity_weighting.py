@@ -90,8 +90,12 @@ class InversePropensityWeighting(BaseExperiment):
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme
         self.input_validation()
+        self._build_design_matrices()
+        self.algorithm()
 
-        t, X = dmatrices(formula, self.data)
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for propensity score model."""
+        t, X = dmatrices(self.formula, self.data)
         self._t_design_info = t.design_info
         self._t_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -103,8 +107,6 @@ class InversePropensityWeighting(BaseExperiment):
         self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
-
-        self.algorithm()
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit propensity score model."""

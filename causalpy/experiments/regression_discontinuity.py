@@ -104,7 +104,12 @@ class RegressionDiscontinuity(BaseExperiment):
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data, applying bandwidth filtering."""
         if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
             fmax = self.treatment_threshold + self.bandwidth
@@ -117,9 +122,9 @@ class RegressionDiscontinuity(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(formula, filtered_data)
+            y, X = dmatrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(formula, self.data)
+            y, X = dmatrices(self.formula, self.data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -127,7 +132,8 @@ class RegressionDiscontinuity(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -141,8 +147,6 @@ class RegressionDiscontinuity(BaseExperiment):
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
-
-        self.algorithm()
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""

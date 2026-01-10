@@ -137,25 +137,28 @@ class InstrumentalVariable(BaseExperiment):
         self.binary_treatment = binary_treatment
         self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
         self.input_validation()
+        self._build_design_matrices()
 
-        y, X = dmatrices(formula, self.data)
+        # Store user-provided priors (will set defaults in algorithm() if None)
+        self.priors = priors
+
+        self.algorithm()
+
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for outcome and instrument formulas."""
+        y, X = dmatrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        t, Z = dmatrices(instruments_formula, self.instruments_data)
+        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
         self._t_design_info = t.design_info
         self._z_design_info = Z.design_info
         self.labels_instruments = Z.design_info.column_names
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
-
-        # Store user-provided priors (will set defaults in algorithm() if None)
-        self.priors = priors
-
-        self.algorithm()
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
