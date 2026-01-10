@@ -21,6 +21,12 @@ Before starting, verify the GitHub CLI is available and authenticated:
    ```
    - If not authenticated, guide: `gh auth login`
 
+3. **Sandbox considerations:**
+   - GitHub CLI commands require access to credentials stored outside the workspace
+   - **Always use `required_permissions: ["all"]`** for any `gh` commands to bypass sandbox restrictions
+   - If authentication fails with "token is invalid" errors inside the sandbox, this is expected - request elevated permissions
+   - Commands that need `all` permissions: `gh auth status`, `gh issue view`, `gh pr create`, `gh push`, etc.
+
 ## Workflow
 
 ### Phase 1: Issue Discovery
