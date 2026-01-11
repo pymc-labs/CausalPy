@@ -6,13 +6,20 @@
 
 <p align="center">
 
+[![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/causalpy.svg)](https://anaconda.org/conda-forge/causalpy)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
-![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
-![Read the Docs](https://img.shields.io/readthedocs/causalpy)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+![Interrogate](_static/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
+
+![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
+![Read the Docs](https://img.shields.io/readthedocs/causalpy)
+[![Downloads](https://static.pepy.tech/badge/causalpy)](https://pepy.tech/project/causalpy)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
 
 </p>
 
