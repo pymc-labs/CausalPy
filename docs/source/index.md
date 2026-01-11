@@ -7,7 +7,7 @@
 <p align="center">
 
 [![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
-[![conda-forge](https://img.shields.io/conda/vn/conda-forge/causalpy.svg)](https://anaconda.org/conda-forge/causalpy)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/causalpy.svg?color=green)](https://anaconda.org/conda-forge/causalpy)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
