@@ -15,6 +15,7 @@
 Inverse propensity weighting
 """
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -127,12 +128,24 @@ class InversePropensityWeighting(BaseExperiment):
                 """
             )
 
+    def _prepare_ps(self, ps: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+        """Checks for extreme propensity scores and clips them for stability."""
+        if np.any((ps < eps) | (ps > 1 - eps)):
+            warnings.warn(
+                f"Extreme propensity scores detected (outside [{eps}, {1 - eps}]). "
+                "Capping values to prevent numerical instability.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return np.clip(ps, eps, 1 - eps)
+
     def make_robust_adjustments(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, int, int]:
         """This estimator is discussed in Aronow
         and Miller's book as being related to the
         Horvitz Thompson method"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -155,6 +168,7 @@ class InversePropensityWeighting(BaseExperiment):
         """This estimator is discussed in Aronow and
         Miller as the simplest of base form of
         inverse propensity weighting schemes"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -177,6 +191,7 @@ class InversePropensityWeighting(BaseExperiment):
         Lucy D’Agostino McGowan's blog on
         Propensity Score Weights referenced in
         the primary CausalPy explainer notebook"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -201,6 +216,7 @@ class InversePropensityWeighting(BaseExperiment):
         the outcome model to be a simple OLS model.
         In this way the compromise between the outcome model and
         the propensity model is always done with OLS."""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
