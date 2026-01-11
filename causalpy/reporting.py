@@ -564,9 +564,20 @@ def _extract_window(result, window, treated_unit=None, hdi_type="expectation"):
         from causalpy.pymc_models import PyMCModel
 
         if isinstance(result.model, PyMCModel):
-            post_impact = result.model.calculate_impact(
-                result.post_y, result.post_pred, hdi_type="prediction"
-            )
+            # ITS uses post_y, SyntheticControl uses datapost_treated
+            if hasattr(result, "post_y"):
+                y_true = result.post_y
+            elif hasattr(result, "datapost_treated"):
+                y_true = result.datapost_treated
+            else:
+                # Fall back to stored impact if we can't find y_true
+                post_impact = result.post_impact
+                y_true = None
+
+            if y_true is not None:
+                post_impact = result.model.calculate_impact(
+                    y_true, result.post_pred, hdi_type="prediction"
+                )
         else:
             # OLS doesn't support y_hat, fall back to stored impact
             post_impact = result.post_impact
