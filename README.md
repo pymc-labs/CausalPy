@@ -106,11 +106,11 @@ CausalPy provides methods for common causal inference decision contexts:
 
 | Decision context | Methods |
 |------------------|---------|
-| Comparative case studies | Synthetic control, Geographical lift |
-| Policy/rollout evaluation | Differences in Differences, Staggered DiD, Interrupted time series |
-| Threshold assignment | Regression discontinuity, Regression kink |
-| Confounding/endogeneity | Instrumental variables, Inverse propensity weighting |
-| Covariate adjustment | ANCOVA |
+| Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
+| Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
+| Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
+| Can't randomize, correct for selection | Instrumental variables, Inverse propensity weighting |
+| Group differences, control for covariates | ANCOVA |
 
 ### Available methods
 
