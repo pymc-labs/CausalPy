@@ -29,7 +29,12 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import (
     DataException,
 )
-from causalpy.plot_utils import HdiType, add_hdi_annotation, plot_xY
+from causalpy.plot_utils import (
+    HdiType,
+    _log_hdi_type_info_once,
+    add_hdi_annotation,
+    plot_xY,
+)
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -230,7 +235,7 @@ class PrePostNEGD(BaseExperiment):
         self,
         round_to: int | None = None,
         hdi_type: HdiType = "expectation",
-        show_hdi_annotation: bool = True,
+        show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs.
@@ -251,7 +256,7 @@ class PrePostNEGD(BaseExperiment):
               observation noise (σ) in addition to parameter uncertainty, resulting
               in wider intervals that represent the full predictive uncertainty
               for new observations.
-        show_hdi_annotation : bool, default=True
+        show_hdi_annotation : bool, default=False
             Whether to display a text annotation at the bottom of the figure
             explaining what the HDI represents. Set to False to hide the annotation.
         **kwargs : dict
@@ -262,6 +267,9 @@ class PrePostNEGD(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             The matplotlib figure and axes.
         """
+        # Log HDI type info once per session
+        _log_hdi_type_info_once()
+
         # Select the variable name based on hdi_type
         var_name = "mu" if hdi_type == "expectation" else "y_hat"
 
@@ -313,9 +321,9 @@ class PrePostNEGD(BaseExperiment):
         az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
         ax[1].set(title="Estimated treatment effect")
 
-        # Add HDI type annotation
+        # Add HDI type annotation to the top subplot's title
         if show_hdi_annotation:
-            add_hdi_annotation(fig, hdi_type)
+            add_hdi_annotation(ax[0], hdi_type)
 
         return fig, ax
 

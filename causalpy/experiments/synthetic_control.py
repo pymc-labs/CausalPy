@@ -27,7 +27,14 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import HdiType, add_hdi_annotation, get_hdi_to_df, plot_xY
+from causalpy.plot_utils import (
+    HdiType,
+    _log_hdi_type_effect_summary_once,
+    _log_hdi_type_info_once,
+    add_hdi_annotation,
+    get_hdi_to_df,
+    plot_xY,
+)
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
@@ -213,8 +220,14 @@ class SyntheticControl(BaseExperiment):
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.datapre_control)
 
-        # calculate the counterfactual
+        # Calculate the counterfactual
         self.post_pred = self.model.predict(X=self.datapost_control)
+
+        # TODO: REFACTOR TARGET - Currently, stored impacts use the model expectation
+        # (mu) by default. When users request hdi_type="prediction" in plot(), the
+        # y_hat-based impact is calculated on-the-fly in _bayesian_plot(). This works
+        # but is not ideal: consider storing both mu and y_hat based impacts, or
+        # refactoring to always calculate on-demand. See calculate_impact() for details.
         self.pre_impact = self.model.calculate_impact(
             self.datapre_treated, self.pre_pred
         )
@@ -263,7 +276,7 @@ class SyntheticControl(BaseExperiment):
         round_to: int | None = None,
         treated_unit: str | None = None,
         hdi_type: HdiType = "expectation",
-        show_hdi_annotation: bool = True,
+        show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
@@ -288,7 +301,7 @@ class SyntheticControl(BaseExperiment):
               observation noise (σ) in addition to parameter uncertainty, resulting
               in wider intervals that represent the full predictive uncertainty
               for new observations.
-        show_hdi_annotation : bool, default=True
+        show_hdi_annotation : bool, default=False
             Whether to display a text annotation at the bottom of the figure
             explaining what the HDI represents. Set to False to hide the annotation.
         **kwargs : dict
@@ -299,6 +312,9 @@ class SyntheticControl(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             The matplotlib figure and axes.
         """
+        # Log HDI type info once per session
+        _log_hdi_type_info_once()
+
         counterfactual_label = "Counterfactual"
 
         # Select the variable name based on hdi_type
@@ -374,22 +390,38 @@ class SyntheticControl(BaseExperiment):
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
 
         # MIDDLE PLOT -----------------------------------------------
+        # Calculate impact for plotting based on hdi_type
+        if hdi_type == "expectation":
+            # Use stored mu-based impact
+            pre_impact_for_plot = self.pre_impact
+            post_impact_for_plot = self.post_impact
+        else:
+            # Calculate y_hat-based impact on demand
+            pre_impact_for_plot = self.model.calculate_impact(
+                self.datapre_treated, self.pre_pred, hdi_type="prediction"
+            )
+            post_impact_for_plot = self.model.calculate_impact(
+                self.datapost_treated, self.post_pred, hdi_type="prediction"
+            )
+
         plot_xY(
             self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
+            pre_impact_for_plot.sel(treated_units=treated_unit),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
+            post_impact_for_plot.sel(treated_units=treated_unit),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units=treated_unit),
+            y1=post_impact_for_plot.mean(["chain", "draw"]).sel(
+                treated_units=treated_unit
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -398,9 +430,17 @@ class SyntheticControl(BaseExperiment):
 
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
+        # Calculate cumulative impact based on hdi_type
+        if hdi_type == "expectation":
+            post_impact_cumulative_for_plot = self.post_impact_cumulative
+        else:
+            post_impact_cumulative_for_plot = self.model.calculate_cumulative_impact(
+                post_impact_for_plot
+            )
+
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            post_impact_cumulative_for_plot.sel(treated_units=treated_unit),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -448,9 +488,9 @@ class SyntheticControl(BaseExperiment):
             )
             format_date_axes(ax, full_index)
 
-        # Add HDI type annotation
+        # Add HDI type annotation to the top subplot's title
         if show_hdi_annotation:
-            add_hdi_annotation(fig, hdi_type)
+            add_hdi_annotation(ax[0], hdi_type)
 
         return fig, ax
 
@@ -577,19 +617,35 @@ class SyntheticControl(BaseExperiment):
         return self.plot_data
 
     def get_plot_data_bayesian(
-        self, hdi_prob: float = 0.94, treated_unit: str | None = None
+        self,
+        hdi_prob: float = 0.94,
+        treated_unit: str | None = None,
+        hdi_type: HdiType = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
 
-        :param hdi_prob:
-            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
-        :param treated_unit:
+        Parameters
+        ----------
+        hdi_prob : float, default=0.94
+            Probability for which the highest density interval will be computed.
+            The default value is defined as the default from the :func:`arviz.hdi` function.
+        treated_unit : str, optional
             Which treated unit to extract data for. Must be a string name of the treated unit.
             If None, uses the first treated unit.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI to use for predictions and impact:
+
+            - ``"expectation"``: Uses the model expectation (μ). Excludes observation
+              noise, focusing on the systematic causal effect.
+            - ``"prediction"``: Uses the full posterior predictive (ŷ). Includes
+              observation noise, showing the full predictive uncertainty.
         """
         if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
+
+        # Map semantic hdi_type to internal variable name
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
 
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -613,10 +669,10 @@ class SyntheticControl(BaseExperiment):
 
         # Extract predictions - handle multi-unit case
         pre_pred_vals = az.extract(
-            self.pre_pred, group="posterior_predictive", var_names="mu"
+            self.pre_pred, group="posterior_predictive", var_names=var_name
         ).mean("sample")
         post_pred_vals = az.extract(
-            self.post_pred, group="posterior_predictive", var_names="mu"
+            self.post_pred, group="posterior_predictive", var_names=var_name
         ).mean("sample")
 
         # Extract predictions for the specified treated unit (always has treated_units dimension)
@@ -625,11 +681,15 @@ class SyntheticControl(BaseExperiment):
 
         # HDI intervals for predictions (always use treated_units dimension)
         pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.pre_pred["posterior_predictive"][var_name].sel(
+                treated_units=treated_unit
+            ),
             hdi_prob=hdi_prob,
         )
         post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.post_pred["posterior_predictive"][var_name].sel(
+                treated_units=treated_unit
+            ),
             hdi_prob=hdi_prob,
         )
 
@@ -640,23 +700,35 @@ class SyntheticControl(BaseExperiment):
         pre_data[[pred_lower_col, pred_upper_col]] = pre_lower_upper
         post_data[[pred_lower_col, pred_upper_col]] = post_lower_upper
 
-        # Impact data - always use primary unit for main dataframe
+        # Impact data - select based on hdi_type
+        if hdi_type == "expectation":
+            pre_impact = self.pre_impact
+            post_impact = self.post_impact
+        else:
+            # Calculate y_hat-based impact on demand
+            pre_impact = self.model.calculate_impact(
+                self.datapre_treated, self.pre_pred, hdi_type="prediction"
+            )
+            post_impact = self.model.calculate_impact(
+                self.datapost_treated, self.post_pred, hdi_type="prediction"
+            )
+
         pre_data["impact"] = (
-            self.pre_impact.mean(dim=["chain", "draw"])
+            pre_impact.mean(dim=["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values
         )
         post_data["impact"] = (
-            self.post_impact.mean(dim=["chain", "draw"])
+            post_impact.mean(dim=["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values
         )
         # Impact HDI intervals (always use treated_units dimension)
         pre_impact_hdi = get_hdi_to_df(
-            self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+            pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
         )
         post_impact_hdi = get_hdi_to_df(
-            self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+            post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
         )
 
         # Extract only the lower and upper columns for impact HDI
@@ -700,6 +772,7 @@ class SyntheticControl(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
+        hdi_type: HdiType = "expectation",
         **kwargs: Any,
     ) -> EffectSummary:
         """
@@ -729,6 +802,13 @@ class SyntheticControl(BaseExperiment):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            Type of HDI to compute for effect sizes:
+
+            - ``"expectation"``: Effect size HDI based on model expectation (μ).
+              Excludes observation noise, focusing on the systematic causal effect.
+            - ``"prediction"``: Effect size HDI based on posterior predictive (ŷ).
+              Includes observation noise, showing full predictive uncertainty.
 
         Returns
         -------
@@ -758,14 +838,18 @@ class SyntheticControl(BaseExperiment):
 
         is_pymc = isinstance(self.model, PyMCModel)
 
+        # Log HDI type info once per session (for PyMC models only)
+        if is_pymc:
+            _log_hdi_type_effect_summary_once()
+
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
-            self, window, treated_unit=treated_unit
+            self, window, treated_unit=treated_unit, hdi_type=hdi_type
         )
 
         # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
-            self, window_coords, treated_unit=treated_unit
+            self, window_coords, treated_unit=treated_unit, hdi_type=hdi_type
         )
 
         if is_pymc:

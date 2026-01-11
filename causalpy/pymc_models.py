@@ -26,6 +26,9 @@ from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+# Type alias for HDI type - reuse from plot_utils for consistency
+# Using semantic names ("expectation", "prediction") rather than internal variable names ("mu", "y_hat")
+from causalpy.plot_utils import HdiType
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -340,46 +343,67 @@ class PyMCModel(pm.Model):
         return pd.Series(scores)
 
     def calculate_impact(
-        self, y_true: xr.DataArray, y_pred: az.InferenceData
+        self,
+        y_true: xr.DataArray,
+        y_pred: az.InferenceData,
+        hdi_type: HdiType = "expectation",
     ) -> xr.DataArray:
         """
         Calculate the causal impact as the difference between observed and predicted values.
 
-        The impact is calculated using the posterior expectation (`mu`) rather than the
-        posterior predictive (`y_hat`). This means the causal impact represents the
-        difference from the expected value of the model, excluding observation noise.
-        This approach provides a cleaner measure of the causal effect by focusing on
-        the systematic difference rather than including sampling variability from the
-        observation noise term.
+        By default, the impact is calculated using the posterior expectation (`mu`)
+        rather than the posterior predictive (`y_hat`). This means the causal impact
+        represents the difference from the expected value of the model, excluding
+        observation noise. This approach provides a cleaner measure of the causal
+        effect by focusing on the systematic difference rather than including sampling
+        variability from the observation noise term.
 
         Parameters
         ----------
         y_true : xr.DataArray
             The observed outcome values with dimensions ["obs_ind", "treated_units"].
         y_pred : az.InferenceData
-            The posterior predictive samples containing the "mu" variable, which
-            represents the expected value (mean) of the outcome.
+            The posterior predictive samples containing the predicted values.
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            The type of HDI to use for impact calculation:
+
+            - ``"expectation"``: Uses the model expectation (μ). Excludes observation
+              noise, focusing on the systematic causal effect.
+            - ``"prediction"``: Uses the full posterior predictive (ŷ). Includes
+              observation noise, showing the full predictive uncertainty.
 
         Returns
         -------
         xr.DataArray
-            The causal impact with dimensions ending in "obs_ind". The impact includes
-            posterior uncertainty from the model parameters but excludes observation noise.
+            The causal impact with dimensions ending in "obs_ind".
 
         Notes
         -----
-        By using `mu` (the posterior expectation) rather than `y_hat` (the posterior
-        predictive with observation noise), the uncertainty in the impact reflects:
+        When using ``hdi_type="expectation"`` (the posterior expectation), the
+        uncertainty in the impact reflects:
+
         - Parameter uncertainty in the fitted model
         - Uncertainty in the counterfactual prediction
 
         But excludes:
+
         - Observation-level noise (sigma)
 
-        This makes the impact plots focus on the systematic causal effect rather than
-        individual observation variability.
+        When using ``hdi_type="prediction"``, the uncertainty also includes
+        observation-level noise, resulting in wider intervals.
+
+        .. note::
+
+            **REFACTOR TARGET**: Currently, experiment classes store impacts using
+            the default ``hdi_type="expectation"`` at fit time. When users call
+            ``plot(hdi_type="prediction")``, the prediction-based impact is calculated
+            on-the-fly in the ``_bayesian_plot()`` methods. This approach works but
+            duplicates the decision logic. A future refactor could unify this by
+            either storing both variants or always calculating on-demand.
         """
-        y_hat = y_pred["posterior_predictive"]["mu"]
+        # Map semantic hdi_type to internal variable name
+        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        y_hat = y_pred["posterior_predictive"][var_name]
         # Ensure the coordinate type and values match along obs_ind so xarray can align
         if "obs_ind" in y_hat.dims and "obs_ind" in getattr(y_true, "coords", {}):
             try:

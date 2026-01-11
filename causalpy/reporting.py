@@ -533,7 +533,7 @@ def _select_treated_unit_numpy(
         return data[:, 0]
 
 
-def _extract_window(result, window, treated_unit=None):
+def _extract_window(result, window, treated_unit=None, hdi_type="expectation"):
     """Extract windowed impact data based on window specification.
 
     Assumes result.post_impact is properly shaped xarray or numpy array.
@@ -546,6 +546,11 @@ def _extract_window(result, window, treated_unit=None):
         Window specification: "post", (start, end) tuple, or slice object
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
+    hdi_type : {"expectation", "prediction"}, default="expectation"
+        Type of HDI to compute for effect sizes:
+
+        - ``"expectation"``: Uses stored mu-based impact (default)
+        - ``"prediction"``: Calculates y_hat-based impact on demand
 
     Returns
     -------
@@ -553,7 +558,20 @@ def _extract_window(result, window, treated_unit=None):
         (windowed_impact, window_coords) where windowed_impact is the data
         and window_coords is the corresponding index
     """
-    post_impact = result.post_impact
+    # Select impact based on hdi_type
+    if hdi_type == "prediction":
+        # Calculate y_hat-based impact on demand
+        from causalpy.pymc_models import PyMCModel
+
+        if isinstance(result.model, PyMCModel):
+            post_impact = result.model.calculate_impact(
+                result.post_y, result.post_pred, hdi_type="prediction"
+            )
+        else:
+            # OLS doesn't support y_hat, fall back to stored impact
+            post_impact = result.post_impact
+    else:
+        post_impact = result.post_impact
 
     # Check if PyMC (xarray with chain/draw dims) or OLS
     is_pymc = isinstance(post_impact, xr.DataArray) and (
@@ -649,7 +667,9 @@ def _extract_window(result, window, treated_unit=None):
     return windowed_impact, window_coords
 
 
-def _extract_counterfactual(result, window_coords, treated_unit=None):
+def _extract_counterfactual(
+    result, window_coords, treated_unit=None, hdi_type="expectation"
+):
     """Extract counterfactual predictions for the window.
 
     Reuses logic from _extract_window for consistency.
@@ -662,6 +682,11 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
         Window coordinates from _extract_window
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
+    hdi_type : {"expectation", "prediction"}, default="expectation"
+        Type of HDI to compute for effect sizes:
+
+        - ``"expectation"``: Uses mu (model expectation) for counterfactual
+        - ``"prediction"``: Uses y_hat (posterior predictive) for counterfactual
 
     Returns
     -------
@@ -670,10 +695,13 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
     """
     post_pred = result.post_pred
 
+    # Select variable name based on hdi_type
+    var_name = "mu" if hdi_type == "expectation" else "y_hat"
+
     # PyMC: Extract from InferenceData
     if hasattr(post_pred, "posterior_predictive"):
         # PyMC model - InferenceData object
-        counterfactual = post_pred.posterior_predictive["mu"]
+        counterfactual = post_pred.posterior_predictive[var_name]
 
         # Handle treated_unit selection using helper
         if "treated_units" in counterfactual.dims:
@@ -685,7 +713,7 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
     elif isinstance(post_pred, dict) and "posterior_predictive" in post_pred:
         # PyMC model - dict format (fallback)
-        counterfactual = post_pred["posterior_predictive"]["mu"]
+        counterfactual = post_pred["posterior_predictive"][var_name]
 
         # Handle treated_unit selection using helper
         if "treated_units" in counterfactual.dims:

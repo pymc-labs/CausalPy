@@ -30,7 +30,12 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.plot_utils import HdiType, add_hdi_annotation, plot_xY
+from causalpy.plot_utils import (
+    HdiType,
+    _log_hdi_type_info_once,
+    add_hdi_annotation,
+    plot_xY,
+)
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -332,7 +337,7 @@ class DifferenceInDifferences(BaseExperiment):
         self,
         round_to: int | None = None,
         hdi_type: HdiType = "expectation",
-        show_hdi_annotation: bool = True,
+        show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
         """
@@ -354,7 +359,7 @@ class DifferenceInDifferences(BaseExperiment):
               observation noise (σ) in addition to parameter uncertainty, resulting
               in wider intervals that represent the full predictive uncertainty
               for new observations.
-        show_hdi_annotation : bool, default=True
+        show_hdi_annotation : bool, default=False
             Whether to display a text annotation at the bottom of the figure
             explaining what the HDI represents. Set to False to hide the annotation.
         **kwargs : dict
@@ -365,6 +370,9 @@ class DifferenceInDifferences(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             The matplotlib figure and axes.
         """
+        # Log HDI type info once per session
+        _log_hdi_type_info_once()
+
         # Select the variable name based on hdi_type
         var_name = "mu" if hdi_type == "expectation" else "y_hat"
 
@@ -509,9 +517,9 @@ class DifferenceInDifferences(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        # Add HDI type annotation
+        # Add HDI type annotation to the title
         if show_hdi_annotation:
-            add_hdi_annotation(fig, hdi_type)
+            add_hdi_annotation(ax, hdi_type)
 
         return fig, ax
 
