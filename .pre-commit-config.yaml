@@ -24,7 +24,7 @@ repos:
       - id: check-toml
       - id: check-json
       - id: check-added-large-files
-        exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test)\.ipynb'
+        exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test|piecewise_its_pymc)\.ipynb'
         args: ["--maxkb=1500"]
       - id: check-merge-conflict
       - id: check-case-conflict
