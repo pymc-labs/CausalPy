@@ -46,6 +46,13 @@ its_lift_test.ipynb
 :::
 
 :::{toctree}
+:caption: Comparative Interrupted Time Series
+:maxdepth: 1
+
+its_pymc_comparative.ipynb
+:::
+
+:::{toctree}
 :caption: Regression Discontinuity
 :maxdepth: 1
 
