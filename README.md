@@ -157,7 +157,7 @@ If you use CausalPy in your research, please cite it. A Zenodo DOI for stable re
   author = {{PyMC Labs}},
   title = {CausalPy: Causal inference for quasi-experiments in Python},
   url = {https://github.com/pymc-labs/CausalPy},
-  year = {2024}
+  year = {2026}
 }
 ```
 
