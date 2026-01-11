@@ -39,7 +39,11 @@ To get the latest release:
 pip install CausalPy
 ```
 
-If you run into installation issues with PyMC (e.g. BLAS or compilation), try the conda install: `conda install -c conda-forge causalpy`.
+or via conda:
+
+```bash
+conda install causalpy -c conda-forge
+```
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:
 
@@ -138,7 +142,7 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 
 **Need expert help with causal inference?** [PyMC Labs](https://www.pymc-labs.com) offers:
 
-- **Causal Design Reviews** (1-2 weeks): Identification strategy assessment, diagnostics plan, and reproducible analysis report
+- **Causal Design Reviews**: Identification strategy assessment, diagnostics plan, and reproducible analysis report
 - **Implementation engagements**: End-to-end support for high-stakes causal analyses
 - **Training**: Corporate workshops from Bayesian fundamentals to advanced causal inference
 
