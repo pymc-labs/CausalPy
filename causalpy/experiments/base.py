@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.base import RegressorMixin
 
+from causalpy.plot_utils import HdiType
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
@@ -134,6 +135,7 @@ class BaseExperiment:
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
+        hdi_type: HdiType = "expectation",
         **kwargs: Any,
     ) -> EffectSummary:
         """
@@ -170,6 +172,19 @@ class BaseExperiment:
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        hdi_type : {"expectation", "prediction"}, default="expectation"
+            Type of HDI to compute for effect sizes (ITS/SC only, ignored for DiD/RD/RKink):
+
+            - ``"expectation"``: Effect size HDI based on model expectation (μ).
+              Excludes observation noise, focusing on the systematic causal effect.
+            - ``"prediction"``: Effect size HDI based on posterior predictive (ŷ).
+              Includes observation noise, showing full predictive uncertainty.
+
+            Note: This parameter only affects experiments where the causal effect is
+            calculated as the difference between observed and predicted values
+            (ITS, Synthetic Control). For experiments where the effect is a model
+            coefficient (DiD, RD, RKink), the HDI is always computed from the
+            posterior of the coefficient and this parameter is ignored.
 
         Returns
         -------
