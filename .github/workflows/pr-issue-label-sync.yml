@@ -1,0 +1,20 @@
+name: "PR Issue Label Sync"
+
+on:
+  pull_request_target:
+    types: [opened, edited]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Sync labels from closing issues
+        uses: williambdean/closing-labels@v0.0.6
+        with:
+          exclude: "help wanted,good first issue"
+          respect_unlabeled: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
