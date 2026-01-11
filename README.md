@@ -11,7 +11,7 @@
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
-![Interrogate](docs/source/_static/interrogate_badge.svg)
+![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
@@ -37,6 +37,12 @@ To get the latest release:
 
 ```bash
 pip install CausalPy
+```
+
+or via conda:
+
+```bash
+conda install causalpy -c conda-forge
 ```
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:
@@ -135,7 +141,7 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 
 **Need expert help with causal inference?** [PyMC Labs](https://www.pymc-labs.com) offers:
 
-- **Causal Design Reviews** (1-2 weeks): Identification strategy assessment, diagnostics plan, and reproducible analysis report
+- **Causal Design Reviews**: Identification strategy assessment, diagnostics plan, and reproducible analysis report
 - **Implementation engagements**: End-to-end support for high-stakes causal analyses
 - **Training**: Corporate workshops from Bayesian fundamentals to advanced causal inference
 
