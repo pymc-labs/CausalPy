@@ -78,6 +78,12 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda activate CausalPy
     ```
 
+    To update an existing environment after changes to `environment.yml`:
+
+    ```bash
+    conda env update --file environment.yml --prune
+    ```
+
 1. Install the package and all development dependencies using the automated setup:
 
     ```bash
