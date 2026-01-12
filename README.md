@@ -29,7 +29,7 @@ CausalPy helps you estimate causal effects with transparent assumptions, uncerta
 - **Bayesian-first estimation** via [PyMC](https://www.pymc.io/) with full uncertainty quantification, plus traditional OLS via [scikit-learn](https://scikit-learn.org)
 - **Decision-ready outputs:** Effect summaries with credible intervals (HDI), practical significance (ROPE), and publication-quality plots
 
-**Non-goals:** CausalPy is a research and analysis library, not a workflow orchestration or governance platform (no pipelines, scheduling, permissions, or registries).
+**Non-goals:** CausalPy focuses on research-grade causal analysis. It does not include production workflow tooling such as scheduled runs, pipeline orchestration, access controls, or experiment/model registries.
 
 ## Installation
 
