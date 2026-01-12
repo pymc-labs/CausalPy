@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 Inverse propensity weighting
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +26,7 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
 
@@ -210,49 +213,160 @@ class InversePropensityWeighting(BaseExperiment):
         weighted_outcome1 = t * (self.y - m1_pred) / X["ps"] + m1_pred
         return weighted_outcome0, weighted_outcome1, None, None
 
+    def _compute_ate_robust(
+        self, ps: np.ndarray
+    ) -> tuple[float | np.floating, float | np.floating, float | np.floating]:
+        """Compute ATE using the robust (Horvitz-Thompson) weighting scheme.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple
+            A tuple of (ate, trt, ntrt) where:
+            - ate: Average Treatment Effect
+            - trt: Weighted mean outcome for treated group
+            - ntrt: Weighted mean outcome for non-treated group
+        """
+        (
+            weighted_outcome_ntrt,
+            weighted_outcome_trt,
+            n_ntrt,
+            n_trt,
+        ) = self.make_robust_adjustments(ps)
+        ntrt = weighted_outcome_ntrt.sum() / n_ntrt
+        trt = weighted_outcome_trt.sum() / n_trt
+        ate = trt - ntrt
+        return ate, trt, ntrt
+
+    def _compute_ate_raw(
+        self, ps: np.ndarray
+    ) -> tuple[float | np.floating, float | np.floating, float | np.floating]:
+        """Compute ATE using the raw inverse propensity weighting scheme.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple
+            A tuple of (ate, trt, ntrt) where:
+            - ate: Average Treatment Effect
+            - trt: Weighted mean outcome for treated group
+            - ntrt: Weighted mean outcome for non-treated group
+        """
+        (
+            weighted_outcome_ntrt,
+            weighted_outcome_trt,
+            n_ntrt,
+            n_trt,
+        ) = self.make_raw_adjustments(ps)
+        ntrt = weighted_outcome_ntrt.sum() / n_ntrt
+        trt = weighted_outcome_trt.sum() / n_trt
+        ate = trt - ntrt
+        return ate, trt, ntrt
+
+    def _compute_ate_overlap(
+        self, ps: np.ndarray
+    ) -> tuple[float | np.floating, float | np.floating, float | np.floating]:
+        """Compute ATE using the overlap weighting scheme.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple
+            A tuple of (ate, trt, ntrt) where:
+            - ate: Average Treatment Effect
+            - trt: Weighted mean outcome for treated group
+            - ntrt: Weighted mean outcome for non-treated group
+        """
+        (
+            weighted_outcome_ntrt,
+            weighted_outcome_trt,
+            n_ntrt,
+            n_trt,
+        ) = self.make_overlap_adjustments(ps)  # type: ignore[assignment]
+        ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)  # type: ignore[arg-type]
+        trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)  # type: ignore[arg-type]
+        ate = trt - ntrt
+        return ate, trt, ntrt
+
+    def _compute_ate_doubly_robust(
+        self, ps: np.ndarray
+    ) -> tuple[float | np.floating, float | np.floating, float | np.floating]:
+        """Compute ATE using the doubly robust weighting scheme.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple
+            A tuple of (ate, trt, ntrt) where:
+            - ate: Average Treatment Effect
+            - trt: Weighted mean outcome for treated group
+            - ntrt: Weighted mean outcome for non-treated group
+        """
+        (
+            weighted_outcome_ntrt,
+            weighted_outcome_trt,
+            _n_ntrt,
+            _n_trt,
+        ) = self.make_doubly_robust_adjustment(ps)  # type: ignore[assignment]
+        trt = np.mean(weighted_outcome_trt)
+        ntrt = np.mean(weighted_outcome_ntrt)
+        ate = trt - ntrt
+        return ate, trt, ntrt
+
     def get_ate(
         self, i: int, idata: az.InferenceData, method: str = "doubly_robust"
-    ) -> list[float]:
-        ### Post processing the sample posterior distribution for propensity scores
-        ### One sample at a time.
+    ) -> list[float | np.floating]:
+        """Compute the Average Treatment Effect for a single posterior sample.
+
+        Post-processes the sample posterior distribution for propensity scores,
+        one sample at a time, using the specified weighting method.
+
+        Parameters
+        ----------
+        i : int
+            Index of the posterior sample to process.
+        idata : az.InferenceData
+            ArviZ InferenceData object containing the posterior samples.
+        method : str, optional
+            Weighting scheme to use. One of 'robust', 'raw', 'overlap',
+            or 'doubly_robust'. Defaults to 'doubly_robust'.
+
+        Returns
+        -------
+        list[float]
+            A list of [ate, trt, ntrt] where:
+            - ate: Average Treatment Effect
+            - trt: Weighted mean outcome for treated group
+            - ntrt: Weighted mean outcome for non-treated group
+        """
         ps = idata["posterior"]["p"].stack(z=("chain", "draw"))[:, i].values
-        if method == "robust":
-            (
-                weighted_outcome_ntrt,
-                weighted_outcome_trt,
-                n_ntrt,
-                n_trt,
-            ) = self.make_robust_adjustments(ps)
-            ntrt = weighted_outcome_ntrt.sum() / n_ntrt
-            trt = weighted_outcome_trt.sum() / n_trt
-        elif method == "raw":
-            (
-                weighted_outcome_ntrt,
-                weighted_outcome_trt,
-                n_ntrt,
-                n_trt,
-            ) = self.make_raw_adjustments(ps)
-            ntrt = weighted_outcome_ntrt.sum() / n_ntrt
-            trt = weighted_outcome_trt.sum() / n_trt
-        elif method == "overlap":
-            (
-                weighted_outcome_ntrt,
-                weighted_outcome_trt,
-                n_ntrt,
-                n_trt,
-            ) = self.make_overlap_adjustments(ps)  # type: ignore[assignment]
-            ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)  # type: ignore[arg-type]
-            trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)  # type: ignore[arg-type]
-        else:
-            (
-                weighted_outcome_ntrt,
-                weighted_outcome_trt,
-                n_ntrt,
-                n_trt,
-            ) = self.make_doubly_robust_adjustment(ps)  # type: ignore[assignment]
-            trt = np.mean(weighted_outcome_trt)
-            ntrt = np.mean(weighted_outcome_ntrt)
-        ate = trt - ntrt
+
+        ate_methods = {
+            "robust": self._compute_ate_robust,
+            "raw": self._compute_ate_raw,
+            "overlap": self._compute_ate_overlap,
+            "doubly_robust": self._compute_ate_doubly_robust,
+        }
+
+        compute_fn = ate_methods.get(method, self._compute_ate_doubly_robust)
+        ate, trt, ntrt = compute_fn(ps)
+
         return [ate, trt, ntrt]
 
     def plot_ate(
@@ -483,3 +597,26 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].legend()
         # TODO: for some reason ax is type numpy.ndarray, so we need to convert this back to a list to conform to the expected return type.
         return fig, list(axs)
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects.
+
+        Note: effect_summary is not yet implemented for InversePropensityWeighting experiments.
+        """
+        raise NotImplementedError(
+            "effect_summary is not yet implemented for InversePropensityWeighting experiments."
+        )

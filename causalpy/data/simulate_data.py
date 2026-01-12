@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -706,3 +706,159 @@ def create_series(
         generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + intercept,
         n_years,
     )
+
+
+def generate_staggered_did_data(
+    n_units: int = 50,
+    n_time_periods: int = 20,
+    treatment_cohorts: dict[int, int] | None = None,
+    treatment_effects: dict[int, float] | None = None,
+    unit_fe_scale: float = 2.0,
+    time_fe_scale: float = 1.0,
+    sigma: float = 0.5,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """
+    Generate synthetic panel data with staggered treatment adoption.
+
+    Creates a balanced panel dataset where different cohorts of units receive
+    treatment at different times. Supports dynamic treatment effects that vary
+    by event-time (time relative to treatment).
+
+    Parameters
+    ----------
+    n_units : int, default=50
+        Total number of units in the panel.
+    n_time_periods : int, default=20
+        Number of time periods in the panel.
+    treatment_cohorts : dict[int, int], optional
+        Dictionary mapping treatment time to number of units in that cohort.
+        Units not assigned to any cohort are never-treated.
+        Default: {5: 10, 10: 10, 15: 10} (3 cohorts of 10 units each,
+        leaving 20 never-treated units).
+    treatment_effects : dict[int, float], optional
+        Dictionary mapping event-time (t - G) to treatment effect.
+        Event-time 0 is the first treated period.
+        Default: {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5} with constant effect
+        of 2.5 for all subsequent periods.
+    unit_fe_scale : float, default=2.0
+        Scale of unit fixed effects (drawn from Normal(0, unit_fe_scale)).
+    time_fe_scale : float, default=1.0
+        Scale of time fixed effects (drawn from Normal(0, time_fe_scale)).
+    sigma : float, default=0.5
+        Standard deviation of idiosyncratic noise.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        Panel data with columns:
+        - unit: Unit identifier
+        - time: Time period
+        - treated: Binary indicator (1 if treated at time t, 0 otherwise)
+        - treatment_time: Time of treatment adoption (np.inf for never-treated)
+        - y: Observed outcome
+        - y0: Counterfactual outcome (for validation)
+        - tau: True treatment effect (for validation)
+
+    Examples
+    --------
+    >>> from causalpy.data.simulate_data import generate_staggered_did_data
+    >>> df = generate_staggered_did_data(n_units=30, n_time_periods=15, seed=42)
+    >>> df.head()
+       unit  time  treated  treatment_time  ...
+
+    Notes
+    -----
+    The data generating process is:
+
+    .. math::
+
+        Y_{it} = \\alpha_i + \\lambda_t + \\tau_{it} \\cdot D_{it} + \\varepsilon_{it}
+
+    where :math:`\\alpha_i` is the unit fixed effect, :math:`\\lambda_t` is the
+    time fixed effect, :math:`D_{it}` is the treatment indicator, and
+    :math:`\\tau_{it}` is the dynamic treatment effect that depends on
+    event-time :math:`e = t - G_i`.
+    """
+    if seed is not None:
+        local_rng = np.random.default_rng(seed)
+    else:
+        local_rng = np.random.default_rng()
+
+    # Default treatment cohorts: 3 cohorts at times 5, 10, 15
+    if treatment_cohorts is None:
+        treatment_cohorts = {5: 10, 10: 10, 15: 10}
+
+    # Default dynamic treatment effects: ramp up then stabilize
+    if treatment_effects is None:
+        treatment_effects = {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5}
+
+    # Validate cohort assignments don't exceed n_units
+    total_treated = sum(treatment_cohorts.values())
+    if total_treated > n_units:
+        raise ValueError(
+            f"Total units in treatment cohorts ({total_treated}) "
+            f"exceeds n_units ({n_units})"
+        )
+
+    # Generate unit fixed effects
+    unit_fe = local_rng.normal(0, unit_fe_scale, n_units)
+
+    # Generate time fixed effects
+    time_fe = local_rng.normal(0, time_fe_scale, n_time_periods)
+
+    # Assign treatment times to units
+    treatment_times = np.full(n_units, np.inf)  # Default: never treated
+    unit_idx = 0
+    for g, n_cohort in treatment_cohorts.items():
+        treatment_times[unit_idx : unit_idx + n_cohort] = g
+        unit_idx += n_cohort
+
+    # Shuffle treatment assignments
+    local_rng.shuffle(treatment_times)
+
+    # Build panel data
+    rows = []
+    for i in range(n_units):
+        for t in range(n_time_periods):
+            g_i = treatment_times[i]
+            is_treated = t >= g_i
+
+            # Counterfactual outcome (no treatment)
+            y0 = unit_fe[i] + time_fe[t]
+
+            # Treatment effect based on event-time
+            if is_treated:
+                event_time = int(t - g_i)
+                # Use specified effect or last available effect for later periods
+                if event_time in treatment_effects:
+                    tau = treatment_effects[event_time]
+                else:
+                    # Use the effect for the maximum specified event-time
+                    max_event_time = max(treatment_effects.keys())
+                    tau = treatment_effects[max_event_time]
+            else:
+                tau = 0.0
+
+            # Add noise
+            epsilon = local_rng.normal(0, sigma)
+
+            # Observed outcome
+            y = y0 + tau + epsilon
+
+            rows.append(
+                {
+                    "unit": i,
+                    "time": t,
+                    "treated": int(is_treated),
+                    "treatment_time": g_i,
+                    "y": y,
+                    "y0": y0,
+                    "tau": tau,
+                }
+            )
+
+    df = pd.DataFrame(rows)
+    return df

@@ -1,4 +1,4 @@
-#   Copyright 2025 - 2025 The PyMC Labs Developers
+#   Copyright 2025 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,6 +15,9 @@
 Synthetic Control Experiment
 """
 
+import warnings
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -26,7 +29,8 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import round_num
+from causalpy.reporting import EffectSummary
+from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -137,6 +141,45 @@ class SyntheticControl(BaseExperiment):
                 "treated_units": self.treated_units,
             },
         )
+
+        # Check convex hull assumption for each treated unit
+        # Aggregate violations across all treated units
+        total_violations = 0
+        total_above = 0
+        total_below = 0
+        n_units = len(self.treated_units)
+        n_pre_points = self.datapre_treated.shape[0]
+
+        for i in range(n_units):
+            unit_check = check_convex_hull_violation(
+                self.datapre_treated.isel(treated_units=i).values,
+                self.datapre_control.values,
+            )
+            total_violations += unit_check["n_violations"]
+            total_above += unit_check["pct_above"] * n_pre_points / 100
+            total_below += unit_check["pct_below"] * n_pre_points / 100
+
+        total_points = n_units * n_pre_points
+        hull_check = {
+            "passes": total_violations == 0,
+            "n_violations": total_violations,
+            "pct_above": 100 * total_above / total_points if total_points > 0 else 0,
+            "pct_below": 100 * total_below / total_points if total_points > 0 else 0,
+        }
+
+        if not hull_check["passes"]:
+            warnings.warn(
+                f"Convex hull assumption may be violated: {hull_check['n_violations']} "
+                f"pre-intervention time points ({hull_check['pct_above']:.1f}% above, "
+                f"{hull_check['pct_below']:.1f}% below control range). "
+                "The synthetic control method requires the treated unit to lie within "
+                "the convex hull of control units. Consider: (1) adding more diverse "
+                "control units, (2) using a model with an intercept (e.g., ITS with "
+                "control predictors), or (3) using the Augmented Synthetic Control Method. "
+                "See glossary term 'Convex hull condition' for more details.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
@@ -611,3 +654,144 @@ class SyntheticControl(BaseExperiment):
         else:
             # OLS model - simple float score
             return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Synthetic Control.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Time window for analysis:
+            - "post": All post-treatment time points (default)
+            - (start, end): Tuple of start and end times (handles both datetime and integer indices)
+            - slice: Python slice object for integer indices
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics.
+        relative : bool, default=True
+            Whether to include relative effect statistics (% change vs counterfactual).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        treated_unit : str, optional
+            For multi-unit experiments, specify which treated unit to analyze.
+            If None and multiple units exist, uses first unit.
+        period : {"intervention", "post", "comparison"}, optional
+            Ignored for Synthetic Control (two-period design only).
+        prefix : str, optional
+            Prefix for prose generation. Defaults to "Post-period".
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import (
+            _compute_statistics,
+            _compute_statistics_ols,
+            _extract_counterfactual,
+            _extract_window,
+            _generate_prose,
+            _generate_prose_ols,
+            _generate_table,
+            _generate_table_ols,
+        )
+
+        # Warn if period parameter is provided (not supported for Synthetic Control)
+        if period is not None:
+            warnings.warn(
+                f"period='{period}' is ignored for SyntheticControl (two-period design only). "
+                "Results reflect the entire post-treatment period. "
+                "Use the 'window' parameter to analyze specific time ranges.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        is_pymc = isinstance(self.model, PyMCModel)
+
+        # Extract windowed impact data
+        windowed_impact, window_coords = _extract_window(
+            self, window, treated_unit=treated_unit
+        )
+
+        # Extract counterfactual for relative effects
+        counterfactual = _extract_counterfactual(
+            self, window_coords, treated_unit=treated_unit
+        )
+
+        if is_pymc:
+            # PyMC model: use posterior draws
+            hdi_prob = 1 - alpha
+            stats = _compute_statistics(
+                windowed_impact,
+                counterfactual,
+                hdi_prob=hdi_prob,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+            )
+
+            # Generate table
+            table = _generate_table(stats, cumulative=cumulative, relative=relative)
+
+            # Generate prose
+            text = _generate_prose(
+                stats,
+                window_coords,
+                alpha=alpha,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+        else:
+            # OLS model: use point estimates and CIs
+            # Convert to numpy arrays if needed
+            if hasattr(windowed_impact, "values"):
+                impact_array = windowed_impact.values
+            else:
+                impact_array = np.asarray(windowed_impact)
+            if hasattr(counterfactual, "values"):
+                counterfactual_array = counterfactual.values
+            else:
+                counterfactual_array = np.asarray(counterfactual)
+
+            stats = _compute_statistics_ols(
+                impact_array,
+                counterfactual_array,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+            )
+
+            # Generate table
+            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
+
+            # Generate prose
+            text = _generate_prose_ols(
+                stats,
+                window_coords,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+
+        return EffectSummary(table=table, text=text)

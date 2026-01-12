@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ Event Study / Dynamic Difference-in-Differences
 """
 
 import warnings
+from typing import Any, Literal
 
 import arviz as az
 import numpy as np
@@ -27,6 +28,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -712,3 +714,46 @@ class EventStudy(BaseExperiment):
     def get_plot_data_ols(self, **kwargs: dict) -> pd.DataFrame:
         """Get plot data for OLS model."""
         return self.get_event_time_summary(hdi_prob=0.94)
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        include_pretrend_check: bool = True,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Event Study.
+
+        Returns the event-time coefficients table with a prose summary describing
+        the pre-treatment trends (parallel trends check) and post-treatment effects.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        include_pretrend_check : bool, default=True
+            Whether to include parallel trends analysis in prose summary.
+        **kwargs : Any
+            Additional keyword arguments (currently unused, for API consistency).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import _effect_summary_event_study
+
+        return _effect_summary_event_study(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+            include_pretrend_check=include_pretrend_check,
+        )

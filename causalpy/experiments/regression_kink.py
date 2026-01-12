@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ import xarray as xr
 from causalpy.plot_utils import plot_xY
 
 from .base import BaseExperiment
+from causalpy.reporting import EffectSummary, _effect_summary_rkink
+from typing import Any, Literal
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
     DataException,
@@ -271,3 +273,35 @@ class RegressionKink(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Regression Kink.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_rkink(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )
