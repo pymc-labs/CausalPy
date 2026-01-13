@@ -46,7 +46,7 @@ version = release
 # The version info for the project you're documenting
 if os.environ.get("READTHEDOCS", False):
     rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
-    elif rtd_version.lower() == "latest":
+    if rtd_version.lower() == "latest":
         version = "dev"
 else:
     version = "local"
