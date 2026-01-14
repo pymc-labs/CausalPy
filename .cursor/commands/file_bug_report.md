@@ -86,6 +86,8 @@ Before starting, verify the GitHub CLI is available and authenticated:
    <Any other relevant information, screenshots, or code snippets>
    ```
 
+   **Formatting note:** Do not hard-wrap lines in markdown drafts; keep paragraphs on a single line and rely on editor auto-wrapping.
+
 2. **Present the draft to the user:**
    > "I've drafted the following bug report:
    >
