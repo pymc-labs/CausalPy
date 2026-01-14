@@ -30,6 +30,7 @@
 - **API documentation**: Auto-generated from docstrings via Sphinx autodoc, no manual API docs needed
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
+- **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
 
 ## Code structure and style
 
