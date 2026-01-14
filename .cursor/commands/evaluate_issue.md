@@ -116,14 +116,14 @@ Based on your findings, determine the appropriate response category:
 
 ### Phase 4: Draft the Comment
 
-1. **Create the `.github/issue_comments/` directory if it doesn't exist:**
+1. **Create the `.scratch/issue_comments/` directory if it doesn't exist:**
    ```bash
-   mkdir -p .github/issue_comments
+   mkdir -p .scratch/issue_comments
    ```
 
 2. **Draft the comment in markdown:**
 
-   Create file `.github/issue_comments/issue-<number>-evaluation.md` with this structure:
+   Create file `.scratch/issue_comments/issue-<number>-evaluation.md` with this structure:
 
    ```markdown
    *This comment was generated with LLM assistance and may have been edited by the commenter.*
@@ -164,7 +164,7 @@ Based on your findings, determine the appropriate response category:
    >
    > Would you like to:
    > 1. **Post as-is** - I'll submit this comment
-   > 2. **Edit first** - Make changes to the draft file at `.github/issue_comments/issue-<number>-evaluation.md`
+> 2. **Edit first** - Make changes to the draft file at `.scratch/issue_comments/issue-<number>-evaluation.md`
    > 3. **Revise** - Tell me what to change and I'll update the draft
    > 4. **Cancel** - Don't post anything"
 
@@ -174,17 +174,17 @@ Based on your findings, determine the appropriate response category:
 
 1. **After user approval, post the comment:**
    ```bash
-   gh issue comment <issue_number> --body-file .github/issue_comments/issue-<number>-evaluation.md
+   gh issue comment <issue_number> --body-file .scratch/issue_comments/issue-<number>-evaluation.md
    ```
 
 2. **Report success:**
    > "✅ Comment posted to issue #<number>!
    >
-   > The draft has been saved to `.github/issue_comments/issue-<number>-evaluation.md` for reference."
+> The draft has been saved to `.scratch/issue_comments/issue-<number>-evaluation.md` for reference."
 
 3. **Cleanup (optional):**
    - Ask if the user wants to keep or delete the draft file
-   - The `.github/issue_comments/` directory is gitignored, so drafts won't be committed
+- The `.scratch/issue_comments/` directory is gitignored, so drafts won't be committed
 
 ## Comment Guidelines
 
@@ -219,4 +219,4 @@ Based on your findings, determine the appropriate response category:
 - **Be transparent** about your analysis and any limitations
 - **Acknowledge uncertainty** - if you're not sure about something, say so
 - **The LLM disclaimer is mandatory** - always include the italic note at the top
-- **Keep drafts local** - the `.github/issue_comments/` directory is gitignored
+- **Keep drafts local** - the `.scratch/issue_comments/` directory is gitignored

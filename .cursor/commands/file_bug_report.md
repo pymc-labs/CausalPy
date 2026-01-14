@@ -50,7 +50,7 @@ Before starting, verify the GitHub CLI is available and authenticated:
 ### Phase 2: Draft Issue
 
 1. **Create the issue markdown file:**
-   Save to `.github/issue_summaries/<short-description>.md` with this structure:
+   Save to `.scratch/issue_summaries/<short-description>.md` with this structure:
 
    ```markdown
    ## Description
@@ -102,7 +102,7 @@ Before starting, verify the GitHub CLI is available and authenticated:
 
 1. **Create the issue:**
    ```bash
-   gh issue create --title "<descriptive title>" --body-file .github/issue_summaries/<short-description>.md --label "bug"
+   gh issue create --title "<descriptive title>" --body-file .scratch/issue_summaries/<short-description>.md --label "bug"
    ```
 
 2. **Report success:**
@@ -115,7 +115,7 @@ Before starting, verify the GitHub CLI is available and authenticated:
 3. **Cleanup:**
    Delete the markdown file (it's gitignored and no longer needed):
    ```bash
-   rm .github/issue_summaries/<short-description>.md
+   rm .scratch/issue_summaries/<short-description>.md
    ```
 
 ## Guidelines
