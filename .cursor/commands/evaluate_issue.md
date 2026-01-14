@@ -220,3 +220,4 @@ Based on your findings, determine the appropriate response category:
 - **Acknowledge uncertainty** - if you're not sure about something, say so
 - **The LLM disclaimer is mandatory** - always include the italic note at the top
 - **Keep drafts local** - the `.scratch/issue_comments/` directory is gitignored
+- **Formatting note** - do not hard-wrap lines in markdown drafts; keep paragraphs on a single line and rely on editor auto-wrapping
