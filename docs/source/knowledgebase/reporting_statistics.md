@@ -26,6 +26,7 @@ The `effect_summary()` method is available for the following experiment types:
 | Regression Kink | ✅ Full support | ❌ Not implemented |
 | Interrupted Time Series | ✅ Full support | ✅ Full support |
 | Synthetic Control | ✅ Full support | ✅ Full support |
+| Event Study | ✅ Full support | ✅ Full support |
 | PrePostNEGD | ❌ Use `.summary()` instead | ❌ Use `.summary()` instead |
 | Instrumental Variable | ❌ Not available | ❌ Not available |
 | Inverse Propensity Weighting | ❌ Not available | ❌ Not available |
