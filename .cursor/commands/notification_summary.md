@@ -10,16 +10,35 @@ This command fetches your GitHub notifications, analyzes them for actionability,
 
 The command **auto-detects** the repository from your git remote. No configuration needed for most users!
 
-### Optional: Custom Configuration
+### Bot Blacklist (YAML)
 
-Create `.cursor/notification_config.json` to customize behavior:
+Edit `.cursor/commands/notification_bots.yml` to customize which bots to **ignore**:
+
+```yaml
+# Bot Blacklist - notifications from these usernames are IGNORED
+# (This is a blacklist, not a whitelist)
+
+# Code coverage bots
+- codecov
+- codecov[bot]
+
+# CI/CD bots
+- pre-commit-ci
+- github-actions[bot]
+
+# Add your custom bots:
+- my-custom-bot
+```
+
+### General Settings (JSON)
+
+Create `.cursor/notification_config.json` for other settings:
 
 ```json
 {
   "repo": "org/repo",
   "default_days": 7,
-  "server_port": 8765,
-  "bot_usernames": ["custom-bot", "another-bot[bot]"]
+  "server_port": 8765
 }
 ```
 
@@ -28,9 +47,13 @@ Create `.cursor/notification_config.json` to customize behavior:
 | `repo` | Auto-detected from git remote | Override repository (e.g., "pymc-labs/CausalPy") |
 | `default_days` | 7 | Days to look back for notifications |
 | `server_port` | 8765 | Local server port |
-| `bot_usernames` | Common bots | Additional bot usernames to filter (merged with defaults) |
 
-**Default bots filtered:** codecov, pre-commit-ci, dependabot, github-actions, renovate
+### Config Files Summary
+
+| File | Purpose |
+|------|---------|
+| `.cursor/commands/notification_bots.yml` | **Bot blacklist** - usernames to IGNORE |
+| `.cursor/notification_config.json` | General settings (repo, days, port) |
 
 ## Parameters
 

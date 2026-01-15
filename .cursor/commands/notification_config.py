@@ -12,14 +12,15 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-#!/usr/bin/env python3
 """
 Configuration for the GitHub notification summary command.
 
 Provides auto-detection of org/repo from git remote, with optional
-config file override for customization.
+config file overrides for customization.
 
-Config file location: .cursor/notification_config.json
+Configuration files:
+- .cursor/commands/notification_bots.yml - Bot blacklist (usernames to IGNORE)
+- .cursor/notification_config.json - General settings (optional)
 """
 
 import json
@@ -27,8 +28,12 @@ import re
 import subprocess
 from pathlib import Path
 
-# Default bot usernames to filter out
-DEFAULT_BOT_USERNAMES = {
+# Default settings
+DEFAULT_DAYS = 7
+DEFAULT_SERVER_PORT = 8765
+
+# Fallback bot blacklist (used if YAML file not found)
+FALLBACK_BOT_BLACKLIST = {
     "codecov",
     "codecov[bot]",
     "codecov-commenter",
@@ -44,10 +49,6 @@ DEFAULT_BOT_USERNAMES = {
     "review-notebook-app",
 }
 
-# Default settings
-DEFAULT_DAYS = 7
-DEFAULT_SERVER_PORT = 8765
-
 
 def get_project_root() -> Path:
     """Get the project root directory (where .git is located)."""
@@ -59,6 +60,51 @@ def get_project_root() -> Path:
         current = current.parent
     # Fallback to cwd
     return Path.cwd()
+
+
+def get_commands_dir() -> Path:
+    """Get the .cursor/commands directory."""
+    return Path(__file__).resolve().parent
+
+
+def load_bot_blacklist() -> set[str]:
+    """
+    Load the bot blacklist from notification_bots.yml.
+
+    This is a BLACKLIST - notifications from these usernames are IGNORED.
+    Helps filter out noise from automated bot comments (codecov, dependabot, etc.)
+
+    Returns:
+        Set of usernames to ignore (case-sensitive as GitHub usernames are).
+    """
+    commands_dir = get_commands_dir()
+    bots_file = commands_dir / "notification_bots.yml"
+
+    if bots_file.exists():
+        try:
+            # Simple YAML list parsing (avoids PyYAML dependency)
+            bots = set()
+            with open(bots_file) as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith("#"):
+                        continue
+                    # Parse list items (- username)
+                    if line.startswith("- "):
+                        username = line[2:].strip()
+                        # Remove inline comments
+                        if "#" in username:
+                            username = username.split("#")[0].strip()
+                        if username:
+                            bots.add(username)
+            if bots:
+                return bots
+        except Exception as e:
+            print(f"Warning: Failed to load bot blacklist from {bots_file}: {e}")
+
+    # Fallback to hardcoded defaults
+    return FALLBACK_BOT_BLACKLIST.copy()
 
 
 def parse_git_remote(remote_url: str) -> tuple[str, str] | None:
@@ -109,13 +155,14 @@ def detect_repo_from_git() -> str | None:
 def load_config() -> dict:
     """
     Load configuration with the following priority:
-    1. .cursor/notification_config.json (if exists)
-    2. Auto-detect from git remote
-    3. Defaults
+    1. .cursor/notification_config.json (if exists) - for repo, days, port
+    2. .cursor/commands/notification_bots.yml - for bot blacklist
+    3. Auto-detect repo from git remote
+    4. Built-in defaults
 
     Returns a dict with:
     - repo: str (e.g., "pymc-labs/CausalPy")
-    - bot_usernames: set[str]
+    - bot_blacklist: set[str] - usernames to IGNORE
     - default_days: int
     - server_port: int
     """
@@ -125,12 +172,12 @@ def load_config() -> dict:
     # Start with defaults
     config = {
         "repo": None,
-        "bot_usernames": DEFAULT_BOT_USERNAMES.copy(),
+        "bot_blacklist": load_bot_blacklist(),
         "default_days": DEFAULT_DAYS,
         "server_port": DEFAULT_SERVER_PORT,
     }
 
-    # Try to load config file
+    # Try to load JSON config file for general settings
     if config_file.exists():
         try:
             with open(config_file) as f:
@@ -139,13 +186,13 @@ def load_config() -> dict:
             # Override with user settings
             if "repo" in user_config:
                 config["repo"] = user_config["repo"]
-            if "bot_usernames" in user_config:
-                # Extend default bots with user-specified ones
-                config["bot_usernames"].update(user_config["bot_usernames"])
             if "default_days" in user_config:
                 config["default_days"] = user_config["default_days"]
             if "server_port" in user_config:
                 config["server_port"] = user_config["server_port"]
+            # Legacy support: bot_usernames in JSON extends the blacklist
+            if "bot_usernames" in user_config:
+                config["bot_blacklist"].update(user_config["bot_usernames"])
         except Exception as e:
             print(f"Warning: Failed to load config file: {e}")
 
@@ -171,9 +218,20 @@ def get_repo() -> str:
     return repo
 
 
+def get_bot_blacklist() -> set[str]:
+    """
+    Get the set of bot usernames to IGNORE (blacklist).
+
+    Notifications from these usernames are filtered out to reduce noise.
+    Edit .cursor/commands/notification_bots.yml to customize.
+    """
+    return load_config()["bot_blacklist"]
+
+
+# Alias for backwards compatibility
 def get_bot_usernames() -> set[str]:
-    """Get the set of bot usernames to filter."""
-    return load_config()["bot_usernames"]
+    """Alias for get_bot_blacklist() - returns usernames to ignore."""
+    return get_bot_blacklist()
 
 
 def get_default_days() -> int:
@@ -186,12 +244,20 @@ def get_server_port() -> int:
     return load_config()["server_port"]
 
 
-# For convenience, export commonly used values
 if __name__ == "__main__":
     # Test the config
-    print("Configuration:")
+    print("=" * 60)
+    print("GitHub Notification Summary - Configuration")
+    print("=" * 60)
     config = load_config()
-    print(f"  Repo: {config['repo']}")
-    print(f"  Default days: {config['default_days']}")
-    print(f"  Server port: {config['server_port']}")
-    print(f"  Bot usernames: {len(config['bot_usernames'])} configured")
+    print(f"\n📦 Repository: {config['repo'] or '(not detected)'}")
+    print(f"📅 Default days: {config['default_days']}")
+    print(f"🌐 Server port: {config['server_port']}")
+    print(f"\n🤖 Bot Blacklist ({len(config['bot_blacklist'])} usernames to IGNORE):")
+    for bot in sorted(config["bot_blacklist"]):
+        print(f"   - {bot}")
+    print("\n📁 Config files:")
+    print(f"   - Bot blacklist: {get_commands_dir() / 'notification_bots.yml'}")
+    print(
+        f"   - General config: {get_project_root() / '.cursor/notification_config.json'}"
+    )
