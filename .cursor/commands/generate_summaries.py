@@ -22,22 +22,10 @@ which notifications to prioritize.
 
 import json
 
-# Known bots
-BOT_USERNAMES = {
-    "codecov",
-    "codecov[bot]",
-    "codecov-commenter",
-    "pre-commit-ci",
-    "pre-commit-ci[bot]",
-    "dependabot",
-    "dependabot[bot]",
-    "github-actions",
-    "github-actions[bot]",
-    "renovate",
-    "renovate[bot]",
-    "review-notebook-app[bot]",
-    "review-notebook-app",
-}
+from notification_config import get_bot_usernames
+
+# Load configuration
+BOT_USERNAMES = get_bot_usernames()
 
 
 def generate_summary(n):

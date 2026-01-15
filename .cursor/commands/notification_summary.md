@@ -1,10 +1,36 @@
 # GitHub Notifications Summary
 
-Generate a morning briefing of GitHub notifications for the pymc-labs/CausalPy repository with AI-generated summaries.
+Generate a morning briefing of GitHub notifications for the current repository with AI-generated summaries.
 
 ## Purpose
 
-This command fetches your GitHub notifications for CausalPy, analyzes them for actionability, generates intelligent AI summaries, and presents an interactive web UI. Think of it as your "inbox zero" tool for GitHub.
+This command fetches your GitHub notifications, analyzes them for actionability, generates intelligent AI summaries, and presents an interactive web UI. Think of it as your "inbox zero" tool for GitHub.
+
+## Configuration
+
+The command **auto-detects** the repository from your git remote. No configuration needed for most users!
+
+### Optional: Custom Configuration
+
+Create `.cursor/notification_config.json` to customize behavior:
+
+```json
+{
+  "repo": "org/repo",
+  "default_days": 7,
+  "server_port": 8765,
+  "bot_usernames": ["custom-bot", "another-bot[bot]"]
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `repo` | Auto-detected from git remote | Override repository (e.g., "pymc-labs/CausalPy") |
+| `default_days` | 7 | Days to look back for notifications |
+| `server_port` | 8765 | Local server port |
+| `bot_usernames` | Common bots | Additional bot usernames to filter (merged with defaults) |
+
+**Default bots filtered:** codecov, pre-commit-ci, dependabot, github-actions, renovate
 
 ## Parameters
 
@@ -90,7 +116,7 @@ After generating all summaries, create `.scratch/notifications-with-summaries.js
     "reason": "review_requested",
     "category": "action",
     "tags": [["🔴", "NEEDS RESPONSE"]],
-    "html_url": "https://github.com/pymc-labs/CausalPy/pull/123",
+    "html_url": "https://github.com/org/repo/pull/123",
     "summary": "Your AI-generated summary here (max 500 words)...",
     ...
   }
@@ -105,7 +131,7 @@ python .cursor/commands/notification_server.py
 
 This will:
 1. Load notifications from `.scratch/notifications-with-summaries.json`
-2. Start a local server at http://localhost:8765
+2. Start a local server (default: http://localhost:8765)
 3. Auto-open your browser
 4. Show notifications in tabs with your AI summaries
 5. Provide "Done" buttons that mark notifications as done on GitHub
@@ -114,7 +140,7 @@ This will:
 
 After launching the web UI, offer follow-up actions:
 
-> "I've analyzed your notifications and launched the interactive dashboard at http://localhost:8765
+> "I've analyzed your notifications and launched the interactive dashboard.
 >
 > **Quick Summary:**
 > - 🔥 X items need your action
@@ -153,10 +179,13 @@ After launching the web UI, offer follow-up actions:
 
 | File | Purpose |
 |------|---------|
+| `.cursor/commands/notification_config.py` | Configuration auto-detection |
 | `.cursor/commands/fetch_notifications.py` | Fetches and enriches notifications |
+| `.cursor/commands/generate_summaries.py` | Template summary generator |
 | `.cursor/commands/notification_server.py` | Serves the interactive web UI |
 | `.scratch/notifications-enriched.json` | Enriched notifications (no summaries) |
 | `.scratch/notifications-with-summaries.json` | With AI summaries added |
+| `.cursor/notification_config.json` | (Optional) Custom configuration |
 
 ## Example Summary Generation
 
@@ -179,6 +208,7 @@ Generate a summary like:
 
 ## Error Handling
 
-- **No notifications:** Report "No notifications found for CausalPy in the specified time window."
+- **No notifications:** Report "No notifications found in the specified time window."
+- **Repository not detected:** Create `.cursor/notification_config.json` with `{"repo": "org/repo"}`
 - **Script not found:** Ensure `.cursor/commands/fetch_notifications.py` exists
 - **Empty enriched file:** Run fetch_notifications.py first

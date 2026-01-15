@@ -43,24 +43,12 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-# Configuration
-REPO = "pymc-labs/CausalPy"
-DEFAULT_PORT = 8765
+from notification_config import get_bot_usernames, get_repo, get_server_port
 
-# Known bots
-BOT_USERNAMES = {
-    "codecov",
-    "codecov[bot]",
-    "codecov-commenter",
-    "pre-commit-ci",
-    "pre-commit-ci[bot]",
-    "dependabot",
-    "dependabot[bot]",
-    "github-actions",
-    "github-actions[bot]",
-    "renovate",
-    "renovate[bot]",
-}
+# Load configuration (auto-detects from git remote or config file)
+REPO = get_repo()
+DEFAULT_PORT = get_server_port()
+BOT_USERNAMES = get_bot_usernames()
 
 
 def run_gh_command(args):
@@ -334,7 +322,7 @@ def generate_html(notifications):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔔 GitHub Notifications: pymc-labs/CausalPy</title>
+    <title>🔔 GitHub Notifications: {REPO}</title>
     <style>
         :root {{
             --bg: #f6f8fa;
@@ -617,7 +605,7 @@ def generate_html(notifications):
 <body>
     <div class="container">
         <header>
-            <h1>🔔 GitHub Notifications: pymc-labs/CausalPy</h1>
+            <h1>🔔 GitHub Notifications: {REPO}</h1>
             <button class="refresh-btn" id="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
         </header>
 

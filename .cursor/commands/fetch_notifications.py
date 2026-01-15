@@ -14,7 +14,7 @@
 #   limitations under the License.
 #!/usr/bin/env python3
 """
-Fetch and enrich GitHub notifications for CausalPy.
+Fetch and enrich GitHub notifications.
 
 This script fetches notifications, enriches them with PR/Issue details,
 assigns tags and categories, and saves to JSON. It does NOT generate summaries -
@@ -34,23 +34,11 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-# Configuration
-REPO = "pymc-labs/CausalPy"
+from notification_config import get_bot_usernames, get_default_days, get_repo
 
-# Known bots
-BOT_USERNAMES = {
-    "codecov",
-    "codecov[bot]",
-    "codecov-commenter",
-    "pre-commit-ci",
-    "pre-commit-ci[bot]",
-    "dependabot",
-    "dependabot[bot]",
-    "github-actions",
-    "github-actions[bot]",
-    "renovate",
-    "renovate[bot]",
-}
+# Load configuration (auto-detects from git remote or config file)
+REPO = get_repo()
+BOT_USERNAMES = get_bot_usernames()
 
 
 def run_gh_command(args):
@@ -339,11 +327,15 @@ def enrich_notification(notification):
 
 
 def main():
+    default_days = get_default_days()
     parser = argparse.ArgumentParser(
-        description="Fetch GitHub notifications for CausalPy"
+        description=f"Fetch GitHub notifications for {REPO}"
     )
     parser.add_argument(
-        "--days", type=int, default=7, help="Number of days to look back"
+        "--days",
+        type=int,
+        default=default_days,
+        help=f"Number of days to look back (default: {default_days})",
     )
     args = parser.parse_args()
 
