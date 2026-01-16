@@ -25,6 +25,13 @@ multi_cell_geolift.ipynb
 :::
 
 :::{toctree}
+:caption: Panel Data
+:maxdepth: 1
+
+panel_fixed_effects_pymc.ipynb
+:::
+
+:::{toctree}
 :caption: Difference in Differences
 :maxdepth: 1
 
