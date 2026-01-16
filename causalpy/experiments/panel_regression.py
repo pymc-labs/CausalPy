@@ -237,13 +237,11 @@ class PanelRegression(BaseExperiment):
 
         if isinstance(self.model, PyMCModel):
             assert self.model.idata is not None
-            coeffs: xr.DataArray = az.extract(
-                self.model.idata.posterior, var_names="beta"
-            )
+            coeffs = self.model.idata.posterior["beta"]
             coeffs = coeffs.sel(treated_units=coeffs.coords["treated_units"].values[0])
             coeffs = coeffs.sel(coeffs=var_names)
-            hdi = az.hdi(coeffs, hdi_prob=hdi_prob)
-            means = coeffs.mean("sample").values
+            hdi = az.hdi(coeffs, hdi_prob=hdi_prob)["beta"]
+            means = coeffs.mean(dim=["chain", "draw"]).values
             lower = hdi.sel(hdi="lower").values
             upper = hdi.sel(hdi="higher").values
             y_pos = np.arange(len(var_names))
