@@ -19,9 +19,12 @@ def mock_sample(*args, **kwargs):
         if isinstance(first_arg, pm.Model):
             model = first_arg
 
-    # Always use MIN_DRAWS to ensure compatibility with code that iterates
-    # over posterior samples (ignoring the requested draws for speed)
-    n_draws = MIN_DRAWS
+    requested_draws = kwargs.get("draws")
+    if requested_draws is None and len(args) > 1 and isinstance(args[1], int):
+        requested_draws = args[1]
+
+    # Ensure enough draws for notebook code while keeping execution fast.
+    n_draws = max(MIN_DRAWS, requested_draws or MIN_DRAWS)
 
     idata = pm.sample_prior_predictive(
         model=model,
