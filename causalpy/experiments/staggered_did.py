@@ -174,6 +174,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Step 4: Build design matrices
         self._build_design_matrices()
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict counterfactuals, and aggregate effects."""
         # Step 5: Fit model on untreated observations
         self._fit_model()
 
