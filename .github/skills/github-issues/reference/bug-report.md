@@ -19,7 +19,7 @@ description: Transform a discovered bug into a well-documented GitHub issue.
   ```
 
 ## Draft issue
-Create `.github/issue_summaries/<short-description>.md` with the bug-specific
+Create `.scratch/issue_summaries/<short-description>.md` with the bug-specific
 template below, then follow the general issue creation steps in
 `issue-creation.md` for review, creation, labeling, and cleanup.
 

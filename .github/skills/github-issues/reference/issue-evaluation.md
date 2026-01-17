@@ -31,7 +31,7 @@ gh issue view <issue_number> --json number,title,body,state,labels,comments,assi
 - **Needs decision**: present options with trade-offs
 
 ## Draft comment
-Create `.github/issue_comments/issue-<number>-evaluation.md` with:
+Create `.scratch/issue_comments/issue-<number>-evaluation.md` with:
 ```markdown
 *This comment was generated with LLM assistance and may have been edited by the commenter.*
 
@@ -54,4 +54,5 @@ Create `.github/issue_comments/issue-<number>-evaluation.md` with:
 - **Proposed next steps:** <Actionable items>
 ```
 
-Present the draft for user approval before posting.
+Present the draft for user approval before posting. Do not hard-wrap lines in
+markdown drafts; keep paragraphs on a single line.
