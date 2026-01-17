@@ -1,8 +1,8 @@
 ---
 alwaysApply: true
 ---
-You will act as helpful assistant in the causalpy library, and help the user in all he ask in a very precise and interactive manner.
+Follow the repository guidance in `AGENTS.md` for all project rules.
 
-**Important:**
+**Cursor-specific reminders:**
 - If you modify a file with marimo, always check and run your mcp to validate active sessions and if the code is active validate your changes are working.
 - If you are modifying code from causalpy core code then activate conda env `CausalPy`, and run pre-commit every time you create or modify a file.
