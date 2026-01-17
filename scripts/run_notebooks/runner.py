@@ -24,7 +24,12 @@ import argparse
 import logging
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from uuid import uuid4
 
+# Monkey-patch nbclient to handle display_id=None for widget updates.
+# This fixes an issue where ipywidgets/tqdm progress bars cause
+# "assert display_id is not None" errors in nbclient.
+import nbclient.client
 import papermill
 import yaml
 from nbformat.notebooknode import NotebookNode
@@ -40,6 +45,21 @@ INJECTED_CODE = INJECTED_CODE_FILE.read_text()
 SKIP_NOTEBOOKS_FILE = HERE / "skip_notebooks.yml"
 SKIP_NOTEBOOKS = set(yaml.safe_load(SKIP_NOTEBOOKS_FILE.read_text()))
 
+_original_output = nbclient.client.NotebookClient.output
+
+
+def _patched_output(self, outs, msg, display_id, cell_index):
+    """Patched output method that catches assertion errors from widget updates."""
+    try:
+        return _original_output(self, outs, msg, display_id, cell_index)
+    except AssertionError:
+        # Silently skip messages that cause display_id assertion errors
+        # (typically from ipywidgets/tqdm progress bar updates)
+        return None
+
+
+nbclient.client.NotebookClient.output = _patched_output
+
 
 def setup_logging() -> None:
     logging.basicConfig(
@@ -48,13 +68,26 @@ def setup_logging() -> None:
     )
 
 
+def generate_random_id() -> str:
+    return str(uuid4())
+
+
+def clear_cell_outputs(cells: list) -> None:
+    """Clear all outputs from cells to avoid widget state issues with nbclient."""
+    for cell in cells:
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+
+
 def inject_mock_code(cells: list) -> None:
     """Inject mock pm.sample code at the start of the notebook."""
+    clear_cell_outputs(cells)
     cells.insert(
         0,
         NotebookNode(
-            id="mock-injection",
-            execution_count=0,
+            id=f"code-injection-{generate_random_id()}",
+            execution_count=sum(map(ord, "Mock pm.sample")),
             cell_type="code",
             metadata={"tags": []},
             outputs=[],
@@ -133,6 +166,12 @@ def parse_args() -> argparse.Namespace:
         dest="exclude_patterns",
         help="Pattern to exclude from notebook names (can be used multiple times)",
     )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help="Run notebooks in parallel when possible.",
+    )
     return parser.parse_args()
 
 
@@ -149,7 +188,17 @@ if __name__ == "__main__":
     for nb in notebooks:
         logging.info(f"  - {nb.name}")
 
-    for notebook in notebooks:
-        run_notebook(notebook)
+    if args.parallel:
+        try:
+            from joblib import Parallel, delayed
+        except ImportError as exc:
+            raise ImportError(
+                "Parallel execution requires joblib. Install it or run without --parallel."
+            ) from exc
+
+        Parallel(n_jobs=-1)(delayed(run_notebook)(notebook) for notebook in notebooks)
+    else:
+        for notebook in notebooks:
+            run_notebook(notebook)
 
     logging.info("All notebooks completed successfully!")

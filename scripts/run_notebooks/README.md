@@ -6,7 +6,9 @@ This script runs Jupyter notebooks from `docs/source/notebooks/` to validate the
 
 1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 100 draws) for speed
 2. **Uses Papermill** — Executes notebooks programmatically
-3. **Discards outputs** — Only checks for errors, doesn't save results
+3. **Clears saved outputs** — Avoids widget state issues during execution
+4. **Guards widget updates** — Patches nbclient to ignore display_id assertion errors
+5. **Discards outputs** — Only checks for errors, doesn't save results
 
 ## Usage
 
@@ -22,6 +24,9 @@ python scripts/run_notebooks/runner.py --pattern "*_skl*.ipynb"
 
 # Exclude PyMC and sklearn notebooks (run others)
 python scripts/run_notebooks/runner.py --exclude-pattern _pymc --exclude-pattern _skl
+
+# Run notebooks in parallel (requires joblib)
+python scripts/run_notebooks/runner.py --parallel
 ```
 
 ## CI Integration
