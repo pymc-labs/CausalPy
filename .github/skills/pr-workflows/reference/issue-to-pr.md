@@ -16,7 +16,7 @@ description: Transform a GitHub issue into a complete pull request through a str
 ## Implementation
 1. Create a branch: `git checkout -b issue-<number>-<short-description>`
 2. Implement the fix, following `AGENTS.md` policies.
-3. Run pre-commit and tests until green.
+3. Run pre-commit and tests until green (see `pre-commit.md`).
 
 ## Prepare PR
 1. Create `.github/pr_summaries/<issue_number> - <short-description>.md` with:
@@ -26,6 +26,7 @@ description: Transform a GitHub issue into a complete pull request through a str
    - Testing
    - Checklist
 2. Share the PR draft with the user before creating the PR.
+3. Commit changes following `committing.md`.
 
 ## Create PR
 ```bash

@@ -14,10 +14,7 @@ description: Create clean, focused commits with user confirmation and pre-commit
 4. Ask for user confirmation before committing.
 
 ## Commit steps
-1. Run pre-commit:
-   ```bash
-   pre-commit run --all-files
-   ```
+1. Run pre-commit (see `pre-commit.md` for details).
 2. Stage only relevant files (avoid `git add -A` / `git add .`).
 3. Create the commit with a clear message.
 

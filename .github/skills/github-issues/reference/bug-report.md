@@ -19,7 +19,11 @@ description: Transform a discovered bug into a well-documented GitHub issue.
   ```
 
 ## Draft issue
-Create `.github/issue_summaries/<short-description>.md` with:
+Create `.github/issue_summaries/<short-description>.md` with the bug-specific
+template below, then follow the general issue creation steps in
+`issue-creation.md` for review, creation, labeling, and cleanup.
+
+Bug-specific template:
 ```markdown
 ## Description
 <Clear, concise description of the bug>
@@ -46,12 +50,6 @@ Create `.github/issue_summaries/<short-description>.md` with:
 <Any other relevant info>
 ```
 
-Present the draft to the user before posting.
-
-## File the issue
-```bash
-gh issue create --title "<descriptive title>" --body-file .github/issue_summaries/<short-description>.md --label "bug"
-```
-
-## Cleanup
-Remove the markdown file after filing.
+## Next steps
+- Present the draft for review.
+- Use the `issue-creation` workflow to file and label the issue.
