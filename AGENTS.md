@@ -31,8 +31,9 @@
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
 - **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
+  - **PR drafts**: Create PR summary markdown files in `.scratch/pr_summaries/` (untracked).
+  - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
 - **Markdown formatting**: Do not hard-wrap lines in markdown files; rely on editor auto-wrapping.
-- **Issue draft cleanup**: Delete issue draft markdown files from `.scratch/issue_summaries/` after filing.
 
 ## Code structure and style
 

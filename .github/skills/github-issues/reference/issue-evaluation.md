@@ -54,5 +54,4 @@ Create `.scratch/issue_comments/issue-<number>-evaluation.md` with:
 - **Proposed next steps:** <Actionable items>
 ```
 
-Present the draft for user approval before posting. Do not hard-wrap lines in
-markdown drafts; keep paragraphs on a single line.
+Present the draft for user approval before posting. Do not hard-wrap lines in markdown drafts; keep paragraphs on a single line.

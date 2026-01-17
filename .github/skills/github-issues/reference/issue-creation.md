@@ -29,6 +29,3 @@ Add labels with `--label`, e.g.:
 ```bash
 gh issue create --title "<descriptive title>" --body-file .scratch/issue_summaries/issue.md --label "bug"
 ```
-
-## Cleanup
-Delete the temporary `.scratch/issue_summaries/issue.md` after submission.
