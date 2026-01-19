@@ -1,5 +1,9 @@
 # AGENTS
 
+## Environment
+
+- **Activation required**: Always run `conda activate CausalPy` before executing any Python commands, tests, or scripts
+
 ## Testing preferences
 
 - Write all Python tests as `pytest` style functions, not unittest classes
