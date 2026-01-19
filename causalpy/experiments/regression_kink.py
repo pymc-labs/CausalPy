@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ Regression kink design
 
 import warnings  # noqa: I001
 
+
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,6 +29,8 @@ import xarray as xr
 from causalpy.plot_utils import plot_xY
 
 from .base import BaseExperiment
+from causalpy.reporting import EffectSummary, _effect_summary_rkink
+from typing import Any, Literal
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
     DataException,
@@ -50,12 +53,12 @@ class RegressionKink(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         kink_point: float,
-        model=None,
+        model: BaseExperiment | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs,
-    ):
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
         self.data = data
@@ -65,7 +68,12 @@ class RegressionKink(BaseExperiment):
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data, applying bandwidth filtering."""
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
@@ -74,17 +82,19 @@ class RegressionKink(BaseExperiment):
                 warnings.warn(
                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
                     UserWarning,
+                    stacklevel=2,
                 )
-            dm = model_matrix(formula, filtered_data)
+            dm = model_matrix(self.formula, filtered_data)
         else:
-            dm = model_matrix(formula, self.data)
+            dm = model_matrix(self.formula, self.data)
 
         self.labels = list(dm.rhs.columns)
         self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         self.rhs_matrix_spec = dm.rhs.model_spec
         self.outcome_variable_name = dm.lhs.columns[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -99,6 +109,8 @@ class RegressionKink(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
         COORDS = {
             "coeffs": self.labels,
             "obs_ind": np.arange(self.X.shape[0]),
@@ -111,6 +123,8 @@ class RegressionKink(BaseExperiment):
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
@@ -127,10 +141,10 @@ class RegressionKink(BaseExperiment):
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
         self.gradient_change = self._eval_gradient_change(
-            mu_kink_left, mu_kink, mu_kink_right, epsilon
+            mu_kink_left, mu_kink, mu_kink_right, self.epsilon
         )
 
-    def input_validation(self):
+    def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
         if "treated" not in self.formula:
             raise FormulaException(
@@ -149,7 +163,12 @@ class RegressionKink(BaseExperiment):
             raise ValueError("Epsilon must be greater than zero.")
 
     @staticmethod
-    def _eval_gradient_change(mu_kink_left, mu_kink, mu_kink_right, epsilon):
+    def _eval_gradient_change(
+        mu_kink_left: xr.DataArray,
+        mu_kink: xr.DataArray,
+        mu_kink_right: xr.DataArray,
+        epsilon: float,
+    ) -> xr.DataArray:
         """Evaluate the gradient change at the kink point.
         It works by evaluating the model below the kink point, at the kink point,
         and above the kink point.
@@ -160,7 +179,7 @@ class RegressionKink(BaseExperiment):
         gradient_change = gradient_right - gradient_left
         return gradient_change
 
-    def _probe_kink_point(self):
+    def _probe_kink_point(self) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         """Probe the kink point to evaluate the predicted outcome at the kink point and
         either side."""
         # Create a dataframe to evaluate predicted outcome at the kink point and either
@@ -185,11 +204,11 @@ class RegressionKink(BaseExperiment):
         mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
         return mu_kink_left, mu_kink, mu_kink_right
 
-    def _is_treated(self, x):
+    def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold."""  # noqa: E501
         return np.greater_equal(x, self.kink_point)
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -208,7 +227,9 @@ class RegressionKink(BaseExperiment):
         )
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, round_to=None, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(
+        self, round_to: int | None = 2, **kwargs: dict
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
         # Plot raw data
@@ -231,15 +252,15 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
         ci = (
             r"$CI_{94\%}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+            + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""
-            Change in gradient = {round_num(self.gradient_change.mean(), round_to)},
+            Change in gradient = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)},
             """
         ax.set(title=r2 + "\n" + grad_change + ci)
         # Intervention line
@@ -256,3 +277,35 @@ class RegressionKink(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Regression Kink.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_rkink(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )

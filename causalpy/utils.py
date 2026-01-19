@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ Utility functions
 """
 
 import re
-from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -26,7 +25,7 @@ import xarray as xr
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
     only."""
-    return len(set(series).difference(set([0, 1]))) == 0
+    return len(set(series).difference({0, 1})) == 0
 
 
 def _series_has_2_levels(series: pd.Series) -> bool:
@@ -34,22 +33,27 @@ def _series_has_2_levels(series: pd.Series) -> bool:
     return len(pd.Categorical(series).categories) == 2
 
 
-def round_num(n, round_to):
-    """
-    Return a string representing a number with `round_to` significant figures.
+def round_num(n: float, round_to: int | None) -> str:
+    """Return a string representing a number with significant figures.
 
     Parameters
     ----------
     n : float
-        number to round
-    round_to : int
-        number of significant figures
+        Number to round.
+    round_to : int, optional
+        Number of significant figures. If None, defaults to 2.
+
+    Returns
+    -------
+    str
+        String representation of the number with specified significant
+        figures.
     """
     sig_figs = _format_sig_figs(n, round_to)
     return f"{n:.{sig_figs}g}"
 
 
-def _format_sig_figs(value, default=None):
+def _format_sig_figs(value: float, default: int | None = None) -> int:
     """Get a default number of significant figures.
 
     Gives the integer part or `default`, whichever is bigger.
@@ -68,8 +72,27 @@ def _format_sig_figs(value, default=None):
     return max(int(np.log10(np.abs(value))) + 1, default)
 
 
-def convert_to_string(x: Union[float, xr.DataArray], round_to: int = 2) -> str:
-    """Utility function which takes in numeric inputs and returns a string."""
+def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
+    """Convert numeric inputs to a formatted string representation.
+
+    Parameters
+    ----------
+    x : float or xr.DataArray
+        The numeric value or xarray DataArray to convert.
+    round_to : int, optional
+        Number of significant figures to round to. Defaults to 2.
+
+    Returns
+    -------
+    str
+        Formatted string representation. For floats, returns rounded
+        decimal. For DataArrays, returns mean with 94% credible interval.
+
+    Raises
+    ------
+    ValueError
+        If `x` is neither a float nor an xarray DataArray.
+    """
     if isinstance(x, float):
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
@@ -131,3 +154,61 @@ def get_interaction_terms(formula: str) -> list[str]:
             interaction_terms.append(clean_term)
 
     return interaction_terms
+
+
+def check_convex_hull_violation(
+    treated_series: np.ndarray, control_matrix: np.ndarray
+) -> dict:
+    """
+    Check if treated series values fall within the range of control series.
+
+    For each time point, verify that:
+    min(controls) <= treated <= max(controls)
+
+    This is a necessary (but not sufficient) condition for the treated unit
+    to lie within the convex hull of control units.
+
+    Parameters
+    ----------
+    treated_series : np.ndarray
+        1D array of treated unit values (shape: n_timepoints)
+    control_matrix : np.ndarray
+        2D array of control unit values (shape: n_timepoints x n_controls)
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+        - 'passes': bool - whether the check passes
+        - 'n_violations': int - number of time points with violations
+        - 'pct_above': float - percentage of points where treated > max(controls)
+        - 'pct_below': float - percentage of points where treated < min(controls)
+
+    Examples
+    --------
+    >>> treated = np.array([1.0, 2.0, 3.0])
+    >>> controls = np.array([[0.5, 1.5], [1.5, 2.5], [2.5, 3.5]])
+    >>> result = check_convex_hull_violation(treated, controls)
+    >>> result["passes"]
+    True
+    """
+    control_min = control_matrix.min(axis=1)
+    control_max = control_matrix.max(axis=1)
+
+    above = treated_series > control_max
+    below = treated_series < control_min
+
+    n_points = len(treated_series)
+    if n_points == 0:
+        return {
+            "passes": True,
+            "n_violations": 0,
+            "pct_above": 0.0,
+            "pct_below": 0.0,
+        }
+    return {
+        "passes": not (above.any() or below.any()),
+        "n_violations": int(above.sum() + below.sum()),
+        "pct_above": float(100 * above.sum() / n_points),
+        "pct_below": float(100 * below.sum() / n_points),
+    }

@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ Base class for quasi experimental designs.
 """
 
 from abc import abstractmethod
+from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -23,16 +24,19 @@ import pandas as pd
 from sklearn.base import RegressorMixin
 
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
 class BaseExperiment:
     """Base class for quasi experimental designs."""
 
+    labels: list[str]
+
     supports_bayes: bool
     supports_ols: bool
 
-    def __init__(self, model=None):
+    def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
@@ -50,16 +54,26 @@ class BaseExperiment:
         if self.model is None:
             raise ValueError("model not set or passed.")
 
+    def fit(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("fit method not implemented")
+
     @property
-    def idata(self):
+    def idata(self) -> az.InferenceData:
         """Return the InferenceData object of the model. Only relevant for PyMC models."""
         return self.model.idata
 
-    def print_coefficients(self, round_to=None):
-        """Ask the model to print its coefficients."""
+    def print_coefficients(self, round_to: int | None = None) -> None:
+        """Ask the model to print its coefficients.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args, **kwargs) -> tuple:
+    def plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
@@ -75,16 +89,16 @@ class BaseExperiment:
                 raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def _bayesian_plot(self, *args, **kwargs):
+    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Abstract method for plotting the model."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
     @abstractmethod
-    def _ols_plot(self, *args, **kwargs):
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Abstract method for plotting the model."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
-    def get_plot_data(self, *args, **kwargs) -> pd.DataFrame:
+    def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Recover the data of an experiment along with the prediction and causal impact information.
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
@@ -98,11 +112,68 @@ class BaseExperiment:
             raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def get_plot_data_bayesian(self, *args, **kwargs):
+    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Abstract method for recovering plot data."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     @abstractmethod
-    def get_plot_data_ols(self, *args, **kwargs):
+    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Abstract method for recovering plot data."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
+
+    @abstractmethod
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Time window for analysis (ITS/SC only, ignored for DiD/RD):
+            - "post": All post-treatment time points (default)
+            - (start, end): Tuple of start and end times (handles both datetime and integer indices)
+            - slice: Python slice object for integer indices
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS):
+            - "increase": P(effect > 0)
+            - "decrease": P(effect < 0)
+            - "two-sided": Two-sided p-value, report 1-p as "probability of effect"
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level)
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
+        relative : bool, default=True
+            Whether to include relative effect statistics (% change vs counterfactual)
+            (ITS/SC only, ignored for DiD/RD)
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+            If provided, reports P(|effect| > min_effect) for two-sided or P(effect > min_effect) for one-sided.
+        treated_unit : str, optional
+            For multi-unit experiments (Synthetic Control), specify which treated unit
+            to analyze. If None and multiple units exist, uses first unit.
+        period : {"intervention", "post", "comparison"}, optional
+            For experiments with multiple periods (e.g., three-period ITS), specify
+            which period to summarize. Defaults to None for standard behavior.
+        prefix : str, optional
+            Prefix for prose generation (e.g., "During intervention", "Post-intervention").
+            Defaults to "Post-period".
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        raise NotImplementedError("effect_summary method not yet implemented")

@@ -2,6 +2,48 @@
 
 CausalPy welcomes contributions from interested individuals or groups. These guidelines are provided to give potential contributors information to make their contribution compliant with the conventions of the CausalPy project, and maximize the probability of such contributions are merged as quickly and efficiently as possible. Contributors need not be experts, but should be interested in the project, willing to learn, and share knowledge.
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Opening issues](#opening-issues)
+- [Use of agents](#use-of-agents)
+- [Contributing code via pull requests](#contributing-code-via-pull-requests)
+- [Local development steps](#local-development-steps)
+- [Pull request checklist](#pull-request-checklist)
+- [Building the documentation locally](#building-the-documentation-locally)
+- [Overview of code structure](#overview-of-code-structure)
+- [Contributor pathways and permissions](#contributor-pathways-and-permissions)
+  - [Current maintainers](#current-maintainers)
+  - [Principles](#principles)
+  - [Pathway overview](#pathway-overview)
+  - [Levels in detail](#levels-in-detail)
+  - [Decision process](#decision-process)
+  - [Role expectations checklist](#role-expectations-checklist)
+  - [Appendix: Quick rubric for promotion](#appendix-quick-rubric-for-promotion)
+
+---
+
+## Quick Start
+
+After forking this repository on GitHub, get up and running in 4 commands:
+
+```bash
+git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
+mamba env create -f environment.yml
+conda activate CausalPy
+make setup  # Installs package + all dev dependencies + pre-commit hooks
+```
+
+Verify everything works:
+
+```bash
+make test
+```
+
+For the complete setup instructions, see [Local development steps](#local-development-steps).
+
+---
+
 There are 4 main ways of contributing to the CausalPy project (in ascending order of difficulty or scope):
 
 1. Submitting issues related to bugs or desired enhancements.
@@ -16,6 +58,9 @@ Items 2-4 require setting up a local development environment, see [Local develop
 We appreciate being notified of problems with the existing CausalPy code. We prefer that issues be filed the on [Github Issue Tracker](https://github.com/pymc-labs/CausalPy/issues), rather than on social media or by direct email to the developers.
 
 Please verify that your issue is not being currently addressed by other issues or pull requests by using the GitHub search tool to look for key words in the project issue tracker.
+
+## Use of agents
+PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
 
 ## Contributing code via pull requests
 
@@ -47,45 +92,35 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create the environment from the `environment.yml` file.
+1. Create the environment from the `environment.yml` file and activate it:
 
     ```bash
     mamba env create -f environment.yml
-    ```
-
-    Activate the environment.
-
-    ```bash
     conda activate CausalPy
     ```
 
-    Install the package (in editable mode) and its development dependencies. The `--no-deps` flag is used to avoid installing the dependencies of `CausalPy` as they are already installed when installing the development dependencies. This can end up interfering with the conda-only install of pymc.
+    To update an existing environment after changes to `environment.yml`:
 
     ```bash
-    pip install --no-deps -e .
+    conda env update --file environment.yml --prune
     ```
 
-	Install development dependencies
-
-	```bash
-	pip install 'causalpy[dev]'
-	pip install 'causalpy[docs]'
-	pip install 'causalpy[test]'
-	pip install 'causalpy[lint]'
-	pip install 'pylint'
-	```
-
-	It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a mac, run `brew install pandoc`.
-
-    Set [pre-commit hooks](https://pre-commit.com/)
+1. Install the package and all development dependencies using the automated setup:
 
     ```bash
-    pre-commit install
+    make setup
     ```
+
+    This single command:
+    - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
+    - Installs all development extras (`dev`, `docs`, `test`, `lint`)
+    - Sets up pre-commit hooks
+
+    It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
 	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
-	```
+	```bash
 	python -m ipykernel install --user --name CausalPy
 	```
 
@@ -194,6 +229,183 @@ UML diagrams can be created with the command below.
 ```bash
 make uml
 ```
+
+---
+
+## Contributor pathways and permissions
+
+Contributions are welcome from the community. This section describes how contributors can grow their responsibilities in the CausalPy project and the GitHub permissions that come with each level.
+
+### Current maintainers
+
+<!-- Update this list as the team evolves -->
+- [@drbenvincent](https://github.com/drbenvincent)
+- [@juanitorduz](https://github.com/juanitorduz)
+- [@NathanielF](https://github.com/NathanielF)
+- [@lucianopaz](https://github.com/lucianopaz)
+
+### Principles
+
+- **Earned trust, least privilege:** permissions increase gradually as trust is built.
+- **Transparency:** criteria and expectations are clear and applied consistently.
+- **Sustainability:** pathways should reduce maintainer load over time.
+- **Safety by default:** branch protection and CI checks remain in place regardless of role.
+- **Respect:** all contributions (code and non-code) are valued.
+
+### Pathway overview
+
+| Level | GitHub permission | Typical scope | Primary focus |
+|---|---|---|---|
+| Community participant | N/A | Participate via issues, discussions, and PRs from forks | Reporting, ideas, fixes, docs, examples, tests |
+| Triager | Triage | Manage issues/PRs (no write) | Labels, reproductions, routing, housekeeping |
+| Collaborator | Write | Contribute directly to branches | Regular PRs, reviews, maintenance |
+| Maintainer | Maintain | Manage repository operations | Merging, releases, governance, roadmap |
+
+> Note: Titles are descriptive. GitHub permission is the enforceable access level.
+
+### Levels in detail
+
+#### 1) Community participant (public access)
+
+**Who this is for**
+- Anyone engaging with the project: users, researchers, educators, and prospective contributors.
+
+**What you can do**
+- Open issues (bug reports, feature requests, questions).
+- Participate in discussions.
+- Submit PRs from forks (code, docs, tests, examples).
+- Review PRs by leaving comments and suggestions.
+
+**Expectations**
+- Follow the [Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+- Prefer small, focused PRs.
+- Include tests and docs updates when appropriate.
+- Be responsive to reviewer feedback.
+
+**Signals you may be ready for elevated access**
+- Consistently helpful participation and good judgment.
+- High-quality issue reports (clear repro, version info).
+- A track record of merged contributions and constructive reviews.
+
+---
+
+#### 2) Triager (Triage)
+
+**Who this is for**
+- Contributors who help maintain project hygiene by managing issues and PR flow without changing code directly.
+
+**What you can do (typical)**
+- Apply and manage labels.
+- Ask for reproductions, logs, environment details.
+- Close duplicates, redirect questions to Discussions.
+- Keep PRs moving by requesting changes, tagging reviewers, and nudging for updates.
+
+**What you cannot do**
+- Merge PRs.
+- Change repository settings.
+
+**Expectations**
+- Use a consistent labeling taxonomy.
+- Be neutral and kind; focus on clarity.
+- Escalate ambiguous/controversial decisions to maintainers.
+
+**Suggested criteria**
+- Demonstrated helpfulness over time (e.g., 4–8 weeks of consistent triage activity).
+- Sound judgment on duplicates, scope, and priority.
+
+**Nomination and granting**
+- Maintainers can invite directly, or a contributor can request the role by [opening a GitHub issue](https://github.com/pymc-labs/CausalPy/issues/new).
+- Access is reviewed periodically; inactivity may result in stepping down.
+
+---
+
+#### 3) Collaborator (Write)
+
+**Who this is for**
+- Contributors who actively push changes and can be trusted with direct write access.
+
+**What you can do (typical)**
+- Push branches to the main repository.
+- Help maintain CI, docs, examples.
+- Perform routine maintenance tasks (refactors, dependency updates) within agreed scope.
+
+**Expectations**
+- Demonstrate good engineering hygiene: tests, docs, changelog discipline (as applicable).
+- Respect backwards compatibility and public API stability.
+- Participate in code review (both giving and receiving).
+
+**Suggested criteria**
+- Sustained contributions (e.g., multiple merged PRs across at least a few weeks/months).
+- High-quality reviews that improve code quality and catch issues.
+- Familiarity with project standards and tooling.
+
+**Safety mechanisms**
+- Branch protection remains enabled (required checks, review requirements).
+- Prefer PR-based changes even for collaborators.
+
+---
+
+#### 4) Maintainer (Maintain)
+
+**Who this is for**
+- People who help run the project: merging, release coordination, and repository management.
+
+**What you can do (typical)**
+- Merge PRs.
+- Manage labels and milestones.
+- Coordinate releases and ensure release notes are accurate.
+- Manage project boards (if used).
+
+**Expectations**
+- Consistent review and merge quality.
+- Ability to mediate disagreements and drive decisions.
+- Active stewardship of community norms.
+
+**Suggested criteria**
+- Track record of high-impact contributions and reliable collaboration.
+- Demonstrated leadership: mentoring, reviews, triage, roadmap contributions.
+- Comfortable with responsible disclosure and security processes (if applicable).
+
+**Onboarding**
+- Start with a limited scope (e.g., one module or docs/releases) and expand.
+
+---
+
+### Decision process
+
+#### How people are invited
+- A maintainer opens a short nomination discussion (or uses an internal maintainer thread) referencing:
+  - contributions (PRs/issues/reviews)
+  - areas of ownership
+  - proposed permission level
+- After a short review period, maintainers grant access.
+
+#### Resolving disagreements
+- Decisions are made by informal consensus among maintainers.
+- If consensus cannot be reached, a simple majority decides.
+- For project-wide decisions (e.g., major API changes, new maintainers), give at least one week for async discussion before finalizing.
+
+#### How to step down
+- Anyone can request to step down at any time.
+- Access can be reduced after long inactivity to minimize risk.
+
+#### A note on Admin access
+Admin access is reserved for project leads and is not part of the contributor pathway. Admins handle repository settings, secrets, and GitHub Actions configuration.
+
+### Role expectations checklist
+
+- Communicate clearly and respectfully.
+- Default to PR-based workflows.
+- Keep changes small and reviewable.
+- Prefer documenting decisions in issues/PRs.
+
+### Appendix: Quick rubric for promotion
+
+Consider promoting when a contributor reliably demonstrates:
+- **Quality:** produces correct changes with appropriate tests/docs.
+- **Judgment:** scopes work well and respects compatibility.
+- **Collaboration:** responds to review, helps others, communicates.
+- **Consistency:** shows up over time rather than one-off activity.
 
 ---
 

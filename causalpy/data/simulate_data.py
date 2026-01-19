@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -20,16 +20,19 @@ import pandas as pd
 from scipy.stats import dirichlet, gamma, norm, uniform
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
-default_lowess_kwargs = {"frac": 0.2, "it": 0}
-RANDOM_SEED = 8927
-rng = np.random.default_rng(RANDOM_SEED)
+default_lowess_kwargs: dict[str, float | int] = {"frac": 0.2, "it": 0}
+RANDOM_SEED: int = 8927
+rng: np.random.Generator = np.random.default_rng(RANDOM_SEED)
 
 
 def _smoothed_gaussian_random_walk(
-    gaussian_random_walk_mu, gaussian_random_walk_sigma, N, lowess_kwargs
-):
+    gaussian_random_walk_mu: float,
+    gaussian_random_walk_sigma: float,
+    N: int,
+    lowess_kwargs: dict,
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Generates Gaussian random walk data and applies LOWESS
+    Generates Gaussian random walk data and applies LOWESS.
 
     :param gaussian_random_walk_mu:
         Mean of the random walk
@@ -48,12 +51,12 @@ def _smoothed_gaussian_random_walk(
 
 
 def generate_synthetic_control_data(
-    N=100,
-    treatment_time=70,
-    grw_mu=0.25,
-    grw_sigma=1,
-    lowess_kwargs=default_lowess_kwargs,
-):
+    N: int = 100,
+    treatment_time: int = 70,
+    grw_mu: float = 0.25,
+    grw_sigma: float = 1,
+    lowess_kwargs: dict = default_lowess_kwargs,
+) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Generates data for synthetic control example.
 
@@ -73,7 +76,6 @@ def generate_synthetic_control_data(
     >>> from causalpy.data.simulate_data import generate_synthetic_control_data
     >>> df, weightings_true = generate_synthetic_control_data(treatment_time=70)
     """
-
     # 1. Generate non-treated variables
     df = pd.DataFrame(
         {
@@ -108,8 +110,12 @@ def generate_synthetic_control_data(
 
 
 def generate_time_series_data(
-    N=100, treatment_time=70, beta_temp=-1, beta_linear=0.5, beta_intercept=3
-):
+    N: int = 100,
+    treatment_time: int = 70,
+    beta_temp: float = -1,
+    beta_linear: float = 0.5,
+    beta_intercept: float = 3,
+) -> pd.DataFrame:
     """
     Generates interrupted time series example data
 
@@ -155,7 +161,9 @@ def generate_time_series_data(
     return df
 
 
-def generate_time_series_data_seasonal(treatment_time):
+def generate_time_series_data_seasonal(
+    treatment_time: pd.Timestamp,
+) -> pd.DataFrame:
     """
     Generates 10 years of monthly data with seasonality
     """
@@ -169,11 +177,13 @@ def generate_time_series_data_seasonal(treatment_time):
         t=df.index,
     ).set_index("date", drop=True)
     month_effect = np.array([11, 13, 12, 15, 19, 23, 21, 28, 20, 17, 15, 12])
-    df["y"] = 0.2 * df["t"] + 2 * month_effect[df.month.values - 1]
+    df["y"] = 0.2 * df["t"] + 2 * month_effect[np.asarray(df.month.values) - 1]
 
     N = df.shape[0]
     idx = np.arange(N)[df.index > treatment_time]
-    df["causal effect"] = 100 * gamma(10).pdf(np.arange(0, N, 1) - np.min(idx))
+    df["causal effect"] = 100 * gamma(10).pdf(
+        np.array(np.arange(0, N, 1)) - int(np.min(idx))
+    )
 
     df["y"] += df["causal effect"]
     df["y"] += norm(0, 2).rvs(N)
@@ -183,7 +193,9 @@ def generate_time_series_data_seasonal(treatment_time):
     return df
 
 
-def generate_time_series_data_simple(treatment_time, slope=0.0):
+def generate_time_series_data_simple(
+    treatment_time: pd.Timestamp, slope: float = 0.0
+) -> pd.DataFrame:
     """Generate simple interrupted time series data, with no seasonality or temporal
     structure.
     """
@@ -205,7 +217,7 @@ def generate_time_series_data_simple(treatment_time, slope=0.0):
     return df
 
 
-def generate_did():
+def generate_did() -> pd.DataFrame:
     """
     Generate Difference in Differences data
 
@@ -223,8 +235,14 @@ def generate_did():
 
     # local functions
     def outcome(
-        t, control_intercept, treat_intercept_delta, trend, Δ, group, post_treatment
-    ):
+        t: np.ndarray,
+        control_intercept: float,
+        treat_intercept_delta: float,
+        trend: float,
+        Δ: float,
+        group: np.ndarray,
+        post_treatment: np.ndarray,
+    ) -> np.ndarray:
         """Compute the outcome of each unit"""
         return (
             control_intercept
@@ -244,21 +262,21 @@ def generate_did():
     df["post_treatment"] = df["t"] > intervention_time
 
     df["y"] = outcome(
-        df["t"],
+        np.asarray(df["t"]),
         control_intercept,
         treat_intercept_delta,
         trend,
         Δ,
-        df["group"],
-        df["post_treatment"],
+        np.asarray(df["group"]),
+        np.asarray(df["post_treatment"]),
     )
     df["y"] += rng.normal(0, 0.1, df.shape[0])
     return df
 
 
 def generate_regression_discontinuity_data(
-    N=100, true_causal_impact=0.5, true_treatment_threshold=0.0
-):
+    N: int = 100, true_causal_impact: float = 0.5, true_treatment_threshold: float = 0.0
+) -> pd.DataFrame:
     """
     Generate regression discontinuity example data
 
@@ -272,12 +290,12 @@ def generate_regression_discontinuity_data(
     ... )  # doctest: +SKIP
     """
 
-    def is_treated(x):
+    def is_treated(x: np.ndarray) -> np.ndarray:
         """Check if x was treated"""
         return np.greater_equal(x, true_treatment_threshold)
 
-    def impact(x):
-        """Assign true_causal_impact to all treaated entries"""
+    def impact(x: np.ndarray) -> np.ndarray:
+        """Assign true_causal_impact to all treated entries"""
         y = np.zeros(len(x))
         y[is_treated(x)] = true_causal_impact
         return y
@@ -289,8 +307,11 @@ def generate_regression_discontinuity_data(
 
 
 def generate_ancova_data(
-    N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
-):
+    N: int = 200,
+    pre_treatment_means: np.ndarray | None = None,
+    treatment_effect: int = 2,
+    sigma: int = 1,
+) -> pd.DataFrame:
     """
     Generate ANCOVA example data
 
@@ -303,6 +324,8 @@ def generate_ancova_data(
     ... )
     >>> df.to_csv(pathlib.Path.cwd() / "ancova_data.csv", index=False)  # doctest: +SKIP
     """
+    if pre_treatment_means is None:
+        pre_treatment_means = np.array([10, 12])
     group = np.random.choice(2, size=N)
     pre = np.random.normal(loc=pre_treatment_means[group])
     post = pre + treatment_effect * group + np.random.normal(size=N) * sigma
@@ -310,7 +333,7 @@ def generate_ancova_data(
     return df
 
 
-def generate_geolift_data():
+def generate_geolift_data() -> pd.DataFrame:
     """Generate synthetic data for a geolift example. This will consists of 6 untreated
     countries. The treated unit `Denmark` is a weighted combination of the untreated
     units. We additionally specify a treatment effect which takes effect after the
@@ -360,7 +383,7 @@ def generate_geolift_data():
     return df
 
 
-def generate_multicell_geolift_data():
+def generate_multicell_geolift_data() -> pd.DataFrame:
     """Generate synthetic data for a geolift example. This will consists of 6 untreated
     countries. The treated unit `Denmark` is a weighted combination of the untreated
     units. We additionally specify a treatment effect which takes effect after the
@@ -422,7 +445,9 @@ def generate_multicell_geolift_data():
 # -----------------
 
 
-def generate_seasonality(n=12, amplitude=1, length_scale=0.5):
+def generate_seasonality(
+    n: int = 12, amplitude: int = 1, length_scale: float = 0.5
+) -> np.ndarray:
     """Generate monthly seasonality by sampling from a Gaussian process with a
     Gaussian kernel, using numpy code"""
     # Generate the covariance matrix
@@ -436,14 +461,26 @@ def generate_seasonality(n=12, amplitude=1, length_scale=0.5):
     return seasonality
 
 
-def periodic_kernel(x1, x2, period=1, length_scale=1, amplitude=1):
+def periodic_kernel(
+    x1: np.ndarray,
+    x2: np.ndarray,
+    period: int = 1,
+    length_scale: float = 1.0,
+    amplitude: int = 1,
+) -> np.ndarray:
     """Generate a periodic kernel for gaussian process"""
     return amplitude**2 * np.exp(
         -2 * np.sin(np.pi * np.abs(x1 - x2) / period) ** 2 / length_scale**2
     )
 
 
-def create_series(n=52, amplitude=1, length_scale=2, n_years=4, intercept=3):
+def create_series(
+    n: int = 52,
+    amplitude: int = 1,
+    length_scale: int = 2,
+    n_years: int = 4,
+    intercept: int = 3,
+) -> np.ndarray:
     """
     Returns numpy tile with generated seasonality data repeated over
     multiple years
@@ -452,3 +489,159 @@ def create_series(n=52, amplitude=1, length_scale=2, n_years=4, intercept=3):
         generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + intercept,
         n_years,
     )
+
+
+def generate_staggered_did_data(
+    n_units: int = 50,
+    n_time_periods: int = 20,
+    treatment_cohorts: dict[int, int] | None = None,
+    treatment_effects: dict[int, float] | None = None,
+    unit_fe_scale: float = 2.0,
+    time_fe_scale: float = 1.0,
+    sigma: float = 0.5,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """
+    Generate synthetic panel data with staggered treatment adoption.
+
+    Creates a balanced panel dataset where different cohorts of units receive
+    treatment at different times. Supports dynamic treatment effects that vary
+    by event-time (time relative to treatment).
+
+    Parameters
+    ----------
+    n_units : int, default=50
+        Total number of units in the panel.
+    n_time_periods : int, default=20
+        Number of time periods in the panel.
+    treatment_cohorts : dict[int, int], optional
+        Dictionary mapping treatment time to number of units in that cohort.
+        Units not assigned to any cohort are never-treated.
+        Default: {5: 10, 10: 10, 15: 10} (3 cohorts of 10 units each,
+        leaving 20 never-treated units).
+    treatment_effects : dict[int, float], optional
+        Dictionary mapping event-time (t - G) to treatment effect.
+        Event-time 0 is the first treated period.
+        Default: {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5} with constant effect
+        of 2.5 for all subsequent periods.
+    unit_fe_scale : float, default=2.0
+        Scale of unit fixed effects (drawn from Normal(0, unit_fe_scale)).
+    time_fe_scale : float, default=1.0
+        Scale of time fixed effects (drawn from Normal(0, time_fe_scale)).
+    sigma : float, default=0.5
+        Standard deviation of idiosyncratic noise.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        Panel data with columns:
+        - unit: Unit identifier
+        - time: Time period
+        - treated: Binary indicator (1 if treated at time t, 0 otherwise)
+        - treatment_time: Time of treatment adoption (np.inf for never-treated)
+        - y: Observed outcome
+        - y0: Counterfactual outcome (for validation)
+        - tau: True treatment effect (for validation)
+
+    Examples
+    --------
+    >>> from causalpy.data.simulate_data import generate_staggered_did_data
+    >>> df = generate_staggered_did_data(n_units=30, n_time_periods=15, seed=42)
+    >>> df.head()
+       unit  time  treated  treatment_time  ...
+
+    Notes
+    -----
+    The data generating process is:
+
+    .. math::
+
+        Y_{it} = \\alpha_i + \\lambda_t + \\tau_{it} \\cdot D_{it} + \\varepsilon_{it}
+
+    where :math:`\\alpha_i` is the unit fixed effect, :math:`\\lambda_t` is the
+    time fixed effect, :math:`D_{it}` is the treatment indicator, and
+    :math:`\\tau_{it}` is the dynamic treatment effect that depends on
+    event-time :math:`e = t - G_i`.
+    """
+    if seed is not None:
+        local_rng = np.random.default_rng(seed)
+    else:
+        local_rng = np.random.default_rng()
+
+    # Default treatment cohorts: 3 cohorts at times 5, 10, 15
+    if treatment_cohorts is None:
+        treatment_cohorts = {5: 10, 10: 10, 15: 10}
+
+    # Default dynamic treatment effects: ramp up then stabilize
+    if treatment_effects is None:
+        treatment_effects = {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5}
+
+    # Validate cohort assignments don't exceed n_units
+    total_treated = sum(treatment_cohorts.values())
+    if total_treated > n_units:
+        raise ValueError(
+            f"Total units in treatment cohorts ({total_treated}) "
+            f"exceeds n_units ({n_units})"
+        )
+
+    # Generate unit fixed effects
+    unit_fe = local_rng.normal(0, unit_fe_scale, n_units)
+
+    # Generate time fixed effects
+    time_fe = local_rng.normal(0, time_fe_scale, n_time_periods)
+
+    # Assign treatment times to units
+    treatment_times = np.full(n_units, np.inf)  # Default: never treated
+    unit_idx = 0
+    for g, n_cohort in treatment_cohorts.items():
+        treatment_times[unit_idx : unit_idx + n_cohort] = g
+        unit_idx += n_cohort
+
+    # Shuffle treatment assignments
+    local_rng.shuffle(treatment_times)
+
+    # Build panel data
+    rows = []
+    for i in range(n_units):
+        for t in range(n_time_periods):
+            g_i = treatment_times[i]
+            is_treated = t >= g_i
+
+            # Counterfactual outcome (no treatment)
+            y0 = unit_fe[i] + time_fe[t]
+
+            # Treatment effect based on event-time
+            if is_treated:
+                event_time = int(t - g_i)
+                # Use specified effect or last available effect for later periods
+                if event_time in treatment_effects:
+                    tau = treatment_effects[event_time]
+                else:
+                    # Use the effect for the maximum specified event-time
+                    max_event_time = max(treatment_effects.keys())
+                    tau = treatment_effects[max_event_time]
+            else:
+                tau = 0.0
+
+            # Add noise
+            epsilon = local_rng.normal(0, sigma)
+
+            # Observed outcome
+            y = y0 + tau + epsilon
+
+            rows.append(
+                {
+                    "unit": i,
+                    "time": t,
+                    "treated": int(is_treated),
+                    "treatment_time": g_i,
+                    "y": y,
+                    "y0": y0,
+                    "tau": tau,
+                }
+            )
+
+    df = pd.DataFrame(rows)
+    return df

@@ -8,10 +8,16 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init lint check_lint test uml html cleandocs doctest help
+.PHONY: init setup lint check_lint test uml html cleandocs doctest help
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
+
+setup: ## Set up complete dev environment (run after conda activate CausalPy)
+	python -m pip install --no-deps -e .
+	python -m pip install -e '.[dev,docs,test,lint]'
+	pre-commit install
+	@echo "Development environment ready!"
 
 lint: ## Run ruff linter and formatter
 	ruff check --fix .

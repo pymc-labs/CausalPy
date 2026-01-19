@@ -16,4 +16,7 @@ dependencies:
   - statsmodels
   - xarray>=v2022.11.0
   - pymc-extras>=0.3.0
-  - python>=3.11
+  - pymc-bart
+  - python>=3.12
+  - pip
+  - "marimo[mcp]"

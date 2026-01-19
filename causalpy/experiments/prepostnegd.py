@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 Pretest/posttest nonequivalent group design
 """
 
-from typing import List
+from typing import Any, Literal
 
 import arviz as az
 import numpy as np
@@ -31,6 +31,7 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
@@ -94,24 +95,34 @@ class PrePostNEGD(BaseExperiment):
         formula: str,
         group_variable_name: str,
         pretreatment_variable_name: str,
-        model=None,
-        **kwargs,
-    ):
+        model: PyMCModel | None = None,
+        **kwargs: dict,
+    ) -> None:
         super().__init__(model=model)
+        self.causal_impact: xr.DataArray
+        self.pred_xi: np.ndarray
+        self.pred_untreated: az.InferenceData
+        self.pred_treated: az.InferenceData
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy."""
         dm = model_matrix(self.formula, self.data)
         self.labels = list(dm.rhs.columns)
         self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         self.rhs_matrix_spec = dm.rhs.model_spec
         self.outcome_variable_name = dm.lhs.columns[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -126,6 +137,8 @@ class PrePostNEGD(BaseExperiment):
             coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -139,6 +152,7 @@ class PrePostNEGD(BaseExperiment):
         else:
             raise ValueError("Model type not recognized")
 
+        assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data
@@ -198,7 +212,7 @@ class PrePostNEGD(BaseExperiment):
 
         raise NameError("Unable to find coefficient name for the treatment effect")
 
-    def _causal_impact_summary_stat(self, round_to) -> str:
+    def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
         ci = (
@@ -208,7 +222,7 @@ class PrePostNEGD(BaseExperiment):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
-    def summary(self, round_to=None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
         :param round_to:
@@ -222,8 +236,8 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to=None, **kwargs
-    ) -> tuple[plt.Figure, List[plt.Axes]]:
+        self, round_to: int | None = None, **kwargs: dict
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
@@ -273,3 +287,35 @@ class PrePostNEGD(BaseExperiment):
         az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for PrePostNEGD.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_did(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )

@@ -31,6 +31,7 @@ multi_cell_geolift.ipynb
 did_skl.ipynb
 did_pymc.ipynb
 did_pymc_banks.ipynb
+staggered_did_pymc.ipynb
 :::
 
 :::{toctree}
@@ -39,7 +40,16 @@ did_pymc_banks.ipynb
 
 its_skl.ipynb
 its_pymc.ipynb
+its_post_intervention_analysis.ipynb
 its_covid.ipynb
+its_lift_test.ipynb
+:::
+
+:::{toctree}
+:caption: Comparative Interrupted Time Series
+:maxdepth: 1
+
+its_pymc_comparative.ipynb
 :::
 
 :::{toctree}
@@ -64,6 +74,7 @@ rkink_pymc.ipynb
 
 iv_pymc.ipynb
 iv_weak_instruments.ipynb
+iv_vs_priors.ipynb
 :::
 
 :::{toctree}

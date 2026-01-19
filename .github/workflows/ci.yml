@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +24,9 @@ jobs:
       - name: Setup environment
         run: pip install -e .[test]
       - name: Run doctests
-        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
+        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
       - name: Run extra tests
-        run: pytest docs/source/.codespell/test_notebook_to_markdown.py
+        run: pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run tests
         run: pytest --cov-report=xml --no-cov-on-fail
       - name: Check codespell for notebooks
