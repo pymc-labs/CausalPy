@@ -114,7 +114,7 @@ class PrePostNEGD(BaseExperiment):
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy."""
+        """Build design matrices from formula and data using formulaic."""
         dm = model_matrix(self.formula, self.data)
         self.labels = list(dm.rhs.columns)
         self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())

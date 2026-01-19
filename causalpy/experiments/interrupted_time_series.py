@@ -57,7 +57,7 @@ class InterruptedTimeSeries(BaseExperiment):
         **INCLUSIVE**: Observations at exactly ``treatment_time`` are included in the
         post-intervention period (uses ``>=`` comparison).
     formula : str
-        A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
+        A statistical model formula using formulaic syntax (e.g., "y ~ 1 + t + C(month)").
     model : Union[PyMCModel, RegressorMixin], optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model.
@@ -155,7 +155,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices for pre and post intervention periods using patsy."""
+        """Build design matrices for pre and post intervention periods using formulaic."""
         # set things up with pre-intervention data
         dm = model_matrix(self.formula, self.datapre)
         self.labels = list(dm.rhs.columns)
@@ -163,9 +163,11 @@ class InterruptedTimeSeries(BaseExperiment):
         self.outcome_variable_name = dm.lhs.columns[0]
         self.pre_y, self.pre_X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         # process post-intervention data
-        new_dm = model_matrix(spec=self.matrix_spec, data=self.datapost)
-        self.post_X = new_dm.rhs.to_numpy()
-        self.post_y = new_dm.lhs.to_numpy()
+        dm_post = model_matrix(self.matrix_spec, self.datapost)
+        self.post_y, self.post_X = (dm_post.lhs.to_numpy(), dm_post.rhs.to_numpy())
+
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays for pre and post periods."""
         # turn into xarray.DataArray's
         self.pre_X = xr.DataArray(
             self.pre_X,
