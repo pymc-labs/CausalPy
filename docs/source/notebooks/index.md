@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Cross-sectional methods
 
 :::{toctree}
 :caption: ANCOVA
@@ -6,6 +8,41 @@
 
 ancova_pymc.ipynb
 :::
+
+:::{toctree}
+:caption: Regression Discontinuity
+:maxdepth: 1
+
+rd_skl.ipynb
+rd_pymc.ipynb
+rd_pymc_drinking.ipynb
+:::
+
+:::{toctree}
+:caption: Regression Kink Design
+:maxdepth: 1
+
+rkink_pymc.ipynb
+:::
+
+:::{toctree}
+:caption: Instrumental Variables Regression
+:maxdepth: 1
+
+iv_pymc.ipynb
+iv_weak_instruments.ipynb
+iv_vs_priors.ipynb
+:::
+
+:::{toctree}
+:caption: Inverse Propensity Score Weighting
+:maxdepth: 1
+
+inv_prop_pymc.ipynb
+inv_prop_latent.ipynb
+:::
+
+## Panel data methods
 
 :::{toctree}
 :caption: Synthetic Control
@@ -50,37 +87,4 @@ its_lift_test.ipynb
 :maxdepth: 1
 
 its_pymc_comparative.ipynb
-:::
-
-:::{toctree}
-:caption: Regression Discontinuity
-:maxdepth: 1
-
-rd_skl.ipynb
-rd_pymc.ipynb
-rd_pymc_drinking.ipynb
-:::
-
-:::{toctree}
-:caption: Regression Kink Design
-:maxdepth: 1
-
-rkink_pymc.ipynb
-:::
-
-:::{toctree}
-:caption: Instrumental Variables Regression
-:maxdepth: 1
-
-iv_pymc.ipynb
-iv_weak_instruments.ipynb
-iv_vs_priors.ipynb
-:::
-
-:::{toctree}
-:caption: Inverse Propensity Score Weighting
-:maxdepth: 1
-
-inv_prop_pymc.ipynb
-inv_prop_latent.ipynb
 :::
