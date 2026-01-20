@@ -229,7 +229,10 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if "post_treatment" in label and self.group_variable_name in label:
+            if (
+                self.post_treatment_variable_name in label
+                and self.group_variable_name in label
+            ):
                 new_x[:, i] = 0
         self.y_pred_counterfactual = self.model.predict(new_x)
 

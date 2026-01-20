@@ -23,7 +23,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
-from patsy import dmatrix
+from formulaic import model_matrix
 from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
@@ -1118,9 +1118,12 @@ class PropensityScore(PyMCModel):
                     priors["beta_ps"][1],
                     size=spline_knots + 4,
                 )
-                B = dmatrix(
+
+                ps_df = pd.DataFrame({"ps": p})
+                B = model_matrix(
                     "bs(ps, knots=knots, degree=3, include_intercept=True, lower_bound=0, upper_bound=1) - 1",
-                    {"ps": p, "knots": np.linspace(0, 1, spline_knots)},
+                    data=ps_df,
+                    context={"knots": np.linspace(0, 1, spline_knots)},
                 )
                 B_f = np.asarray(B, order="F")
                 splines_summed = pm.Deterministic(
