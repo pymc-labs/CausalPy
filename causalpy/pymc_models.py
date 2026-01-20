@@ -226,7 +226,12 @@ class PyMCModel(pm.Model):
 
             # Always use 2D format for consistency
             pm.set_data(
-                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                {
+                    "X": X.data,
+                    "y": np.zeros(
+                        (new_no_of_observations, n_treated_units), dtype=np.int32
+                    ),
+                },
                 coords={"obs_ind": obs_coords},
             )
 
