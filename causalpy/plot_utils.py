@@ -62,7 +62,7 @@ def plot_xY(
     kind : {"ribbon", "histogram", "spaghetti"}, optional
         Type of visualization. Default is "ribbon".
     ci_kind : {"hdi", "eti"}, optional
-        Type of interval for ribbon plots. Default is "hdi" (matching current behavior).
+        Type of interval for ribbon plots. Default is "hdi".
     num_samples : int, optional
         Number of posterior samples to plot for spaghetti visualization.
         Default is 50.
@@ -213,7 +213,12 @@ def _plot_histogram(
     plot_hdi_kwargs: dict[str, Any] | None,
     label: str | None,
 ) -> tuple[list[Line2D], None]:
-    """2D heatmap of marginal histograms over time (posterior density vs. time)."""
+    """Plot histogram visualization of the posterior as a 2D heatmap.
+
+    Columns are time points (x), rows are y-value bins; cell values are
+    per-time histogram counts, column-normalized for display. The posterior
+    mean line is overlaid on top.
+    """
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
 

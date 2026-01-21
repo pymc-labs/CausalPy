@@ -234,7 +234,7 @@ class BaseExperiment(ABC):
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             Type of visualization. Default is "ribbon".
         ci_kind : {"hdi", "eti"}, optional
-            Type of interval for ribbon plots. Default is "hdi" (matching current behavior).
+            Type of interval for ribbon plots. Default is "hdi".
         ci_prob : float, optional
             The size of the credible interval. Default is :data:`~causalpy.constants.HDI_PROB`.
         num_samples : int, optional
