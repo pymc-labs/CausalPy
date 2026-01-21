@@ -89,9 +89,9 @@ class BaseExperiment:
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             Type of visualization. Default is "ribbon".
         ci_kind : {"hdi", "eti"}, optional
-            Type of interval for ribbon plots. Default is "hdi" (matching current behavior).
+            Type of interval for ribbon plots. Default is "hdi".
         ci_prob : float, optional
-            The size of the credible interval. Default is 0.94 (matching current behavior).
+            The size of the credible interval. Default is 0.94.
         num_samples : int, optional
             Number of posterior samples to plot for spaghetti visualization.
             Default is 50.

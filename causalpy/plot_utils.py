@@ -54,13 +54,13 @@ def plot_xY(
     plot_hdi_kwargs : dict, optional
         Dictionary of keyword arguments passed to ax.plot().
     ci_prob : float, optional
-        The size of the credible interval. Default is 0.94 (matching current behavior).
+        The size of the credible interval. Default is 0.94.
     label : str, optional
         The plot label.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
         Type of visualization. Default is "ribbon".
     ci_kind : {"hdi", "eti"}, optional
-        Type of interval for ribbon plots. Default is "hdi" (matching current behavior).
+        Type of interval for ribbon plots. Default is "hdi".
     num_samples : int, optional
         Number of posterior samples to plot for spaghetti visualization.
         Default is 50.
@@ -180,58 +180,102 @@ def _plot_histogram(
     plot_hdi_kwargs: dict[str, Any] | None,
     label: str | None,
 ) -> tuple[list[Line2D], None]:
-    """Plot histogram visualization of posterior distribution."""
+    """Plot histogram visualization of posterior distribution as 2D heatmap.
+
+    Creates a 2D array where columns represent time points (x values) and rows
+    represent bins of y values. The values in the array are counts of posterior
+    samples in each bin at each time point. Visualized as a heatmap using
+    pcolormesh, with the posterior mean line overlaid.
+    """
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
 
     # Flatten posterior samples across chains and draws
     # Shape: [n_time_points, n_samples_total]
     Y_flat = Y.stack(sample=("chain", "draw"))
-
-    # Select a few key time points for visualization
     n_time_points = len(x)
-    if n_time_points <= 5:
-        time_indices = list(range(n_time_points))
+
+    # Define global y bins based on min/max across all time points
+    # This ensures consistent binning across all time points
+    y_min = float(Y_flat.min().values)
+    y_max = float(Y_flat.max().values)
+    n_bins = 50  # Number of bins for y-axis
+    y_bins = np.linspace(y_min, y_max, n_bins + 1)
+
+    # Create 2D array: [n_bins, n_time_points]
+    # Each column represents a time point, each row represents a y bin
+    histogram_2d = np.zeros((n_bins, n_time_points))
+
+    # Compute histogram for each time point using global bins
+    for t_idx in range(n_time_points):
+        samples = Y_flat.isel(obs_ind=t_idx).values
+        counts, _ = np.histogram(samples, bins=y_bins)
+        histogram_2d[:, t_idx] = counts
+
+    # Prepare x coordinates for pcolormesh
+    # pcolormesh needs edges, so we need to create edges from x values
+    if isinstance(x, pd.DatetimeIndex):
+        # For datetime indices, create edges by adding half the time step
+        if len(x) > 1:
+            # Calculate average time step
+            time_delta = (x[-1] - x[0]) / (len(x) - 1)
+            # Create edges: subtract half delta from each point, add final edge
+            x_start_edges = (x - time_delta / 2).values
+            x_final_edge = (x[-1] + time_delta / 2).to_numpy()
+            x_edges = np.concatenate([x_start_edges, [x_final_edge]])
+        else:
+            # Single time point - create edges manually
+            time_delta = pd.Timedelta(days=1)
+            x_edges = np.array(
+                [
+                    (x[0] - time_delta / 2).to_numpy(),
+                    (x[0] + time_delta / 2).to_numpy(),
+                ]
+            )
     else:
-        # Select first, middle, and last time points
-        time_indices = [0, n_time_points // 2, n_time_points - 1]
+        # For numeric arrays, convert to numpy array first for type safety
+        x_array = np.asarray(x)
+        if len(x_array) > 1:
+            x_diff = np.diff(x_array)
+            x_edges = np.concatenate(
+                [
+                    [x_array[0] - x_diff[0] / 2],
+                    x_array[1:] - x_diff / 2,
+                    [x_array[-1] + x_diff[-1] / 2],
+                ]
+            )
+        else:
+            # Single time point
+            x_edges = np.array([x_array[0] - 0.5, x_array[0] + 0.5])
 
-    handles = []
-    for i, idx in enumerate(time_indices):
-        # Get posterior samples for this time point
-        samples = Y_flat.isel(obs_ind=idx).values
+    # Create meshgrid for pcolormesh
+    X, Y_mesh = np.meshgrid(x_edges, y_bins)
 
-        # Create histogram
-        counts, bins = np.histogram(samples, bins=30)
-        bin_centers = (bins[:-1] + bins[1:]) / 2
+    # Get colormap and styling from kwargs
+    # Blues colormap: light (low counts) to dark (high counts)
+    cmap = plot_hdi_kwargs.get("cmap", "Blues")
+    alpha = plot_hdi_kwargs.get("alpha", 0.8)
 
-        # Normalize to make it visible on the plot
-        max_count = counts.max()
-        normalized_counts = (
-            counts / max_count * 0.1 if max_count > 0 else counts
-        )  # Scale to 10% of y-axis range
+    # Plot 2D histogram as heatmap using pcolormesh
+    # pcolormesh is better than imshow for datetime indices and non-uniform spacing
+    mesh = ax.pcolormesh(
+        X,
+        Y_mesh,
+        histogram_2d,
+        cmap=cmap,
+        alpha=alpha,
+        shading="flat",
+    )
 
-        # Plot histogram bars at the time point
-        color = plot_hdi_kwargs.get("color", f"C{i}")
-        alpha = plot_hdi_kwargs.get("alpha", 0.6)
+    handles = [mesh]
 
-        h = ax.barh(
-            bin_centers,
-            normalized_counts,
-            left=x[idx],
-            height=bins[1] - bins[0],
-            color=color,
-            alpha=alpha,
-            label=label if i == 0 else None,
-        )
-        handles.extend(h)
-
-    # Plot mean line
+    # Plot mean line on top
     mean_line = ax.plot(
         x,
         Y.mean(dim=["chain", "draw"]),
         ls="-",
-        color=plot_hdi_kwargs.get("color", "C0"),
+        color=plot_hdi_kwargs.get("color", "white"),
+        linewidth=2,
         label=label if label else "Posterior mean",
     )
     handles.extend(mean_line)
