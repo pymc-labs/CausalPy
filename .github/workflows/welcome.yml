@@ -14,10 +14,10 @@ jobs:
   welcome:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/first-interaction@v1
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: |
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |
             👋 **Welcome to CausalPy, @${{ github.actor }}!**
 
             Thank you for opening your first issue! We appreciate you taking the time to post this.
@@ -29,7 +29,7 @@ jobs:
 
             A maintainer will take a look soon. Thanks for being part of the CausalPy community! 🎉
 
-          pr-message: |
+          pr_message: |
             👋 **Welcome to CausalPy, @${{ github.actor }}!**
 
             Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
@@ -50,7 +50,7 @@ jobs:
       # FIRST_TIME_CONTRIBUTOR: contributed elsewhere but not to this repo
       - name: Add first-time-contributor label
         if: github.event_name == 'pull_request' && (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' || github.event.pull_request.author_association == 'FIRST_TIMER')
-        uses: actions/github-script@v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             await github.rest.issues.addLabels({
