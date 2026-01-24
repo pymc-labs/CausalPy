@@ -10,6 +10,41 @@ This script runs Jupyter notebooks from `docs/source/notebooks/` to validate the
 4. **Guards widget updates** — Patches nbclient to ignore display_id assertion errors
 5. **Discards outputs** — Only checks for errors, doesn't save results
 
+## Dependencies
+
+The notebook runner mirrors the CI setup and expects a full docs/test environment.
+
+1. **Install Python dependencies**
+
+   ```bash
+   pip install -e ".[test,docs]"
+   ```
+
+   This brings in Papermill, Jupyter, nbclient, and notebook-related dependencies.
+
+2. **Install Graphviz (system dependency)**
+
+   - macOS:
+     ```bash
+     brew install graphviz
+     ```
+   - Ubuntu/Debian:
+     ```bash
+     sudo apt-get update && sudo apt-get install -y graphviz
+     ```
+
+3. **Optional: parallel execution**
+
+   ```bash
+   pip install joblib
+   ```
+
+## Notes
+
+- The runner executes using the `python3` Jupyter kernel. Ensure your environment
+  provides that kernel (e.g., from `ipykernel` installed via the docs extras).
+- The CI workflow uses Python 3.12 and installs the same extras.
+
 ## Usage
 
 ```bash
