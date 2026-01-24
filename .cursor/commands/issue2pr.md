@@ -21,6 +21,12 @@ Before starting, verify the GitHub CLI is available and authenticated:
    ```
    - If not authenticated, guide: `gh auth login`
 
+3. **Sandbox considerations:**
+   - GitHub CLI commands require access to credentials stored outside the workspace
+   - **Always use `required_permissions: ["all"]`** for any `gh` commands to bypass sandbox restrictions
+   - If authentication fails with "token is invalid" errors inside the sandbox, this is expected - request elevated permissions
+   - Commands that need `all` permissions: `gh auth status`, `gh issue view`, `gh pr create`, `gh push`, etc.
+
 ## Workflow
 
 ### Phase 1: Issue Discovery
@@ -86,6 +92,7 @@ Before starting, verify the GitHub CLI is available and authenticated:
       ```
       - If tests fail, diagnose and fix
       - Add new tests if coverage is insufficient
+      - **Note:** Running a subset of tests (e.g., a single test file) will report coverage failure. This is expected - the coverage threshold applies to the full test suite, not individual files.
 
    c. **If stuck after 3 iterations:**
       > "I've encountered an issue I need help with:
@@ -102,12 +109,32 @@ Before starting, verify the GitHub CLI is available and authenticated:
 
 ### Phase 3: Commit and PR Preparation
 
-1. **Stage and commit changes:**
+1. **Check for unrelated changes:**
+   Before committing, check for unrelated unstaged changes:
+   ```bash
+   git status
+   ```
+   - If unrelated changes exist (e.g., other files you've edited), stash them:
+     ```bash
+     git stash push -m "unrelated changes" -- <file1> <file2>
+     ```
+   - This prevents conflicts when pre-commit hooks modify files
+
+2. **Stage and commit changes:**
    - Use atomic, focused commits
    - Write clear commit messages in imperative mood
    - Reference the issue number: `Fixes #<number>` or `Addresses #<number>`
 
-2. **Generate PR markdown file:**
+   **Pre-commit auto-fixes:** Pre-commit hooks may modify files during `git commit` (formatting, badge regeneration, etc.). If this happens:
+   - The commit will fail with "files were modified by this hook"
+   - Re-add the modified files and commit again:
+     ```bash
+     git add <modified-files>
+     git commit -m "..."
+     ```
+   - Common auto-generated files to include: `docs/source/_static/interrogate_badge.svg`
+
+3. **Generate PR markdown file:**
    Create `.github/pr_summaries/<issue_number> - <short-description>.md` with:
 
    ```markdown
@@ -135,7 +162,7 @@ Before starting, verify the GitHub CLI is available and authenticated:
    - [ ] Follows project coding conventions
    ```
 
-3. **Present PR draft to user:**
+4. **Present PR draft to user:**
    > "I've prepared the following for PR creation:
    >
    > **Branch:** `issue-<number>-<description>`
@@ -147,6 +174,13 @@ Before starting, verify the GitHub CLI is available and authenticated:
    > Ready to create the pull request? (yes/no)"
 
    **Wait for user confirmation.**
+
+5. **Handle user edits (if any):**
+   If the user makes formatting or other tweaks to committed files before pushing:
+   ```bash
+   git add <edited-files>
+   git commit --amend --no-edit
+   ```
 
 ### Phase 4: Create Pull Request
 

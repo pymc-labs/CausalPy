@@ -40,6 +40,7 @@ DATASETS = {
     "pisa18": {"filename": "PISA18sampleScale.csv"},
     "nets": {"filename": "nets_df.csv"},
     "lalonde": {"filename": "lalonde.csv"},
+    "zipcodes": {"filename": "zipcodes_data.csv"},
     "nevo": {"filename": "data_nevo.csv"},
 }
 
@@ -80,6 +81,9 @@ def load_data(dataset: str) -> pd.DataFrame:
         - ``"pisa18"`` - PISA 2018 sample data
         - ``"nets"`` - National Supported Work Demonstration dataset
         - ``"lalonde"`` - LaLonde dataset for propensity score analysis
+        - ``"zipcodes"`` - Geo-experimentation zipcode data for comparative interrupted time
+          series analysis. Based on synthetic data from Juan Orduz's blog post on
+          `time-based regression for geo-experiments <https://juanitorduz.github.io/time_based_regression_pymc/>`_.
 
     Returns
     -------
