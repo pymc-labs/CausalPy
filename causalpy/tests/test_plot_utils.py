@@ -22,8 +22,8 @@ import pytest
 import xarray as xr
 
 from causalpy.plot_utils import (
-    _log_hdi_type_effect_summary_once,
-    _log_hdi_type_info_once,
+    _log_response_type_effect_summary_once,
+    _log_response_type_info_once,
     add_hdi_annotation,
     get_hdi_to_df,
 )
@@ -155,19 +155,19 @@ class TestAddHdiAnnotation:
         plt.close(fig)
 
 
-class TestHdiTypeLogging:
-    """Tests for the HDI type logging functions."""
+class TestResponseTypeLogging:
+    """Tests for the response type logging functions."""
 
-    def test_log_hdi_type_info_once_callable(self):
-        """Test that _log_hdi_type_info_once is callable without error."""
+    def test_log_response_type_info_once_callable(self):
+        """Test that _log_response_type_info_once is callable without error."""
         # Clear the cache to ensure fresh state
-        _log_hdi_type_info_once.cache_clear()
+        _log_response_type_info_once.cache_clear()
         # Should not raise
-        _log_hdi_type_info_once()
+        _log_response_type_info_once()
 
-    def test_log_hdi_type_effect_summary_once_callable(self):
-        """Test that _log_hdi_type_effect_summary_once is callable without error."""
+    def test_log_response_type_effect_summary_once_callable(self):
+        """Test that _log_response_type_effect_summary_once is callable without error."""
         # Clear the cache to ensure fresh state
-        _log_hdi_type_effect_summary_once.cache_clear()
+        _log_response_type_effect_summary_once.cache_clear()
         # Should not raise
-        _log_hdi_type_effect_summary_once()
+        _log_response_type_effect_summary_once()

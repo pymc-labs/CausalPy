@@ -12,9 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Tests for hdi_type parameter functionality across experiment classes.
+Tests for response_type parameter functionality across experiment classes.
 
-These tests specifically target the hdi_type="prediction" and show_hdi_annotation=True
+These tests specifically target the response_type="prediction" and show_hdi_annotation=True
 branches to ensure code coverage.
 """
 
@@ -144,13 +144,13 @@ def prepostnegd_result():
     return result
 
 
-class TestHdiTypePlotting:
-    """Test hdi_type parameter for plotting methods."""
+class TestResponseTypePlotting:
+    """Test response_type parameter for plotting methods."""
 
     @pytest.mark.integration
     def test_its_plot_prediction_hdi(self, its_result):
-        """Test ITS plot with hdi_type='prediction'."""
-        fig, ax = its_result.plot(hdi_type="prediction")
+        """Test ITS plot with response_type='prediction'."""
+        fig, ax = its_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -165,16 +165,16 @@ class TestHdiTypePlotting:
 
     @pytest.mark.integration
     def test_its_plot_prediction_with_annotation(self, its_result):
-        """Test ITS plot with both hdi_type='prediction' and annotation."""
-        fig, ax = its_result.plot(hdi_type="prediction", show_hdi_annotation=True)
+        """Test ITS plot with both response_type='prediction' and annotation."""
+        fig, ax = its_result.plot(response_type="prediction", show_hdi_annotation=True)
         title = ax[0].get_title()
         assert "posterior predictive" in title or "ŷ" in title
         plt.close(fig)
 
     @pytest.mark.integration
     def test_sc_plot_prediction_hdi(self, sc_result):
-        """Test Synthetic Control plot with hdi_type='prediction'."""
-        fig, ax = sc_result.plot(hdi_type="prediction")
+        """Test Synthetic Control plot with response_type='prediction'."""
+        fig, ax = sc_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -188,8 +188,8 @@ class TestHdiTypePlotting:
 
     @pytest.mark.integration
     def test_did_plot_prediction_hdi(self, did_result):
-        """Test DiD plot with hdi_type='prediction'."""
-        fig, ax = did_result.plot(hdi_type="prediction")
+        """Test DiD plot with response_type='prediction'."""
+        fig, ax = did_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -203,8 +203,8 @@ class TestHdiTypePlotting:
 
     @pytest.mark.integration
     def test_rd_plot_prediction_hdi(self, rd_result):
-        """Test RD plot with hdi_type='prediction'."""
-        fig, ax = rd_result.plot(hdi_type="prediction")
+        """Test RD plot with response_type='prediction'."""
+        fig, ax = rd_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -218,8 +218,8 @@ class TestHdiTypePlotting:
 
     @pytest.mark.integration
     def test_rkink_plot_prediction_hdi(self, rkink_result):
-        """Test RegressionKink plot with hdi_type='prediction'."""
-        fig, ax = rkink_result.plot(hdi_type="prediction")
+        """Test RegressionKink plot with response_type='prediction'."""
+        fig, ax = rkink_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -233,8 +233,8 @@ class TestHdiTypePlotting:
 
     @pytest.mark.integration
     def test_prepostnegd_plot_prediction_hdi(self, prepostnegd_result):
-        """Test PrePostNEGD plot with hdi_type='prediction'."""
-        fig, ax = prepostnegd_result.plot(hdi_type="prediction")
+        """Test PrePostNEGD plot with response_type='prediction'."""
+        fig, ax = prepostnegd_result.plot(response_type="prediction")
         assert fig is not None
         plt.close(fig)
 
@@ -248,37 +248,37 @@ class TestHdiTypePlotting:
         plt.close(fig)
 
 
-class TestHdiTypeEffectSummary:
-    """Test hdi_type parameter for effect_summary methods."""
+class TestResponseTypeEffectSummary:
+    """Test response_type parameter for effect_summary methods."""
 
     @pytest.mark.integration
     def test_its_effect_summary_prediction(self, its_result):
-        """Test ITS effect_summary with hdi_type='prediction'."""
-        summary = its_result.effect_summary(hdi_type="prediction")
+        """Test ITS effect_summary with response_type='prediction'."""
+        summary = its_result.effect_summary(response_type="prediction")
         assert summary is not None
         assert hasattr(summary, "table")
 
     @pytest.mark.integration
     def test_sc_effect_summary_prediction(self, sc_result):
-        """Test Synthetic Control effect_summary with hdi_type='prediction'."""
-        summary = sc_result.effect_summary(hdi_type="prediction")
+        """Test Synthetic Control effect_summary with response_type='prediction'."""
+        summary = sc_result.effect_summary(response_type="prediction")
         assert summary is not None
         assert hasattr(summary, "table")
 
 
-class TestHdiTypeGetPlotData:
-    """Test hdi_type parameter for get_plot_data_bayesian methods."""
+class TestResponseTypeGetPlotData:
+    """Test response_type parameter for get_plot_data_bayesian methods."""
 
     @pytest.mark.integration
     def test_its_get_plot_data_prediction(self, its_result):
-        """Test ITS get_plot_data_bayesian with hdi_type='prediction'."""
-        df = its_result.get_plot_data_bayesian(hdi_type="prediction")
+        """Test ITS get_plot_data_bayesian with response_type='prediction'."""
+        df = its_result.get_plot_data_bayesian(response_type="prediction")
         assert isinstance(df, pd.DataFrame)
         assert "prediction" in df.columns
 
     @pytest.mark.integration
     def test_sc_get_plot_data_prediction(self, sc_result):
-        """Test Synthetic Control get_plot_data_bayesian with hdi_type='prediction'."""
-        df = sc_result.get_plot_data_bayesian(hdi_type="prediction")
+        """Test Synthetic Control get_plot_data_bayesian with response_type='prediction'."""
+        df = sc_result.get_plot_data_bayesian(response_type="prediction")
         assert isinstance(df, pd.DataFrame)
         assert "prediction" in df.columns

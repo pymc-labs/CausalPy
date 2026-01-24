@@ -26,9 +26,9 @@ from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
-# Type alias for HDI type - reuse from plot_utils for consistency
+# Type alias for response type - reuse from plot_utils for consistency
 # Using semantic names ("expectation", "prediction") rather than internal variable names ("mu", "y_hat")
-from causalpy.plot_utils import HdiType
+from causalpy.plot_utils import ResponseType
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -346,7 +346,7 @@ class PyMCModel(pm.Model):
         self,
         y_true: xr.DataArray,
         y_pred: az.InferenceData,
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
     ) -> xr.DataArray:
         """
         Calculate the causal impact as the difference between observed and predicted values.
@@ -364,14 +364,13 @@ class PyMCModel(pm.Model):
             The observed outcome values with dimensions ["obs_ind", "treated_units"].
         y_pred : az.InferenceData
             The posterior predictive samples containing the predicted values.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI to use for impact calculation:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to use for impact calculation:
 
             - ``"expectation"``: Uses the model expectation (μ). Excludes observation
               noise, focusing on the systematic causal effect.
             - ``"prediction"``: Uses the full posterior predictive (ŷ). Includes
               observation noise, showing the full predictive uncertainty.
-
         Returns
         -------
         xr.DataArray
@@ -379,7 +378,7 @@ class PyMCModel(pm.Model):
 
         Notes
         -----
-        When using ``hdi_type="expectation"`` (the posterior expectation), the
+        When using ``response_type="expectation"`` (the posterior expectation), the
         uncertainty in the impact reflects:
 
         - Parameter uncertainty in the fitted model
@@ -389,20 +388,20 @@ class PyMCModel(pm.Model):
 
         - Observation-level noise (sigma)
 
-        When using ``hdi_type="prediction"``, the uncertainty also includes
+        When using ``response_type="prediction"``, the uncertainty also includes
         observation-level noise, resulting in wider intervals.
 
         .. note::
 
             **REFACTOR TARGET**: Currently, experiment classes store impacts using
-            the default ``hdi_type="expectation"`` at fit time. When users call
-            ``plot(hdi_type="prediction")``, the prediction-based impact is calculated
+            the default ``response_type="expectation"`` at fit time. When users call
+            ``plot(response_type="prediction")``, the prediction-based impact is calculated
             on-the-fly in the ``_bayesian_plot()`` methods. This approach works but
             duplicates the decision logic. A future refactor could unify this by
             either storing both variants or always calculating on-demand.
         """
-        # Map semantic hdi_type to internal variable name
-        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        # Map semantic response_type to internal variable name
+        var_name = "mu" if response_type == "expectation" else "y_hat"
         y_hat = y_pred["posterior_predictive"][var_name]
         # Ensure the coordinate type and values match along obs_ind so xarray can align
         if "obs_ind" in y_hat.dims and "obs_ind" in getattr(y_true, "coords", {}):

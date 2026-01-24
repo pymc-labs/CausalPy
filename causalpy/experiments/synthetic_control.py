@@ -28,9 +28,9 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import (
-    HdiType,
-    _log_hdi_type_effect_summary_once,
-    _log_hdi_type_info_once,
+    ResponseType,
+    _log_response_type_effect_summary_once,
+    _log_response_type_info_once,
     add_hdi_annotation,
     get_hdi_to_df,
     plot_xY,
@@ -224,7 +224,7 @@ class SyntheticControl(BaseExperiment):
         self.post_pred = self.model.predict(X=self.datapost_control)
 
         # TODO: REFACTOR TARGET - Currently, stored impacts use the model expectation
-        # (mu) by default. When users request hdi_type="prediction" in plot(), the
+        # (mu) by default. When users request response_type="prediction" in plot(), the
         # y_hat-based impact is calculated on-the-fly in _bayesian_plot(). This works
         # but is not ideal: consider storing both mu and y_hat based impacts, or
         # refactoring to always calculate on-demand. See calculate_impact() for details.
@@ -275,7 +275,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
         show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -290,8 +290,8 @@ class SyntheticControl(BaseExperiment):
         treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI (Highest Density Interval) to display:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to display in the HDI band:
 
             - ``"expectation"``: HDI of the model expectation (μ). This shows
               uncertainty from model parameters only, excluding observation noise.
@@ -313,12 +313,12 @@ class SyntheticControl(BaseExperiment):
             The matplotlib figure and axes.
         """
         # Log HDI type info once per session
-        _log_hdi_type_info_once()
+        _log_response_type_info_once()
 
         counterfactual_label = "Counterfactual"
 
-        # Select the variable name based on hdi_type
-        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        # Select the variable name based on response_type
+        var_name = "mu" if response_type == "expectation" else "y_hat"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
@@ -390,18 +390,18 @@ class SyntheticControl(BaseExperiment):
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
 
         # MIDDLE PLOT -----------------------------------------------
-        # Calculate impact for plotting based on hdi_type
-        if hdi_type == "expectation":
+        # Calculate impact for plotting based on response_type
+        if response_type == "expectation":
             # Use stored mu-based impact
             pre_impact_for_plot = self.pre_impact
             post_impact_for_plot = self.post_impact
         else:
             # Calculate y_hat-based impact on demand
             pre_impact_for_plot = self.model.calculate_impact(
-                self.datapre_treated, self.pre_pred, hdi_type="prediction"
+                self.datapre_treated, self.pre_pred, response_type="prediction"
             )
             post_impact_for_plot = self.model.calculate_impact(
-                self.datapost_treated, self.post_pred, hdi_type="prediction"
+                self.datapost_treated, self.post_pred, response_type="prediction"
             )
 
         plot_xY(
@@ -430,8 +430,8 @@ class SyntheticControl(BaseExperiment):
 
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
-        # Calculate cumulative impact based on hdi_type
-        if hdi_type == "expectation":
+        # Calculate cumulative impact based on response_type
+        if response_type == "expectation":
             post_impact_cumulative_for_plot = self.post_impact_cumulative
         else:
             post_impact_cumulative_for_plot = self.model.calculate_cumulative_impact(
@@ -490,7 +490,7 @@ class SyntheticControl(BaseExperiment):
 
         # Add HDI type annotation to the top subplot's title
         if show_hdi_annotation:
-            add_hdi_annotation(ax[0], hdi_type)
+            add_hdi_annotation(ax[0], response_type)
 
         return fig, ax
 
@@ -620,7 +620,7 @@ class SyntheticControl(BaseExperiment):
         self,
         hdi_prob: float = 0.94,
         treated_unit: str | None = None,
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
@@ -633,8 +633,8 @@ class SyntheticControl(BaseExperiment):
         treated_unit : str, optional
             Which treated unit to extract data for. Must be a string name of the treated unit.
             If None, uses the first treated unit.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI to use for predictions and impact:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to use for predictions and impact:
 
             - ``"expectation"``: Uses the model expectation (μ). Excludes observation
               noise, focusing on the systematic causal effect.
@@ -644,8 +644,8 @@ class SyntheticControl(BaseExperiment):
         if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
 
-        # Map semantic hdi_type to internal variable name
-        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        # Map semantic response_type to internal variable name
+        var_name = "mu" if response_type == "expectation" else "y_hat"
 
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -700,17 +700,17 @@ class SyntheticControl(BaseExperiment):
         pre_data[[pred_lower_col, pred_upper_col]] = pre_lower_upper
         post_data[[pred_lower_col, pred_upper_col]] = post_lower_upper
 
-        # Impact data - select based on hdi_type
-        if hdi_type == "expectation":
+        # Impact data - select based on response_type
+        if response_type == "expectation":
             pre_impact = self.pre_impact
             post_impact = self.post_impact
         else:
             # Calculate y_hat-based impact on demand
             pre_impact = self.model.calculate_impact(
-                self.datapre_treated, self.pre_pred, hdi_type="prediction"
+                self.datapre_treated, self.pre_pred, response_type="prediction"
             )
             post_impact = self.model.calculate_impact(
-                self.datapost_treated, self.post_pred, hdi_type="prediction"
+                self.datapost_treated, self.post_pred, response_type="prediction"
             )
 
         pre_data["impact"] = (
@@ -772,7 +772,7 @@ class SyntheticControl(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
         **kwargs: Any,
     ) -> EffectSummary:
         """
@@ -802,8 +802,8 @@ class SyntheticControl(BaseExperiment):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            Type of HDI to compute for effect sizes:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            Response type to compute effect sizes:
 
             - ``"expectation"``: Effect size HDI based on model expectation (μ).
               Excludes observation noise, focusing on the systematic causal effect.
@@ -840,16 +840,19 @@ class SyntheticControl(BaseExperiment):
 
         # Log HDI type info once per session (for PyMC models only)
         if is_pymc:
-            _log_hdi_type_effect_summary_once()
+            _log_response_type_effect_summary_once()
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
-            self, window, treated_unit=treated_unit, hdi_type=hdi_type
+            self, window, treated_unit=treated_unit, response_type=response_type
         )
 
         # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
-            self, window_coords, treated_unit=treated_unit, hdi_type=hdi_type
+            self,
+            window_coords,
+            treated_unit=treated_unit,
+            response_type=response_type,
         )
 
         if is_pymc:

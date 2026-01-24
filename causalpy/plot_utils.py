@@ -28,45 +28,45 @@ from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
-# Type alias for HDI type parameter
-HdiType = Literal["expectation", "prediction"]
+# Type alias for response type parameter
+ResponseType = Literal["expectation", "prediction"]
 
 # Module-level logger
 logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
-def _log_hdi_type_info_once() -> None:
-    """Log HDI type information for plots once per session.
+def _log_response_type_info_once() -> None:
+    """Log response type information for plots once per session.
 
     This function uses lru_cache to ensure the message is only logged once,
     regardless of how many times plot() is called.
     """
     logger.info(
-        "HDI intervals in plots use 'expectation' by default (model mean, excluding "
+        "Plot intervals use response_type='expectation' by default (model mean, excluding "
         "observation noise). For full predictive uncertainty including observation "
-        "noise, use hdi_type='prediction'. To annotate plots with this information, "
+        "noise, use response_type='prediction'. To annotate plots with this information, "
         "use show_hdi_annotation=True."
     )
 
 
 @lru_cache(maxsize=1)
-def _log_hdi_type_effect_summary_once() -> None:
-    """Log HDI type information for effect_summary once per session.
+def _log_response_type_effect_summary_once() -> None:
+    """Log response type information for effect_summary once per session.
 
     This function uses lru_cache to ensure the message is only logged once,
     regardless of how many times effect_summary() is called.
     """
     logger.info(
-        "Effect size HDIs use 'expectation' by default (model mean, excluding "
+        "Effect size intervals use response_type='expectation' by default (model mean, excluding "
         "observation noise). For full predictive uncertainty including observation "
-        "noise, use hdi_type='prediction'."
+        "noise, use response_type='prediction'."
     )
 
 
 def add_hdi_annotation(
     ax: plt.Axes,
-    hdi_type: HdiType,
+    response_type: ResponseType,
     hdi_prob: float = 0.94,
 ) -> None:
     """Add HDI type information to an axes title.
@@ -80,8 +80,8 @@ def add_hdi_annotation(
     ----------
     ax : plt.Axes
         The matplotlib axes whose title should be updated.
-    hdi_type : {"expectation", "prediction"}
-        The type of HDI being displayed:
+    response_type : {"expectation", "prediction"}
+        The response type used for the HDI:
         - "expectation": HDI of the model expectation (μ), which excludes
           observation noise. Shows uncertainty from model parameters only.
         - "prediction": HDI of the posterior predictive (ŷ), which includes
@@ -99,7 +99,7 @@ def add_hdi_annotation(
     """
     hdi_pct = int(hdi_prob * 100)
 
-    if hdi_type == "expectation":
+    if response_type == "expectation":
         annotation = (
             f"Shaded: {hdi_pct}% HDI of model expectation (μ), excl. observation noise"
         )

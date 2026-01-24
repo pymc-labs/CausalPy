@@ -28,9 +28,9 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import (
-    HdiType,
-    _log_hdi_type_effect_summary_once,
-    _log_hdi_type_info_once,
+    ResponseType,
+    _log_response_type_effect_summary_once,
+    _log_response_type_info_once,
     add_hdi_annotation,
     get_hdi_to_df,
     plot_xY,
@@ -242,7 +242,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Calculate impact - all PyMC models now use 2D data with treated_units.
         # TODO: REFACTOR TARGET - Currently, stored impacts use the model expectation
-        # (mu) by default. When users request hdi_type="prediction" in plot(), the
+        # (mu) by default. When users request response_type="prediction" in plot(), the
         # y_hat-based impact is calculated on-the-fly in _bayesian_plot(). This works
         # but is not ideal: consider storing both mu and y_hat based impacts, or
         # refactoring to always calculate on-demand. See calculate_impact() for details.
@@ -596,7 +596,7 @@ class InterruptedTimeSeries(BaseExperiment):
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
         show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -608,8 +608,8 @@ class InterruptedTimeSeries(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2.
             Use None to return raw numbers.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI (Highest Density Interval) to display:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to display in the HDI band:
 
             - ``"expectation"``: HDI of the model expectation (μ). This shows
               uncertainty from model parameters only, excluding observation noise.
@@ -631,12 +631,12 @@ class InterruptedTimeSeries(BaseExperiment):
             The matplotlib figure and axes.
         """
         # Log HDI type info once per session
-        _log_hdi_type_info_once()
+        _log_response_type_info_once()
 
         counterfactual_label = "Counterfactual"
 
-        # Select the variable name based on hdi_type
-        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        # Select the variable name based on response_type
+        var_name = "mu" if response_type == "expectation" else "y_hat"
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
@@ -730,18 +730,18 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[0].set(title=title_str)
 
         # MIDDLE PLOT -----------------------------------------------
-        # Calculate impact for plotting based on hdi_type
-        if hdi_type == "expectation":
+        # Calculate impact for plotting based on response_type
+        if response_type == "expectation":
             # Use stored mu-based impact
             pre_impact_for_plot = self.pre_impact
             post_impact_for_plot = self.post_impact
         else:
             # Calculate y_hat-based impact on demand
             pre_impact_for_plot = self.model.calculate_impact(
-                self.pre_y, self.pre_pred, hdi_type="prediction"
+                self.pre_y, self.pre_pred, response_type="prediction"
             )
             post_impact_for_plot = self.model.calculate_impact(
-                self.post_y, self.post_pred, hdi_type="prediction"
+                self.post_y, self.post_pred, response_type="prediction"
             )
 
         pre_impact_plot = (
@@ -790,8 +790,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
-        # Calculate cumulative impact based on hdi_type
-        if hdi_type == "expectation":
+        # Calculate cumulative impact based on response_type
+        if response_type == "expectation":
             post_impact_cumulative_for_plot = self.post_impact_cumulative
         else:
             post_impact_cumulative_for_plot = self.model.calculate_cumulative_impact(
@@ -847,7 +847,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Add HDI type annotation to the top subplot's title
         if show_hdi_annotation:
-            add_hdi_annotation(ax[0], hdi_type)
+            add_hdi_annotation(ax[0], response_type)
 
         return fig, ax
 
@@ -943,7 +943,9 @@ class InterruptedTimeSeries(BaseExperiment):
         return (fig, ax)
 
     def get_plot_data_bayesian(
-        self, hdi_prob: float = 0.94, hdi_type: HdiType = "expectation"
+        self,
+        hdi_prob: float = 0.94,
+        response_type: ResponseType = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
@@ -953,17 +955,18 @@ class InterruptedTimeSeries(BaseExperiment):
         hdi_prob : float, default=0.94
             Probability for which the highest density interval will be computed.
             The default value is defined as the default from the :func:`arviz.hdi` function.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI to use for predictions and impact:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to use for predictions and impact:
 
             - ``"expectation"``: Uses the model expectation (μ). Excludes observation
               noise, focusing on the systematic causal effect.
             - ``"prediction"``: Uses the full posterior predictive (ŷ). Includes
               observation noise, showing the full predictive uncertainty.
         """
+
         if isinstance(self.model, PyMCModel):
-            # Map semantic hdi_type to internal variable name
-            var_name = "mu" if hdi_type == "expectation" else "y_hat"
+            # Map semantic response_type to internal variable name
+            var_name = "mu" if response_type == "expectation" else "y_hat"
             hdi_pct = int(round(hdi_prob * 100))
 
             pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
@@ -1012,17 +1015,17 @@ class InterruptedTimeSeries(BaseExperiment):
                     post_data.index
                 )
 
-            # Select impact based on hdi_type
-            if hdi_type == "expectation":
+            # Select impact based on response_type
+            if response_type == "expectation":
                 pre_impact = self.pre_impact
                 post_impact = self.post_impact
             else:
                 # Calculate y_hat-based impact on demand
                 pre_impact = self.model.calculate_impact(
-                    self.pre_y, self.pre_pred, hdi_type="prediction"
+                    self.pre_y, self.pre_pred, response_type="prediction"
                 )
                 post_impact = self.model.calculate_impact(
-                    self.post_y, self.post_pred, hdi_type="prediction"
+                    self.post_y, self.post_pred, response_type="prediction"
                 )
 
             pre_impact_mean = (
@@ -1103,7 +1106,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self,
         hdi_prob: float = 0.95,
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
     ) -> dict[str, Any]:
         """Analyze effect persistence between intervention and post-intervention periods.
 
@@ -1121,8 +1124,8 @@ class InterruptedTimeSeries(BaseExperiment):
             Probability for HDI interval (Bayesian models only)
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (Bayesian models only)
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI to use for effect analysis (Bayesian models only):
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to use for effect analysis (Bayesian models only):
 
             - ``"expectation"``: Uses the model expectation (μ). Excludes observation
               noise, focusing on the systematic causal effect.
@@ -1180,8 +1183,8 @@ class InterruptedTimeSeries(BaseExperiment):
             # PyMC: Compute statistics using xarray operations
             from causalpy.reporting import _extract_hdi_bounds
 
-            # Select impact based on hdi_type
-            if hdi_type == "expectation":
+            # Select impact based on response_type
+            if response_type == "expectation":
                 intervention_impact = self.intervention_impact
                 post_intervention_impact = self.post_intervention_impact
                 intervention_impact_cumulative = self.intervention_impact_cumulative
@@ -1196,12 +1199,12 @@ class InterruptedTimeSeries(BaseExperiment):
                     obs_ind=self.data_post_intervention.index
                 )
                 intervention_impact = self.model.calculate_impact(
-                    intervention_y, self.intervention_pred, hdi_type="prediction"
+                    intervention_y, self.intervention_pred, response_type="prediction"
                 )
                 post_intervention_impact = self.model.calculate_impact(
                     post_intervention_y,
                     self.post_intervention_pred,
-                    hdi_type="prediction",
+                    response_type="prediction",
                 )
                 intervention_impact_cumulative = self.model.calculate_cumulative_impact(
                     intervention_impact
@@ -1336,7 +1339,7 @@ class InterruptedTimeSeries(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
         **kwargs: Any,
     ) -> EffectSummary:
         """
@@ -1367,8 +1370,8 @@ class InterruptedTimeSeries(BaseExperiment):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            Type of HDI to compute for effect sizes:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            Response type to compute effect sizes:
 
             - ``"expectation"``: Effect size HDI based on model expectation (μ).
               Excludes observation noise, focusing on the systematic causal effect.
@@ -1394,7 +1397,7 @@ class InterruptedTimeSeries(BaseExperiment):
         # Log HDI type info once per session (for PyMC models only)
         is_pymc = isinstance(self.model, PyMCModel)
         if is_pymc:
-            _log_hdi_type_effect_summary_once()
+            _log_response_type_effect_summary_once()
 
         # Handle period parameter for three-period designs
         if period is not None:
@@ -1441,20 +1444,26 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Extract windowed impact data using calculated window
             windowed_impact, window_coords = _extract_window(
-                self, window, treated_unit=treated_unit, hdi_type=hdi_type
+                self, window, treated_unit=treated_unit, response_type=response_type
             )
 
             # Extract counterfactual for relative effects
             counterfactual = _extract_counterfactual(
-                self, window_coords, treated_unit=treated_unit, hdi_type=hdi_type
+                self,
+                window_coords,
+                treated_unit=treated_unit,
+                response_type=response_type,
             )
         else:
             # No period specified, use standard flow
             windowed_impact, window_coords = _extract_window(
-                self, window, treated_unit=treated_unit, hdi_type=hdi_type
+                self, window, treated_unit=treated_unit, response_type=response_type
             )
             counterfactual = _extract_counterfactual(
-                self, window_coords, treated_unit=treated_unit, hdi_type=hdi_type
+                self,
+                window_coords,
+                treated_unit=treated_unit,
+                response_type=response_type,
             )
 
         if is_pymc:

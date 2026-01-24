@@ -31,8 +31,8 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import (
-    HdiType,
-    _log_hdi_type_info_once,
+    ResponseType,
+    _log_response_type_info_once,
     add_hdi_annotation,
     plot_xY,
 )
@@ -336,7 +336,7 @@ class DifferenceInDifferences(BaseExperiment):
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        hdi_type: HdiType = "expectation",
+        response_type: ResponseType = "expectation",
         show_hdi_annotation: bool = False,
         **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -348,8 +348,8 @@ class DifferenceInDifferences(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2.
             Use None to return raw numbers.
-        hdi_type : {"expectation", "prediction"}, default="expectation"
-            The type of HDI (Highest Density Interval) to display:
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to display in the HDI band:
 
             - ``"expectation"``: HDI of the model expectation (μ). This shows
               uncertainty from model parameters only, excluding observation noise.
@@ -371,10 +371,10 @@ class DifferenceInDifferences(BaseExperiment):
             The matplotlib figure and axes.
         """
         # Log HDI type info once per session
-        _log_hdi_type_info_once()
+        _log_response_type_info_once()
 
-        # Select the variable name based on hdi_type
-        var_name = "mu" if hdi_type == "expectation" else "y_hat"
+        # Select the variable name based on response_type
+        var_name = "mu" if response_type == "expectation" else "y_hat"
 
         def _plot_causal_impact_arrow(results, ax):
             """
@@ -519,7 +519,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         # Add HDI type annotation to the title
         if show_hdi_annotation:
-            add_hdi_annotation(ax, hdi_type)
+            add_hdi_annotation(ax, response_type)
 
         return fig, ax
 
