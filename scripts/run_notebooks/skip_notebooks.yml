@@ -2,11 +2,6 @@
 #
 # These notebooks are skipped for various reasons documented below.
 
-# Inverse propensity weighting notebooks require realistic posterior samples.
-# Prior samples can produce extreme propensity scores (very close to 0 or 1),
-# causing infinite values in the inverse weighting calculations.
-- inv_prop_latent.ipynb
-
 # Requires JAX which is not installed in the test environment.
 - iv_pymc.ipynb
 - iv_weak_instruments.ipynb
