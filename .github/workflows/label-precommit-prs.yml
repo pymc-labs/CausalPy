@@ -6,7 +6,7 @@ on:
 
 jobs:
   label:
-    if: github.actor == 'pre-commit-ci[bot]'
+    if: github.event.pull_request.user.login == 'pre-commit-ci[bot]'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

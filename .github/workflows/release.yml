@@ -9,14 +9,19 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   build:
     name: Build source distribution
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: 3.11
@@ -32,8 +37,11 @@ jobs:
           python -m venv venv-sdist
           venv-sdist/bin/python -m pip install ../dist/causalpy*.tar.gz
           echo "Checking import and version number (on release)"
-          venv-sdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{ github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
+          venv-sdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${REF_NAME}' if '${REF_TYPE}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
           cd ..
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
       - name: Check the bdist installs and imports
         run: |
           mkdir -p test-bdist
@@ -41,8 +49,11 @@ jobs:
           python -m venv venv-bdist
           venv-bdist/bin/python -m pip install ../dist/causalpy*.whl
           echo "Checking import and version number (on release)"
-          venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${{ github.ref_name }}' if '${{ github.ref_type }}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
+          venv-bdist/bin/python -c "import causalpy; assert causalpy.__version__ == '${REF_NAME}' if '${REF_TYPE}' == 'tag' else causalpy.__version__; print(causalpy.__version__)"
           cd ..
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: artifact
@@ -75,7 +86,9 @@ jobs:
           python -m venv venv-test-pypi
           venv-test-pypi/bin/python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple causalpy
           echo "Checking import and version number"
-          venv-test-pypi/bin/python -c "import causalpy; assert causalpy.__version__ == '${{ github.ref_name }}'"
+          venv-test-pypi/bin/python -c "import causalpy; assert causalpy.__version__ == '${REF_NAME}'"
+        env:
+          REF_NAME: ${{ github.ref_name }}
 
   publish:
     environment: release
