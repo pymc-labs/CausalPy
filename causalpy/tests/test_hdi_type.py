@@ -75,6 +75,23 @@ def its_result():
 
 
 @pytest.fixture
+def its_three_period_result():
+    """Create a minimal three-period ITS result for testing."""
+    df = cp.load_data("its")
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=pd.Timestamp("2017-01-01"),
+        treatment_end_time=pd.Timestamp("2017-06-01"),
+        formula="y ~ 1 + t",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=SAMPLE_KWARGS),
+    )
+    return result
+
+
+@pytest.fixture
 def sc_result():
     """Create a minimal Synthetic Control result for testing."""
     df = cp.load_data("sc")
@@ -264,6 +281,24 @@ class TestResponseTypeEffectSummary:
         summary = sc_result.effect_summary(response_type="prediction")
         assert summary is not None
         assert hasattr(summary, "table")
+
+
+class TestResponseTypeAnalyzePersistence:
+    """Test response_type parameter for analyze_persistence method."""
+
+    @pytest.mark.integration
+    def test_its_analyze_persistence_prediction(self, its_three_period_result):
+        """Test ITS analyze_persistence with response_type='prediction'."""
+        result = its_three_period_result.analyze_persistence(response_type="prediction")
+        assert isinstance(result, dict)
+        for key in [
+            "mean_effect_during",
+            "mean_effect_post",
+            "persistence_ratio",
+            "total_effect_during",
+            "total_effect_post",
+        ]:
+            assert key in result
 
 
 class TestResponseTypeGetPlotData:
