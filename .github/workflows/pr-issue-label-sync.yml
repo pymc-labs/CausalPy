@@ -4,11 +4,14 @@ on:
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, edited]
 
+permissions: {}
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      issues: read  # to read labels from linked issues
 
     steps:
       - name: Sync labels from closing issues

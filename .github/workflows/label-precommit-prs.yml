@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+permissions: {}
+
 jobs:
   label:
     if: github.event.pull_request.user.login == 'pre-commit-ci[bot]'
