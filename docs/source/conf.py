@@ -24,7 +24,7 @@ autodoc_mock_imports = [
     "matplotlib",
     "numpy",
     "pandas",
-    "patsy",
+    "formulaic",
     "pymc",
     "pymc-extras",
     "scipy",
