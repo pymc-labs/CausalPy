@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Panel data methods
 
 :::{toctree}
 :caption: ANCOVA
@@ -58,6 +60,8 @@ its_lift_test.ipynb
 
 its_pymc_comparative.ipynb
 :::
+
+## Cross-sectional methods
 
 :::{toctree}
 :caption: Regression Discontinuity
