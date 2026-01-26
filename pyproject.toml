@@ -84,6 +84,7 @@ docs = [
     "labs-sphinx-theme",
     "sphinx-copybutton",
     "sphinx-rtd-theme",
+    "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex",
     "sphinx-notfound-page",
