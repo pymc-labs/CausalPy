@@ -15,12 +15,18 @@
 Tests for plot utility functions
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from causalpy.plot_utils import get_hdi_to_df
+from causalpy.plot_utils import (
+    _log_response_type_effect_summary_once,
+    _log_response_type_info_once,
+    add_hdi_annotation,
+    get_hdi_to_df,
+)
 
 
 @pytest.mark.integration
@@ -95,3 +101,73 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
     # Verify reasonable HDI values (should be around the mean of 5.0)
     assert result["lower"].min() > 3.0, "HDI lower bounds should be reasonable"
     assert result["higher"].max() < 7.0, "HDI upper bounds should be reasonable"
+
+
+class TestAddHdiAnnotation:
+    """Tests for the add_hdi_annotation function."""
+
+    def test_add_hdi_annotation_expectation(self):
+        """Test adding HDI annotation for expectation type."""
+        fig, ax = plt.subplots()
+        ax.set_title("Original Title")
+
+        add_hdi_annotation(ax, "expectation")
+
+        title = ax.get_title()
+        assert "Original Title" in title
+        assert "94% HDI of model expectation (μ)" in title
+        assert "excl. observation noise" in title
+        plt.close(fig)
+
+    def test_add_hdi_annotation_prediction(self):
+        """Test adding HDI annotation for prediction type."""
+        fig, ax = plt.subplots()
+        ax.set_title("Original Title")
+
+        add_hdi_annotation(ax, "prediction")
+
+        title = ax.get_title()
+        assert "Original Title" in title
+        assert "94% HDI of posterior predictive (ŷ)" in title
+        assert "incl. observation noise" in title
+        plt.close(fig)
+
+    def test_add_hdi_annotation_custom_prob(self):
+        """Test adding HDI annotation with custom probability."""
+        fig, ax = plt.subplots()
+        ax.set_title("My Plot")
+
+        add_hdi_annotation(ax, "expectation", hdi_prob=0.89)
+
+        title = ax.get_title()
+        assert "89% HDI" in title
+        plt.close(fig)
+
+    def test_add_hdi_annotation_empty_title(self):
+        """Test adding HDI annotation when there's no existing title."""
+        fig, ax = plt.subplots()
+        # No title set
+
+        add_hdi_annotation(ax, "expectation")
+
+        title = ax.get_title()
+        assert "94% HDI of model expectation (μ)" in title
+        plt.close(fig)
+
+
+class TestResponseTypeLogging:
+    """Tests for the response type logging functions."""
+
+    def test_log_response_type_info_once_callable(self):
+        """Test that _log_response_type_info_once is callable without error."""
+        # Clear the cache to ensure fresh state
+        _log_response_type_info_once.cache_clear()
+        # Should not raise
+        _log_response_type_info_once()
+
+    def test_log_response_type_effect_summary_once_callable(self):
+        """Test that _log_response_type_effect_summary_once is callable without error."""
+        # Clear the cache to ensure fresh state
+        _log_response_type_effect_summary_once.cache_clear()
+        # Should not raise
+        _log_response_type_effect_summary_once()
