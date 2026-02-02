@@ -15,11 +15,17 @@
 Utility functions
 """
 
+from __future__ import annotations
+
 import re
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+if TYPE_CHECKING:
+    from causalpy.experiments.synthetic_control import SyntheticControl
 
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
@@ -212,3 +218,141 @@ def check_convex_hull_violation(
         "pct_above": float(100 * above.sum() / n_points),
         "pct_below": float(100 * below.sum() / n_points),
     }
+
+
+def extract_lift_for_mmm(
+    sc_result: SyntheticControl,
+    channel: str,
+    x: float,
+    delta_x: float,
+    aggregate: Literal["mean", "sum"] = "mean",
+) -> pd.DataFrame:
+    """
+    Extract lift test results from a Synthetic Control analysis for MMM calibration.
+
+    This function extracts lift estimates from a fitted SyntheticControl model in a
+    format compatible with PyMC-Marketing's ``add_lift_test_measurements()`` method.
+    This enables using geo-level lift test results to calibrate Media Mix Models.
+
+    Parameters
+    ----------
+    sc_result : SyntheticControl
+        A fitted SyntheticControl model with one or more treated units. The model
+        must have been fit with a Bayesian (PyMC) model to provide posterior
+        distributions for uncertainty quantification.
+    channel : str
+        Name of the marketing channel being tested (e.g., "tv", "radio", "digital").
+        This should match the channel names used in your MMM.
+    x : float
+        Baseline spend level for the channel before the test period. For channels
+        with zero pre-test spend, use 0.0.
+    delta_x : float
+        The change in spend during the test period (i.e., test spend minus baseline
+        spend). For a new channel activation, this equals the total test spend.
+    aggregate : {"mean", "sum"}, default="mean"
+        How to aggregate the causal impact across post-intervention time periods:
+
+        - "mean": Average lift per time period. Use this for rate-based outcomes
+          (e.g., weekly sales rate) or when your MMM operates at the same time
+          granularity as the experiment.
+        - "sum": Total cumulative lift across all post-intervention periods. Use
+          this for cumulative outcomes or when you want total campaign impact.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with one row per treated geo, containing columns:
+
+        - ``channel``: The marketing channel name (from input parameter)
+        - ``geo``: The treated geo identifier (from sc_result.treated_units)
+        - ``x``: Pre-test spend level (from input parameter)
+        - ``delta_x``: Spend change during test (from input parameter)
+        - ``delta_y``: Mean lift estimate from the posterior distribution
+        - ``sigma``: Standard deviation of the lift estimate from the posterior
+
+    Raises
+    ------
+    ValueError
+        If the model is not a Bayesian (PyMC) model, as uncertainty quantification
+        requires posterior samples.
+
+    See Also
+    --------
+    PyMC-Marketing lift test calibration :
+        https://www.pymc-marketing.io/en/stable/notebooks/mmm/mmm_lift_test.html
+
+    Notes
+    -----
+    This function is designed for integration with PyMC-Marketing's MMM calibration
+    workflow. The output DataFrame can be passed directly to
+    ``MMM.add_lift_test_measurements()`` to inform the model's saturation curves
+    with experimental evidence.
+
+    For more information on lift test calibration in MMMs, see the PyMC-Marketing
+    documentation: https://github.com/pymc-labs/pymc-marketing
+
+    Examples
+    --------
+    >>> import causalpy as cp
+    >>> # Fit a multi-geo synthetic control model
+    >>> result = cp.SyntheticControl(
+    ...     df,
+    ...     treatment_time,
+    ...     control_units=["geo_a", "geo_b", "geo_c"],
+    ...     treated_units=["geo_x", "geo_y"],
+    ...     model=cp.pymc_models.WeightedSumFitter(
+    ...         sample_kwargs={"progressbar": False}
+    ...     ),
+    ... )
+    >>> # Extract lift results for MMM calibration
+    >>> df_lift = cp.extract_lift_for_mmm(
+    ...     result,
+    ...     channel="tv_campaign",
+    ...     x=0.0,  # No pre-test TV spend
+    ...     delta_x=50000,  # $50k test spend
+    ...     aggregate="mean",
+    ... )
+    >>> # The resulting DataFrame can be used with PyMC-Marketing:
+    >>> # mmm.add_lift_test_measurements(df_lift)
+    """
+    from causalpy.pymc_models import PyMCModel
+
+    # Validate that we have a Bayesian model
+    if not isinstance(sc_result.model, PyMCModel):
+        raise ValueError(
+            "extract_lift_for_mmm requires a Bayesian (PyMC) model for uncertainty "
+            "quantification. OLS models do not provide posterior distributions needed "
+            "for the 'sigma' (uncertainty) column."
+        )
+
+    treated_units = sc_result.treated_units
+    results = []
+
+    for unit in treated_units:
+        # Get posterior samples for this unit's causal impact
+        unit_impact = sc_result.post_impact.sel(treated_units=unit)
+
+        # Aggregate across time periods
+        if aggregate == "mean":
+            # Average lift per time period
+            lift_samples = unit_impact.mean(dim="obs_ind")
+        else:  # sum
+            # Total cumulative lift
+            lift_samples = unit_impact.sum(dim="obs_ind")
+
+        # Extract mean and std from the posterior
+        delta_y = float(lift_samples.mean().values)
+        sigma = float(lift_samples.std().values)
+
+        results.append(
+            {
+                "channel": channel,
+                "geo": str(unit),
+                "x": x,
+                "delta_x": delta_x,
+                "delta_y": delta_y,
+                "sigma": sigma,
+            }
+        )
+
+    return pd.DataFrame(results)
