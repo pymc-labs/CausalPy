@@ -21,7 +21,7 @@ from typing import Any, Literal
 import arviz as az
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.base import RegressorMixin
+from sklearn.base import RegressorMixin, clone
 
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -64,6 +64,35 @@ class BaseExperiment(ABC):
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
 
+    def _ensure_sklearn_fit_intercept_false(self) -> None:
+        """Ensure scikit-learn models use fit_intercept=False without mutating user models."""
+        if not isinstance(self.model, RegressorMixin):
+            return
+        if not hasattr(self.model, "fit_intercept"):
+            return
+        if getattr(self.model, "fit_intercept", False) is False:
+            return
+
+        try:
+            cloned_model = clone(self.model)
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - defensive for non-cloneable estimators
+            raise ValueError(
+                "This experiment requires a scikit-learn estimator with "
+                "fit_intercept=False. Set fit_intercept=False on your estimator or "
+                "pass an estimator that supports sklearn.base.clone()."
+            ) from exc
+
+        if hasattr(cloned_model, "set_params"):
+            try:
+                cloned_model.set_params(fit_intercept=False)
+            except ValueError:
+                cloned_model.fit_intercept = False
+        else:
+            cloned_model.fit_intercept = False
+
+        self.model = create_causalpy_compatible_class(cloned_model)
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")
 

@@ -32,6 +32,7 @@ def test_did():
     2. skl_experiements.DifferenceInDifferences returns correct type
     """
     data = cp.load_data("did")
+    model = LinearRegression(fit_intercept=True)
     result = cp.DifferenceInDifferences(
         data,
         formula="y ~ 1 + group*post_treatment",
@@ -39,10 +40,12 @@ def test_did():
         group_variable_name="group",
         treated=1,
         untreated=0,
-        model=LinearRegression(),
+        model=model,
     )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
+    assert model.fit_intercept is True
+    assert result.model.fit_intercept is False
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
