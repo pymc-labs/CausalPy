@@ -293,9 +293,9 @@ def extract_lift_for_mmm(
 
     Examples
     --------
-    >>> import causalpy as cp
+    >>> import causalpy as cp  # doctest: +SKIP
     >>> # Fit a multi-geo synthetic control model
-    >>> result = cp.SyntheticControl(
+    >>> result = cp.SyntheticControl(  # doctest: +SKIP
     ...     df,
     ...     treatment_time,
     ...     control_units=["geo_a", "geo_b", "geo_c"],
@@ -305,7 +305,7 @@ def extract_lift_for_mmm(
     ...     ),
     ... )
     >>> # Extract lift results for MMM calibration
-    >>> df_lift = cp.extract_lift_for_mmm(
+    >>> df_lift = cp.extract_lift_for_mmm(  # doctest: +SKIP
     ...     result,
     ...     channel="tv_campaign",
     ...     x=0.0,  # No pre-test TV spend
@@ -313,7 +313,7 @@ def extract_lift_for_mmm(
     ...     aggregate="mean",
     ... )
     >>> # The resulting DataFrame can be used with PyMC-Marketing:
-    >>> # mmm.add_lift_test_measurements(df_lift)
+    >>> # mmm.add_lift_test_measurements(df_lift)  # doctest: +SKIP
     """
     from causalpy.pymc_models import PyMCModel
 
