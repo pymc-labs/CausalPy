@@ -293,27 +293,32 @@ def extract_lift_for_mmm(
 
     Examples
     --------
-    >>> import causalpy as cp  # doctest: +SKIP
-    >>> # Fit a multi-geo synthetic control model
-    >>> result = cp.SyntheticControl(  # doctest: +SKIP
-    ...     df,
-    ...     treatment_time,
-    ...     control_units=["geo_a", "geo_b", "geo_c"],
-    ...     treated_units=["geo_x", "geo_y"],
-    ...     model=cp.pymc_models.WeightedSumFitter(
-    ...         sample_kwargs={"progressbar": False}
-    ...     ),
-    ... )
-    >>> # Extract lift results for MMM calibration
-    >>> df_lift = cp.extract_lift_for_mmm(  # doctest: +SKIP
-    ...     result,
-    ...     channel="tv_campaign",
-    ...     x=0.0,  # No pre-test TV spend
-    ...     delta_x=50000,  # $50k test spend
-    ...     aggregate="mean",
-    ... )
-    >>> # The resulting DataFrame can be used with PyMC-Marketing:
-    >>> # mmm.add_lift_test_measurements(df_lift)  # doctest: +SKIP
+    .. code-block:: python
+
+        import causalpy as cp
+
+        # Fit a multi-geo synthetic control model
+        result = cp.SyntheticControl(
+            df,
+            treatment_time,
+            control_units=["geo_a", "geo_b", "geo_c"],
+            treated_units=["geo_x", "geo_y"],
+            model=cp.pymc_models.WeightedSumFitter(
+                sample_kwargs={"progressbar": False}
+            ),
+        )
+
+        # Extract lift results for MMM calibration
+        df_lift = cp.extract_lift_for_mmm(
+            result,
+            channel="tv_campaign",
+            x=0.0,  # No pre-test TV spend
+            delta_x=50000,  # $50k test spend
+            aggregate="mean",
+        )
+
+        # The resulting DataFrame can be used with PyMC-Marketing:
+        # mmm.add_lift_test_measurements(df_lift)
     """
     from causalpy.pymc_models import PyMCModel
 
