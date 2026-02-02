@@ -159,12 +159,8 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, automatically set fit_intercept=False
-            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
-            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
+            # Ensure intercept handling is explicit without mutating user models.
+            self._ensure_sklearn_fit_intercept_false()
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")
