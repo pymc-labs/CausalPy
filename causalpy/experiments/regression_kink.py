@@ -298,6 +298,12 @@ class RegressionKink(BaseExperiment):
         )
         return fig, ax
 
+    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """Return plot data for Bayesian Regression Kink."""
+        raise NotImplementedError(
+            "get_plot_data_bayesian is not implemented for RegressionKink."
+        )
+
     def effect_summary(
         self,
         *,

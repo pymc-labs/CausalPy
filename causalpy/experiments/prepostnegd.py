@@ -287,6 +287,12 @@ class PrePostNEGD(BaseExperiment):
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 
+    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """Return plot data for Bayesian PrePostNEGD."""
+        raise NotImplementedError(
+            "get_plot_data_bayesian is not implemented for PrePostNEGD."
+        )
+
     def effect_summary(
         self,
         *,
