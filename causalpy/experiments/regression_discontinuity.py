@@ -347,6 +347,18 @@ class RegressionDiscontinuity(BaseExperiment):
         # TODO: have to convert ax into list because it is somehow a numpy.ndarray
         return (fig, ax)
 
+    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """Return plot data for Bayesian Regression Discontinuity."""
+        raise NotImplementedError(
+            "get_plot_data_bayesian is not implemented for RegressionDiscontinuity."
+        )
+
+    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """Return plot data for OLS Regression Discontinuity."""
+        raise NotImplementedError(
+            "get_plot_data_ols is not implemented for RegressionDiscontinuity."
+        )
+
     def effect_summary(
         self,
         *,

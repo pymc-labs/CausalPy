@@ -15,7 +15,7 @@
 Base class for quasi experimental designs.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 import arviz as az
@@ -28,13 +28,29 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class BaseExperiment:
+class BaseExperiment(ABC):
     """Base class for quasi experimental designs."""
 
     labels: list[str]
 
     supports_bayes: bool
     supports_ols: bool
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        abstract_methods = set(getattr(cls, "__abstractmethods__", set()))
+        supports_bayes = getattr(cls, "supports_bayes", None)
+        supports_ols = getattr(cls, "supports_ols", None)
+
+        if supports_bayes is False:
+            abstract_methods.discard("_bayesian_plot")
+            abstract_methods.discard("get_plot_data_bayesian")
+
+        if supports_ols is False:
+            abstract_methods.discard("_ols_plot")
+            abstract_methods.discard("get_plot_data_ols")
+
+        cls.__abstractmethods__ = frozenset(abstract_methods)
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
