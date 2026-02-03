@@ -1,182 +1,240 @@
 # Estimands in CausalPy
 
-Understanding **what** a method estimates is just as important as knowing **how** to use it. This page documents the causal estimands, computation approaches, and key assumptions for CausalPy's core methods.
+Understanding **what** a method estimates is just as important as knowing
+**how** to use it. This page introduces a framework for thinking about causal
+estimands and connects CausalPy's methods to this framework.
 
-## Why Estimands Matter
+## The Estimand Framework
 
-Different causal inference methods target different causal quantities. Misunderstanding what a method estimates can lead to:
+Following {cite:t}`lundberg2021estimand`, we distinguish three interconnected
+concepts in causal inference:
 
-- Choosing the wrong method for your research question
-- Misinterpreting the magnitude or meaning of effects
-- Drawing incorrect conclusions about generalizability
+```
+Theoretical Estimand     -->  Empirical Estimand      -->  Estimator
+```
 
-CausalPy methods fall into two broad categories:
+- **Theoretical Estimand**: The causal quantity of interest, defined by the
+  research question. This specifies *what* causal effect we want to know, for
+  *whom*, and over *what time period*. Examples: "the average effect of a job
+  training program on weekly earnings for program participants" or "the
+  cumulative impact of a marketing campaign on sales for the treated region."
 
-- **Parametric interaction models** (DiD, ANCOVA): Estimate treatment effects via model coefficients representing population-level averages
-- **Pre-post counterfactual models** (ITS, SC): Estimate time-varying, unit-specific impacts by comparing observed outcomes to counterfactual predictions
+- **Empirical Estimand**: A specific, data-linked quantity that can be
+  identified under a set of assumptions. Examples: {term}`ATT`, {term}`ATE`,
+  {term}`LATE`, local effect at a cutoff, time-varying unit-specific impact.
 
-This distinction affects how you should interpret results and plots.
+- **Estimator**: The combination of a statistical model and a computational
+  procedure used to produce an estimate from data. In CausalPy, this typically
+  means choosing a model type (Bayesian via PyMC or OLS via scikit-learn)
+  together with a computation to extract the causal quantity (e.g., coefficient
+  extraction, g-computation). The same design can be implemented with different
+  estimators---for example, a DiD design can use either a Bayesian model with
+  g-computation or an OLS model with coefficient extraction.
+
+The connection between theoretical and empirical estimands requires
+**identification assumptions**---claims about the data-generating process that
+cannot be tested from data alone. These assumptions are often formalized using
+Directed Acyclic Graphs (DAGs). See {doc}`quasi_dags` for DAG-based
+identification strategies for each quasi-experimental method.
+
+The **structure of available data** also constrains which empirical estimands
+are even *candidates*. Panel data with treated and control groups makes the
+ATT a candidate; a single time series restricts you to unit-specific impacts;
+data with a threshold-based assignment mechanism makes local effects at the
+cutoff a possibility. But data structure alone does not guarantee credibility---
+the identification assumptions must also be defensible. The choice of empirical
+estimand is thus jointly determined by the research question, the available
+data, and the assumptions one is willing to defend.
+
+The estimator is the machinery that transforms data into an estimate. Different
+estimators make different bias-variance trade-offs and have different data
+requirements. See {doc}`structural_causal_models` for a deeper treatment of
+structural versus reduced-form approaches.
 
 :::{note}
-The estimand is not always uniquely determined by the experiment class. Some methods have explicit parameters that change the target (e.g., IPW's `weighting_scheme` selects between ATE and ATO). Others produce "local" effects whose scope depends on design choices (e.g., RD bandwidth, IV instrument). The descriptions below assume standard usage.
+This is an iterative process: estimates inform new theoretical questions,
+refining our understanding over time.
 :::
+
+---
+
+## CausalPy Methods: From Questions to Estimates
+
+Each CausalPy experiment class targets a specific empirical estimand and
+supports different estimators (Bayesian or OLS). Understanding which estimand
+your method targets---and under what assumptions---is essential for valid
+causal interpretation.
+
+### Difference-in-Differences
+
+**Typical research questions**: What is the effect of a policy that was
+implemented in some regions/groups but not others? Did the intervention cause a
+change in outcomes for the treated group?
+
+**Empirical estimand**: {term}`Average treatment effect on the treated` (ATT)---
+the average causal effect on units that received treatment in the post-treatment
+period, relative to their counterfactual trajectory.
+
+**Identification assumptions**:
+
+- {term}`Parallel trends assumption`: Absent treatment, treated and control
+  groups would have followed the same trajectory.
+- No anticipation: Units do not change behavior before treatment begins.
+- No interference between units: One unit's treatment does not affect another
+  unit's outcomes.
+
+See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences)
+for the DAG representation.
+
+**Estimator**: Coefficient-based. The ATT is estimated as the coefficient on
+the group-by-post interaction term. CausalPy supports both Bayesian (PyMC) and
+OLS (scikit-learn) models for this design.
+
+**Interpretation note**: Plots show counterfactual trajectories, but the
+reported effect is the interaction coefficient---a single summary of the
+treatment effect across all post-treatment observations.
+
+---
+
+### Interrupted Time Series
+
+**Typical research questions**: Did an intervention (policy change, marketing
+campaign, etc.) affect a time series? What is the causal impact over time?
+
+**Empirical estimand**: Time-varying causal impact for a single treated unit
+(or aggregate). This is **not** a population-level {term}`ATE` or {term}`ATT`---
+it is unit-specific and time-indexed:
+
+$$\text{impact}(t) = Y_{\text{observed}}(t) - \mathbb{E}[Y_{\text{counterfactual}}(t)]$$
+
+**Identification assumptions**:
+
+- Stable pre-intervention relationship: The model correctly captures the
+  pre-intervention trend and seasonality.
+- No concurrent shocks: No other events affect the outcome at treatment time.
+- Correct counterfactual model: The model specification accurately represents
+  what would have happened without intervention.
+
+See the [Interrupted Time Series section of quasi_dags](quasi_dags.ipynb#interrupted-time-series)
+for the DAG representation.
+
+**Estimator**: G-computation. A model is fit to pre-intervention data only,
+then used to predict counterfactual outcomes in the post-intervention period.
+The causal impact is the difference between observed and predicted values.
+CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this
+design.
+
+**Interpretation note**: The effect varies over time. Summarizing with a single
+number (e.g., average impact) loses information about the temporal pattern. Use
+`effect_summary()` for both point-in-time and cumulative statistics.
+
+---
+
+### Synthetic Control
+
+**Typical research questions**: What would have happened to a treated unit
+(e.g., a country, region, or firm) if it had not been treated? What is the
+causal effect of a unique intervention?
+
+**Empirical estimand**: Time-varying causal impact for a treated unit---the
+difference between the observed outcome and a synthetic counterfactual
+constructed from weighted control units:
+
+$$\text{impact}(t) = Y_{\text{treated}}(t) - \sum_i w_i \cdot Y_{\text{control}_i}(t)$$
+
+Like ITS, this is **not** a population-level effect.
+
+**Identification assumptions**:
+
+- Parallel trends in weighted combination: The synthetic control would have
+  followed the same trajectory as the treated unit absent treatment.
+- No spillovers: Treatment of one unit does not affect control units.
+- Convex hull coverage: The treated unit can be well-approximated by a weighted
+  combination of controls.
+- No concurrent shocks: No other events differentially affect the treated unit.
+
+See the [Synthetic Control section of quasi_dags](quasi_dags.ipynb#synthetic-control)
+for the DAG representation.
+
+**Estimator**: G-computation. Weights are learned from pre-intervention data
+to minimize the distance between the treated unit and the weighted combination
+of controls. These weights are then applied to construct the counterfactual in
+the post-intervention period. CausalPy supports both Bayesian (PyMC) and OLS
+(scikit-learn) models for this design.
+
+**Interpretation note**: The effect is specific to the treated unit and time
+period. Generalization requires additional assumptions.
+
+---
+
+### Regression Discontinuity
+
+**Typical research questions**: What is the effect of crossing a threshold
+(e.g., eligibility cutoff, election margin, test score threshold)?
+
+**Empirical estimand**: Local average treatment effect at the cutoff---the
+causal effect for units exactly at the threshold where treatment assignment
+changes. This is a highly local estimate:
+
+$$\text{effect} = \lim_{x \to c^+} \mathbb{E}[Y|X=x] - \lim_{x \to c^-} \mathbb{E}[Y|X=x]$$
+
+**Identification assumptions**:
+
+- Continuity at cutoff: The conditional expectation of the outcome would be
+  continuous at the threshold absent treatment.
+- No manipulation: Units cannot precisely sort around the cutoff.
+
+See the [Regression Discontinuity section of quasi_dags](quasi_dags.ipynb#regression-discontinuity)
+for the DAG representation.
+
+**Estimator**: Coefficient-based. The treatment effect is estimated as the
+discontinuity in predicted outcomes at the cutoff, typically using local
+polynomials around the {term}`running variable` threshold. CausalPy supports
+both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+
+**Interpretation note**: The effect is **local** to the cutoff. Units far from
+the threshold may experience different treatment effects. The bandwidth
+parameter controls how much data is used---narrower bandwidths are more local
+but have higher variance.
+
+---
+
+## Context-Dependence of Estimands
+
+:::{note}
+The empirical estimand is not always uniquely determined by the experiment
+class. Design choices can change what you are estimating:
+
+- **IPW**: The `weighting_scheme` parameter selects between ATE (`"raw"`,
+  `"robust"`) and the overlap population estimand (`"overlap"`).
+- **Regression Discontinuity**: Bandwidth choice affects how local the effect
+  is (see the Regression Discontinuity section above).
+- **IV**: The instrument used defines the complier population, determining
+  whose LATE you estimate.
+
+The descriptions above assume standard usage. Always consider what your
+specific design choices imply for interpretation.
+:::
+
+---
 
 ## Quick Reference
 
-- **Difference-in-Differences**: {term}`ATT` via interaction coefficient
-- **Interrupted Time Series**: Time-varying causal impact for a treated unit
-- **Synthetic Control**: Time-varying causal impact for a treated unit
-- **Regression Discontinuity**: Local treatment effect at the cutoff
+| Method | Empirical Estimand | Computation |
+|--------|-------------------|-------------|
+| Difference-in-Differences | {term}`ATT` | Coefficient-based |
+| Interrupted Time Series | Time-varying unit-specific impact | G-computation |
+| Synthetic Control | Time-varying unit-specific impact | G-computation |
+| Regression Discontinuity | Local effect at cutoff | Coefficient-based |
+
+For methods not covered here (IV, IPW, ANCOVA), see the respective notebook
+documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary`
+for estimand definitions.
 
 ---
 
-## Difference-in-Differences (DiD)
+## References
 
-### Estimand
-
-The {term}`Average treatment effect on the treated` (ATT): the average causal effect of treatment on the units that received it, in the post-treatment period.
-
-### Computation
-
-CausalPy estimates the ATT as the coefficient on the interaction term between the group indicator and the post-treatment indicator:
-
-```
-causal_impact = β[group × post_treatment]
-```
-
-This coefficient represents the difference in the change over time between the treatment and control groups.
-
-### Key Assumptions
-
-- **{term}`Parallel trends assumption`**: In the absence of treatment, the treatment and control groups would have followed the same trend over time
-- **No anticipation**: Units do not change behavior before treatment begins
-- **SUTVA (Stable Unit Treatment Value Assumption)**: No spillovers between units; treatment effect is the same regardless of how many others are treated
-
-### Interpretation Note
-
-:::{note}
-The plots show counterfactual trajectories (what would have happened to the treatment group without treatment), but the **reported causal impact is the interaction coefficient**, not the visual difference at a single time point. For experiments with multiple post-treatment periods, the coefficient represents the average effect across all post-treatment observations.
+:::{bibliography}
+:filter: docname in docnames
 :::
-
----
-
-## Interrupted Time Series (ITS)
-
-### Estimand
-
-**Time-varying causal impact** for a single treated unit (or aggregate): the difference between the observed outcome and the counterfactual prediction at each post-intervention time point.
-
-This is **not** a population-level {term}`ATE` or {term}`ATT`. It is a unit-specific, time-indexed effect.
-
-### Computation
-
-CausalPy computes the causal impact as:
-
-```
-impact(t) = Y_observed(t) - E[Y_counterfactual(t)]
-```
-
-Where:
-- The counterfactual is predicted by a model trained only on pre-intervention data
-- For Bayesian models, the impact uses the posterior expectation (`mu`) rather than the posterior predictive (`y_hat`), representing the systematic causal effect excluding observation-level noise
-
-The cumulative impact sums these effects over the post-intervention period.
-
-### Key Assumptions
-
-- **Stable pre-intervention relationship**: The model correctly captures the pre-intervention trend and seasonality
-- **No concurrent shocks**: No other events occur at treatment time that would affect the outcome
-- **Correct counterfactual model**: The model specification (trend, seasonality, covariates) accurately represents what would have happened without intervention
-
-### Interpretation Note
-
-:::{note}
-The causal impact varies over time and is specific to the treated unit. Summarizing with a single number (e.g., average impact) loses information about the temporal pattern. The `effect_summary()` method provides both point-in-time and cumulative statistics with appropriate uncertainty intervals.
-:::
-
----
-
-## Synthetic Control (SC)
-
-### Estimand
-
-**Time-varying causal impact** for a treated unit: the difference between the observed outcome and a synthetic counterfactual constructed from weighted control units.
-
-Like ITS, this is **not** a population-level effect. It estimates what would have happened to the specific treated unit if it had not received treatment.
-
-### Computation
-
-CausalPy computes the causal impact as:
-
-```
-impact(t) = Y_treated(t) - Σ(w_i × Y_control_i(t))
-```
-
-Where:
-- Weights `w_i` are learned from pre-intervention data to best approximate the treated unit
-- For `WeightedSumFitter`, weights are constrained to be non-negative and sum to 1
-- For Bayesian models, the impact uses the posterior expectation (`mu`) rather than the posterior predictive
-
-### Key Assumptions
-
-- **Parallel trends in weighted combination**: The weighted combination of control units would have followed the same trajectory as the treated unit in the absence of treatment
-- **No spillovers**: Treatment of one unit does not affect control units
-- **Convex hull coverage**: The treated unit's pre-intervention characteristics can be well-approximated by a weighted combination of controls
-- **No concurrent shocks**: No other events differentially affect the treated unit at treatment time
-
-### Interpretation Note
-
-:::{note}
-The synthetic control method is designed for comparative case studies with a single treated unit (or small number of treated units). The effect is specific to that unit and time period—generalization to other units or time periods requires additional assumptions.
-:::
-
----
-
-## Regression Discontinuity (RD)
-
-### Estimand
-
-**Local average treatment effect at the cutoff**: the causal effect of treatment for units exactly at the threshold where treatment assignment changes.
-
-This is a highly local estimate—it applies to units at the margin of treatment, not to the full population.
-
-### Computation
-
-CausalPy estimates the discontinuity as:
-
-```
-causal_impact = lim(x→c⁺) E[Y|X=x] - lim(x→c⁻) E[Y|X=x]
-```
-
-Where `c` is the treatment threshold. In practice, this is computed as the jump in predicted outcomes at the cutoff, either via:
-- The coefficient on the treatment indicator (sharp RD)
-- The difference in model predictions just above and below the threshold
-
-### Key Assumptions
-
-- **Continuity at cutoff**: In the absence of treatment, the conditional expectation of the outcome would be continuous at the threshold
-- **No manipulation**: Units cannot precisely control their value of the {term}`running variable` to sort around the cutoff
-- **Local validity**: The treatment effect is only identified at the cutoff; extrapolation requires additional assumptions
-- **Correct functional form**: The relationship between the running variable and outcome is correctly specified on both sides of the cutoff
-
-### Interpretation Note
-
-:::{note}
-The RD effect is **local** to the cutoff. Units far from the threshold may experience different treatment effects. The bandwidth parameter controls how much data is used for estimation—narrower bandwidths are more local but have higher variance.
-:::
-
----
-
-## Summary: Choosing the Right Method
-
-When selecting a method, consider:
-
-- **Do you have a control group?** DiD requires treatment and control groups; ITS does not
-- **Is treatment based on a threshold?** RD is appropriate when treatment is assigned based on a cutoff
-- **Do you have multiple control units to construct a synthetic counterfactual?** SC requires a pool of untreated units
-- **What population does your effect apply to?**
-  - DiD → treated units (ATT)
-  - ITS/SC → the specific treated unit(s) at each time point
-  - RD → units at the treatment threshold
-
-For methods not covered here (IV, IPW, ANCOVA), see the respective notebook documentation and the {doc}`glossary` for estimand definitions.
