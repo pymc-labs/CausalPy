@@ -17,6 +17,10 @@ CausalPy methods fall into two broad categories:
 
 This distinction affects how you should interpret results and plots.
 
+:::{note}
+The estimand is not always uniquely determined by the experiment class. Some methods have explicit parameters that change the target (e.g., IPW's `weighting_scheme` selects between ATE and ATO). Others produce "local" effects whose scope depends on design choices (e.g., RD bandwidth, IV instrument). The descriptions below assume standard usage.
+:::
+
 ## Quick Reference
 
 - **Difference-in-Differences**: {term}`ATT` via interaction coefficient
