@@ -18,7 +18,7 @@ Utility functions
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -225,7 +225,7 @@ def extract_lift_for_mmm(
     channel: str,
     x: float,
     delta_x: float,
-    aggregate: Literal["mean", "sum"] = "mean",
+    aggregate: str = "mean",
 ) -> pd.DataFrame:
     """
     Extract lift test results from a Synthetic Control analysis for MMM calibration.
@@ -249,12 +249,14 @@ def extract_lift_for_mmm(
     delta_x : float
         The change in spend during the test period (i.e., test spend minus baseline
         spend). For a new channel activation, this equals the total test spend.
-    aggregate : {"mean", "sum"}, default="mean"
+    aggregate : {"mean", "median", "sum"}, default="mean"
         How to aggregate the causal impact across post-intervention time periods:
 
         - "mean": Average lift per time period. Use this for rate-based outcomes
           (e.g., weekly sales rate) or when your MMM operates at the same time
           granularity as the experiment.
+        - "median": Median lift per time period. More robust to outliers than the
+          mean; useful when the impact distribution across time periods is skewed.
         - "sum": Total cumulative lift across all post-intervention periods. Use
           this for cumulative outcomes or when you want total campaign impact.
 
@@ -320,6 +322,12 @@ def extract_lift_for_mmm(
         # The resulting DataFrame can be used with PyMC-Marketing:
         # mmm.add_lift_test_measurements(df_lift)
     """
+    _VALID_AGGREGATIONS = ("mean", "median", "sum")
+    if aggregate not in _VALID_AGGREGATIONS:
+        raise ValueError(
+            f"aggregate must be one of {_VALID_AGGREGATIONS}, got '{aggregate}'"
+        )
+
     from causalpy.pymc_models import PyMCModel
 
     # Validate that we have a Bayesian model
@@ -337,13 +345,8 @@ def extract_lift_for_mmm(
         # Get posterior samples for this unit's causal impact
         unit_impact = sc_result.post_impact.sel(treated_units=unit)
 
-        # Aggregate across time periods
-        if aggregate == "mean":
-            # Average lift per time period
-            lift_samples = unit_impact.mean(dim="obs_ind")
-        else:  # sum
-            # Total cumulative lift
-            lift_samples = unit_impact.sum(dim="obs_ind")
+        # Aggregate across time periods using the named method (e.g. "mean", "sum")
+        lift_samples = getattr(unit_impact, aggregate)(dim="obs_ind")
 
         # Extract mean and std from the posterior
         delta_y = float(lift_samples.mean().to_numpy())
