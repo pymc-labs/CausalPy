@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/pymc-labs/CausalPy"><img width="60%" src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/logo.png"></a>
+  <a href="https://github.com/pymc-labs/CausalPy"><img width="40%" src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/logo.png"></a>
 </div>
 
 ----
@@ -19,7 +19,9 @@
 [![Downloads](https://static.pepy.tech/badge/causalpy)](https://pepy.tech/project/causalpy)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
 
-# CausalPy
+<!-- docs-start -->
+
+# Causal Inference for Quasi-Experiments
 
 **Research-grade causal inference workflows** for quasi-experimental designs in Python.
 
