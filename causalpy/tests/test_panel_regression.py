@@ -605,3 +605,115 @@ def test_group_means_from_original_data(large_panel_data):
         check_names=False,
         check_like=True,
     )
+
+
+def test_plot_unit_effects_ols(small_panel_data):
+    """plot_unit_effects() OLS branch should produce a histogram of point estimates."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    fig, ax = result.plot_unit_effects()
+    assert isinstance(fig, plt.Figure)
+    # Histogram should have at least one patch
+    assert len(ax.patches) > 0
+    plt.close(fig)
+
+
+def test_plot_residuals_ols(small_panel_data):
+    """plot_residuals() should work with OLS models."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    fig, ax = result.plot_residuals(kind="scatter")
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
+
+
+def test_plot_trajectories_all_units(small_panel_data):
+    """plot_trajectories() with n_sample >= n_units should show all units."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    # n_sample=100 exceeds the 10 units, so all 10 should be plotted
+    fig, axes = result.plot_trajectories(n_sample=100)
+    visible = [ax for ax in axes if ax.get_visible()]
+    assert len(visible) == 10
+    plt.close(fig)
+
+
+def test_plot_trajectories_single_unit(small_panel_data):
+    """plot_trajectories() with a single unit should not raise."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    fig, axes = result.plot_trajectories(units=["unit_0"])
+    assert isinstance(fig, plt.Figure)
+    visible = [ax for ax in axes if ax.get_visible()]
+    assert len(visible) == 1
+    plt.close(fig)
+
+
+def test_get_plot_data_bayesian_raises_on_ols(small_panel_data):
+    """get_plot_data_bayesian() should raise ValueError for non-PyMC models."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    with pytest.raises(ValueError, match="not a PyMC model"):
+        result.get_plot_data_bayesian()
+
+
+def test_get_plot_data_ols_raises_on_pymc(mock_pymc_sample, small_panel_data):
+    """get_plot_data_ols() should raise ValueError for non-OLS models."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    with pytest.raises(ValueError, match="not an OLS model"):
+        result.get_plot_data_ols()
+
+
+def test_plot_unit_effects_no_fe_labels(small_panel_data):
+    """plot_unit_effects() raises when formula has no C(unit) terms."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    with pytest.raises(ValueError, match="No unit fixed effects found"):
+        result.plot_unit_effects()
