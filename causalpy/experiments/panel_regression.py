@@ -28,6 +28,8 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
+from causalpy.utils import round_num
 
 from .base import BaseExperiment
 
@@ -89,7 +91,7 @@ class PanelRegression(BaseExperiment):
     ...         {
     ...             "unit": u,
     ...             "time": t,
-    ...             "treatment": t >= 10 and u in units[:5],
+    ...             "treatment": int(t >= 10 and u in units[:5]),
     ...             "x1": np.random.randn(),
     ...             "y": np.random.randn(),
     ...         }
@@ -119,7 +121,7 @@ class PanelRegression(BaseExperiment):
     ...         {
     ...             "unit": u,
     ...             "time": t,
-    ...             "treatment": t >= 5,
+    ...             "treatment": int(t >= 5),
     ...             "x1": np.random.randn(),
     ...             "y": np.random.randn(),
     ...         }
@@ -140,15 +142,25 @@ class PanelRegression(BaseExperiment):
 
     Notes
     -----
-    The within transformation demeans all numeric variables by group, which
-    removes time-invariant confounders but also drops time-invariant covariates
-    from the model. For the dummy approach, individual unit effects can be
-    extracted from the coefficients. For the within approach, unit effects can
-    be recovered post-hoc using the stored group means.
+    The within transformation demeans all numeric and boolean variables by
+    group, which removes time-invariant confounders but also drops
+    time-invariant covariates from the model. For the dummy approach,
+    individual unit effects can be extracted from the coefficients. For
+    the within approach, unit effects can be recovered post-hoc using the
+    stored group means (``_group_means``), which are always computed from
+    the original (pre-demeaning) data.
 
     Two-way fixed effects (unit + time) control for both unit-specific and
     time-specific unobserved heterogeneity. This is the standard approach in
     difference-in-differences estimation.
+
+    **Balanced panels**: When both unit and time fixed effects are requested
+    with ``fe_method="within"``, the sequential demeaning (first by unit,
+    then by time) is algebraically equivalent to the standard two-way within
+    transformation only for **balanced panels** (every unit observed in every
+    period). For unbalanced panels, iterative alternating demeaning would be
+    needed for exact convergence; the single-pass approximation may introduce
+    small biases.
     """
 
     expt_type = "Panel Regression"
@@ -180,9 +192,10 @@ class PanelRegression(BaseExperiment):
         self.n_units = data[unit_fe_variable].nunique()
         self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
 
-        # Store original data for plotting
+        # Store original data for plotting and for recovering group means
         self.data = data.copy()
         self.data.index.name = "obs_ind"
+        self._original_data = data.copy()
 
         # Initialize storage for group means (used in within transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
@@ -210,10 +223,13 @@ class PanelRegression(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
+        # The "treated_units" dimension is required by PyMCModel.fit() / predict()
+        # which expects y to have shape (obs, treated_units).  For panel regression
+        # there is only one outcome column, so we use a single placeholder label.
         self.y = xr.DataArray(  # type: ignore[assignment]
             self.y,
             dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["y"]},
         )
 
         # Fit model
@@ -221,7 +237,7 @@ class PanelRegression(BaseExperiment):
             COORDS = {
                 "coeffs": self.labels,
                 "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["unit_0"],
+                "treated_units": ["y"],
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
         elif isinstance(self.model, RegressorMixin):
@@ -276,19 +292,49 @@ class PanelRegression(BaseExperiment):
         -------
         pd.DataFrame
             Demeaned data
+
+        Notes
+        -----
+        When two-way fixed effects are requested (both unit and time), the
+        sequential single-pass demeaning (first by unit, then by time) is
+        algebraically equivalent to the standard two-way within transformation
+
+        .. math:: \\tilde{y}_{it} = y_{it} - \\bar{y}_{i\\cdot}
+                   - \\bar{y}_{\\cdot t} + \\bar{y}_{\\cdot\\cdot}
+
+        **only for balanced panels** (every unit observed in every period).
+        For unbalanced panels the single pass is an approximation; iterative
+        alternating demeaning would be needed for exact convergence.
+
+        Group means stored in ``_group_means`` are always computed from the
+        **original** (pre-demeaning) data so that unit and time effects can
+        be recovered post-hoc without confusion.
         """
         data = data.copy()
 
-        # Identify numeric columns to demean (exclude group variables)
-        numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+        # Identify numeric and boolean columns to demean (exclude group variables).
+        # Boolean columns (e.g. treatment indicators) must be included; pandas
+        # select_dtypes(include=[np.number]) excludes bool.
+        numeric_cols = data.select_dtypes(include=[np.number, "bool"]).columns.tolist()
         group_vars_to_exclude = [self.unit_fe_variable]
         if self.time_fe_variable:
             group_vars_to_exclude.append(self.time_fe_variable)
 
         numeric_cols = [c for c in numeric_cols if c not in group_vars_to_exclude]
 
-        # Store group means for potential recovery of fixed effects
-        self._group_means[group_var] = data.groupby(group_var)[numeric_cols].mean()
+        # Cast boolean columns to float so that demeaning produces correct
+        # numeric results (bool - float would otherwise raise or produce
+        # unexpected dtypes).
+        for col in numeric_cols:
+            if data[col].dtype == "bool":
+                data[col] = data[col].astype(float)
+
+        # Store group means from the ORIGINAL data (before any demeaning in
+        # prior calls) so that fixed effects can be recovered post-hoc.
+        if group_var not in self._group_means:
+            self._group_means[group_var] = self._original_data.groupby(group_var)[
+                numeric_cols
+            ].mean()
 
         # Demean each numeric column
         for col in numeric_cols:
@@ -296,6 +342,28 @@ class PanelRegression(BaseExperiment):
             data[col] = data[col] - group_mean
 
         return data
+
+    def _get_non_fe_labels(self) -> list[str]:
+        """Return coefficient labels with FE dummy names filtered out.
+
+        For ``fe_method="dummies"`` this removes all ``C(unit_fe_variable)``
+        and ``C(time_fe_variable)`` labels.  For ``fe_method="within"`` it
+        returns all labels unchanged (there are no dummy columns).
+        """
+        coeff_labels = self.labels.copy()
+        if self.fe_method == "dummies":
+            coeff_labels = [
+                c
+                for c in coeff_labels
+                if not c.startswith(f"C({self.unit_fe_variable})")
+            ]
+            if self.time_fe_variable:
+                coeff_labels = [
+                    c
+                    for c in coeff_labels
+                    if not c.startswith(f"C({self.time_fe_variable})")
+                ]
+        return coeff_labels
 
     def summary(self, round_to: int | None = None) -> None:
         """Print a summary of the panel regression results.
@@ -315,28 +383,68 @@ class PanelRegression(BaseExperiment):
         print(f"Observations: {self.X.shape[0]}")
         print("=" * 60)
 
-        # Filter out fixed effect dummy coefficients for cleaner output
-        coeff_labels = self.labels.copy()
-        if self.fe_method == "dummies":
-            coeff_labels = [
-                c
-                for c in coeff_labels
-                if not c.startswith(f"C({self.unit_fe_variable})")
-            ]
-            if self.time_fe_variable:
-                coeff_labels = [
-                    c
-                    for c in coeff_labels
-                    if not c.startswith(f"C({self.time_fe_variable})")
-                ]
-            if len(coeff_labels) < len(self.labels):
-                print(
-                    f"\nNote: {len(self.labels) - len(coeff_labels)} fixed effect "
-                    "coefficients not shown (use print_coefficients() to see all)"
-                )
+        coeff_labels = self._get_non_fe_labels()
 
-        print("\nModel Coefficients (excluding FE dummies):")
-        self.model.print_coefficients(coeff_labels, round_to)
+        if self.fe_method == "dummies" and len(coeff_labels) < len(self.labels):
+            n_hidden = len(self.labels) - len(coeff_labels)
+            print(
+                f"\nNote: {n_hidden} fixed effect coefficients not shown "
+                "(use print_coefficients() to see all)"
+            )
+
+        print("\nModel Coefficients:")
+        if isinstance(self.model, PyMCModel):
+            # PyMC print_coefficients uses coordinate-based lookup so a
+            # filtered label list works correctly.
+            self.model.print_coefficients(coeff_labels, round_to)
+        else:
+            # For OLS models the base print_coefficients uses positional zip
+            # which would pair filtered labels with the wrong coefficient
+            # values.  We do our own index-based lookup instead.
+            coefs = self.model.get_coeffs()
+            max_label_length = max(len(name) for name in coeff_labels)
+            rd = round_to if round_to is not None else 2
+            print("Model coefficients:")
+            for name in coeff_labels:
+                idx = self.labels.index(name)
+                formatted_name = f"{name:<{max_label_length}}"
+                formatted_val = f"{round_num(coefs[idx], rd):>10}"
+                print(f"  {formatted_name}\t{formatted_val}")
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """Generate a decision-ready summary of causal effects.
+
+        .. note::
+            ``effect_summary()`` is not yet implemented for
+            ``PanelRegression``.  Panel fixed-effects models estimate
+            regression coefficients rather than time-varying causal impacts,
+            so the standard ITS/SC-style effect summary does not directly
+            apply.  Use :meth:`summary` for coefficient-level inference.
+
+        Raises
+        ------
+        NotImplementedError
+            Always raised; this method is a placeholder for future work.
+        """
+        raise NotImplementedError(
+            "effect_summary() is not yet implemented for PanelRegression. "
+            "Panel fixed-effects models estimate regression coefficients rather "
+            "than time-varying causal impacts. Use summary() for coefficient-level "
+            "inference."
+        )
 
     def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for Bayesian model.
@@ -358,25 +466,18 @@ class PanelRegression(BaseExperiment):
         """
         return self._plot_coefficients_internal()
 
-    def _plot_coefficients_internal(self) -> tuple[plt.Figure, plt.Axes]:
-        """Internal method to create coefficient plot."""
-        # Filter out fixed effect dummy coefficients
-        coeff_names = self.labels.copy()
+    def _plot_coefficients_internal(
+        self, var_names: list[str] | None = None
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Internal method to create coefficient plot.
 
-        # Remove unit FE dummies
-        if self.fe_method == "dummies":
-            coeff_names = [
-                c
-                for c in coeff_names
-                if not c.startswith(f"C({self.unit_fe_variable})")
-            ]
-            # Also remove time FE dummies if present
-            if self.time_fe_variable:
-                coeff_names = [
-                    c
-                    for c in coeff_names
-                    if not c.startswith(f"C({self.time_fe_variable})")
-                ]
+        Parameters
+        ----------
+        var_names : list[str], optional
+            Specific coefficient names to plot.  If ``None``, plots all
+            non-FE coefficients (as determined by ``_get_non_fe_labels``).
+        """
+        coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
         if isinstance(self.model, PyMCModel):
             # Bayesian: use az.plot_forest directly
@@ -389,7 +490,7 @@ class PanelRegression(BaseExperiment):
             )
             ax = axes.ravel()[0]
             fig = ax.figure
-            ax.set_title("Model Coefficients with 94% HDI (excluding FE dummies)")
+            ax.set_title("Model Coefficients with 94% HDI")
         else:
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
@@ -401,7 +502,7 @@ class PanelRegression(BaseExperiment):
             ax.set_yticklabels(coeff_names)
             ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8)
             ax.set_xlabel("Coefficient Value")
-            ax.set_title("Model Coefficients (excluding FE dummies)")
+            ax.set_title("Model Coefficients")
 
         plt.tight_layout()
         return fig, ax
@@ -475,15 +576,16 @@ class PanelRegression(BaseExperiment):
         Parameters
         ----------
         var_names : list[str], optional
-            Specific coefficient names to plot. If None, plots all non-FE coefficients.
+            Specific coefficient names to plot.  Names must match the patsy
+            design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
+            If ``None``, plots all non-FE coefficients.
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        # Use main plot method which already filters FE dummies
-        return self.plot()
+        return self._plot_coefficients_internal(var_names=var_names)
 
     def plot_unit_effects(
         self, highlight: list[str] | None = None, label_extreme: int = 0
@@ -623,9 +725,21 @@ class PanelRegression(BaseExperiment):
             if select == "random":
                 rng = np.random.default_rng(42)
                 selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
-            else:
-                # For extreme/high_variance, just take first n_sample for now
-                selected_units = all_units[:n_sample]  # type: ignore[assignment]
+            elif select == "extreme":
+                # Select units with the largest and smallest mean outcomes
+                unit_means = self.data.groupby(self.unit_fe_variable)[
+                    self.outcome_variable_name
+                ].mean()
+                n_each = max(1, n_sample // 2)
+                top = unit_means.nlargest(n_each).index.tolist()
+                bottom = unit_means.nsmallest(n_sample - n_each).index.tolist()
+                selected_units = top + bottom
+            elif select == "high_variance":
+                # Select units with the most within-unit variation
+                unit_var = self.data.groupby(self.unit_fe_variable)[
+                    self.outcome_variable_name
+                ].var()
+                selected_units = unit_var.nlargest(n_sample).index.tolist()
 
         # Create subplots
         n_units_plot = len(selected_units)
@@ -665,7 +779,7 @@ class PanelRegression(BaseExperiment):
 
             if is_bayesian:
                 # Get posterior mu for this unit's observations in sorted order
-                # Squeeze out treated_units dimension (always "unit_0" for panel regression)
+                # Squeeze out treated_units dimension (single placeholder for panel regression)
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
                     unit_mu = unit_mu.squeeze("treated_units", drop=True)
