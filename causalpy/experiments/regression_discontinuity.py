@@ -137,12 +137,15 @@ class RegressionDiscontinuity(BaseExperiment):
                 filter_desc.append(f"bandwidth={self.bandwidth}")
             if self.donut_hole > 0:
                 filter_desc.append(f"donut_hole={self.donut_hole}")
-            warnings.warn(
-                f"Choice of {' and '.join(filter_desc)} parameters has led to only "
-                f"{len(self.fit_data)} remaining datapoints. Consider adjusting these parameters.",
-                UserWarning,
-                stacklevel=2,
-            )
+            if filter_desc:
+                msg = (
+                    f"Choice of {' and '.join(filter_desc)} parameters has led to only "
+                    f"{len(self.fit_data)} remaining datapoints. "
+                    f"Consider adjusting these parameters."
+                )
+            else:
+                msg = f"Only {len(self.fit_data)} datapoints in the dataset."
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         y, X = dmatrices(self.formula, self.fit_data)
 
@@ -248,10 +251,10 @@ class RegressionDiscontinuity(BaseExperiment):
 
         # Validate donut_hole parameter
         if self.donut_hole < 0:
-            raise DataException("donut_hole must be non-negative.")
+            raise ValueError("donut_hole must be non-negative.")
 
         if self.bandwidth is not np.inf and self.donut_hole >= self.bandwidth:
-            raise DataException(
+            raise ValueError(
                 f"donut_hole ({self.donut_hole}) must be less than bandwidth "
                 f"({self.bandwidth}) when bandwidth is finite."
             )
@@ -298,35 +301,34 @@ class RegressionDiscontinuity(BaseExperiment):
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
 
-        # Plot all data in light gray (excluded observations)
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="lightgray",
-            ax=ax,
-            label="excluded data",
-        )
-
-        # Overlay fit data in black
+        # Plot data: use two layers only when there are excluded observations
+        has_exclusion = len(self.fit_data) < len(self.data)
+        if has_exclusion:
+            sns.scatterplot(
+                self.data,
+                x=self.running_variable_name,
+                y=self.outcome_variable_name,
+                color="lightgray",
+                ax=ax,
+                label="excluded data",
+            )
         sns.scatterplot(
             self.fit_data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
             color="k",
             ax=ax,
-            label="fit data",
+            label="fit data" if has_exclusion else "data",
         )
 
         # Plot model fit to data
-        h_line, h_patch = plot_xY(
+        plot_xY(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
+            label="Posterior mean",
         )
-        handles = [(h_line, h_patch)]
-        labels = ["Posterior mean"]
 
         # create strings to compose title
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
@@ -366,11 +368,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 color="orange",
             )
 
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
     def _ols_plot(
@@ -379,24 +377,24 @@ class RegressionDiscontinuity(BaseExperiment):
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
 
-        # Plot all data in light gray (excluded observations)
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="lightgray",
-            ax=ax,
-            label="excluded data",
-        )
-
-        # Overlay fit data in black
+        # Plot data: use two layers only when there are excluded observations
+        has_exclusion = len(self.fit_data) < len(self.data)
+        if has_exclusion:
+            sns.scatterplot(
+                self.data,
+                x=self.running_variable_name,
+                y=self.outcome_variable_name,
+                color="lightgray",
+                ax=ax,
+                label="excluded data",
+            )
         sns.scatterplot(
             self.fit_data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
             color="k",
             ax=ax,
-            label="fit data",
+            label="fit data" if has_exclusion else "data",
         )
 
         # Plot model fit to data

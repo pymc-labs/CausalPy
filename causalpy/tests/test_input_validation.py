@@ -584,11 +584,11 @@ def test_rd_donut_hole_with_bandwidth():
 
 
 def test_rd_donut_hole_validation_negative():
-    """Test that negative donut_hole raises DataException."""
+    """Test that negative donut_hole raises ValueError."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
-    with pytest.raises(DataException):
+    with pytest.raises(ValueError):
         cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated + x:treated",
@@ -599,11 +599,11 @@ def test_rd_donut_hole_validation_negative():
 
 
 def test_rd_donut_hole_validation_exceeds_bandwidth():
-    """Test that donut_hole >= bandwidth raises DataException."""
+    """Test that donut_hole >= bandwidth raises ValueError."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
-    with pytest.raises(DataException):
+    with pytest.raises(ValueError):
         cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated + x:treated",
@@ -613,7 +613,7 @@ def test_rd_donut_hole_validation_exceeds_bandwidth():
             donut_hole=0.3,  # Equal to bandwidth, should fail
         )
 
-    with pytest.raises(DataException):
+    with pytest.raises(ValueError):
         cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated + x:treated",
