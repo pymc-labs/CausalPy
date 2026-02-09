@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.0
     hooks:
       # Run the linter
       - id: ruff
@@ -64,6 +64,14 @@ repos:
         files: ^causalpy/
         additional_dependencies: [numpy>=1.20, pandas-stubs]
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.24.1
+    rev: v0.25
     hooks:
       - id: validate-pyproject
+  - repo: local
+    hooks:
+      - id: validate-bibtex
+        name: Validate BibTeX files
+        entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
+        language: python
+        files: \.bib$
+        additional_dependencies: [pybtex]

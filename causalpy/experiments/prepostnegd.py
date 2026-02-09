@@ -15,6 +15,8 @@
 Pretest/posttest nonequivalent group design
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -29,6 +31,7 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
@@ -106,15 +109,21 @@ class PrePostNEGD(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
-        y, X = dmatrices(formula, self.data)
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy."""
+        y, X = dmatrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -129,6 +138,8 @@ class PrePostNEGD(BaseExperiment):
             coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -275,3 +286,35 @@ class PrePostNEGD(BaseExperiment):
         az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for PrePostNEGD.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_did(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )

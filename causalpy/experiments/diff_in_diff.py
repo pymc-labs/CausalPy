@@ -15,6 +15,8 @@
 Difference in differences
 """
 
+from typing import Any, Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -30,6 +32,13 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import (
+    EffectSummary,
+    _compute_statistics_did_ols,
+    _effect_summary_did,
+    _generate_prose_did_ols,
+    _generate_table_did_ols,
+)
 from causalpy.utils import (
     _is_variable_dummy_coded,
     convert_to_string,
@@ -110,15 +119,21 @@ class DifferenceInDifferences(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.post_treatment_variable_name = post_treatment_variable_name
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
-        y, X = dmatrices(formula, self.data)
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy."""
+        y, X = dmatrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -133,6 +148,8 @@ class DifferenceInDifferences(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit model
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -242,8 +259,6 @@ class DifferenceInDifferences(BaseExperiment):
             self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
-
-        return
 
     def input_validation(self) -> None:
         # Validate formula structure and interaction interaction terms
@@ -547,3 +562,46 @@ class DifferenceInDifferences(BaseExperiment):
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Difference-in-Differences.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.pymc_models import PyMCModel
+
+        is_pymc = isinstance(self.model, PyMCModel)
+
+        if is_pymc:
+            return _effect_summary_did(
+                self,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+            )
+        else:
+            # OLS DiD
+            stats = _compute_statistics_did_ols(self, alpha=alpha)
+            table = _generate_table_did_ols(stats)
+            text = _generate_prose_did_ols(stats, alpha=alpha)
+            return EffectSummary(table=table, text=text)

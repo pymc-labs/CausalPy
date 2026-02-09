@@ -29,6 +29,7 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -143,22 +144,20 @@ class InterruptedTimeSeries(BaseExperiment):
         self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
+        self.data = data
         self.input_validation(data, treatment_time, treatment_end_time)
         self.treatment_time = treatment_time
         self.treatment_end_time = treatment_end_time
-        # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        # NOTE: treatment_time is INCLUSIVE (>=) in post-period
-        # Pre-period: index < treatment_time (exclusive)
-        # Post-period: index >= treatment_time (inclusive)
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
-
         self.formula = formula
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for pre and post intervention periods using patsy."""
         # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre)
+        y, X = dmatrices(self.formula, self.datapre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -170,7 +169,9 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
-        # turn into xarray.DataArray's
+
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays for pre and post periods."""
         self.pre_X = xr.DataArray(
             self.pre_X,
             dims=["obs_ind", "coeffs"],
@@ -198,6 +199,8 @@ class InterruptedTimeSeries(BaseExperiment):
             coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         # All PyMC models now accept xr.DataArray with consistent API
         if isinstance(self.model, PyMCModel):
@@ -299,6 +302,22 @@ class InterruptedTimeSeries(BaseExperiment):
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
                 )
+
+    @property
+    def datapre(self) -> pd.DataFrame:
+        """Data from before the treatment time (exclusive).
+
+        Pre-period: index < treatment_time
+        """
+        return self.data[self.data.index < self.treatment_time]
+
+    @property
+    def datapost(self) -> pd.DataFrame:
+        """Data from on or after the treatment time (inclusive).
+
+        Post-period: index >= treatment_time
+        """
+        return self.data[self.data.index >= self.treatment_time]
 
     def _split_post_period(self) -> None:
         """Split post period into intervention and post-intervention periods.
@@ -406,181 +425,6 @@ class InterruptedTimeSeries(BaseExperiment):
                 self.model.calculate_cumulative_impact(self.post_intervention_impact)
             )
 
-    def effect_summary(
-        self,
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-    ):
-        """Generate a decision-ready summary of causal effects.
-
-        For three-period designs (when treatment_end_time is provided), use the
-        period parameter to get summaries for specific periods.
-
-        Parameters
-        ----------
-        window : str, tuple, or slice, default="post"
-            Time window for analysis (ignored when period is specified for three-period design)
-        period : {"intervention", "post", "comparison"}, optional
-            For three-period designs, specify which period to summarize:
-            - "intervention": Summary for intervention period only
-            - "post": Summary for post-intervention period only
-            - "comparison": Comparative summary with persistence metrics (persistence ratio,
-              probability that effect persisted, HDI/CI interval comparison)
-            - None: Default behavior (summarizes all post-treatment data, backward compatible)
-        direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for tail probability calculation (PyMC only)
-        alpha : float, default=0.05
-            Significance level for HDI/CI intervals
-        cumulative : bool, default=True
-            Whether to include cumulative effect statistics
-        relative : bool, default=True
-            Whether to include relative effect statistics
-        min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold (PyMC only)
-        treated_unit : str, optional
-            For multi-unit experiments, specify which treated unit to analyze
-
-        Returns
-        -------
-        EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
-        """
-        from causalpy.reporting import (
-            EffectSummary,
-            _compute_statistics,
-            _compute_statistics_ols,
-            _generate_prose,
-            _generate_prose_ols,
-            _generate_table,
-            _generate_table_ols,
-        )
-
-        # Handle three-period design
-        if self.treatment_end_time is not None and period is not None:
-            # Validate period parameter
-            valid_periods = ["intervention", "post", "comparison"]
-            if period not in valid_periods:
-                raise ValueError(
-                    f"period must be one of {valid_periods}, got '{period}'"
-                )
-
-            if period == "comparison":
-                # Comparison period: compare intervention and post-intervention periods
-                return self._comparison_period_summary(
-                    direction=direction,
-                    alpha=alpha,
-                    cumulative=cumulative,
-                    relative=relative,
-                    min_effect=min_effect,
-                )
-
-            # Select appropriate impact and prediction data based on period
-            if period == "intervention":
-                impact = self.intervention_impact
-                counterfactual_pred = self.intervention_pred
-                window_coords = self.data_intervention.index
-                prefix = "During intervention"
-            elif period == "post":
-                impact = self.post_intervention_impact
-                counterfactual_pred = self.post_intervention_pred
-                window_coords = self.data_post_intervention.index
-                prefix = "Post-intervention"
-
-            # Determine time dimension
-            is_pymc = isinstance(self.model, PyMCModel)
-            if is_pymc:
-                # For PyMC, dimension is always "obs_ind" in CausalPy
-                time_dim = "obs_ind"
-
-                # Extract counterfactual from InferenceData
-                if hasattr(counterfactual_pred, "posterior_predictive"):
-                    counterfactual = counterfactual_pred.posterior_predictive["mu"]
-                    if "treated_units" in counterfactual.dims:
-                        counterfactual = counterfactual.isel(treated_units=0)
-                else:
-                    counterfactual = counterfactual_pred
-
-                # Compute statistics
-                hdi_prob = 1 - alpha
-                stats = _compute_statistics(
-                    impact,
-                    counterfactual,
-                    hdi_prob=hdi_prob,
-                    direction=direction,
-                    cumulative=cumulative,
-                    relative=relative,
-                    min_effect=min_effect,
-                    time_dim=time_dim,
-                )
-
-                # Generate table
-                table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-                # Generate prose
-                text = _generate_prose(
-                    stats,
-                    window_coords,
-                    alpha=alpha,
-                    direction=direction,
-                    cumulative=cumulative,
-                    relative=relative,
-                    prefix=prefix,
-                )
-            else:
-                # OLS model
-                # Convert to numpy arrays if needed
-                if hasattr(impact, "values"):
-                    impact_array = impact.values
-                else:
-                    impact_array = np.asarray(impact)
-
-                if hasattr(counterfactual_pred, "values"):
-                    counterfactual_array = counterfactual_pred.values
-                else:
-                    counterfactual_array = np.asarray(counterfactual_pred)
-
-                stats = _compute_statistics_ols(
-                    impact_array,
-                    counterfactual_array,
-                    alpha=alpha,
-                    cumulative=cumulative,
-                    relative=relative,
-                )
-
-                # Generate table
-                table = _generate_table_ols(
-                    stats, cumulative=cumulative, relative=relative
-                )
-
-                # Generate prose
-                text = _generate_prose_ols(
-                    stats,
-                    window_coords,
-                    alpha=alpha,
-                    cumulative=cumulative,
-                    relative=relative,
-                    prefix=prefix,
-                )
-
-            return EffectSummary(table=table, text=text)
-        else:
-            # Default: use base class implementation (backward compatible)
-            return super().effect_summary(
-                window=window,
-                direction=direction,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-                treated_unit=treated_unit,
-            )
-
     def _comparison_period_summary(
         self,
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
@@ -609,7 +453,7 @@ class InterruptedTimeSeries(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        from causalpy.reporting import EffectSummary, _extract_hdi_bounds
+        from causalpy.reporting import _extract_hdi_bounds
 
         is_pymc = isinstance(self.model, PyMCModel)
         time_dim = "obs_ind"
@@ -1358,3 +1202,186 @@ class InterruptedTimeSeries(BaseExperiment):
         print("=" * 60)
 
         return result
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Interrupted Time Series.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Time window for analysis:
+            - "post": All post-treatment time points (default)
+            - (start, end): Tuple of start and end times (handles both datetime and integer indices)
+            - slice: Python slice object for integer indices
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        cumulative : bool, default=True
+            Whether to include cumulative effect statistics.
+        relative : bool, default=True
+            Whether to include relative effect statistics (% change vs counterfactual).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        treated_unit : str, optional
+            Ignored for Interrupted Time Series (single unit).
+        period : {"intervention", "post", "comparison"}, optional
+            For three-period designs (with treatment_end_time), specify which period to summarize.
+            Defaults to None for standard behavior.
+        prefix : str, optional
+            Prefix for prose generation (e.g., "During intervention", "Post-intervention").
+            Defaults to "Post-period".
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import (
+            _compute_statistics,
+            _compute_statistics_ols,
+            _extract_counterfactual,
+            _extract_window,
+            _generate_prose,
+            _generate_prose_ols,
+            _generate_table,
+            _generate_table_ols,
+        )
+
+        is_pymc = isinstance(self.model, PyMCModel)
+
+        # Handle period parameter for three-period designs
+        if period is not None:
+            # Validate period parameter
+            valid_periods = ["intervention", "post", "comparison"]
+            if period not in valid_periods:
+                raise ValueError(
+                    f"period must be one of {valid_periods}, got '{period}'"
+                )
+
+            # Check if this experiment supports three-period designs
+            if not (
+                hasattr(self, "treatment_end_time")
+                and self.treatment_end_time is not None
+            ):
+                raise ValueError(
+                    f"Period '{period}' not available. This experiment may not support three-period designs. "
+                    "Provide treatment_end_time to enable period-specific analysis."
+                )
+
+            if period == "comparison":
+                # Comparison period: delegate to subclass method
+                return self._comparison_period_summary(
+                    direction=direction,
+                    alpha=alpha,
+                    cumulative=cumulative,
+                    relative=relative,
+                    min_effect=min_effect,
+                )
+
+            # For "intervention" or "post" periods, use _extract_window with tuple windows
+            if period == "intervention":
+                # Intervention period: treatment_time <= index < treatment_end_time
+                intervention_indices = self.datapost.index[
+                    self.datapost.index < self.treatment_end_time
+                ]
+                # Use the last index before treatment_end_time as the end bound
+                window = (self.treatment_time, intervention_indices.max())
+                prefix = "During intervention"
+            elif period == "post":
+                # Post-intervention period: index >= treatment_end_time (inclusive)
+                window = (self.treatment_end_time, self.datapost.index.max())
+                prefix = "Post-intervention"
+
+            # Extract windowed impact data using calculated window
+            windowed_impact, window_coords = _extract_window(
+                self, window, treated_unit=treated_unit
+            )
+
+            # Extract counterfactual for relative effects
+            counterfactual = _extract_counterfactual(
+                self, window_coords, treated_unit=treated_unit
+            )
+        else:
+            # No period specified, use standard flow
+            windowed_impact, window_coords = _extract_window(
+                self, window, treated_unit=treated_unit
+            )
+            counterfactual = _extract_counterfactual(
+                self, window_coords, treated_unit=treated_unit
+            )
+
+        if is_pymc:
+            # PyMC model: use posterior draws
+            hdi_prob = 1 - alpha
+            stats = _compute_statistics(
+                windowed_impact,
+                counterfactual,
+                hdi_prob=hdi_prob,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+            )
+
+            # Generate table
+            table = _generate_table(stats, cumulative=cumulative, relative=relative)
+
+            # Generate prose
+            text = _generate_prose(
+                stats,
+                window_coords,
+                alpha=alpha,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+        else:
+            # OLS model: use point estimates and CIs
+            # Convert to numpy arrays if needed
+            if hasattr(windowed_impact, "values"):
+                impact_array = windowed_impact.values
+            else:
+                impact_array = np.asarray(windowed_impact)
+            if hasattr(counterfactual, "values"):
+                counterfactual_array = counterfactual.values
+            else:
+                counterfactual_array = np.asarray(counterfactual)
+
+            stats = _compute_statistics_ols(
+                impact_array,
+                counterfactual_array,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+            )
+
+            # Generate table
+            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
+
+            # Generate prose
+            text = _generate_prose_ols(
+                stats,
+                window_coords,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+
+        return EffectSummary(table=table, text=text)
