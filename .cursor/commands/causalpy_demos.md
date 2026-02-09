@@ -13,30 +13,18 @@ import causalpy as cp
 df = cp.load_data("dataset_name")
 ```
 
-## Available Datasets
+## Discovering Available Datasets
 
-The following datasets are available for demonstration purposes. Use the key (left) to load the corresponding file.
+To discover available datasets and their descriptions, read the `load_data` docstring in `causalpy/data/datasets.py`:
 
-| Key | Description / Context |
-| :--- | :--- |
-| `did` | Generic Difference-in-Differences example |
-| `its` | Generic Interrupted Time Series example |
-| `sc` | Generic Synthetic Control example |
-| `banks` | DiD example (Banks) |
-| `brexit` | Synthetic Control example (GDP impact of Brexit) |
-| `covid` | ITS example (Deaths and temps in England/Wales) |
-| `drinking` | Regression Discontinuity example (Minimum Legal Drinking Age) |
-| `rd` | Generic Regression Discontinuity example |
-| `its simple` | Simple ITS example |
-| `anova1` | Generated ANCOVA example |
-| `geolift1` | GeoLift example (Single cell) |
-| `geolift_multi_cell` | GeoLift example (Multi cell) |
-| `risk` | AJR2001 dataset |
-| `nhefs` | NHEFS dataset |
-| `schoolReturns` | Schooling Returns dataset |
-| `pisa18` | PISA 2018 Sample Scale |
-| `nets` | Nets DataFrame |
-| `lalonde` | Lalonde dataset |
+```python
+import causalpy as cp
+
+# View the docstring with dataset descriptions
+help(cp.load_data)
+```
+
+The docstring contains a complete list of dataset keys and descriptions of each dataset's intended use case.
 
 ## Usage Example
 
