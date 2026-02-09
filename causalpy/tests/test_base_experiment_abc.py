@@ -18,16 +18,14 @@ Tests for BaseExperiment abstract method enforcement.
 import pytest
 
 from causalpy.experiments.base import BaseExperiment
-from causalpy.reporting import EffectSummary
 
 
-def test_baseexperiment_enforces_missing_bayesian_methods():
+def test_cannot_instantiate_without_effect_summary():
+    """Subclasses that don't implement effect_summary cannot be instantiated."""
+
     class IncompleteExperiment(BaseExperiment):
         supports_bayes = True
         supports_ols = False
 
-        def effect_summary(self, *args, **kwargs) -> EffectSummary:
-            raise NotImplementedError
-
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="effect_summary"):
         IncompleteExperiment()

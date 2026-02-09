@@ -394,18 +394,6 @@ class InversePropensityWeighting(BaseExperiment):
 
         return [ate, trt, ntrt]
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Return a plot for Bayesian Inverse Propensity Weighting experiments."""
-        raise NotImplementedError(
-            "_bayesian_plot is not implemented for InversePropensityWeighting."
-        )
-
-    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian Inverse Propensity Weighting experiments."""
-        raise NotImplementedError(
-            "get_plot_data_bayesian is not implemented for InversePropensityWeighting."
-        )
-
     def plot_ate(
         self,
         idata: az.InferenceData | None = None,

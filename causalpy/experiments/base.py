@@ -15,7 +15,7 @@
 Base class for quasi experimental designs.
 """
 
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 import arviz as az
@@ -28,41 +28,7 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class _ExperimentMeta(ABCMeta):
-    """Metaclass that relaxes abstract-method requirements based on support flags.
-
-    ``ABCMeta.__new__`` computes ``__abstractmethods__`` *after*
-    ``__init_subclass__`` runs, so pruning inside ``__init_subclass__`` is
-    silently overwritten.  By doing the pruning here – after
-    ``super().__new__`` has already set ``__abstractmethods__`` – the
-    relaxation takes effect correctly.
-    """
-
-    def __new__(
-        mcs,
-        name: str,
-        bases: tuple[type, ...],
-        namespace: dict[str, Any],
-        **kwargs: Any,
-    ) -> "_ExperimentMeta":
-        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
-        abstract_methods = set(getattr(cls, "__abstractmethods__", set()))
-        supports_bayes = getattr(cls, "supports_bayes", None)
-        supports_ols = getattr(cls, "supports_ols", None)
-
-        if supports_bayes is False:
-            abstract_methods.discard("_bayesian_plot")
-            abstract_methods.discard("get_plot_data_bayesian")
-
-        if supports_ols is False:
-            abstract_methods.discard("_ols_plot")
-            abstract_methods.discard("get_plot_data_ols")
-
-        cls.__abstractmethods__ = frozenset(abstract_methods)
-        return cls  # type: ignore[return-value]
-
-
-class BaseExperiment(metaclass=_ExperimentMeta):
+class BaseExperiment(ABC):
     """Base class for quasi experimental designs.
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
@@ -132,14 +98,12 @@ class BaseExperiment(metaclass=_ExperimentMeta):
             else:
                 raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    @abstractmethod
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
@@ -155,14 +119,12 @@ class BaseExperiment(metaclass=_ExperimentMeta):
         else:
             raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
-    @abstractmethod
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
