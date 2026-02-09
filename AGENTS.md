@@ -17,6 +17,12 @@
 - Preference should be given to integration tests, but unit tests are acceptable for core functionality to maintain high code coverage.
 - Tests should remain quick to run. Tests involving MCMC sampling with PyMC should use custom `sample_kwargs` to minimize the computational load.
 
+## Sandbox and permissions
+
+- **PyMC/PyTensor require filesystem access** outside the workspace (e.g. `~/.pytensor/compiledir_*` for C compilation cache, `~/.matplotlib` for font cache). The default Cursor sandbox blocks writes to these paths, causing misleading `ValueError` or `PermissionError` failures that look like real test errors but are not.
+- **Always use `required_permissions: ["all"]`** when running `pytest`, `make doctest`, or any command that imports PyMC, PyTensor, or matplotlib. This avoids false negatives from sandbox restrictions.
+- **If a test run shows `compiledir ... you don't have read, write or listing permissions`**, that is a sandbox problem, not a code problem. Re-run with `["all"]` permissions before investigating further.
+
 ## Documentation
 
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
