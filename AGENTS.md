@@ -1,5 +1,10 @@
 # AGENTS
 
+## Environment
+
+- Before running Python-related commands (e.g., `python`, `pytest`, `pre-commit`, `ruff`, `mypy`), activate the conda environment: `source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy`
+- If shell activation is not available or unreliable, run commands via `conda run -n CausalPy ...` instead.
+
 ## Testing preferences
 
 - Write all Python tests as `pytest` style functions, not unittest classes
