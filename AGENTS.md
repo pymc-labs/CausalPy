@@ -30,6 +30,9 @@
 - **API documentation**: Auto-generated from docstrings via Sphinx autodoc, no manual API docs needed
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
+- **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
+- **Markdown formatting**: Do not hard-wrap lines in markdown files; rely on editor auto-wrapping.
+- **Issue draft cleanup**: Delete issue draft markdown files from `.scratch/issue_summaries/` after filing.
 
 ## Code structure and style
 
@@ -40,6 +43,7 @@
 - **Formulas**: Use patsy for formula parsing (via `dmatrices()`)
 - **Custom exceptions**: Use project-specific exceptions from `causalpy.custom_exceptions`: `FormulaException`, `DataException`, `BadIndexException`
 - **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
+- **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
 
 ## Code quality checks
 

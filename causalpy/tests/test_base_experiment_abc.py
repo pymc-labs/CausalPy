@@ -11,6 +11,21 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""CausalPy Version"""
+"""
+Tests for BaseExperiment abstract method enforcement.
+"""
 
-__version__ = "0.7.0"
+import pytest
+
+from causalpy.experiments.base import BaseExperiment
+
+
+def test_cannot_instantiate_without_effect_summary():
+    """Subclasses that don't implement effect_summary cannot be instantiated."""
+
+    class IncompleteExperiment(BaseExperiment):
+        supports_bayes = True
+        supports_ols = False
+
+    with pytest.raises(TypeError, match="effect_summary"):
+        IncompleteExperiment()

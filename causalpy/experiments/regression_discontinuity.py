@@ -34,6 +34,8 @@ from causalpy.pymc_models import PyMCModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
 from .base import BaseExperiment
+from causalpy.reporting import EffectSummary, _effect_summary_rd
+from typing import Any, Literal
 
 LEGEND_FONT_SIZE = 12
 
@@ -110,7 +112,12 @@ class RegressionDiscontinuity(BaseExperiment):
         self.bandwidth = bandwidth
         self.donut_hole = donut_hole
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data, applying bandwidth and donut hole filtering."""
         # Build boolean mask for data filtering (bandwidth + donut_hole)
         x_vals = self.data[self.running_variable_name]
         c = self.treatment_threshold
@@ -137,7 +144,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 stacklevel=2,
             )
 
-        y, X = dmatrices(formula, self.fit_data)
+        y, X = dmatrices(self.formula, self.fit_data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -145,7 +152,8 @@ class RegressionDiscontinuity(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -160,6 +168,8 @@ class RegressionDiscontinuity(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""
         # fit model
         if isinstance(self.model, PyMCModel):
             # fit the model to the observed (pre-intervention) data
@@ -430,3 +440,35 @@ class RegressionDiscontinuity(BaseExperiment):
 
         ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Regression Discontinuity.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_rd(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )
