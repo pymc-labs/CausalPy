@@ -162,7 +162,7 @@ def test_panel_regression_skl_dummies(small_panel_data):
 
     # Check that model was fitted
     assert hasattr(result.model, "coef_")
-    assert len(result.model.coef_) == len(result.labels)
+    assert len(result.model.get_coeffs()) == len(result.labels)
 
     # Check plotting works
     fig, ax = result.plot()
@@ -466,7 +466,7 @@ def test_within_transform_boolean_treatment():
     # The treatment coefficient should be close to 2.0.  Without the bool
     # fix the variable would not be demeaned and the estimate would be biased.
     treatment_idx = result.labels.index("treatment")
-    treatment_coef = result.model.coef_[treatment_idx]
+    treatment_coef = result.model.get_coeffs()[treatment_idx]
     assert abs(treatment_coef - 2.0) < 1.0, (
         f"Treatment coefficient {treatment_coef:.2f} far from true value 2.0; "
         "boolean column may not have been demeaned"
@@ -489,7 +489,7 @@ def test_summary_ols_dummies_correct_coefficients(small_panel_data, capsys):
 
     # The treatment coefficient from the OLS fit should be ~2.0 (true DGP value)
     treatment_idx = result.labels.index("treatment")
-    true_coef = result.model.coef_[treatment_idx]
+    true_coef = result.model.get_coeffs()[treatment_idx]
 
     # The printed output should contain a value close to the true coefficient,
     # not the value of some FE dummy.  Values are rounded to 2 significant

@@ -163,7 +163,6 @@ class PanelRegression(BaseExperiment):
     small biases.
     """
 
-    expt_type = "Panel Regression"
     supports_ols = True
     supports_bayes = True
 
@@ -179,21 +178,24 @@ class PanelRegression(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
 
-        # Store parameters
+        # Rename the index to "obs_ind" (on original, before copying)
+        data.index.name = "obs_ind"
+        self.data = data
+        self.expt_type = "Panel Regression"
+        self.formula = formula
         self.unit_fe_variable = unit_fe_variable
         self.time_fe_variable = time_fe_variable
         self.fe_method = fe_method
-        self.formula = formula
 
-        # Store original data for plotting and for recovering group means
-        self.data = data.copy()
-        self.data.index.name = "obs_ind"
+        # Store a copy of original data for recovering group means in within
+        # transformation.  Other experiment classes don't need this because
+        # they don't demean the data before fitting.
         self._original_data = data.copy()
 
         # Initialize storage for group means (used in within transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
 
-        # Pipeline
+        # Pipeline (matches pattern of other experiment classes)
         self.input_validation()
 
         # Store panel dimensions (after validation confirms columns exist)
@@ -267,13 +269,10 @@ class PanelRegression(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
-        # The "treated_units" dimension is required by PyMCModel.fit() / predict()
-        # which expects y to have shape (obs, treated_units).  For panel regression
-        # there is only one outcome column, so we use a single placeholder label.
         self.y = xr.DataArray(  # type: ignore[assignment]
             self.y,
             dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["y"]},
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
     def algorithm(self) -> None:
@@ -282,15 +281,16 @@ class PanelRegression(BaseExperiment):
             COORDS = {
                 "coeffs": self.labels,
                 "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["y"],
+                "treated_units": ["unit_0"],
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
         elif isinstance(self.model, RegressorMixin):
             # For scikit-learn models, set fit_intercept=False so that the
             # patsy intercept column is included in the coefficients array.
+            # TODO: later, this should be handled in ScikitLearnAdaptor itself
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
-            self.model.fit(X=self.X.values, y=self.y.values.ravel())  # type: ignore[attr-defined]
+            self.model.fit(X=self.X, y=self.y)
 
     def _within_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply within transformation (demean by group).
@@ -509,7 +509,7 @@ class PanelRegression(BaseExperiment):
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.coef_[coef_indices]
+            coefs = self.model.get_coeffs()[coef_indices]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -562,7 +562,7 @@ class PanelRegression(BaseExperiment):
             DataFrame with fitted values
         """
         if isinstance(self.model, RegressorMixin):
-            y_fitted = self.model.predict(self.X.values)  # type: ignore[attr-defined]
+            y_fitted = np.squeeze(self.model.predict(self.X))  # type: ignore[attr-defined]
         else:
             raise ValueError("Model is not an OLS model")
 
@@ -662,7 +662,8 @@ class PanelRegression(BaseExperiment):
         else:
             # OLS: get point estimates
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            fe_values = [self.model.coef_[idx] for idx in unit_fe_indices]
+            coefs = self.model.get_coeffs()
+            fe_values = [coefs[idx] for idx in unit_fe_indices]
 
             ax.hist(
                 fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
@@ -793,7 +794,7 @@ class PanelRegression(BaseExperiment):
 
             if is_bayesian:
                 # Get posterior mu for this unit's observations in sorted order
-                # Squeeze out treated_units dimension (single placeholder for panel regression)
+                # Squeeze out treated_units dimension
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
                     unit_mu = unit_mu.squeeze("treated_units", drop=True)
@@ -818,7 +819,7 @@ class PanelRegression(BaseExperiment):
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = self.model.predict(self.X.values)[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
+                y_fitted = np.squeeze(self.model.predict(self.X))[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,
