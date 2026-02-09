@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
+    rev: v0.15.0
     hooks:
       # Run the linter
       - id: ruff
@@ -64,7 +64,7 @@ repos:
         files: ^causalpy/
         additional_dependencies: [numpy>=1.20, pandas-stubs]
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.24.1
+    rev: v0.25
     hooks:
       - id: validate-pyproject
   - repo: local
