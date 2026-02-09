@@ -185,13 +185,6 @@ class PanelRegression(BaseExperiment):
         self.fe_method = fe_method
         self.formula = formula
 
-        # Validate inputs
-        self._validate_inputs(data)
-
-        # Store panel dimensions
-        self.n_units = data[unit_fe_variable].nunique()
-        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
-
         # Store original data for plotting and for recovering group means
         self.data = data.copy()
         self.data.index.name = "obs_ind"
@@ -200,60 +193,24 @@ class PanelRegression(BaseExperiment):
         # Initialize storage for group means (used in within transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
 
-        # Apply within transformation if requested
-        if fe_method == "within":
-            data = self._within_transform(data, unit_fe_variable)
-            if time_fe_variable:
-                data = self._within_transform(data, time_fe_variable)
+        # Pipeline
+        self.input_validation()
 
-        # Create design matrices
-        y, X = dmatrices(formula, data)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        # Store panel dimensions (after validation confirms columns exist)
+        self.n_units = data[unit_fe_variable].nunique()
+        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
-        # Convert to xarray
-        self.X = xr.DataArray(  # type: ignore[assignment]
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
-        )
-        # The "treated_units" dimension is required by PyMCModel.fit() / predict()
-        # which expects y to have shape (obs, treated_units).  For panel regression
-        # there is only one outcome column, so we use a single placeholder label.
-        self.y = xr.DataArray(  # type: ignore[assignment]
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["y"]},
-        )
-
-        # Fit model
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["y"],
-            }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
-        elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, set fit_intercept=False to include intercept in coefficients
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
-            self.model.fit(X=self.X.values, y=self.y.values.ravel())  # type: ignore[attr-defined]
-
-    def _validate_inputs(self, data: pd.DataFrame) -> None:
+    def input_validation(self) -> None:
         """Validate input parameters."""
-        if self.unit_fe_variable not in data.columns:
+        if self.unit_fe_variable not in self.data.columns:
             raise DataException(
                 f"unit_fe_variable '{self.unit_fe_variable}' not found in data columns"
             )
 
-        if self.time_fe_variable and self.time_fe_variable not in data.columns:
+        if self.time_fe_variable and self.time_fe_variable not in self.data.columns:
             raise DataException(
                 f"time_fe_variable '{self.time_fe_variable}' not found in data columns"
             )
@@ -277,6 +234,63 @@ class PanelRegression(BaseExperiment):
                 f"When using fe_method='within', do not include C({self.time_fe_variable}) "
                 "in the formula. The within transformation handles time fixed effects automatically."
             )
+
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy.
+
+        For ``fe_method="within"`` this first applies the within transformation
+        (demeaning by unit, and optionally by time) before constructing the
+        patsy design matrices.
+        """
+        data = self._original_data.copy()
+
+        # Apply within transformation if requested
+        if self.fe_method == "within":
+            data = self._within_transform(data, self.unit_fe_variable)
+            if self.time_fe_variable:
+                data = self._within_transform(data, self.time_fe_variable)
+
+        y, X = dmatrices(self.formula, data)
+        self.outcome_variable_name = y.design_info.column_names[0]
+        self._y_design_info = y.design_info
+        self._x_design_info = X.design_info
+        self.labels = X.design_info.column_names
+        self.y, self.X = np.asarray(y), np.asarray(X)
+
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
+        self.X = xr.DataArray(  # type: ignore[assignment]
+            self.X,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(self.X.shape[0]),
+                "coeffs": self.labels,
+            },
+        )
+        # The "treated_units" dimension is required by PyMCModel.fit() / predict()
+        # which expects y to have shape (obs, treated_units).  For panel regression
+        # there is only one outcome column, so we use a single placeholder label.
+        self.y = xr.DataArray(  # type: ignore[assignment]
+            self.y,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["y"]},
+        )
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit the model."""
+        if isinstance(self.model, PyMCModel):
+            COORDS = {
+                "coeffs": self.labels,
+                "obs_ind": np.arange(self.X.shape[0]),
+                "treated_units": ["y"],
+            }
+            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
+        elif isinstance(self.model, RegressorMixin):
+            # For scikit-learn models, set fit_intercept=False so that the
+            # patsy intercept column is included in the coefficients array.
+            if hasattr(self.model, "fit_intercept"):
+                self.model.fit_intercept = False
+            self.model.fit(X=self.X.values, y=self.y.values.ravel())  # type: ignore[attr-defined]
 
     def _within_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply within transformation (demean by group).
