@@ -102,6 +102,14 @@ Click on the thumbnail below to watch a video about CausalPy on YouTube.
 - You want fully automated "black box" causal answers without specifying assumptions
 - You primarily need production workflow tooling (pipelines, governance, multi-user collaboration)
 
+## Need expert help?
+
+<img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="40%" />
+
+CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team needs to move faster or faces high-stakes causal questions, our [Expert Access Program](https://www.pymc-labs.com/blog-posts/expert-access-program) gives you on-demand access to the causal inference specialists behind this library — for design review, implementation guidance, and analysis support.
+
+📬 [**Get in touch →**](https://www.pymc-labs.com/contact)
+
 ## Methods and Workflows
 
 CausalPy provides methods for common causal inference decision contexts:
@@ -138,18 +146,6 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 - **Practical significance:** ROPE (Region of Practical Equivalence) analysis to assess whether effects exceed meaningful thresholds
 - **Direction testing:** Tail probabilities (e.g., P(effect > 0)) for directional inference
 
-## Consulting
-
-<img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="40%" />
-
-**Need expert help with causal inference?** [PyMC Labs](https://www.pymc-labs.com) offers:
-
-- **Causal Design Reviews**: Identification strategy assessment, diagnostics plan, and reproducible analysis report
-- **Implementation engagements**: End-to-end support for high-stakes causal analyses
-- **Training**: Corporate workshops from Bayesian fundamentals to advanced causal inference
-
-Contact [ben.vincent@pymc-labs.com](mailto:ben.vincent@pymc-labs.com) to discuss your needs.
-
 ## Citing CausalPy
 
 If you use CausalPy in your research, please cite it. A Zenodo DOI for stable releases is planned. In the meantime, you can cite the repository:
@@ -183,8 +179,4 @@ Have questions about using CausalPy? We're here to help!
 
 Please use GitHub Discussions for general questions rather than opening issues, so we can keep the issue tracker focused on bugs and enhancements.
 
-## Support
-
-This repository is supported by [PyMC Labs](https://www.pymc-labs.com).
-
-If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.com](mailto:ben.vincent@pymc-labs.com). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
+CausalPy is supported by [PyMC Labs](https://www.pymc-labs.com).
