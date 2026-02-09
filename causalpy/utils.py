@@ -104,12 +104,12 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
         # In the case of an xarray object, we return the mean and 94% CI
-        percentiles = x.quantile([0.03, 1 - 0.03]).values
+        percentiles = x.quantile([0.03, 1 - 0.03]).to_numpy()
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
-        return f"{x.mean().values:.2f}" + ci
+        return f"{x.mean().to_numpy():.2f}" + ci
     else:
         raise ValueError(
             "Type not supported. Please provide a float or an xarray object."
@@ -346,8 +346,8 @@ def extract_lift_for_mmm(
             lift_samples = unit_impact.sum(dim="obs_ind")
 
         # Extract mean and std from the posterior
-        delta_y = float(lift_samples.mean().values)
-        sigma = float(lift_samples.std().values)
+        delta_y = float(lift_samples.mean().to_numpy())
+        sigma = float(lift_samples.std().to_numpy())
 
         results.append(
             {
