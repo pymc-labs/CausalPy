@@ -33,15 +33,16 @@ def test_did():
     """
     data = cp.load_data("did")
     model = LinearRegression(fit_intercept=True)
-    result = cp.DifferenceInDifferences(
-        data,
-        formula="y ~ 1 + group*post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        treated=1,
-        untreated=0,
-        model=model,
-    )
+    with pytest.warns(UserWarning, match="fit_intercept=True"):
+        result = cp.DifferenceInDifferences(
+            data,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            treated=1,
+            untreated=0,
+            model=model,
+        )
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert model.fit_intercept is True
