@@ -31,8 +31,9 @@
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
 - **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
+  - **PR drafts**: Create PR summary markdown files in `.scratch/pr_summaries/` (untracked).
+  - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
 - **Markdown formatting**: Do not hard-wrap lines in markdown files; rely on editor auto-wrapping.
-- **Issue draft cleanup**: Delete issue draft markdown files from `.scratch/issue_summaries/` after filing.
 
 ## Code structure and style
 
@@ -64,54 +65,14 @@
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
 - **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
 
-## GitHub Issue Creation
+## GitHub Issue Workflows
 
-When you or the user identify an issue (bug, enhancement, or task), you can automatically create a GitHub issue using the GitHub CLI.
+Use the `github-issues` Skill in `.github/skills/github-issues/` for issue
+creation, bug reports, and issue evaluation workflows.
 
-### Prerequisites
+## Skills Location
 
-- **Install GitHub CLI**: If `gh` is not available, install it:
-  - macOS: `brew install gh`
-  - Linux: See https://github.com/cli/cli/blob/trunk/docs/install_linux.md
-  - Windows: `winget install --id GitHub.cli`
-- **Authenticate**: Run `gh auth login` and follow the prompts to authorize access to the repository.
-
-### Creating an Issue
-
-1. **Generate the issue body**: Create a markdown file (e.g., `issue.md`) describing the issue with:
-   - A clear problem statement or feature request
-   - Steps to reproduce (for bugs)
-   - Expected vs actual behavior (for bugs)
-   - Relevant code snippets or error messages
-   - Proposed solution (if applicable)
-
-2. **User review**: Always present the draft issue to the user for review before filing. The user should have the opportunity to view, modify, or approve the issue content before it is submitted.
-
-3. **Create the issue**: After the user approves, run the following command:
-   ```bash
-   gh issue create --title "<descriptive title>" --body-file issue.md
-   ```
-
-   **Adding labels**: Use the `--label` flag to categorize the issue appropriately:
-   ```bash
-   gh issue create --title "<descriptive title>" --body-file issue.md --label "<label>"
-   ```
-
-   Common labels include:
-   - `bug` - Something isn't working correctly
-   - `enhancement` - New feature or improvement request
-   - `documentation` - Documentation improvements or additions
-   - `question` - Further information is requested
-
-   Multiple labels can be added by repeating the flag: `--label "bug" --label "high priority"`
-
-   **Discovering available labels**: To see what labels are available in the repository:
-   ```bash
-   # List all labels defined in the repo, along with their descriptions
-   gh label list --limit 100
-
-   # Find unique labels from existing issues
-   gh issue list --state all --limit 100 --json labels --jq '.[].labels[].name' | sort -u
-   ```
-
-4. **Clean up**: Delete the temporary `issue.md` file after the issue is created.
+Canonical skills live in `.github/skills/`. The `.claude/skills` and
+`.cursor/skills` paths are symlinks to that directory. On Windows, symlink
+support may require Developer Mode or elevated permissions; if symlinks are not
+available, mirror `.github/skills/` into those locations and keep them in sync.
