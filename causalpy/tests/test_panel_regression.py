@@ -434,3 +434,174 @@ def test_panel_regression_two_way_fe(large_panel_data):
     # Check that both unit and time demeaning were applied
     assert "unit" in result._group_means
     assert "time" in result._group_means
+
+
+def test_within_transform_boolean_treatment():
+    """Boolean treatment columns must be demeaned by the within transformation."""
+    np.random.seed(42)
+    n_units, n_periods = 20, 10
+    data = pd.DataFrame(
+        [
+            {
+                "unit": f"u{i}",
+                "time": t,
+                # boolean column, not int
+                "treatment": t >= 5 and i < n_units // 2,
+                "y": float(i) + 2.0 * (t >= 5 and i < n_units // 2) + np.random.randn(),
+            }
+            for i in range(n_units)
+            for t in range(n_periods)
+        ]
+    )
+    assert data["treatment"].dtype == bool, "fixture should produce bool treatment"
+
+    result = cp.PanelRegression(
+        data=data,
+        formula="y ~ treatment",
+        unit_fe_variable="unit",
+        fe_method="within",
+        model=LinearRegression(),
+    )
+
+    # The treatment coefficient should be close to 2.0.  Without the bool
+    # fix the variable would not be demeaned and the estimate would be biased.
+    treatment_idx = result.labels.index("treatment")
+    treatment_coef = result.model.coef_[treatment_idx]
+    assert abs(treatment_coef - 2.0) < 1.0, (
+        f"Treatment coefficient {treatment_coef:.2f} far from true value 2.0; "
+        "boolean column may not have been demeaned"
+    )
+
+
+def test_summary_ols_dummies_correct_coefficients(small_panel_data, capsys):
+    """summary() must print the correct coefficient values for OLS dummies."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    result.summary()
+    captured = capsys.readouterr().out
+
+    # The treatment coefficient from the OLS fit should be ~2.0 (true DGP value)
+    treatment_idx = result.labels.index("treatment")
+    true_coef = result.model.coef_[treatment_idx]
+
+    # The printed output should contain a value close to the true coefficient,
+    # not the value of some FE dummy.  Values are rounded to 2 significant
+    # figures by default so we allow tolerance for that.
+    assert "treatment" in captured
+    # Parse the treatment line and check the value is correct
+    for line in captured.splitlines():
+        if "treatment" in line and "C(" not in line:
+            # Extract the numeric value from the line
+            parts = line.split()
+            value = float(parts[-1])
+            assert abs(value - true_coef) < 0.1, (
+                f"Printed value {value} does not match true coefficient {true_coef}"
+            )
+            break
+
+
+def test_effect_summary_raises(small_panel_data):
+    """effect_summary() should raise NotImplementedError."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="within",
+        model=LinearRegression(),
+    )
+    with pytest.raises(NotImplementedError, match="not yet implemented"):
+        result.effect_summary()
+
+
+def test_plot_trajectories_select_extreme(small_panel_data):
+    """plot_trajectories with select='extreme' picks high/low mean-outcome units."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+    fig, axes = result.plot_trajectories(n_sample=4, select="extreme")
+    assert isinstance(fig, plt.Figure)
+    # Should have at least 4 visible subplots
+    visible = [ax for ax in axes if ax.get_visible()]
+    assert len(visible) >= 4
+    plt.close(fig)
+
+
+def test_plot_trajectories_select_high_variance(small_panel_data):
+    """plot_trajectories with select='high_variance' picks high-variance units."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+    fig, axes = result.plot_trajectories(n_sample=4, select="high_variance")
+    assert isinstance(fig, plt.Figure)
+    visible = [ax for ax in axes if ax.get_visible()]
+    assert len(visible) >= 4
+    plt.close(fig)
+
+
+def test_plot_coefficients_with_var_names(small_panel_data):
+    """plot_coefficients(var_names=...) should only plot the specified coefficients."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+    fig, ax = result.plot_coefficients(var_names=["treatment"])
+    # Should have exactly one bar (horizontal bar chart)
+    assert len(ax.patches) == 1
+    plt.close(fig)
+
+
+def test_group_means_from_original_data(large_panel_data):
+    """_group_means should contain means from original data, not demeaned data."""
+    result = cp.PanelRegression(
+        data=large_panel_data,
+        formula="y ~ treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="within",
+        model=LinearRegression(),
+    )
+
+    # The stored unit group means should match means computed directly from
+    # the original data.  Use check_like=True to ignore column ordering.
+    original_unit_means = large_panel_data.groupby("unit")[
+        ["y", "treatment", "x1"]
+    ].mean()
+    pd.testing.assert_frame_equal(
+        result._group_means["unit"].sort_index(),
+        original_unit_means.sort_index(),
+        check_names=False,
+        check_like=True,
+    )
+
+    # Time group means should also come from the original data (not
+    # unit-demeaned data).
+    original_time_means = large_panel_data.groupby("time")[
+        ["y", "treatment", "x1"]
+    ].mean()
+    pd.testing.assert_frame_equal(
+        result._group_means["time"].sort_index(),
+        original_time_means.sort_index(),
+        check_names=False,
+        check_like=True,
+    )
