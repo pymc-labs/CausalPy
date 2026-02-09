@@ -278,10 +278,20 @@ class RegressionKink(BaseExperiment):
         )
         return fig, ax
 
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
+        """OLS plotting is unsupported for RegressionKink."""
+        raise NotImplementedError("_ols_plot is not implemented for RegressionKink.")
+
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Return plot data for Bayesian Regression Kink."""
         raise NotImplementedError(
             "get_plot_data_bayesian is not implemented for RegressionKink."
+        )
+
+    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """OLS plot data is unsupported for RegressionKink."""
+        raise NotImplementedError(
+            "get_plot_data_ols is not implemented for RegressionKink."
         )
 
     def effect_summary(

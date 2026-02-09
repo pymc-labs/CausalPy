@@ -263,10 +263,22 @@ class InstrumentalVariable(BaseExperiment):
             "_bayesian_plot is not implemented for InstrumentalVariable."
         )
 
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
+        """OLS plotting is unsupported for InstrumentalVariable."""
+        raise NotImplementedError(
+            "_ols_plot is not implemented for InstrumentalVariable."
+        )
+
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Return plot data for Bayesian Instrumental Variable experiments."""
         raise NotImplementedError(
             "get_plot_data_bayesian is not implemented for InstrumentalVariable."
+        )
+
+    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """OLS plot data is unsupported for InstrumentalVariable."""
+        raise NotImplementedError(
+            "get_plot_data_ols is not implemented for InstrumentalVariable."
         )
 
     def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
