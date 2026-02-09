@@ -15,7 +15,7 @@
 Base class for quasi experimental designs.
 """
 
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 from typing import Any, Literal
 
 import arviz as az
@@ -28,23 +28,24 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class BaseExperiment(ABC):
-    """Base class for quasi experimental designs.
+class _ExperimentMeta(ABCMeta):
+    """Metaclass that relaxes abstract-method requirements based on support flags.
 
-    Subclasses should set ``_default_model_class`` to a PyMC model class
-    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
-    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    ``ABCMeta.__new__`` computes ``__abstractmethods__`` *after*
+    ``__init_subclass__`` runs, so pruning inside ``__init_subclass__`` is
+    silently overwritten.  By doing the pruning here – after
+    ``super().__new__`` has already set ``__abstractmethods__`` – the
+    relaxation takes effect correctly.
     """
 
-    labels: list[str]
-
-    supports_bayes: bool
-    supports_ols: bool
-
-    _default_model_class: type[PyMCModel] | None = None
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
+    def __new__(
+        mcs,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, Any],
+        **kwargs: Any,
+    ) -> "_ExperimentMeta":
+        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
         abstract_methods = set(getattr(cls, "__abstractmethods__", set()))
         supports_bayes = getattr(cls, "supports_bayes", None)
         supports_ols = getattr(cls, "supports_ols", None)
@@ -58,6 +59,23 @@ class BaseExperiment(ABC):
             abstract_methods.discard("get_plot_data_ols")
 
         cls.__abstractmethods__ = frozenset(abstract_methods)
+        return cls  # type: ignore[return-value]
+
+
+class BaseExperiment(metaclass=_ExperimentMeta):
+    """Base class for quasi experimental designs.
+
+    Subclasses should set ``_default_model_class`` to a PyMC model class
+    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
+    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    """
+
+    labels: list[str]
+
+    supports_bayes: bool
+    supports_ols: bool
+
+    _default_model_class: type[PyMCModel] | None = None
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
