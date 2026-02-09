@@ -99,15 +99,16 @@ def test_staggered_did_sklearn():
     )
 
     model = LinearRegression(fit_intercept=True)
-    result = cp.StaggeredDifferenceInDifferences(
-        df,
-        formula="y ~ 1 + C(unit) + C(time)",
-        unit_variable_name="unit",
-        time_variable_name="time",
-        treated_variable_name="treated",
-        treatment_time_variable_name="treatment_time",
-        model=model,
-    )
+    with pytest.warns(UserWarning, match="fit_intercept=True"):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=model,
+        )
 
     # Check result type
     assert isinstance(result, cp.StaggeredDifferenceInDifferences)
