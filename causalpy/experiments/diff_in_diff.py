@@ -150,6 +150,8 @@ class DifferenceInDifferences(BaseExperiment):
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
+        # Ensure intercept handling is correct before fitting (no-op for non-sklearn).
+        self._ensure_sklearn_fit_intercept_false()
         # fit model
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -159,8 +161,6 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # Ensure intercept handling is explicit without mutating user models.
-            self._ensure_sklearn_fit_intercept_false()
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")
