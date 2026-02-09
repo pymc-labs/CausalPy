@@ -89,7 +89,7 @@ source_suffix = {
     ".myst": "myst-nb",
 }
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".codespell"]
 master_doc = "index"
 
 # bibtex config
