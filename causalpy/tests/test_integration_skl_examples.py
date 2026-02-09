@@ -56,6 +56,34 @@ def test_did():
 
 
 @pytest.mark.integration
+def test_did_sklearn_fit_intercept_false():
+    """
+    Test DiD with an sklearn model that already has fit_intercept=False.
+
+    When the model's fit_intercept is already False, no warning should be
+    emitted and the model should not be cloned.
+    """
+    data = cp.load_data("did")
+    model = LinearRegression(fit_intercept=False)
+    result = cp.DifferenceInDifferences(
+        data,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        treated=1,
+        untreated=0,
+        model=model,
+    )
+    assert isinstance(result, cp.DifferenceInDifferences)
+    # Model was not cloned — the experiment uses the original object (wrapped)
+    assert result.model.fit_intercept is False
+    result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+
+@pytest.mark.integration
 def test_rd_drinking():
     """
     Test Regression Discontinuity scikit-learn experiment on drinking age data.

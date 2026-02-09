@@ -340,6 +340,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _fit_model(self) -> None:
         """Fit the model on untreated observations only."""
+        # Ensure intercept handling is correct before fitting (no-op for non-sklearn).
+        self._ensure_sklearn_fit_intercept_false()
         # Convert to xarray for PyMC models
         n_train = self.X_train.shape[0]
 
@@ -364,7 +366,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            self._ensure_sklearn_fit_intercept_false()
             self.model.fit(X=self.X_train, y=self.y_train)
         else:
             raise ValueError("Model type not recognized")
