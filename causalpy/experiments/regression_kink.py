@@ -27,8 +27,10 @@ from patsy import build_design_matrices, dmatrices
 import xarray as xr
 from causalpy.plot_utils import plot_xY
 
-from .base import BaseExperiment
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
+
+from .base import BaseExperiment
 from typing import Any, Literal
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
@@ -46,13 +48,14 @@ class RegressionKink(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
         data: pd.DataFrame,
         formula: str,
         kink_point: float,
-        model: BaseExperiment | None = None,
+        model: PyMCModel | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,

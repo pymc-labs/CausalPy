@@ -36,11 +36,16 @@ class BaseExperiment:
     supports_bayes: bool
     supports_ols: bool
 
+    _default_model_class: type[PyMCModel] | None = None
+
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
+
+        if model is None and self._default_model_class is not None:
+            model = self._default_model_class()
 
         if model is not None:
             self.model = model
