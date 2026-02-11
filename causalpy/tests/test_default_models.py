@@ -93,9 +93,11 @@ def sample_kwargs():
         (
             cp.InterruptedTimeSeries,
             {
-                "data": lambda: cp.load_data("its")
-                .assign(date=lambda x: pd.to_datetime(x["date"]))
-                .set_index("date"),
+                "data": lambda: (
+                    cp.load_data("its")
+                    .assign(date=lambda x: pd.to_datetime(x["date"]))
+                    .set_index("date")
+                ),
                 "treatment_time": pd.to_datetime("2017-01-01"),
                 "formula": "y ~ 1 + t + C(month)",
             },
