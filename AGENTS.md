@@ -2,8 +2,9 @@
 
 ## Environment
 
-- Before running Python-related commands (e.g., `python`, `pytest`, `pre-commit`, `ruff`, `mypy`), activate the conda environment: `source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy`
-- If shell activation is not available or unreliable, run commands via `conda run -n CausalPy ...` instead.
+Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `CausalPy` environment. Always run commands via `$CONDA_EXE run -n CausalPy <command>` -- never use `$CONDA_EXE activate`.
+
+See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
 
 ## Testing preferences
 
