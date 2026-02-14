@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from scipy import stats
 from sklearn.base import RegressorMixin
@@ -756,15 +757,17 @@ class PanelRegression(BaseExperiment):
                 ].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()
 
-        # Create subplots
+        # Create only the subplots we need
         n_units_plot = len(selected_units)
         ncols = min(3, n_units_plot)
         nrows = (n_units_plot + ncols - 1) // ncols
 
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows))
-        if n_units_plot == 1:
-            axes = np.array([axes])
-        axes = axes.flatten()
+        fig = plt.figure(figsize=(5 * ncols, 3 * nrows))
+        gs = GridSpec(nrows, ncols, figure=fig)
+        axes = [
+            fig.add_subplot(gs[idx // ncols, idx % ncols])
+            for idx in range(n_units_plot)
+        ]
 
         # Plot each unit
         for idx, unit in enumerate(selected_units):
@@ -834,12 +837,8 @@ class PanelRegression(BaseExperiment):
             if idx == 0:
                 ax.legend(fontsize=8)
 
-        # Hide unused subplots
-        for idx in range(n_units_plot, len(axes)):
-            axes[idx].set_visible(False)
-
         plt.tight_layout()
-        return fig, axes
+        return fig, np.array(axes)
 
     def plot_residuals(
         self,
