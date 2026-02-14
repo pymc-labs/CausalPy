@@ -6,6 +6,7 @@ on:
     paths:
       - "causalpy/**"
       - "pyproject.toml"
+  workflow_dispatch:
 
 permissions: {}
 
