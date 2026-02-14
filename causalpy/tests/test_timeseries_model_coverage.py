@@ -42,6 +42,14 @@ class MockComponentNoApply:
 class TestBayesianBasisExpansionTimeSeriesCoverage:
     """Test uncovered branches in BayesianBasisExpansionTimeSeries."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_pymc_marketing(self):
+        """Skip entire class when pymc-marketing not installed (needed for default BSTS components)."""
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
+
     @pytest.fixture
     def sample_data(self):
         """Create sample time series data."""

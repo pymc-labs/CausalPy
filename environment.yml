@@ -21,7 +21,7 @@ dependencies:
   - matplotlib>=3.5.3
   - nbconvert
   - nbformat
-  - numpy
+  - numpy<2.4
   - pandas
   - patsy
   - pre-commit
