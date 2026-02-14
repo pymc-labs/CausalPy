@@ -54,4 +54,9 @@ $CONDA_EXE env update --file environment.yml --prune
 
 ## Troubleshooting
 
-If you hit issues with an outdated `mamba` or `micromamba`, you can self-update: `$CONDA_EXE self-update`. As of 2026-02-13, current versions are conda 26.1.0, mamba/micromamba 2.5.0.
+If you hit issues with an outdated tool, update it:
+
+- **mamba / micromamba**: `$CONDA_EXE self-update`
+- **conda**: `conda update -n base conda`
+
+As of 2026-02-13, current versions are conda 26.1.0, mamba/micromamba 2.5.0.
