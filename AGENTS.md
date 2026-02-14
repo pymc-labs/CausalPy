@@ -2,40 +2,9 @@
 
 ## Environment
 
-This project uses a conda environment named **CausalPy**. All Python-related commands (`python`, `pytest`, `pre-commit`, `ruff`, `mypy`) must run inside that environment. The env is defined in `environment.yml` at the project root.
+Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `CausalPy` environment. Always run commands via `$CONDA_EXE run -n CausalPy <command>` -- never use `$CONDA_EXE activate`.
 
-### When to use what
-
-- **Codex desktop app, git worktrees, or fresh shells** (conda not auto-activated):
-  **Always** use `conda run -n CausalPy <command>`. Do not rely on activation; the shell may not have conda in PATH or the env active. Example: `conda run -n CausalPy python -m pytest causalpy/tests/`
-
-- **Cursor or other IDE where conda is available and you can activate:**
-  Either activate once then run commands normally, or use `conda run -n CausalPy ...` for a single command. Prefer `conda run` when suggesting commands for the user to run in a terminal that might not have the env activated.
-
-- **First-time setup or the CausalPy env does not exist:**
-  From the repo root, run `scripts/codex_setup.sh`. It creates the env and does an editable install with `[dev]` extras.
-
-### How to activate (when activation is possible)
-
-```bash
-source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy
-```
-
-If that path does not exist, use:
-
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy
-```
-
-### Run without activating (recommended when in doubt)
-
-Use this form for any Python or tooling command when you are not sure the env is active (e.g. in Codex, worktrees, or when suggesting a one-off command):
-
-```bash
-conda run -n CausalPy python -m pytest causalpy/tests/
-conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"
-conda run -n CausalPy pre-commit run --all-files
-```
+See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
 
 ## Testing preferences
 
