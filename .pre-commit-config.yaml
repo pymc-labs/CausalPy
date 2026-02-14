@@ -67,6 +67,31 @@ repos:
     rev: v0.25
     hooks:
       - id: validate-pyproject
+  # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff)
+  - repo: https://github.com/usnistgov/pyproject2conda
+    rev: v0.22.1
+    hooks:
+      - id: pyproject2conda-yaml
+        name: Sync environment.yml from pyproject.toml
+        args:
+          - -e
+          - dev
+          - -o
+          - environment.yml
+          - -n
+          - CausalPy
+          - -w
+          - force
+          - --python-include
+          - "python>=3.12"
+          - -d
+          - make
+          - -d
+          - pip
+          - -d
+          - pymc-bart
+          - -r
+          - "marimo[mcp]"
   - repo: local
     hooks:
       - id: validate-bibtex

@@ -95,6 +95,9 @@ docs = [
 lint = ["interrogate", "pre-commit", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
 
+[tool.pyproject2conda]
+channels = ["conda-forge"]
+
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
