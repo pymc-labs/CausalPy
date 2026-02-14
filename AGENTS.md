@@ -2,6 +2,8 @@
 
 ## Environment
 
+- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it (do not edit by hand—see CONTRIBUTING). Optional: `pymc-marketing` is in the `docs` extra only.
+- **Development**: The supported setup is the conda env (`environment.yml`). `pip install -e .[dev]` works but does not include conda-only tooling (e.g. `make`, `pymc-bart`, `marimo`); do not suggest pip-only dev as equivalent.
 - Before running Python-related commands (e.g., `python`, `pytest`, `pre-commit`, `ruff`, `mypy`), activate the conda environment: `source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy`
 - If shell activation is not available or unreliable, run commands via `conda run -n CausalPy ...` instead.
 

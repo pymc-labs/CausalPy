@@ -47,7 +47,6 @@ dependencies = [
     "pandas",
     "patsy",
     "pymc>=5.15.1",
-    "pymc-marketing>=0.13.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
@@ -73,6 +72,7 @@ dev = [
 ]
 docs = [
     "ipykernel",
+    "pymc-marketing>=0.13.1",
     "daft-pgm",
     "linkify-it-py",
     "myst-nb<=1.0.0",
