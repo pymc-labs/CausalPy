@@ -5,14 +5,13 @@ on:
     branches: [main]
     paths:
       - "causalpy/**"
+      - "pyproject.toml"
 
 permissions: {}
 
 jobs:
-  update-badge:
+  generate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -23,25 +22,32 @@ jobs:
           python-version: "3.14"
 
       - name: Install interrogate
-        run: pip install interrogate
+        run: pip install interrogate==1.7.0
 
       - name: Generate badge
         run: interrogate causalpy/ --generate-badge . --badge-format svg
 
-      - name: Push badge to interrogate-badges branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git fetch origin interrogate-badges
-          git checkout interrogate-badges
-          cp interrogate_badge.svg .
-          git add interrogate_badge.svg
-          if git diff --cached --quiet; then
-            echo "Badge unchanged, nothing to push."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -m "Update interrogate badge"
-            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-            git push origin interrogate-badges
-          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: interrogate-badge
+          path: interrogate_badge.svg
+
+  publish:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: # zizmor: ignore[artipacked] only git operations, no third-party code
+          ref: interrogate-badges
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: interrogate-badge
+
+      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7.1.0
+        with:
+          commit_message: Update interrogate badge
+          branch: interrogate-badges
+          file_pattern: interrogate_badge.svg
