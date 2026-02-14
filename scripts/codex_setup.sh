@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Set up the CausalPy development environment for use with Codex, worktrees, or
+# any context where conda is not already activated. Creates a conda env at
+# ./.conda/env from environment.yml and does an editable install of this repo
+# with [dev] extras. Run once per clone/worktree from the repo root.
 set -euo pipefail
 
 ENV_PREFIX="./.conda/env"
