@@ -3,7 +3,26 @@
 ## Environment
 
 - Before running Python-related commands (e.g., `python`, `pytest`, `pre-commit`, `ruff`, `mypy`), activate the conda environment: `source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy`
-- If shell activation is not available or unreliable, run commands via `conda run -n CausalPy ...` instead.
+- If shell activation is not available or unreliable (e.g. in a worktree or fresh shell), run commands via `conda run -n CausalPy ...` instead. Examples:
+  - `conda run -n CausalPy python -m pytest causalpy/tests/`
+  - `conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"`
+  - `conda run -n CausalPy pre-commit run --all-files`
+- Alternative activation: `source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy && <your command>`
+- The environment is defined in `environment.yml` at the project root
+
+### Environment setup (for Codex worktrees)
+
+When using git worktrees in the OpenAI Codex desktop app (or any context where conda is not auto-activated):
+
+- **Always prefix Python commands** with `conda run -n CausalPy` to ensure the correct environment is used.
+- Examples:
+  - `conda run -n CausalPy python -m pytest causalpy/tests/`
+  - `conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"`
+  - `conda run -n CausalPy pre-commit run --all-files`
+- **Alternative**: Source conda and activate before running commands:
+  ```bash
+  source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy && <your command>
+  ```
 
 ## Testing preferences
 
@@ -76,14 +95,10 @@
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
 - **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
 
-## GitHub Issue Workflows
+## GitHub CLI
 
-Use the `github-issues` Skill in `.github/skills/github-issues/` for issue
-creation, bug reports, and issue evaluation workflows.
+Use `gh` CLI as the preferred source of truth for GitHub issues, PRs, releases. See [`.github/skills/github-cli/SKILL.md`](.github/skills/github-cli/SKILL.md) for details.
 
 ## Skills Location
 
-Canonical skills live in `.github/skills/`. The `.claude/skills` and
-`.cursor/skills` paths are symlinks to that directory. On Windows, symlink
-support may require Developer Mode or elevated permissions; if symlinks are not
-available, mirror `.github/skills/` into those locations and keep them in sync.
+Canonical skills live in `.github/skills/`. The `.claude/skills` and `.cursor/skills` paths are symlinks to that directory. On Windows, symlink support may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into those locations and keep them in sync.
