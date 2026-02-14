@@ -41,7 +41,7 @@ class PanelRegression(BaseExperiment):
     """Panel regression with fixed effects estimation.
 
     Enables panel-aware visualization and diagnostics, with support for both
-    dummy variable and within-transformation approaches to fixed effects.
+    dummy variable and demeaned (de-meaned) transformation approaches to fixed effects.
 
     Parameters
     ----------
@@ -50,19 +50,19 @@ class PanelRegression(BaseExperiment):
         unit at a time period.
     formula : str
         A statistical model formula using patsy syntax. For dummy variable
-        approach, include C(unit_var) in the formula. For within transformation,
+        approach, include C(unit_var) in the formula.         For demeaned transformation,
         do NOT include C(unit_var) as it will be automatically removed.
     unit_fe_variable : str
         Column name for the unit identifier (e.g., "state", "id", "country").
     time_fe_variable : str, optional
         Column name for the time identifier (e.g., "year", "wave", "period").
         If provided, time fixed effects will be included. Default is None.
-    fe_method : {"dummies", "within"}, default="dummies"
+    fe_method : {"dummies", "demeaned"}, default="dummies"
         Method for handling fixed effects:
         - "dummies": Use dummy variables (C(unit) in formula). Gets individual
           unit effect estimates but creates N-1 dummy columns. Best for small N.
-        - "within": Use within transformation (demeaning). Scales to large N but
-          doesn't directly estimate individual unit effects.
+        - "demeaned": Use demeaned (de-meaned) transformation. Scales to large N
+          but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
 
@@ -73,9 +73,9 @@ class PanelRegression(BaseExperiment):
     n_periods : int or None
         Number of unique time periods (None if time_fe_variable not provided).
     fe_method : str
-        The fixed effects method used ("dummies" or "within").
+        The fixed effects method used ("dummies" or "demeaned").
     _group_means : dict
-        Stored group means for recovering unit effects (within method only).
+        Stored group means for recovering unit effects (demeaned method only).
 
     Examples
     --------
@@ -111,7 +111,7 @@ class PanelRegression(BaseExperiment):
     ...     ),
     ... )
 
-    Large panel with within transformation:
+    Large panel with demeaned transformation:
 
     >>> # Create larger panel: 1000 units, 10 time periods
     >>> np.random.seed(42)
@@ -135,7 +135,7 @@ class PanelRegression(BaseExperiment):
     ...     formula="y ~ treatment + x1",  # No C(unit) needed
     ...     unit_fe_variable="unit",
     ...     time_fe_variable="time",
-    ...     fe_method="within",
+    ...     fe_method="demeaned",
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
@@ -143,25 +143,24 @@ class PanelRegression(BaseExperiment):
 
     Notes
     -----
-    The within transformation demeans all numeric and boolean variables by
-    group, which removes time-invariant confounders but also drops
-    time-invariant covariates from the model. For the dummy approach,
-    individual unit effects can be extracted from the coefficients. For
-    the within approach, unit effects can be recovered post-hoc using the
-    stored group means (``_group_means``), which are always computed from
-    the original (pre-demeaning) data.
+    The demeaned transformation (de-meaning by group) removes time-invariant
+    confounders but also drops time-invariant covariates from the model. For
+    the dummy approach, individual unit effects can be extracted from the
+    coefficients. For the demeaned approach, unit effects can be recovered
+    post-hoc using the stored group means (``_group_means``), which are always
+    computed from the original (pre-demeaning) data.
 
     Two-way fixed effects (unit + time) control for both unit-specific and
     time-specific unobserved heterogeneity. This is the standard approach in
     difference-in-differences estimation.
 
     **Balanced panels**: When both unit and time fixed effects are requested
-    with ``fe_method="within"``, the sequential demeaning (first by unit,
-    then by time) is algebraically equivalent to the standard two-way within
-    transformation only for **balanced panels** (every unit observed in every
-    period). For unbalanced panels, iterative alternating demeaning would be
-    needed for exact convergence; the single-pass approximation may introduce
-    small biases.
+    with ``fe_method="demeaned"``, the sequential demeaning (first by unit,
+    then by time) is algebraically equivalent to the standard two-way
+    demeaned transformation only for **balanced panels** (every unit observed
+    in every period). For unbalanced panels, iterative alternating demeaning
+    would be needed for exact convergence; the single-pass approximation may
+    introduce small biases.
     """
 
     supports_ols = True
@@ -173,7 +172,7 @@ class PanelRegression(BaseExperiment):
         formula: str,
         unit_fe_variable: str,
         time_fe_variable: str | None = None,
-        fe_method: Literal["dummies", "within"] = "dummies",
+        fe_method: Literal["dummies", "demeaned"] = "dummies",
         model: PyMCModel | RegressorMixin | None = None,
         **kwargs: dict,
     ) -> None:
@@ -188,12 +187,12 @@ class PanelRegression(BaseExperiment):
         self.time_fe_variable = time_fe_variable
         self.fe_method = fe_method
 
-        # Store a copy of original data for recovering group means in within
+        # Store a copy of original data for recovering group means in demeaned
         # transformation.  Other experiment classes don't need this because
         # they don't demean the data before fitting.
         self._original_data = data.copy()
 
-        # Initialize storage for group means (used in within transformation)
+        # Initialize storage for group means (used in demeaned transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
 
         # Pipeline (matches pattern of other experiment classes)
@@ -218,40 +217,43 @@ class PanelRegression(BaseExperiment):
                 f"time_fe_variable '{self.time_fe_variable}' not found in data columns"
             )
 
-        if self.fe_method not in ["dummies", "within"]:
-            raise ValueError("fe_method must be 'dummies' or 'within'")
+        if self.fe_method not in ["dummies", "demeaned"]:
+            raise ValueError("fe_method must be 'dummies' or 'demeaned'")
 
-        # Check if formula includes C(unit_var) or C(time_var) when using within method
-        if self.fe_method == "within" and f"C({self.unit_fe_variable})" in self.formula:
+        # Check if formula includes C(unit_var) or C(time_var) when using demeaned method
+        if (
+            self.fe_method == "demeaned"
+            and f"C({self.unit_fe_variable})" in self.formula
+        ):
             raise ValueError(
-                f"When using fe_method='within', do not include C({self.unit_fe_variable}) "
-                "in the formula. The within transformation handles unit fixed effects automatically."
+                f"When using fe_method='demeaned', do not include C({self.unit_fe_variable}) "
+                "in the formula. The demeaned transformation handles unit fixed effects automatically."
             )
 
         if (
-            self.fe_method == "within"
+            self.fe_method == "demeaned"
             and self.time_fe_variable
             and f"C({self.time_fe_variable})" in self.formula
         ):
             raise ValueError(
-                f"When using fe_method='within', do not include C({self.time_fe_variable}) "
-                "in the formula. The within transformation handles time fixed effects automatically."
+                f"When using fe_method='demeaned', do not include C({self.time_fe_variable}) "
+                "in the formula. The demeaned transformation handles time fixed effects automatically."
             )
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy.
 
-        For ``fe_method="within"`` this first applies the within transformation
-        (demeaning by unit, and optionally by time) before constructing the
-        patsy design matrices.
+        For ``fe_method="demeaned"`` this first applies the demeaned
+        transformation (de-meaning by unit, and optionally by time) before
+        constructing the patsy design matrices.
         """
         data = self._original_data.copy()
 
-        # Apply within transformation if requested
-        if self.fe_method == "within":
-            data = self._within_transform(data, self.unit_fe_variable)
+        # Apply demeaned transformation if requested
+        if self.fe_method == "demeaned":
+            data = self._demean_transform(data, self.unit_fe_variable)
             if self.time_fe_variable:
-                data = self._within_transform(data, self.time_fe_variable)
+                data = self._demean_transform(data, self.time_fe_variable)
 
         y, X = dmatrices(self.formula, data)
         self.outcome_variable_name = y.design_info.column_names[0]
@@ -293,8 +295,8 @@ class PanelRegression(BaseExperiment):
                 self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
 
-    def _within_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
-        """Apply within transformation (demean by group).
+    def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
+        """Apply demeaned transformation (demean by group).
 
         Parameters
         ----------
@@ -312,7 +314,7 @@ class PanelRegression(BaseExperiment):
         -----
         When two-way fixed effects are requested (both unit and time), the
         sequential single-pass demeaning (first by unit, then by time) is
-        algebraically equivalent to the standard two-way within transformation
+        algebraically equivalent to the standard two-way demeaned transformation
 
         .. math:: \\tilde{y}_{it} = y_{it} - \\bar{y}_{i\\cdot}
                    - \\bar{y}_{\\cdot t} + \\bar{y}_{\\cdot\\cdot}
@@ -362,7 +364,7 @@ class PanelRegression(BaseExperiment):
         """Return coefficient labels with FE dummy names filtered out.
 
         For ``fe_method="dummies"`` this removes all ``C(unit_fe_variable)``
-        and ``C(time_fe_variable)`` labels.  For ``fe_method="within"`` it
+        and ``C(time_fe_variable)`` labels.  For ``fe_method="demeaned"`` it
         returns all labels unchanged (there are no dummy columns).
         """
         coeff_labels = self.labels.copy()
@@ -630,7 +632,7 @@ class PanelRegression(BaseExperiment):
         if self.fe_method != "dummies":
             raise ValueError(
                 "plot_unit_effects() only available with fe_method='dummies'. "
-                "Use within transformation for large panels."
+                "Use demeaned transformation for large panels."
             )
 
         # Extract unit fixed effects from coefficients
