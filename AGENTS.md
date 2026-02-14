@@ -6,6 +6,9 @@ Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `
 
 See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
 
+- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it (do not edit by hand—see CONTRIBUTING). Optional: `pymc-marketing` is in the `docs` extra only.
+- **Development**: The supported setup is the conda env (`environment.yml`). `pip install -e .[dev]` works but does not include conda-only tooling (e.g. `make`, `pymc-bart`, `marimo`); do not suggest pip-only dev as equivalent.
+
 ## Testing preferences
 
 - Write all Python tests as `pytest` style functions, not unittest classes

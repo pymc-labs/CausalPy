@@ -27,7 +27,6 @@ dependencies:
   - pre-commit
   - pymc-bart
   - pymc-extras>=0.3.0
-  - pymc-marketing>=0.13.1
   - pymc>=5.15.1
   - scikit-learn>=1
   - scipy

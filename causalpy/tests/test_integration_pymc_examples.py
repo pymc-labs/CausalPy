@@ -850,6 +850,9 @@ def test_inverse_prop(mock_pymc_sample):
 @pytest.mark.integration
 def test_bayesian_structural_time_series():
     """Test the BayesianBasisExpansionTimeSeries model."""
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
     # Generate synthetic data
     rng = np.random.default_rng(seed=123)
     dates = pd.date_range(start="2020-01-01", end="2021-12-31", freq="D")
