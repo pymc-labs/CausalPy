@@ -258,6 +258,8 @@ class PanelRegression(BaseExperiment):
         if self.fe_method == "demeaned":
             data = self._demean_transform(data, self.unit_fe_variable)
             if self.time_fe_variable:
+                # TODO: Use iterative alternating demeaning for unbalanced panels
+                # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
         y, X = dmatrices(self.formula, data)
