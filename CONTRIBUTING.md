@@ -25,16 +25,31 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 
 ## Quick Start
 
-After forking this repository on GitHub, get up and running in 4 commands:
+After forking this repository on GitHub, get up and running in a few commands.
+
+Throughout this guide, `conda` is used as a placeholder -- you can substitute `mamba` or `micromamba` in any command. If none are installed, install micromamba:
+
+```bash
+"${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+```
+
+Then:
 
 ```bash
 git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
-mamba env create -f environment.yml
-conda activate CausalPy
-make setup  # Installs package + all dev dependencies + pre-commit hooks
+conda env create -f environment.yml
+conda run -n CausalPy make setup  # Installs package + all dev dependencies + pre-commit hooks
 ```
 
-Verify everything works:
+For interactive development, either activate the environment or drop into a subshell:
+
+```bash
+conda activate CausalPy
+# or
+conda run -n CausalPy bash  # no shell init needed
+```
+
+From there, all commands run inside the `CausalPy` environment without prefixing each one. Verify everything works:
 
 ```bash
 make test
@@ -92,11 +107,10 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create the environment from the `environment.yml` file and activate it:
+1. Create the environment from the `environment.yml` file (remember, `conda` can be substituted with `mamba` or `micromamba`):
 
     ```bash
-    mamba env create -f environment.yml
-    conda activate CausalPy
+    conda env create -f environment.yml
     ```
 
     To update an existing environment after changes to `environment.yml`:
@@ -105,10 +119,20 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda env update --file environment.yml --prune
     ```
 
+    For interactive development, either activate the environment or drop into a subshell:
+
+    ```bash
+    conda activate CausalPy
+    # or
+    conda run -n CausalPy bash  # no shell init needed
+    ```
+
+    Either way, subsequent commands run inside the environment without prefixing each one. You can also prefix individual commands with `conda run -n CausalPy` if you prefer.
+
 1. Install the package and all development dependencies using the automated setup:
 
     ```bash
-    make setup
+    conda run -n CausalPy make setup
     ```
 
     This single command:
@@ -121,7 +145,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
 	```bash
-	python -m ipykernel install --user --name CausalPy
+	conda run -n CausalPy python -m ipykernel install --user --name CausalPy
 	```
 
 1. You can then work on your changes locally, in your feature branch. Add changed files using `git add` and then `git commit` files:

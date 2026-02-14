@@ -13,7 +13,7 @@ PACKAGE_DIR = causalpy
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
 
-setup: ## Set up complete dev environment (run after conda activate CausalPy)
+setup: ## Set up complete dev environment (run inside CausalPy env, e.g. conda run -n CausalPy make setup)
 	python -m pip install --no-deps -e .
 	python -m pip install -e '.[dev,docs,test,lint]'
 	pre-commit install
