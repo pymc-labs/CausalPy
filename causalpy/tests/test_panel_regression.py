@@ -117,14 +117,14 @@ def test_panel_regression_pymc_dummies(mock_pymc_sample, small_panel_data):
 
 
 @pytest.mark.integration
-def test_panel_regression_pymc_within(mock_pymc_sample, large_panel_data):
-    """Test PanelRegression with PyMC model using within transformation."""
+def test_panel_regression_pymc_demeaned(mock_pymc_sample, large_panel_data):
+    """Test PanelRegression with PyMC model using demeaned transformation."""
     result = cp.PanelRegression(
         data=large_panel_data,
         formula="y ~ treatment + x1",  # No C(unit) needed
         unit_fe_variable="unit",
         time_fe_variable="time",
-        fe_method="within",
+        fe_method="demeaned",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
@@ -132,7 +132,7 @@ def test_panel_regression_pymc_within(mock_pymc_sample, large_panel_data):
     assert isinstance(result, cp.PanelRegression)
     assert result.n_units == 100
     assert result.n_periods == 10
-    assert result.fe_method == "within"
+    assert result.fe_method == "demeaned"
 
     # Check that group means were stored
     assert "unit" in result._group_means
@@ -170,21 +170,21 @@ def test_panel_regression_skl_dummies(small_panel_data):
     plt.close(fig)
 
 
-def test_panel_regression_skl_within(large_panel_data):
-    """Test PanelRegression with scikit-learn model using within transformation."""
+def test_panel_regression_skl_demeaned(large_panel_data):
+    """Test PanelRegression with scikit-learn model using demeaned transformation."""
     result = cp.PanelRegression(
         data=large_panel_data,
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
         time_fe_variable="time",
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
 
     # Check basic properties
     assert isinstance(result, cp.PanelRegression)
     assert result.n_units == 100
-    assert result.fe_method == "within"
+    assert result.fe_method == "demeaned"
 
     # Check plotting
     fig, ax = result.plot()
@@ -200,7 +200,7 @@ def test_panel_regression_validation_errors(small_panel_data):
             data=small_panel_data,
             formula="y ~ treatment + x1",
             unit_fe_variable="nonexistent",
-            fe_method="within",
+            fe_method="demeaned",
             model=LinearRegression(),
         )
 
@@ -211,7 +211,7 @@ def test_panel_regression_validation_errors(small_panel_data):
             formula="y ~ treatment + x1",
             unit_fe_variable="unit",
             time_fe_variable="nonexistent",
-            fe_method="within",
+            fe_method="demeaned",
             model=LinearRegression(),
         )
 
@@ -225,24 +225,24 @@ def test_panel_regression_validation_errors(small_panel_data):
             model=LinearRegression(),
         )
 
-    # C(unit) in formula with within method
+    # C(unit) in formula with demeaned method
     with pytest.raises(ValueError, match="do not include C\\(unit\\)"):
         cp.PanelRegression(
             data=small_panel_data,
             formula="y ~ C(unit) + treatment + x1",
             unit_fe_variable="unit",
-            fe_method="within",
+            fe_method="demeaned",
             model=LinearRegression(),
         )
 
-    # C(time) in formula with within method
+    # C(time) in formula with demeaned method
     with pytest.raises(ValueError, match="do not include C\\(time\\)"):
         cp.PanelRegression(
             data=small_panel_data,
             formula="y ~ C(time) + treatment + x1",
             unit_fe_variable="unit",
             time_fe_variable="time",
-            fe_method="within",
+            fe_method="demeaned",
             model=LinearRegression(),
         )
 
@@ -280,18 +280,18 @@ def test_panel_regression_plot_unit_effects(mock_pymc_sample, small_panel_data):
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
 
-    # Should fail with within method
-    result_within = cp.PanelRegression(
+    # Should fail with demeaned method
+    result_demeaned = cp.PanelRegression(
         data=small_panel_data,
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
         time_fe_variable="time",
-        fe_method="within",
+        fe_method="demeaned",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
     with pytest.raises(ValueError, match="only available with fe_method='dummies'"):
-        result_within.plot_unit_effects()
+        result_demeaned.plot_unit_effects()
 
 
 @pytest.mark.integration
@@ -404,7 +404,7 @@ def test_panel_regression_one_way_fe(large_panel_data):
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
         time_fe_variable=None,  # No time FE
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
 
@@ -424,7 +424,7 @@ def test_panel_regression_two_way_fe(large_panel_data):
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
         time_fe_variable="time",
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
 
@@ -436,8 +436,8 @@ def test_panel_regression_two_way_fe(large_panel_data):
     assert "time" in result._group_means
 
 
-def test_within_transform_boolean_treatment():
-    """Boolean treatment columns must be demeaned by the within transformation."""
+def test_demean_transform_boolean_treatment():
+    """Boolean treatment columns must be demeaned by the demeaned transformation."""
     np.random.seed(42)
     n_units, n_periods = 20, 10
     data = pd.DataFrame(
@@ -459,7 +459,7 @@ def test_within_transform_boolean_treatment():
         data=data,
         formula="y ~ treatment",
         unit_fe_variable="unit",
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
 
@@ -513,7 +513,7 @@ def test_effect_summary_raises(small_panel_data):
         data=small_panel_data,
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
     with pytest.raises(NotImplementedError, match="not yet implemented"):
@@ -578,7 +578,7 @@ def test_group_means_from_original_data(large_panel_data):
         formula="y ~ treatment + x1",
         unit_fe_variable="unit",
         time_fe_variable="time",
-        fe_method="within",
+        fe_method="demeaned",
         model=LinearRegression(),
     )
 
