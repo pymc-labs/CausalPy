@@ -2,27 +2,40 @@
 
 ## Environment
 
-- Before running Python-related commands (e.g., `python`, `pytest`, `pre-commit`, `ruff`, `mypy`), activate the conda environment: `source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy`
-- If shell activation is not available or unreliable (e.g. in a worktree or fresh shell), run commands via `conda run -n CausalPy ...` instead. Examples:
-  - `conda run -n CausalPy python -m pytest causalpy/tests/`
-  - `conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"`
-  - `conda run -n CausalPy pre-commit run --all-files`
-- Alternative activation: `source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy && <your command>`
-- The environment is defined in `environment.yml` at the project root
+This project uses a conda environment named **CausalPy**. All Python-related commands (`python`, `pytest`, `pre-commit`, `ruff`, `mypy`) must run inside that environment. The env is defined in `environment.yml` at the project root.
 
-### Environment setup (for Codex worktrees)
+### When to use what
 
-When using git worktrees in the OpenAI Codex desktop app (or any context where conda is not auto-activated):
+- **Codex desktop app, git worktrees, or fresh shells** (conda not auto-activated):
+  **Always** use `conda run -n CausalPy <command>`. Do not rely on activation; the shell may not have conda in PATH or the env active. Example: `conda run -n CausalPy python -m pytest causalpy/tests/`
 
-- **Always prefix Python commands** with `conda run -n CausalPy` to ensure the correct environment is used.
-- Examples:
-  - `conda run -n CausalPy python -m pytest causalpy/tests/`
-  - `conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"`
-  - `conda run -n CausalPy pre-commit run --all-files`
-- **Alternative**: Source conda and activate before running commands:
-  ```bash
-  source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy && <your command>
-  ```
+- **Cursor or other IDE where conda is available and you can activate:**
+  Either activate once then run commands normally, or use `conda run -n CausalPy ...` for a single command. Prefer `conda run` when suggesting commands for the user to run in a terminal that might not have the env activated.
+
+- **First-time setup or the CausalPy env does not exist:**
+  From the repo root, run `scripts/codex_setup.sh`. It creates the env and does an editable install with `[dev]` extras.
+
+### How to activate (when activation is possible)
+
+```bash
+source ~/mambaforge/etc/profile.d/conda.sh && conda activate CausalPy
+```
+
+If that path does not exist, use:
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate CausalPy
+```
+
+### Run without activating (recommended when in doubt)
+
+Use this form for any Python or tooling command when you are not sure the env is active (e.g. in Codex, worktrees, or when suggesting a one-off command):
+
+```bash
+conda run -n CausalPy python -m pytest causalpy/tests/
+conda run -n CausalPy python -c "import causalpy; print(causalpy.__version__)"
+conda run -n CausalPy pre-commit run --all-files
+```
 
 ## Testing preferences
 
