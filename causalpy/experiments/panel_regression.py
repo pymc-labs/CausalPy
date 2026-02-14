@@ -154,13 +154,18 @@ class PanelRegression(BaseExperiment):
     time-specific unobserved heterogeneity. This is the standard approach in
     difference-in-differences estimation.
 
-    **Balanced panels**: When both unit and time fixed effects are requested
-    with ``fe_method="demeaned"``, the sequential demeaning (first by unit,
-    then by time) is algebraically equivalent to the standard two-way
-    demeaned transformation only for **balanced panels** (every unit observed
-    in every period). For unbalanced panels, iterative alternating demeaning
-    would be needed for exact convergence; the single-pass approximation may
-    introduce small biases.
+    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
+    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
+    entry/exit, missing waves). When both unit and time fixed effects are
+    requested with ``fe_method="demeaned"``, the sequential demeaning
+    (first by unit, then by time) is algebraically equivalent to the standard
+    two-way demeaned transformation only for balanced panels. For unbalanced
+    panels, iterative alternating demeaning would be needed for exact
+    convergence; the single-pass approximation used here may introduce small
+    biases. Unbalanced panels are common in practice (e.g. firm or worker
+    panels with attrition); for heavily unbalanced data, consider checking
+    sensitivity or using dedicated FE packages that implement iterative
+    two-way demeaning (e.g. reghdfe, pyfixest).
     """
 
     supports_ols = True
