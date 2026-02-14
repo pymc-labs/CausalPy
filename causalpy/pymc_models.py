@@ -1725,7 +1725,7 @@ class StateSpaceTimeSeries(PyMCModel):
             except ImportError as err:
                 raise ImportError(
                     "StateSpaceTimeSeries requires pymc-extras when default trend component is used. "
-                    "Install it with `conda install -c conda-forge pymc-extras`."
+                    "Install it with `conda/mamba/micromamba install -c conda-forge pymc-extras`."
                 ) from err
             self._trend_component = st.LevelTrendComponent(order=self.level_order)
         return self._trend_component
@@ -1742,7 +1742,7 @@ class StateSpaceTimeSeries(PyMCModel):
             except ImportError as err:
                 raise ImportError(
                     "StateSpaceTimeSeries requires pymc-extras when default seasonality component is used. "
-                    "Install it with `conda install -c conda-forge pymc-extras`."
+                    "Install it with `conda/mamba/micromamba install -c conda-forge pymc-extras`."
                 ) from err
             self._seasonality_component = st.FrequencySeasonality(
                 season_length=self.seasonal_length, name="freq"
