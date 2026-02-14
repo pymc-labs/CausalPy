@@ -24,6 +24,8 @@ To get the latest release:
 pip install CausalPy
 ```
 
+If you run into installation issues with PyMC (e.g. BLAS or compilation), try the conda install: `conda install -c conda-forge causalpy`.
+
 Alternatively, if you want the very latest version of the package you can install from GitHub:
 
 ```bash
