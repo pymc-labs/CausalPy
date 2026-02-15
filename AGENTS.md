@@ -77,14 +77,10 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
 - **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
 
-## GitHub Issue Workflows
+## GitHub CLI
 
-Use the `github-issues` Skill in `.github/skills/github-issues/` for issue
-creation, bug reports, and issue evaluation workflows.
+Use `gh` CLI as the preferred source of truth for GitHub issues, PRs, releases. See [`.github/skills/github-cli/SKILL.md`](.github/skills/github-cli/SKILL.md) for details.
 
 ## Skills Location
 
-Canonical skills live in `.github/skills/`. The `.claude/skills` and
-`.cursor/skills` paths are symlinks to that directory. On Windows, symlink
-support may require Developer Mode or elevated permissions; if symlinks are not
-available, mirror `.github/skills/` into those locations and keep them in sync.
+Canonical skills live in `.github/skills/`. The `.claude/skills` and `.cursor/skills` paths are symlinks to that directory. On Windows, symlink support may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into those locations and keep them in sync.
