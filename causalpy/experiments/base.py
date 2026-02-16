@@ -29,7 +29,12 @@ from causalpy.skl_models import create_causalpy_compatible_class
 
 
 class BaseExperiment:
-    """Base class for quasi experimental designs."""
+    """Base class for quasi experimental designs.
+
+    Subclasses should set ``_default_model_class`` to a PyMC model class
+    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
+    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    """
 
     labels: list[str]
 
@@ -50,14 +55,14 @@ class BaseExperiment:
         if model is not None:
             self.model = model
 
+        if getattr(self, "model", None) is None:
+            raise ValueError("model not set or passed.")
+
         if isinstance(self.model, PyMCModel) and not self.supports_bayes:
             raise ValueError("Bayesian models not supported.")
 
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
-
-        if self.model is None:
-            raise ValueError("model not set or passed.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")

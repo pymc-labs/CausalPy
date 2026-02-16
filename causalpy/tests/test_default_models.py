@@ -191,7 +191,12 @@ def sample_kwargs():
 def test_experiment_uses_default_model_when_model_is_none(
     mock_pymc_sample, experiment_class, init_kwargs, expected_model_class
 ):
-    """Each experiment class uses its default PyMC model when model=None."""
+    """Each experiment class uses its default PyMC model when model=None.
+
+    Construction exercises the full pipeline (design matrices, fit via
+    algorithm()) so this also validates that the default model is wired
+    correctly, not just instantiated.
+    """
     if callable(init_kwargs):
         kwargs = init_kwargs()
     else:
@@ -200,6 +205,34 @@ def test_experiment_uses_default_model_when_model_is_none(
     result = experiment_class(**kwargs, model=None)
 
     assert isinstance(result.model, expected_model_class)
+    assert hasattr(result, "idata")
+
+
+def test_missing_default_model_class_raises_valueerror():
+    """Subclass without _default_model_class raises ValueError, not AttributeError."""
+    from causalpy.experiments.base import BaseExperiment
+
+    class _NoDefaultExperiment(BaseExperiment):
+        supports_bayes = True
+        supports_ols = True
+
+        def _bayesian_plot(self):
+            pass
+
+        def _ols_plot(self):
+            pass
+
+        def get_plot_data_bayesian(self):
+            pass
+
+        def get_plot_data_ols(self):
+            pass
+
+        def effect_summary(self):
+            pass
+
+    with pytest.raises(ValueError, match="model not set or passed"):
+        _NoDefaultExperiment(model=None)
 
 
 @pytest.mark.integration

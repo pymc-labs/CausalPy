@@ -44,7 +44,24 @@ LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):
-    """Regression Kink experiment class."""
+    """A class to analyse regression kink designs.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param kink_point:
+        A scalar value at which the kink occurs
+    :param model:
+        A PyMC model. Defaults to LinearRegression.
+    :param running_variable_name:
+        The name of the running variable column
+    :param epsilon:
+        A small scalar for evaluating the causal impact above/below the kink
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the kink) is not used to fit
+        the model.
+    """
 
     supports_ols = False
     supports_bayes = True
