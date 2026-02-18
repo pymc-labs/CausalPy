@@ -533,18 +533,19 @@ class LinearRegression(PyMCModel):
 
 class MultivarLinearReg(PyMCModel):
     r"""
-    PyMC linear regression for multivariate outcomes (3D y).
+    PyMC linear regression for multivariate outcomes (3D y) with covariance.
 
     For use with InterruptedTimeSeries when multiple outcomes are specified
     (list of formulas). Accepts y with dims ["obs_ind", "treated_units", "outcomes"]
     and X with dims ["obs_ind", "coeffs"]. Each (unit, outcome) has its own
-    coefficient vector beta and noise sigma.
+    coefficient vector beta. Residuals across outcomes share a covariance matrix
+    (LKJ prior), so you can estimate and interpret correlations between outcomes.
 
     .. math::
         \beta &\sim \mathrm{Normal}(0, 50) \\
-        \sigma &\sim \mathrm{HalfNormal}(1) \\
+        \Sigma &\sim \mathrm{LKJCholeskyCov}(\eta, n\_outcomes) \\
         \mu_{i,u,o} &= X_i \cdot \beta_{u,o} \\
-        y &\sim \mathrm{Normal}(\mu, \sigma)
+        y_{i,u,\cdot} &\sim \mathrm{MvNormal}(\mu_{i,u,\cdot}, \Sigma)
     """
 
     supports_multivariate = True
@@ -553,36 +554,55 @@ class MultivarLinearReg(PyMCModel):
         "beta": Prior(
             "Normal", mu=0, sigma=50, dims=["treated_units", "outcomes", "coeffs"]
         ),
-        "y_hat": Prior(
-            "Normal",
-            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units", "outcomes"]),
-            dims=["obs_ind", "treated_units", "outcomes"],
-        ),
     }
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
-        """Define the PyMC model for multivariate outcomes (3D y)."""
+        """Define the PyMC model: regression + LKJ covariance between outcomes."""
         with self:
-            if coords is not None and "outcomes" not in coords:
+            if coords is None:
+                raise ValueError("coords must be provided for MultivarLinearReg")
+            if "outcomes" not in coords:
                 raise ValueError("coords must contain 'outcomes' for MultivarLinearReg")
             self.add_coords(coords)
+            n_outcomes = len(coords["outcomes"])
+            if n_outcomes < 2:
+                raise ValueError(
+                    "MultivarLinearReg requires at least 2 outcomes for a covariance."
+                )
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y_data = pm.Data("y", y, dims=["obs_ind", "treated_units", "outcomes"])
             beta = self.priors["beta"].create_variable("beta")
-            # mu[b,u,o] = X[b,:] @ beta[u,o,:]
             mu = pm.Deterministic(
                 "mu",
                 pt.einsum("ij,koj->iko", X_data, beta),
                 dims=["obs_ind", "treated_units", "outcomes"],
             )
-            self.priors["y_hat"].create_likelihood_variable(
-                "y_hat", mu=mu, observed=y_data
+            # Covariance between outcomes: LKJ prior on correlation + scale per outcome
+            sd_dist = pm.Exponential.dist(1.0, shape=n_outcomes)
+            chol, corr, stds = pm.LKJCholeskyCov(
+                "chol_cov",
+                eta=2,
+                n=n_outcomes,
+                sd_dist=sd_dist,
+                compute_corr=True,
+            )
+            pm.Deterministic("cov", pt.dot(chol, chol.T))
+            # Flatten (n_obs, n_units, n_outcomes) for MvNormal batch
+            n_obs = X_data.shape[0]
+            n_units = y_data.shape[1]
+            mu_flat = mu.reshape((n_obs * n_units, n_outcomes))
+            y_flat = y_data.reshape((n_obs * n_units, n_outcomes))
+            pm.MvNormal(
+                "y_hat",
+                mu=mu_flat,
+                chol=chol,
+                observed=y_flat,
             )
 
     def _data_setter(self, X: xr.DataArray) -> None:
-        """Set data for prediction; y is zeros with shape (n_obs, n_treated, n_outcomes)."""
+        """Set data for prediction; y keeps dims (n_obs, n_units, n_outcomes) for PyMC."""
         new_no_of_observations = X.shape[0]
         obs_coords = np.arange(new_no_of_observations)
         with self:
@@ -601,6 +621,50 @@ class MultivarLinearReg(PyMCModel):
                 },
                 coords={"obs_ind": obs_coords},
             )
+
+    def predict(
+        self,
+        X: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
+        **kwargs,
+    ):
+        """
+        Predict data given input data `X`.
+
+        Overrides the base implementation to reshape ``y_hat`` in the returned
+        posterior predictive: the model uses a flattened likelihood (MvNormal on
+        shape ``(n_obs * n_units, n_outcomes)``), so PyMC stores ``y_hat`` with
+        that shape. We reshape it back to ``(obs_ind, treated_units, outcomes)``
+        so that the returned InferenceData matches the interface expected by
+        :meth:`calculate_impact` and ITS (3D ``y_hat`` with the same dims as
+        other models).
+
+        .. caution::
+            Results in KeyError if model hasn't been fit.
+        """
+        pp = super().predict(X, coords=coords, out_of_sample=out_of_sample, **kwargs)
+        y_hat = pp["posterior_predictive"]["y_hat"]
+        n_obs, n_units = X.shape[0], len(self.coords["treated_units"])
+        n_outcomes = y_hat.shape[-1]
+        dims = ["chain", "draw", "obs_ind", "treated_units", "outcomes"]
+        pp["posterior_predictive"] = (
+            pp["posterior_predictive"]
+            .assign(
+                y_hat=(
+                    dims,
+                    y_hat.values.reshape(
+                        (*y_hat.shape[:2], n_obs, n_units, n_outcomes)
+                    ),
+                )
+            )
+            .assign_coords(
+                obs_ind=X.obs_ind.values,
+                treated_units=list(self.coords["treated_units"]),
+                outcomes=list(self.coords["outcomes"]),
+            )
+        )
+        return pp
 
     def score(
         self,
