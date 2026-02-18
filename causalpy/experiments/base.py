@@ -29,12 +29,19 @@ from causalpy.skl_models import create_causalpy_compatible_class
 
 
 class BaseExperiment:
-    """Base class for quasi experimental designs."""
+    """Base class for quasi experimental designs.
+
+    Subclasses should set ``_default_model_class`` to a PyMC model class
+    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
+    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    """
 
     labels: list[str]
 
     supports_bayes: bool
     supports_ols: bool
+
+    _default_model_class: type[PyMCModel] | None = None
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
@@ -42,17 +49,20 @@ class BaseExperiment:
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
 
+        if model is None and self._default_model_class is not None:
+            model = self._default_model_class()
+
         if model is not None:
             self.model = model
+
+        if getattr(self, "model", None) is None:
+            raise ValueError("model not set or passed.")
 
         if isinstance(self.model, PyMCModel) and not self.supports_bayes:
             raise ValueError("Bayesian models not supported.")
 
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
-
-        if self.model is None:
-            raise ValueError("model not set or passed.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")

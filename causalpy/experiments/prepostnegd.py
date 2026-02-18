@@ -30,7 +30,7 @@ from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
@@ -53,7 +53,7 @@ class PrePostNEGD(BaseExperiment):
     :param pretreatment_variable_name:
         Name of the column in data for the pretreatment variable
     :param model:
-        A PyMC model
+        A PyMC model. Defaults to LinearRegression.
 
     Example
     --------
@@ -88,6 +88,7 @@ class PrePostNEGD(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
