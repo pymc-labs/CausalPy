@@ -137,8 +137,6 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
-generate-badge = "docs/source/_static/"
-badge-format = "svg"
 
 [tool.ruff.format]
 docstring-code-format = true

@@ -10,7 +10,7 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
 ![Read the Docs](https://img.shields.io/readthedocs/causalpy)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
-![Interrogate](docs/source/_static/interrogate_badge.svg)
+![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 # CausalPy
