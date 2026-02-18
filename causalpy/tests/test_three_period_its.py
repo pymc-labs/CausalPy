@@ -1005,3 +1005,101 @@ def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
     # Should only have treatment_time line, not treatment_end_time
     assert fig is not None
     assert ax is not None
+
+
+# ==============================================================================
+# ITS point 4.1: formula str | list[str], outcome_variable_names, n_outcomes
+# ==============================================================================
+
+
+@pytest.fixture
+def bivariate_integer_data(rng):
+    """Integer-indexed data with two outcomes for testing formula list (4.1)."""
+    n_points = 60
+    indices = np.arange(n_points)
+    t = np.arange(n_points, dtype=float)
+    y1 = 1.0 + 0.5 * t + rng.normal(0, 0.5, n_points)
+    y2 = 2.0 + 0.3 * t + rng.normal(0, 0.5, n_points)
+    treatment_idx = 30
+    treatment_end_idx = 42
+    df = pd.DataFrame(
+        {"y1": y1, "y2": y2, "t": t},
+        index=indices,
+    )
+    df.index.name = "obs_ind"
+    return df, treatment_idx, treatment_end_idx
+
+
+def test_its_formula_single_string_sets_outcome_names(integer_data):
+    """4.1: Single formula (str) sets outcome_variable_names and n_outcomes."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    )
+    assert result.outcome_variable_names == ["y"]
+    assert result.n_outcomes == 1
+    assert result.outcome_variable_name == "y"
+
+
+def test_its_pre_y_post_y_always_3d(integer_data):
+    """pre_y and post_y are always 3D (obs_ind, treated_units, outcomes), even with one formula."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    )
+    assert result.pre_y.dims == ("obs_ind", "treated_units", "outcomes")
+    assert result.post_y.dims == ("obs_ind", "treated_units", "outcomes")
+    assert result.pre_y.shape == (len(result.datapre), 1, 1)
+    assert result.post_y.shape == (len(result.datapost), 1, 1)
+    assert list(result.pre_y.coords["outcomes"].values) == ["y"]
+
+
+def test_its_formula_list_one_element_same_as_single(integer_data):
+    """4.1: Formula as list of one string behaves like single formula."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y ~ 1 + t"],
+        model=LinearRegression(),
+    )
+    assert result.outcome_variable_names == ["y"]
+    assert result.n_outcomes == 1
+    assert result.outcome_variable_name == "y"
+
+
+def test_its_formula_list_two_elements_raises_without_multivariate_model(
+    bivariate_integer_data,
+):
+    """With two formulas, fit requires a model with supports_multivariate."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    with pytest.raises(ValueError, match="supports_multivariate"):
+        cp.InterruptedTimeSeries(
+            df,
+            treatment_time=treatment_time,
+            treatment_end_time=treatment_end_time,
+            formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+            model=LinearRegression(),
+        )
+
+
+def test_its_formula_empty_list_raises(integer_data):
+    """4.1: Empty formula list raises ValueError."""
+    df, treatment_time, treatment_end_time = integer_data
+    with pytest.raises(ValueError, match="non-empty"):
+        cp.InterruptedTimeSeries(
+            df,
+            treatment_time=treatment_time,
+            treatment_end_time=treatment_end_time,
+            formula=[],
+            model=LinearRegression(),
+        )
