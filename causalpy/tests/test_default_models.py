@@ -212,7 +212,7 @@ def test_missing_default_model_class_raises_valueerror():
     """Subclass without _default_model_class raises ValueError, not AttributeError."""
     from causalpy.experiments.base import BaseExperiment
 
-    class _NoDefaultExperiment(BaseExperiment):
+    class _NoDefaultExperiment(BaseExperiment):  # pragma: no cover
         supports_bayes = True
         supports_ols = True
 
