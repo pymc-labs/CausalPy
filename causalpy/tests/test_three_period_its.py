@@ -21,6 +21,7 @@ with pre-intervention, intervention, and post-intervention periods.
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -1103,3 +1104,89 @@ def test_its_formula_empty_list_raises(integer_data):
             formula=[],
             model=LinearRegression(),
         )
+
+
+# ==============================================================================
+# MultivarLinearReg: unit tests and ITS integration (planning §8)
+# ==============================================================================
+
+
+@pytest.fixture
+def multivar_xy_coords(rng):
+    """Small 3D y and 2D X for MultivarLinearReg unit tests."""
+    n_obs, n_coeffs, n_outcomes = 20, 2, 2
+    X = xr.DataArray(
+        rng.normal(0, 1, (n_obs, n_coeffs)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(n_obs), "coeffs": ["a", "b"]},
+    )
+    y = xr.DataArray(
+        rng.normal(0, 1, (n_obs, 1, n_outcomes)),
+        dims=["obs_ind", "treated_units", "outcomes"],
+        coords={
+            "obs_ind": np.arange(n_obs),
+            "treated_units": ["unit_0"],
+            "outcomes": ["y1", "y2"],
+        },
+    )
+    coords = {
+        "coeffs": ["a", "b"],
+        "obs_ind": np.arange(n_obs),
+        "treated_units": ["unit_0"],
+        "outcomes": ["y1", "y2"],
+    }
+    return X, y, coords
+
+
+@pytest.mark.integration
+def test_multivar_linear_reg_fit_predict_impact(multivar_xy_coords, mock_pymc_sample):
+    """MultivarLinearReg: fit with 3D y, idata has mu/y_hat 3D; predict and calculate_impact run."""
+    X, y, coords = multivar_xy_coords
+    model = cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs)
+    model.fit(X, y, coords=coords)
+    assert model.idata is not None
+    assert "y_hat" in model.idata.posterior_predictive
+    # mu is Deterministic; after predict() it is in posterior_predictive
+    pred = model.predict(X)
+    assert "mu" in pred["posterior_predictive"]
+    assert "obs_ind" in pred["posterior_predictive"]["mu"].dims
+    assert "treated_units" in pred["posterior_predictive"]["mu"].dims
+    assert "outcomes" in pred["posterior_predictive"]["mu"].dims
+    impact = model.calculate_impact(y, pred)
+    assert "obs_ind" in impact.dims
+    assert "outcomes" in impact.dims
+    assert impact.transpose(..., "obs_ind").dims[-1] == "obs_ind"
+
+
+@pytest.mark.integration
+def test_multivar_linear_reg_score(multivar_xy_coords, mock_pymc_sample):
+    """MultivarLinearReg: score returns Series with keys per unit/outcome."""
+    X, y, coords = multivar_xy_coords
+    model = cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs)
+    model.fit(X, y, coords=coords)
+    score = model.score(X, y)
+    assert isinstance(score, pd.Series)
+    assert any("r2" in k for k in score.index)
+    assert any("outcome" in k for k in score.index)
+
+
+@pytest.mark.integration
+def test_its_two_formulas_multivar_linear_reg(bivariate_integer_data, mock_pymc_sample):
+    """ITS with two formulas and MultivarLinearReg: fit, predict, impact run; shapes 3D."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    assert result.n_outcomes == 2
+    assert result.outcome_variable_names == ["y1", "y2"]
+    assert result.pre_y.shape == (len(result.datapre), 1, 2)
+    assert result.post_y.shape == (len(result.datapost), 1, 2)
+    assert result.pre_pred is not None
+    assert result.post_pred is not None
+    assert result.pre_impact is not None
+    assert result.post_impact is not None
+    assert "outcomes" in result.post_impact.dims

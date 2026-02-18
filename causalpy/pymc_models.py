@@ -531,6 +531,105 @@ class LinearRegression(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
+class MultivarLinearReg(PyMCModel):
+    r"""
+    PyMC linear regression for multivariate outcomes (3D y).
+
+    For use with InterruptedTimeSeries when multiple outcomes are specified
+    (list of formulas). Accepts y with dims ["obs_ind", "treated_units", "outcomes"]
+    and X with dims ["obs_ind", "coeffs"]. Each (unit, outcome) has its own
+    coefficient vector beta and noise sigma.
+
+    .. math::
+        \beta &\sim \mathrm{Normal}(0, 50) \\
+        \sigma &\sim \mathrm{HalfNormal}(1) \\
+        \mu_{i,u,o} &= X_i \cdot \beta_{u,o} \\
+        y &\sim \mathrm{Normal}(\mu, \sigma)
+    """
+
+    supports_multivariate = True
+
+    default_priors = {
+        "beta": Prior(
+            "Normal", mu=0, sigma=50, dims=["treated_units", "outcomes", "coeffs"]
+        ),
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units", "outcomes"]),
+            dims=["obs_ind", "treated_units", "outcomes"],
+        ),
+    }
+
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+    ) -> None:
+        """Define the PyMC model for multivariate outcomes (3D y)."""
+        with self:
+            if coords is not None and "outcomes" not in coords:
+                raise ValueError("coords must contain 'outcomes' for MultivarLinearReg")
+            self.add_coords(coords)
+            X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "treated_units", "outcomes"])
+            beta = self.priors["beta"].create_variable("beta")
+            # mu[b,u,o] = X[b,:] @ beta[u,o,:]
+            mu = pm.Deterministic(
+                "mu",
+                pt.einsum("ij,koj->iko", X_data, beta),
+                dims=["obs_ind", "treated_units", "outcomes"],
+            )
+            self.priors["y_hat"].create_likelihood_variable(
+                "y_hat", mu=mu, observed=y_data
+            )
+
+    def _data_setter(self, X: xr.DataArray) -> None:
+        """Set data for prediction; y is zeros with shape (n_obs, n_treated, n_outcomes)."""
+        new_no_of_observations = X.shape[0]
+        obs_coords = np.arange(new_no_of_observations)
+        with self:
+            treated_units_coord = getattr(self, "coords", {}).get(
+                "treated_units", ["unit_0"]
+            )
+            outcomes_coord = getattr(self, "coords", {}).get("outcomes", [])
+            n_treated_units = len(treated_units_coord)
+            n_outcomes = len(outcomes_coord)
+            pm.set_data(
+                {
+                    "X": X,
+                    "y": np.zeros(
+                        (new_no_of_observations, n_treated_units, n_outcomes)
+                    ),
+                },
+                coords={"obs_ind": obs_coords},
+            )
+
+    def score(
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+        **kwargs,
+    ) -> pd.Series:
+        """R² per (treated_unit, outcome) for multivariate y."""
+        mu = self.predict(X)
+        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
+        scores = {}
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            for _j, outcome in enumerate(mu_data.coords["outcomes"].values):
+                unit_outcome_mu = mu_data.sel(
+                    treated_units=unit, outcomes=outcome
+                ).T  # (sample, obs_ind)
+                unit_outcome_y = y.sel(
+                    treated_units=unit, outcomes=outcome
+                ).data  # (obs_ind,) or (obs_ind, 1)
+                if hasattr(unit_outcome_y, "ravel"):
+                    unit_outcome_y = unit_outcome_y.ravel()
+                unit_score = r2_score(unit_outcome_y, unit_outcome_mu.data)
+                key = f"unit_{i}_outcome_{outcome}_r2"
+                scores[key] = unit_score["r2"]
+                scores[f"{key}_std"] = unit_score["r2_std"]
+        return pd.Series(scores)
+
+
 class WeightedSumFitter(PyMCModel):
     r"""
     Used for synthetic control experiments.
