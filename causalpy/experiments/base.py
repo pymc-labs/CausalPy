@@ -73,7 +73,9 @@ class BaseExperiment:
         """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def plot(
+        self, *args: Any, **kwargs: Any
+    ) -> tuple[Any, ...] | list[tuple[Any, ...]]:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
@@ -89,7 +91,9 @@ class BaseExperiment:
                 raise ValueError("Unsupported model type")
 
     @abstractmethod
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def _bayesian_plot(
+        self, *args: Any, **kwargs: Any
+    ) -> tuple[Any, ...] | list[tuple[Any, ...]]:
         """Abstract method for plotting the model."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 

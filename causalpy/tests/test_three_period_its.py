@@ -1190,3 +1190,110 @@ def test_its_two_formulas_multivar_linear_reg(bivariate_integer_data, mock_pymc_
     assert result.pre_impact is not None
     assert result.post_impact is not None
     assert "outcomes" in result.post_impact.dims
+
+
+@pytest.mark.integration
+def test_its_multivar_get_plot_data_bayesian_long_format(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """Multivariate ITS: get_plot_data_bayesian returns long format with outcome column."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    plot_data = result.get_plot_data_bayesian()
+    assert "outcome" in plot_data.columns
+    assert set(plot_data["outcome"].unique()) == {"y1", "y2"}
+    assert "prediction" in plot_data.columns
+    assert "impact" in plot_data.columns
+    n_pre, n_post = len(result.datapre), len(result.datapost)
+    assert len(plot_data) == 2 * (n_pre + n_post)
+
+
+@pytest.mark.integration
+def test_its_multivar_bayesian_plot_layouts(bivariate_integer_data, mock_pymc_sample):
+    """Multivariate ITS: plot() supports layout overlay/per_outcome and outcomes_to_plot."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    fig, ax = result.plot(layout="overlay")
+    assert fig is not None
+    assert len(ax) == 3
+    figs = result.plot(layout="per_outcome")
+    assert len(figs) == 2
+    for f, a in figs:
+        assert f is not None
+        assert len(a) == 3
+    fig1, _ = result.plot(layout="overlay", outcomes_to_plot=["y1"])
+    assert fig1 is not None
+
+
+@pytest.mark.integration
+def test_its_multivar_plot_outcomes_to_plot_unknown_raises(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """outcomes_to_plot with unknown outcome name raises ValueError."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    with pytest.raises(ValueError, match="unknown outcome"):
+        result.plot(layout="overlay", outcomes_to_plot=["y1", "bad"])
+
+
+@pytest.mark.integration
+def test_its_multivar_effect_summary_returns_table_with_outcome_column(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """Multivariate ITS: effect_summary returns DataFrame with outcome and statistic columns."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    summary = result.effect_summary()
+    assert "outcome" in summary.table.columns
+    assert "statistic" in summary.table.columns
+    assert set(summary.table["outcome"].unique()) == {"y1", "y2"}
+    assert set(summary.table["statistic"].unique()) == {"average", "cumulative"}
+    assert len(summary.table) == 4  # 2 outcomes * 2 statistics
+    assert summary.text.count("[y1]") == 1
+    assert summary.text.count("[y2]") == 1
+
+
+@pytest.mark.integration
+def test_its_multivar_split_post_period_preserves_outcomes(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """_split_post_period preserves outcomes dimension (no squeeze) in multivariate ITS."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    assert result.treatment_end_time is not None
+    assert hasattr(result, "intervention_impact")
+    assert hasattr(result, "post_intervention_impact")
+    assert "outcomes" in result.intervention_impact.dims
+    assert "outcomes" in result.post_intervention_impact.dims
+    assert result.intervention_impact.sizes["outcomes"] == 2
+    assert result.post_intervention_impact.sizes["outcomes"] == 2

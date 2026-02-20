@@ -580,7 +580,7 @@ class MultivarLinearReg(PyMCModel):
                 dims=["obs_ind", "treated_units", "outcomes"],
             )
             # Covariance between outcomes: LKJ prior on correlation + scale per outcome
-            sd_dist = pm.Exponential.dist(1.0, shape=n_outcomes)
+            sd_dist = pm.HalfNormal.dist(sigma=2.0, shape=n_outcomes)
             chol, corr, stds = pm.LKJCholeskyCov(
                 "chol_cov",
                 eta=2,
@@ -692,6 +692,61 @@ class MultivarLinearReg(PyMCModel):
                 scores[key] = unit_score["r2"]
                 scores[f"{key}_std"] = unit_score["r2_std"]
         return pd.Series(scores)
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print regression coefficients per outcome; residual covariance is in posterior 'cov'."""
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit")
+        round_to = round_to or 2
+
+        def print_row(
+            max_label_length: int, name: str, coeff_samples: xr.DataArray, rt: int
+        ) -> None:
+            formatted_name = f"  {name: <{max_label_length}}"
+            formatted_val = f"{round_num(coeff_samples.mean().data, rt)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, rt)}, {round_num(coeff_samples.quantile(1 - 0.03).data, rt)}]"  # noqa: E501
+            print(f"  {formatted_name}  {formatted_val}")
+
+        print("Model coefficients:")
+        coeffs = az.extract(self.idata.posterior, var_names="beta")
+        max_label_length = max(len(name) for name in labels)
+        treated_units = coeffs.coords["treated_units"].values
+        outcomes = coeffs.coords["outcomes"].values
+        for unit in treated_units:
+            if len(treated_units) > 1:
+                print(f"\nTreated unit: {unit}")
+            for outcome in outcomes:
+                print(f"\n  Outcome: {outcome}")
+                unit_outcome_coeffs = coeffs.sel(treated_units=unit, outcomes=outcome)
+                for name in labels:
+                    coeff_samples = unit_outcome_coeffs.sel(coeffs=name)
+                    print_row(max_label_length, name, coeff_samples, round_to)
+        if "cov" in self.idata.posterior:
+            cov_post = self.idata.posterior["cov"]
+            outcome_names = list(self.coords["outcomes"])
+            n_o = len(outcome_names)
+            # Reduce to (chain, draw, n_o, n_o); dim names may vary
+            cov_arr = np.asarray(cov_post).squeeze()
+            if cov_arr.ndim != 4:
+                cov_arr = cov_arr.reshape((-1, -1, n_o, n_o))  # (chain, draw, n_o, n_o)
+            samples_flat = cov_arr.reshape(-1, n_o, n_o)
+            print("\n  Residual covariance (upper triangle), 94% HDI:")
+            max_cov_label = max(
+                len(f"cov({outcome_names[i]}, {outcome_names[j]})")
+                for i in range(n_o)
+                for j in range(i, n_o)
+            )
+            for i in range(n_o):
+                for j in range(i, n_o):
+                    sij = samples_flat[:, i, j]
+                    mean_val = round_num(float(np.mean(sij)), round_to)
+                    lo = round_num(float(np.quantile(sij, 0.03)), round_to)
+                    hi = round_num(float(np.quantile(sij, 0.97)), round_to)
+                    label = f"cov({outcome_names[i]}, {outcome_names[j]})"
+                    print(
+                        f"  {label: <{max_cov_label}}  {mean_val}, 94% HDI [{lo}, {hi}]"
+                    )
 
 
 class WeightedSumFitter(PyMCModel):
