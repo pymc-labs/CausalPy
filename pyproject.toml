@@ -45,7 +45,7 @@ dependencies = [
     "matplotlib>=3.5.3",
     "numpy<2.4",
     "pandas",
-    "patsy",
+    "formulaic",
     "pymc>=5.15.1",
     "pymc-marketing>=0.13.1",
     "scikit-learn>=1",

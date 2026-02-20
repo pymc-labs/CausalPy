@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from formulaic import model_matrix
 from sklearn.base import RegressorMixin
 import xarray as xr
 from causalpy.custom_exceptions import (
@@ -123,15 +123,14 @@ class RegressionDiscontinuity(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
+            dm = model_matrix(self.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            dm = model_matrix(self.formula, self.data)
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+        self.labels = list(dm.rhs.columns)
+        self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
     def _prepare_data(self) -> None:
         """Convert design matrices to xarray DataArrays."""
@@ -182,8 +181,8 @@ class RegressionDiscontinuity(BaseExperiment):
         self.x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
+        new_x = model_matrix(spec=self.rhs_matrix_spec, data=self.x_pred).to_numpy()
+        self.pred = self.model.predict(X=new_x)
 
         # calculate discontinuity by evaluating the difference in model expectation on
         # either side of the discontinuity
@@ -200,8 +199,8 @@ class RegressionDiscontinuity(BaseExperiment):
                 "treated": np.array([0, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
+        new_x = model_matrix(spec=self.rhs_matrix_spec, data=self.x_discon).to_numpy()
+        self.pred_discon = self.model.predict(X=new_x)
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
         if isinstance(self.model, PyMCModel):

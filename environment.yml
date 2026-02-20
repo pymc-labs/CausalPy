@@ -9,7 +9,7 @@ dependencies:
   - matplotlib>=3.5.3
   - numpy
   - pandas
-  - patsy
+  - formulaic
   - pre-commit
   - pymc>=5.15.1
   - scikit-learn>=1
