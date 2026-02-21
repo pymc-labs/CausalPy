@@ -199,6 +199,25 @@ def test_sc_datetime_treatment_time_plot():
     ), "ax must be a numpy.ndarray of plt.Axes"
 
 
+@pytest.mark.parametrize("error_type", [TypeError, ValueError])
+def test_sc_convert_treatment_time_for_axis_fallback(error_type):
+    """Return original treatment_time when axis conversion raises."""
+
+    class FailingXAxis:
+        def convert_units(self, _value):
+            raise error_type("conversion failed")
+
+    class FailingAxis:
+        xaxis = FailingXAxis()
+
+    treatment_time = pd.Timestamp("2022-01-01")
+    converted = cp.SyntheticControl._convert_treatment_time_for_axis(
+        FailingAxis(), treatment_time
+    )
+
+    assert converted is treatment_time
+
+
 @pytest.mark.integration
 def test_rd_linear_main_effects():
     """
