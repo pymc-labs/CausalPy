@@ -48,6 +48,13 @@ its_lift_test.ipynb
 :::
 
 :::{toctree}
+:caption: Piecewise Interrupted Time Series
+:maxdepth: 1
+
+piecewise_its_pymc.ipynb
+:::
+
+:::{toctree}
 :caption: Comparative Interrupted Time Series
 :maxdepth: 1
 
