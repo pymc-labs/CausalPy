@@ -19,7 +19,7 @@ the approach of Borusyak, Jaravel, and Spiess (2024). It handles settings where
 different units receive treatment at different times.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -29,7 +29,8 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
 
@@ -65,7 +66,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Value indicating never-treated units in treatment_time column.
         Defaults to np.inf.
     model : PyMCModel or RegressorMixin, optional
-        A model for the untreated outcome. Defaults to None.
+        A model for the untreated outcome. Defaults to LinearRegression.
     event_window : tuple[int, int], optional
         Tuple (min_event_time, max_event_time) to restrict event-time aggregation.
         If None, uses all available event-times.
@@ -123,6 +124,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -173,6 +175,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Step 4: Build design matrices
         self._build_design_matrices()
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict counterfactuals, and aggregate effects."""
         # Step 5: Fit model on untreated observations
         self._fit_model()
 
@@ -912,3 +918,37 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             DataFrame with event_time, att, att_std, n_obs columns.
         """
         return self.att_event_time_.copy()
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Staggered Difference-in-Differences.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        from causalpy.reporting import _effect_summary_staggered_did
+
+        return _effect_summary_staggered_did(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )

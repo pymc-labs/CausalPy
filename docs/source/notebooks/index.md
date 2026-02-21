@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Panel data methods
 
 :::{toctree}
 :caption: ANCOVA
@@ -51,6 +53,15 @@ its_lift_test.ipynb
 
 piecewise_its_pymc.ipynb
 :::
+
+:::{toctree}
+:caption: Comparative Interrupted Time Series
+:maxdepth: 1
+
+its_pymc_comparative.ipynb
+:::
+
+## Cross-sectional methods
 
 :::{toctree}
 :caption: Regression Discontinuity

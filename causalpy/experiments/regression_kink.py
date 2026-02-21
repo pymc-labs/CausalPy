@@ -27,7 +27,11 @@ from patsy import build_design_matrices, dmatrices
 import xarray as xr
 from causalpy.plot_utils import plot_xY
 
+from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_rkink
+
 from .base import BaseExperiment
+from typing import Any, Literal
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
     DataException,
@@ -40,17 +44,35 @@ LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):
-    """Regression Kink experiment class."""
+    """A class to analyse regression kink designs.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param kink_point:
+        A scalar value at which the kink occurs
+    :param model:
+        A PyMC model. Defaults to LinearRegression.
+    :param running_variable_name:
+        The name of the running variable column
+    :param epsilon:
+        A small scalar for evaluating the causal impact above/below the kink
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the kink) is not used to fit
+        the model.
+    """
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
         data: pd.DataFrame,
         formula: str,
         kink_point: float,
-        model: BaseExperiment | None = None,
+        model: PyMCModel | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
@@ -65,7 +87,12 @@ class RegressionKink(BaseExperiment):
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data, applying bandwidth filtering."""
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
@@ -76,9 +103,9 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(formula, filtered_data)
+            y, X = dmatrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(formula, self.data)
+            y, X = dmatrices(self.formula, self.data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -86,7 +113,8 @@ class RegressionKink(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -101,6 +129,8 @@ class RegressionKink(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
         COORDS = {
             "coeffs": self.labels,
             "obs_ind": np.arange(self.X.shape[0]),
@@ -113,6 +143,8 @@ class RegressionKink(BaseExperiment):
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
@@ -129,7 +161,7 @@ class RegressionKink(BaseExperiment):
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
         self.gradient_change = self._eval_gradient_change(
-            mu_kink_left, mu_kink, mu_kink_right, epsilon
+            mu_kink_left, mu_kink, mu_kink_right, self.epsilon
         )
 
     def input_validation(self) -> None:
@@ -265,3 +297,35 @@ class RegressionKink(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
         return fig, ax
+
+    def effect_summary(
+        self,
+        *,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        min_effect: float | None = None,
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects for Regression Kink.
+
+        Parameters
+        ----------
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for tail probability calculation (PyMC only, ignored for OLS).
+        alpha : float, default=0.05
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes
+        """
+        return _effect_summary_rkink(
+            self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+        )
