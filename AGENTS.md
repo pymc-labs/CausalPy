@@ -1,5 +1,11 @@
 # AGENTS
 
+## Environment
+
+Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `CausalPy` environment. Always run commands via `$CONDA_EXE run -n CausalPy <command>` -- never use `$CONDA_EXE activate`.
+
+See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
+
 ## Testing preferences
 
 - Write all Python tests as `pytest` style functions, not unittest classes

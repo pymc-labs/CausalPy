@@ -23,6 +23,8 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import InstrumentalVariableRegression
+
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
 from typing import Any, Literal
@@ -46,8 +48,8 @@ class InstrumentalVariable(BaseExperiment):
     formula : str
         A statistical model formula for the focal regression,
         e.g. ``y ~ 1 + t + x1 + x2 + x3``.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : InstrumentalVariableRegression, optional
+        A PyMC model. Defaults to InstrumentalVariableRegression.
     priors : dict, optional
         Dictionary of priors for the mus and sigmas of both regressions.
         If priors are not specified we will substitute MLE estimates for
@@ -111,6 +113,7 @@ class InstrumentalVariable(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = InstrumentalVariableRegression
 
     def __init__(
         self,
@@ -118,7 +121,7 @@ class InstrumentalVariable(BaseExperiment):
         data: pd.DataFrame,
         instruments_formula: str,
         formula: str,
-        model: BaseExperiment | None = None,
+        model: InstrumentalVariableRegression | None = None,
         priors: dict | None = None,
         vs_prior_type=None,
         vs_hyperparams=None,
@@ -131,7 +134,6 @@ class InstrumentalVariable(BaseExperiment):
         self.instruments_data = instruments_data
         self.formula = formula
         self.instruments_formula = instruments_formula
-        self.model = model
         self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
         self.binary_treatment = binary_treatment

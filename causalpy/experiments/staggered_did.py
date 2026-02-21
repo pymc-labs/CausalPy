@@ -29,7 +29,7 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
@@ -66,7 +66,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Value indicating never-treated units in treatment_time column.
         Defaults to np.inf.
     model : PyMCModel or RegressorMixin, optional
-        A model for the untreated outcome. Defaults to None.
+        A model for the untreated outcome. Defaults to LinearRegression.
     event_window : tuple[int, int], optional
         Tuple (min_event_time, max_event_time) to restrict event-time aggregation.
         If None, uses all available event-times.
@@ -124,6 +124,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,

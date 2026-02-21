@@ -36,7 +36,7 @@ from causalpy.plot_utils import (
     add_hdi_annotation,
     plot_xY,
 )
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _compute_statistics_did_ols,
@@ -78,7 +78,7 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column indicating post-treatment period.
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
-        A PyMC model for difference in differences. Defaults to None.
+        A PyMC model for difference in differences. Defaults to LinearRegression.
 
     Example
     --------
@@ -102,6 +102,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,

@@ -35,7 +35,7 @@ from causalpy.plot_utils import (
     add_hdi_annotation,
     plot_xY,
 )
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
 from .base import BaseExperiment
@@ -56,7 +56,7 @@ class RegressionDiscontinuity(BaseExperiment):
     :param treatment_threshold:
         A scalar threshold value at which the treatment is applied
     :param model:
-        A PyMC model
+        A PyMC or sklearn model. Defaults to LinearRegression.
     :param running_variable_name:
         The name of the predictor variable that the treatment threshold is based upon
     :param epsilon:
@@ -88,6 +88,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,

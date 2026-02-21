@@ -35,7 +35,7 @@ from causalpy.plot_utils import (
     get_hdi_to_df,
     plot_xY,
 )
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
@@ -136,6 +136,7 @@ class InterruptedTimeSeries(BaseExperiment):
     expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,

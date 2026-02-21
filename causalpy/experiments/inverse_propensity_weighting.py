@@ -27,6 +27,7 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
@@ -48,8 +49,8 @@ class InversePropensityWeighting(BaseExperiment):
         'robust', 'doubly robust' or 'overlap'. See Aronow and Miller
         "Foundations of Agnostic Statistics" for discussion and computation
         of these weighting schemes.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : PropensityScore, optional
+        A PyMC model. Defaults to PropensityScore.
 
     Example
     --------
@@ -74,6 +75,7 @@ class InversePropensityWeighting(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = PropensityScore
 
     def __init__(
         self,
@@ -81,7 +83,7 @@ class InversePropensityWeighting(BaseExperiment):
         formula: str,
         outcome_variable: str,
         weighting_scheme: str,
-        model: BaseExperiment | None = None,
+        model: PropensityScore | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
