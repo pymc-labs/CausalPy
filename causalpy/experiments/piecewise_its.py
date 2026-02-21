@@ -790,16 +790,8 @@ class PiecewiseITS(BaseExperiment):
                 prefix=prefix,
             )
         else:
-            impact_array = (
-                windowed_impact.values
-                if hasattr(windowed_impact, "values")
-                else np.asarray(windowed_impact)
-            )
-            counterfactual_array = (
-                counterfactual.values
-                if hasattr(counterfactual, "values")
-                else np.asarray(counterfactual)
-            )
+            impact_array = np.asarray(windowed_impact)
+            counterfactual_array = np.asarray(counterfactual)
             stats = _compute_statistics_ols(
                 impact_array,
                 counterfactual_array,
