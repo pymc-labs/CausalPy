@@ -1,0 +1,51 @@
+name: Test Notebooks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "causalpy/**"
+      - ".github/workflows/test_notebook.yml"
+      - "scripts/run_notebooks/**"
+      - "docs/source/notebooks/**"
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "causalpy/**"
+      - ".github/workflows/test_notebook.yml"
+      - "scripts/run_notebooks/**"
+      - "docs/source/notebooks/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notebooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        split:
+          - "--pattern *_pymc*.ipynb"
+          - "--pattern *_skl*.ipynb"
+          - "--exclude-pattern _pymc --exclude-pattern _skl"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[test,docs]"
+
+      - name: Run notebooks
+        run: python scripts/run_notebooks/runner.py ${{ matrix.split }}
