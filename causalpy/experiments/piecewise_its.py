@@ -16,7 +16,7 @@ Piecewise Interrupted Time Series Analysis (Segmented Regression)
 """
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 import arviz as az
 import numpy as np
@@ -29,6 +29,7 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import FormulaException
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import round_num
 
@@ -727,3 +728,93 @@ class PiecewiseITS(BaseExperiment):
 
         self.plot_data = result
         return result
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """Generate a decision-ready summary of PiecewiseITS causal effects."""
+        from causalpy.reporting import (
+            _compute_statistics,
+            _compute_statistics_ols,
+            _extract_counterfactual,
+            _extract_window,
+            _generate_prose,
+            _generate_prose_ols,
+            _generate_table,
+            _generate_table_ols,
+        )
+
+        if period is not None:
+            raise ValueError(
+                "period is not supported for PiecewiseITS. "
+                "Use window to restrict the post-period summary."
+            )
+
+        windowed_impact, window_coords = _extract_window(
+            self, window, treated_unit=treated_unit
+        )
+        counterfactual = _extract_counterfactual(
+            self, window_coords, treated_unit=treated_unit
+        )
+
+        if isinstance(self.model, PyMCModel):
+            hdi_prob = 1 - alpha
+            stats = _compute_statistics(
+                windowed_impact,
+                counterfactual,
+                hdi_prob=hdi_prob,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+            )
+            table = _generate_table(stats, cumulative=cumulative, relative=relative)
+            text = _generate_prose(
+                stats,
+                window_coords,
+                alpha=alpha,
+                direction=direction,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+        else:
+            impact_array = (
+                windowed_impact.values
+                if hasattr(windowed_impact, "values")
+                else np.asarray(windowed_impact)
+            )
+            counterfactual_array = (
+                counterfactual.values
+                if hasattr(counterfactual, "values")
+                else np.asarray(counterfactual)
+            )
+            stats = _compute_statistics_ols(
+                impact_array,
+                counterfactual_array,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+            )
+            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
+            text = _generate_prose_ols(
+                stats,
+                window_coords,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+                prefix=prefix,
+            )
+
+        return EffectSummary(table=table, text=text)
