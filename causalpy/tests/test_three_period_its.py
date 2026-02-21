@@ -21,6 +21,7 @@ with pre-intervention, intervention, and post-intervention periods.
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -1005,3 +1006,294 @@ def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
     # Should only have treatment_time line, not treatment_end_time
     assert fig is not None
     assert ax is not None
+
+
+# ==============================================================================
+# ITS point 4.1: formula str | list[str], outcome_variable_names, n_outcomes
+# ==============================================================================
+
+
+@pytest.fixture
+def bivariate_integer_data(rng):
+    """Integer-indexed data with two outcomes for testing formula list (4.1)."""
+    n_points = 60
+    indices = np.arange(n_points)
+    t = np.arange(n_points, dtype=float)
+    y1 = 1.0 + 0.5 * t + rng.normal(0, 0.5, n_points)
+    y2 = 2.0 + 0.3 * t + rng.normal(0, 0.5, n_points)
+    treatment_idx = 30
+    treatment_end_idx = 42
+    df = pd.DataFrame(
+        {"y1": y1, "y2": y2, "t": t},
+        index=indices,
+    )
+    df.index.name = "obs_ind"
+    return df, treatment_idx, treatment_end_idx
+
+
+def test_its_formula_single_string_sets_outcome_names(integer_data):
+    """4.1: Single formula (str) sets outcome_variable_names and n_outcomes."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    )
+    assert result.outcome_variable_names == ["y"]
+    assert result.n_outcomes == 1
+    assert result.outcome_variable_name == "y"
+
+
+def test_its_pre_y_post_y_always_3d(integer_data):
+    """pre_y and post_y are always 3D (obs_ind, treated_units, outcomes), even with one formula."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    )
+    assert result.pre_y.dims == ("obs_ind", "treated_units", "outcomes")
+    assert result.post_y.dims == ("obs_ind", "treated_units", "outcomes")
+    assert result.pre_y.shape == (len(result.datapre), 1, 1)
+    assert result.post_y.shape == (len(result.datapost), 1, 1)
+    assert list(result.pre_y.coords["outcomes"].values) == ["y"]
+
+
+def test_its_formula_list_one_element_same_as_single(integer_data):
+    """4.1: Formula as list of one string behaves like single formula."""
+    df, treatment_time, treatment_end_time = integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y ~ 1 + t"],
+        model=LinearRegression(),
+    )
+    assert result.outcome_variable_names == ["y"]
+    assert result.n_outcomes == 1
+    assert result.outcome_variable_name == "y"
+
+
+def test_its_formula_list_two_elements_raises_without_multivariate_model(
+    bivariate_integer_data,
+):
+    """With two formulas, fit requires a model with supports_multivariate."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    with pytest.raises(ValueError, match="supports_multivariate"):
+        cp.InterruptedTimeSeries(
+            df,
+            treatment_time=treatment_time,
+            treatment_end_time=treatment_end_time,
+            formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+            model=LinearRegression(),
+        )
+
+
+def test_its_formula_empty_list_raises(integer_data):
+    """4.1: Empty formula list raises ValueError."""
+    df, treatment_time, treatment_end_time = integer_data
+    with pytest.raises(ValueError, match="non-empty"):
+        cp.InterruptedTimeSeries(
+            df,
+            treatment_time=treatment_time,
+            treatment_end_time=treatment_end_time,
+            formula=[],
+            model=LinearRegression(),
+        )
+
+
+# ==============================================================================
+# MultivarLinearReg: unit tests and ITS integration (planning §8)
+# ==============================================================================
+
+
+@pytest.fixture
+def multivar_xy_coords(rng):
+    """Small 3D y and 2D X for MultivarLinearReg unit tests."""
+    n_obs, n_coeffs, n_outcomes = 20, 2, 2
+    X = xr.DataArray(
+        rng.normal(0, 1, (n_obs, n_coeffs)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(n_obs), "coeffs": ["a", "b"]},
+    )
+    y = xr.DataArray(
+        rng.normal(0, 1, (n_obs, 1, n_outcomes)),
+        dims=["obs_ind", "treated_units", "outcomes"],
+        coords={
+            "obs_ind": np.arange(n_obs),
+            "treated_units": ["unit_0"],
+            "outcomes": ["y1", "y2"],
+        },
+    )
+    coords = {
+        "coeffs": ["a", "b"],
+        "obs_ind": np.arange(n_obs),
+        "treated_units": ["unit_0"],
+        "outcomes": ["y1", "y2"],
+    }
+    return X, y, coords
+
+
+@pytest.mark.integration
+def test_multivar_linear_reg_fit_predict_impact(multivar_xy_coords, mock_pymc_sample):
+    """MultivarLinearReg: fit with 3D y, idata has mu/y_hat 3D; predict and calculate_impact run."""
+    X, y, coords = multivar_xy_coords
+    model = cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs)
+    model.fit(X, y, coords=coords)
+    assert model.idata is not None
+    assert "y_hat" in model.idata.posterior_predictive
+    # mu is Deterministic; after predict() it is in posterior_predictive
+    pred = model.predict(X)
+    assert "mu" in pred["posterior_predictive"]
+    assert "obs_ind" in pred["posterior_predictive"]["mu"].dims
+    assert "treated_units" in pred["posterior_predictive"]["mu"].dims
+    assert "outcomes" in pred["posterior_predictive"]["mu"].dims
+    impact = model.calculate_impact(y, pred)
+    assert "obs_ind" in impact.dims
+    assert "outcomes" in impact.dims
+    assert impact.transpose(..., "obs_ind").dims[-1] == "obs_ind"
+
+
+@pytest.mark.integration
+def test_multivar_linear_reg_score(multivar_xy_coords, mock_pymc_sample):
+    """MultivarLinearReg: score returns Series with keys per unit/outcome."""
+    X, y, coords = multivar_xy_coords
+    model = cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs)
+    model.fit(X, y, coords=coords)
+    score = model.score(X, y)
+    assert isinstance(score, pd.Series)
+    assert any("r2" in k for k in score.index)
+    assert any("outcome" in k for k in score.index)
+
+
+@pytest.mark.integration
+def test_its_two_formulas_multivar_linear_reg(bivariate_integer_data, mock_pymc_sample):
+    """ITS with two formulas and MultivarLinearReg: fit, predict, impact run; shapes 3D."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    assert result.n_outcomes == 2
+    assert result.outcome_variable_names == ["y1", "y2"]
+    assert result.pre_y.shape == (len(result.datapre), 1, 2)
+    assert result.post_y.shape == (len(result.datapost), 1, 2)
+    assert result.pre_pred is not None
+    assert result.post_pred is not None
+    assert result.pre_impact is not None
+    assert result.post_impact is not None
+    assert "outcomes" in result.post_impact.dims
+
+
+@pytest.mark.integration
+def test_its_multivar_get_plot_data_bayesian_long_format(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """Multivariate ITS: get_plot_data_bayesian returns long format with outcome column."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    plot_data = result.get_plot_data_bayesian()
+    assert "outcome" in plot_data.columns
+    assert set(plot_data["outcome"].unique()) == {"y1", "y2"}
+    assert "prediction" in plot_data.columns
+    assert "impact" in plot_data.columns
+    n_pre, n_post = len(result.datapre), len(result.datapost)
+    assert len(plot_data) == 2 * (n_pre + n_post)
+
+
+@pytest.mark.integration
+def test_its_multivar_bayesian_plot_layouts(bivariate_integer_data, mock_pymc_sample):
+    """Multivariate ITS: plot() supports layout overlay/per_outcome and outcomes_to_plot."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    fig, ax = result.plot(layout="overlay")
+    assert fig is not None
+    assert len(ax) == 3
+    figs = result.plot(layout="per_outcome")
+    assert len(figs) == 2
+    for f, a in figs:
+        assert f is not None
+        assert len(a) == 3
+    fig1, _ = result.plot(layout="overlay", outcomes_to_plot=["y1"])
+    assert fig1 is not None
+
+
+@pytest.mark.integration
+def test_its_multivar_plot_outcomes_to_plot_unknown_raises(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """outcomes_to_plot with unknown outcome name raises ValueError."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    with pytest.raises(ValueError, match="unknown outcome"):
+        result.plot(layout="overlay", outcomes_to_plot=["y1", "bad"])
+
+
+@pytest.mark.integration
+def test_its_multivar_effect_summary_returns_table_with_outcome_column(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """Multivariate ITS: effect_summary returns DataFrame with outcome and statistic columns."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    summary = result.effect_summary()
+    assert "outcome" in summary.table.columns
+    assert "statistic" in summary.table.columns
+    assert set(summary.table["outcome"].unique()) == {"y1", "y2"}
+    assert set(summary.table["statistic"].unique()) == {"average", "cumulative"}
+    assert len(summary.table) == 4  # 2 outcomes * 2 statistics
+    assert summary.text.count("[y1]") == 1
+    assert summary.text.count("[y2]") == 1
+
+
+@pytest.mark.integration
+def test_its_multivar_split_post_period_preserves_outcomes(
+    bivariate_integer_data, mock_pymc_sample
+):
+    """_split_post_period preserves outcomes dimension (no squeeze) in multivariate ITS."""
+    df, treatment_time, treatment_end_time = bivariate_integer_data
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula=["y1 ~ 1 + t", "y2 ~ 1 + t"],
+        model=cp.pymc_models.MultivarLinearReg(sample_kwargs=sample_kwargs),
+    )
+    assert result.treatment_end_time is not None
+    assert hasattr(result, "intervention_impact")
+    assert hasattr(result, "post_intervention_impact")
+    assert "outcomes" in result.intervention_impact.dims
+    assert "outcomes" in result.post_intervention_impact.dims
+    assert result.intervention_impact.sizes["outcomes"] == 2
+    assert result.post_intervention_impact.sizes["outcomes"] == 2
