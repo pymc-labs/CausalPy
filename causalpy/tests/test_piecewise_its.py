@@ -900,6 +900,23 @@ def test_piecewise_its_effect_summary_pymc():
     assert "Post-period" in summary.text
 
 
+def test_piecewise_its_effect_summary_period_not_supported():
+    """Test that period kwarg raises clear error for PiecewiseITS."""
+    np.random.seed(42)
+    t = np.arange(100)
+    y = 10 + 0.1 * t + 5 * (t >= 50) + np.random.randn(100)
+    df = pd.DataFrame({"t": t, "y": y})
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 50)",
+        model=LinearRegression(),
+    )
+
+    with pytest.raises(ValueError, match="period is not supported for PiecewiseITS"):
+        result.effect_summary(period="post")
+
+
 def test_piecewise_its_post_impact_attributes():
     """Test that PiecewiseITS creates post_impact and datapost attributes."""
     np.random.seed(42)
