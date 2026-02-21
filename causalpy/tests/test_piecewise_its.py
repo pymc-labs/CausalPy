@@ -23,6 +23,7 @@ from patsy import dmatrix
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.custom_exceptions import FormulaException
 from causalpy.data.simulate_data import generate_piecewise_its_data
 from causalpy.transforms import RampTransform, StepTransform
 
@@ -294,6 +295,46 @@ def test_piecewise_its_missing_column():
         cp.PiecewiseITS(
             df,
             formula="y ~ 1 + t + step(t, 50) + nonexistent",
+            model=LinearRegression(),
+        )
+
+
+def test_piecewise_its_mixed_step_variables_fail_fast():
+    """Test that mixed step/ramp time variables are rejected."""
+    df = pd.DataFrame(
+        {
+            "t": np.arange(100),
+            "month": np.tile(np.arange(1, 13), 9)[:100],
+            "y": np.random.randn(100),
+        }
+    )
+    with pytest.raises(FormulaException, match="exactly one time variable"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + t + step(t, 50) + step(month, 6)",
+            model=LinearRegression(),
+        )
+
+
+def test_piecewise_its_invalid_datetime_threshold_fail_fast():
+    """Test invalid datetime thresholds fail during initialization."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="D")
+    df = pd.DataFrame({"date": dates, "y": np.random.randn(100)})
+    with pytest.raises(FormulaException, match="Invalid datetime threshold"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + step(date, 'not-a-date')",
+            model=LinearRegression(),
+        )
+
+
+def test_piecewise_its_invalid_numeric_threshold_fail_fast():
+    """Test invalid numeric thresholds fail during initialization."""
+    df = pd.DataFrame({"t": np.arange(100), "y": np.random.randn(100)})
+    with pytest.raises(FormulaException, match="Invalid numeric threshold"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + t + step(t, 'abc')",
             model=LinearRegression(),
         )
 
@@ -745,7 +786,7 @@ def test_piecewise_its_datetime_time():
 
     assert isinstance(result, cp.PiecewiseITS)
     # Check interruption times extracted correctly
-    assert "2020-02-20" in result.interruption_times
+    assert pd.Timestamp("2020-02-20") in result.interruption_times
 
 
 def test_piecewise_its_datetime_multiple_interruptions():
