@@ -61,7 +61,8 @@ class PiecewiseITS(BaseExperiment):
         A pandas DataFrame containing the time series data.
     formula : str
         A patsy formula specifying the model. Must include at least one
-        ``step()`` or ``ramp()`` term. Example:
+        ``step()`` or ``ramp()`` term, and all such terms must use the same
+        time variable. Example:
         ``"y ~ 1 + t + step(t, 50) + ramp(t, 50)"``
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
@@ -74,7 +75,7 @@ class PiecewiseITS(BaseExperiment):
     formula : str
         The patsy formula used for the model.
     interruption_times : list
-        List of interruption times extracted from the formula.
+        Canonicalized interruption thresholds extracted from the formula.
     labels : list[str]
         Names of all coefficients in the design matrix.
     effect : xr.DataArray or np.ndarray
@@ -165,11 +166,12 @@ class PiecewiseITS(BaseExperiment):
         # Input validation
         self._validate_inputs()
 
-        # Extract interruption times from formula for plotting
-        self.interruption_times = self._extract_interruption_times()
-
-        # Detect time column from step/ramp usage
-        self.time_col = self._extract_time_column()
+        # Parse and validate step/ramp terms before any downstream logic.
+        self._step_ramp_terms = self._parse_step_ramp_terms()
+        self.time_col = self._extract_time_column(self._step_ramp_terms)
+        self.interruption_times = self._extract_and_canonicalize_interruption_times(
+            self._step_ramp_terms, self.time_col
+        )
 
         # Parse formula with patsy (step and ramp are available in namespace)
         y, X = dmatrices(formula, self.data)
@@ -242,43 +244,75 @@ class PiecewiseITS(BaseExperiment):
                 "Example: 'y ~ 1 + t + step(t, 50) + ramp(t, 50)'"
             )
 
-    def _extract_interruption_times(self) -> list[int | float | str]:
-        """Extract interruption times from step() and ramp() calls in formula.
-
-        Returns a list of unique threshold values found in the formula.
-        """
-        # Match step(var, threshold) and ramp(var, threshold)
-        # Threshold can be: numeric (50, 50.0), string ('2020-01-01'), or expression
-        pattern = r"(?:step|ramp)\s*\(\s*\w+\s*,\s*([^)]+)\s*\)"
+    def _parse_step_ramp_terms(self) -> list[dict[str, str]]:
+        """Parse step/ramp terms into structured metadata."""
+        pattern = r"(step|ramp)\s*\(\s*(\w+)\s*,\s*([^)]+?)\s*\)"
         matches = re.findall(pattern, self.formula)
+        return [
+            {"transform": transform, "variable": variable, "raw_threshold": threshold}
+            for transform, variable, threshold in matches
+        ]
 
-        thresholds: list[int | float | str] = []
-        for match in matches:
-            match = match.strip()
-            # Try to parse as numeric
-            try:
-                if "." in match:
-                    val: int | float | str = float(match)
-                else:
-                    val = int(match)
-            except ValueError:
-                # Keep as string (e.g., "'2020-01-01'" or "pd.Timestamp(...)")
-                # Strip quotes if present
-                val = match.strip("'\"")
-            if val not in thresholds:
-                thresholds.append(val)
+    def _extract_time_column(self, terms: list[dict[str, str]]) -> str:
+        """Extract and validate the unique time column used by step/ramp calls."""
+        variables = {term["variable"] for term in terms}
+        if len(variables) != 1:
+            raise FormulaException(
+                "All step()/ramp() terms must use exactly one time variable in this "
+                "version of PiecewiseITS. Mixed variables are not yet supported."
+            )
+        time_col = next(iter(variables))
+        if time_col not in self.data.columns:
+            raise FormulaException(
+                f"Time variable '{time_col}' from step()/ramp() terms is not present "
+                "in the input data."
+            )
+        return time_col
 
-        return thresholds
+    def _extract_and_canonicalize_interruption_times(
+        self, terms: list[dict[str, str]], time_col: str
+    ) -> list[int | float | pd.Timestamp]:
+        """Extract thresholds and canonicalize them to numeric or Timestamp."""
+        time_values = self.data[time_col]
+        is_datetime = pd.api.types.is_datetime64_any_dtype(time_values)
+        is_numeric = pd.api.types.is_numeric_dtype(time_values)
 
-    def _extract_time_column(self) -> str:
-        """Extract the time column name from step/ramp calls in formula."""
-        # Match step(var, ...) or ramp(var, ...)
-        pattern = r"(?:step|ramp)\s*\(\s*(\w+)\s*,"
-        matches = re.findall(pattern, self.formula)
-        if matches:
-            return matches[0]
-        # Fallback: try to find a time-like column
-        return "t"
+        if not is_datetime and not is_numeric:
+            raise FormulaException(
+                f"Time variable '{time_col}' must be numeric or datetime-like to be "
+                "used with step()/ramp()."
+            )
+
+        canonical_thresholds: list[int | float | pd.Timestamp] = []
+        for term in terms:
+            raw_threshold = term["raw_threshold"].strip().strip("'\"")
+
+            if is_datetime:
+                try:
+                    value: int | float | pd.Timestamp = pd.to_datetime(
+                        raw_threshold, errors="raise"
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise FormulaException(
+                        f"Invalid datetime threshold '{term['raw_threshold']}' for "
+                        f"time variable '{time_col}'."
+                    ) from exc
+            else:
+                try:
+                    if re.fullmatch(r"[-+]?\d+", raw_threshold):
+                        value = int(raw_threshold)
+                    else:
+                        value = float(raw_threshold)
+                except ValueError as exc:
+                    raise FormulaException(
+                        f"Invalid numeric threshold '{term['raw_threshold']}' for "
+                        f"time variable '{time_col}'."
+                    ) from exc
+
+            if value not in canonical_thresholds:
+                canonical_thresholds.append(value)
+
+        return canonical_thresholds
 
     def _get_interruption_column_indices(self) -> list[int]:
         """Get indices of columns related to interruptions (step/ramp terms)."""
@@ -355,19 +389,8 @@ class PiecewiseITS(BaseExperiment):
         first_interruption = self.interruption_times[0]
         time_col = self.time_col
 
-        # Create boolean mask for post-intervention period
         # Post-intervention = time >= first_interruption (inclusive)
-        if isinstance(first_interruption, str):
-            # String threshold (e.g., '2020-06-01')
-            try:
-                threshold = pd.Timestamp(first_interruption)
-                post_mask = self.data[time_col] >= threshold
-            except Exception:
-                # Fallback: try direct comparison
-                post_mask = self.data[time_col] >= first_interruption
-        else:
-            # Numeric threshold
-            post_mask = self.data[time_col] >= first_interruption
+        post_mask = self.data[time_col] >= first_interruption
 
         # Create datapost - the post-intervention data
         self.datapost = self.data[post_mask].copy()
@@ -520,11 +543,9 @@ class PiecewiseITS(BaseExperiment):
 
         # Add vertical lines for interruptions
         for i, t_k in enumerate(self.interruption_times):
-            # Convert string thresholds to appropriate type for plotting
-            plot_threshold = self._convert_threshold_for_plotting(t_k)
             for a in ax:
                 a.axvline(
-                    x=plot_threshold,
+                    x=t_k,
                     ls="-",
                     lw=2,
                     color="red",
@@ -588,10 +609,9 @@ class PiecewiseITS(BaseExperiment):
 
         # Add vertical lines for interruptions
         for i, t_k in enumerate(self.interruption_times):
-            plot_threshold = self._convert_threshold_for_plotting(t_k)
             for a in ax:
                 a.axvline(
-                    x=plot_threshold,
+                    x=t_k,
                     ls="-",
                     lw=2,
                     color="red",
@@ -603,18 +623,6 @@ class PiecewiseITS(BaseExperiment):
 
         plt.tight_layout()
         return fig, ax
-
-    def _convert_threshold_for_plotting(
-        self, threshold: int | float | str
-    ) -> int | float | pd.Timestamp:
-        """Convert threshold to appropriate type for matplotlib plotting."""
-        if isinstance(threshold, str):
-            # Try to parse as datetime
-            try:
-                return pd.Timestamp(threshold)
-            except Exception:
-                return threshold  # type: ignore[return-value]
-        return threshold
 
     def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
         """
