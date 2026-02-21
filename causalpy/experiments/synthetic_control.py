@@ -528,8 +528,7 @@ class SyntheticControl(BaseExperiment):
             label="Causal impact",
         )
 
-        # Intervention line
-        # TODO: make this work when treatment_time is a datetime
+        # Intervention line (see #725 for datetime treatment_time support)
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
