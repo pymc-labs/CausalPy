@@ -553,7 +553,7 @@ def test_sc_brexit(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_ancova(mock_pymc_sample):
+def test_ancova(mock_pymc_sample, capsys):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -576,6 +576,11 @@ def test_ancova(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    output = capsys.readouterr().out
+    assert "Group-level descriptive stats:" in output
+    assert "n" in output
+    assert "pre_mean" in output
+    assert "post_mean" in output
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes
