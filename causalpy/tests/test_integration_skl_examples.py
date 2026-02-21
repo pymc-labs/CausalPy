@@ -175,6 +175,31 @@ def test_sc():
 
 
 @pytest.mark.integration
+def test_sc_datetime_treatment_time_plot():
+    """Test SyntheticControl plotting with datetime treatment_time and sklearn model."""
+    df = (
+        cp.load_data("geolift1")
+        .assign(time=lambda x: pd.to_datetime(x["time"]))
+        .set_index("time")
+    )
+    treatment_time = pd.to_datetime("2022-01-01")
+
+    result = cp.SyntheticControl(
+        df,
+        treatment_time,
+        control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
+        treated_units=["Denmark"],
+        model=cp.skl_models.WeightedProportion(),
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.integration
 def test_rd_linear_main_effects():
     """
     Test Regression Discontinuity scikit-learn experiment main effects.
