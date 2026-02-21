@@ -23,6 +23,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 import causalpy as cp
+from causalpy.tests.conftest import setup_regression_kink_data
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -58,56 +59,29 @@ def test_did(mock_pymc_sample):
         result.get_plot_data()
 
 
-# TODO: set up fixture for the banks dataset
-
-
 @pytest.mark.integration
-def test_did_banks_simple(mock_pymc_sample):
+def test_did_banks_simple(mock_pymc_sample, banks_data):
     """
     Test simple Differences In Differences Experiment on the 'banks' data set.
 
     :code: `formula="bib ~ 1 + district * post_treatment"`
 
-    Loads, transforms data and checks:
+    Uses the ``banks_data`` fixture and checks:
     1. data is a dataframe
     2. pymc_experiements.DifferenceInDifferences returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
-
     """
-    treatment_time = 1930.5
-    df = (
-        cp.load_data("banks")
-        .filter(items=["bib6", "bib8", "year"])
-        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
-        .groupby("year")
-        .median()
-    )
-    # SET TREATMENT TIME TO ZERO =========
-    df.index = df.index - treatment_time
-    treatment_time = 0
-    # ====================================
-    df.reset_index(level=0, inplace=True)
-    df_long = pd.melt(
-        df,
-        id_vars=["year"],
-        value_vars=["Sixth District", "Eighth District"],
-        var_name="district",
-        value_name="bib",
-    ).sort_values("year")
-    df_long["unit"] = df_long["district"]
-    df_long["post_treatment"] = df_long.year >= treatment_time
-    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+    df_long, _treatment_time = banks_data
 
     result = cp.DifferenceInDifferences(
-        # df_long[df_long.year.isin([1930, 1931])],
         df_long[df_long.year.isin([-0.5, 0.5])],
         formula="bib ~ 1 + district * post_treatment",
         time_variable_name="year",
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -118,42 +92,20 @@ def test_did_banks_simple(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_did_banks_multi(mock_pymc_sample):
+def test_did_banks_multi(mock_pymc_sample, banks_data):
     """
     Test multiple regression Differences In Differences Experiment on the 'banks'
     data set.
 
     :code: `formula="bib ~ 1 + year + district + post_treatment + district:post_treatment"` # noqa: E501
 
-    Loads, transforms data and checks:
+    Uses the ``banks_data`` fixture and checks:
     1. data is a dataframe
     2. pymc_experiements.DifferenceInDifferences returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    treatment_time = 1930.5
-    df = (
-        cp.load_data("banks")
-        .filter(items=["bib6", "bib8", "year"])
-        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
-        .groupby("year")
-        .median()
-    )
-    # SET TREATMENT TIME TO ZERO =========
-    df.index = df.index - treatment_time
-    treatment_time = 0
-    # ====================================
-    df.reset_index(level=0, inplace=True)
-    df_long = pd.melt(
-        df,
-        id_vars=["year"],
-        value_vars=["Sixth District", "Eighth District"],
-        var_name="district",
-        value_name="bib",
-    ).sort_values("year")
-    df_long["unit"] = df_long["district"]
-    df_long["post_treatment"] = df_long.year >= treatment_time
-    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+    df_long, _treatment_time = banks_data
 
     result = cp.DifferenceInDifferences(
         df_long,
@@ -162,7 +114,7 @@ def test_did_banks_multi(mock_pymc_sample):
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -304,33 +256,6 @@ def test_rd_drinking(mock_pymc_sample):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-
-
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    kink = 0.5
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-
-
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
 
 
 @pytest.mark.integration

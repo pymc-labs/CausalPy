@@ -1449,68 +1449,11 @@ def _effect_summary_rkink(
             direction=direction,
         )
     else:
-        # OLS model: Not currently supported for RegressionKink, but structure is here
-        stats = _compute_statistics_rkink_ols(result, alpha=alpha)
-        table = _generate_table_rkink_ols(stats)
-        text = _generate_prose_rkink_ols(stats, alpha=alpha)
+        raise NotImplementedError(
+            "OLS models are not currently supported for Regression Kink experiments. "
+            "Please use a PyMC model for full statistical inference. "
+            "If OLS support is needed, see _compute_statistics_rd_ols() "
+            "for the implementation pattern."
+        )
 
     return EffectSummary(table=table, text=text)
-
-
-def _compute_statistics_rkink_ols(result, alpha=0.05):
-    """Compute statistics for Regression Kink scalar effect with OLS model.
-
-    TODO: Implement OLS support for Regression Kink
-    - Extract gradient change coefficient from model
-    - Calculate standard error from regression
-    - Compute confidence intervals and p-values
-    - Follow pattern from _compute_statistics_rd_ols()
-    """
-    raise NotImplementedError(
-        "OLS models are not currently supported for Regression Kink experiments. "
-        "Please use a PyMC model for full statistical inference. "
-        "If OLS support is needed, see _compute_statistics_rd_ols() for implementation pattern."
-    )
-
-
-def _generate_table_rkink_ols(stats):
-    """Generate DataFrame table for Regression Kink with OLS model.
-
-    TODO: This is a placeholder implementation.
-    Will be used when _compute_statistics_rkink_ols() is implemented.
-    """
-    # Placeholder for future OLS support
-    data = {
-        "metric": ["gradient_change"],
-        "mean": [stats["mean"]],
-        "CI_lower": [stats["ci_lower"]],
-        "CI_upper": [stats["ci_upper"]],
-        "p_value": [stats["p_value"]],
-    }
-    return pd.DataFrame(data)
-
-
-def _generate_prose_rkink_ols(stats, alpha=0.05):
-    """Generate prose summary for Regression Kink with OLS model.
-
-    TODO: This is a placeholder implementation.
-    Will be used when _compute_statistics_rkink_ols() is implemented.
-    """
-    # Placeholder for future OLS support
-    ci_pct = int((1 - alpha) * 100)
-
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    mean = stats["mean"]
-    lower = stats["ci_lower"]
-    upper = stats["ci_upper"]
-    p_val = stats["p_value"]
-
-    prose = (
-        f"The change in gradient at the kink point was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
-        f"with a p-value of {fmt_num(p_val, 3)}."
-    )
-
-    return prose

@@ -556,6 +556,19 @@ def test_effect_summary_rkink_rope(mock_pymc_sample):
     assert "p_rope" in stats.table.columns
 
 
+def test_effect_summary_rkink_ols_raises():
+    """The OLS path for Regression Kink should raise NotImplementedError."""
+    from types import SimpleNamespace
+
+    from causalpy.reporting import _effect_summary_rkink
+
+    mock_result = SimpleNamespace(gradient_change=1.5)
+    with pytest.raises(
+        NotImplementedError, match="OLS models are not currently supported"
+    ):
+        _effect_summary_rkink(mock_result)
+
+
 @pytest.mark.integration
 def test_effect_summary_empty_window_error(mock_pymc_sample):
     """Test that effect_summary raises error for empty window."""
