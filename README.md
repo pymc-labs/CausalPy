@@ -65,6 +65,16 @@ plt.show()
 
 Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues).
 
+## Getting Help
+
+Have questions about using CausalPy? We're here to help!
+
+- **Questions & Help**: Visit our [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) to ask questions and get help from the community
+- **Bug Reports & Feature Requests**: Open an [Issue](https://github.com/pymc-labs/CausalPy/issues) for bugs or feature requests
+- **Documentation**: Check out our [documentation](https://causalpy.readthedocs.io) for detailed guides and examples
+
+Please use GitHub Discussions for general questions rather than opening issues, so we can keep the issue tracker focused on bugs and enhancements.
+
 ## Videos
 Click on the thumbnail below to watch a video about CausalPy on YouTube.
 [![Youtube video thumbnail image](https://img.youtube.com/vi/gV6wzTk3o1U/maxresdefault.jpg)](https://www.youtube.com/watch?v=gV6wzTk3o1U)
