@@ -29,7 +29,12 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import (
+    ResponseType,
+    _log_response_type_info_once,
+    add_hdi_annotation,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
@@ -261,9 +266,47 @@ class RegressionDiscontinuity(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self,
+        round_to: int | None = 2,
+        response_type: ResponseType = "expectation",
+        show_hdi_annotation: bool = False,
+        **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs."""
+        """Generate plot for regression discontinuity designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to display in the HDI band:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        show_hdi_annotation : bool, default=False
+            Whether to display a text annotation at the bottom of the figure
+            explaining what the HDI represents. Set to False to hide the annotation.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+            The matplotlib figure and axes.
+        """
+        # Log HDI type info once per session
+        _log_response_type_info_once()
+
+        # Select the variable name based on response_type
+        var_name = "mu" if response_type == "expectation" else "y_hat"
+
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -277,7 +320,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_xY(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred["posterior_predictive"][var_name].isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
         )
@@ -309,6 +352,11 @@ class RegressionDiscontinuity(BaseExperiment):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
+
+        # Add HDI type annotation to the title
+        if show_hdi_annotation:
+            add_hdi_annotation(ax, response_type)
+
         return (fig, ax)
 
     def _ols_plot(

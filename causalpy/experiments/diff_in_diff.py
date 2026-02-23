@@ -30,7 +30,12 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import (
+    ResponseType,
+    _log_response_type_info_once,
+    add_hdi_annotation,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -336,21 +341,54 @@ class DifferenceInDifferences(BaseExperiment):
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self,
+        round_to: int | None = None,
+        response_type: ResponseType = "expectation",
+        show_hdi_annotation: bool = False,
+        **kwargs: dict,
     ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+            Use None to return raw numbers.
+        response_type : {"expectation", "prediction"}, default="expectation"
+            The response type to display in the HDI band:
+
+            - ``"expectation"``: HDI of the model expectation (μ). This shows
+              uncertainty from model parameters only, excluding observation noise.
+              Results in narrower intervals that represent the uncertainty in
+              the expected value of the outcome.
+            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
+              observation noise (σ) in addition to parameter uncertainty, resulting
+              in wider intervals that represent the full predictive uncertainty
+              for new observations.
+        show_hdi_annotation : bool, default=False
+            Whether to display a text annotation at the bottom of the figure
+            explaining what the HDI represents. Set to False to hide the annotation.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+            The matplotlib figure and axes.
         """
+        # Log HDI type info once per session
+        _log_response_type_info_once()
+
+        # Select the variable name based on response_type
+        var_name = "mu" if response_type == "expectation" else "y_hat"
 
         def _plot_causal_impact_arrow(results, ax):
             """
             draw a vertical arrow between `y_pred_counterfactual` and
             `y_pred_counterfactual`
             """
-            # Calculate y values to plot the arrow between
+            # Calculate y values to plot the arrow between - always use mu for arrow position
             y_pred_treatment = (
                 results.y_pred_treatment["posterior_predictive"]
                 .mu.isel({"obs_ind": 1})
@@ -410,7 +448,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
+            self.y_pred_control["posterior_predictive"][var_name].isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
@@ -422,7 +460,9 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
+            self.y_pred_treatment["posterior_predictive"][var_name].isel(
+                treated_units=0
+            ),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
@@ -437,7 +477,7 @@ class DifferenceInDifferences(BaseExperiment):
             y_pred_cf = az.extract(
                 self.y_pred_counterfactual,
                 group="posterior_predictive",
-                var_names="mu",
+                var_names=var_name,
             )
             # Select single unit data for plotting
             y_pred_cf_single = y_pred_cf.isel(treated_units=0)
@@ -460,7 +500,7 @@ class DifferenceInDifferences(BaseExperiment):
         else:
             h_line, h_patch = plot_xY(
                 time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu.isel(
+                self.y_pred_counterfactual.posterior_predictive[var_name].isel(
                     treated_units=0
                 ),
                 ax=ax,
@@ -483,6 +523,11 @@ class DifferenceInDifferences(BaseExperiment):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
+
+        # Add HDI type annotation to the title
+        if show_hdi_annotation:
+            add_hdi_annotation(ax, response_type)
+
         return fig, ax
 
     def _ols_plot(
