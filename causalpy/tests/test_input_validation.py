@@ -20,6 +20,7 @@ import pytest
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.tests.conftest import setup_regression_kink_data
 
 from sklearn.linear_model import LinearRegression
 
@@ -422,32 +423,6 @@ def test_iv_treatment_var_is_present():
 
 
 # Regression kink design
-
-
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-
-
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
 
 
 def test_rkink_bandwidth_check():

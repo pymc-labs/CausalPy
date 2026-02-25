@@ -345,7 +345,6 @@ class RegressionDiscontinuity(BaseExperiment):
             label="treatment threshold",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
-        # TODO: have to convert ax into list because it is somehow a numpy.ndarray
         return (fig, ax)
 
     def effect_summary(
