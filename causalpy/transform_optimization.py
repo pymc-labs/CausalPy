@@ -28,7 +28,7 @@ Since OLS has a closed-form solution, this is computationally tractable.
 """
 
 from itertools import product
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -40,6 +40,7 @@ from causalpy.transforms import (
     AdstockTransform,
     GeometricAdstock,
     HillSaturation,
+    LagTransform,
     LogisticSaturation,
     MichaelisMentenSaturation,
     SaturationTransform,
@@ -57,11 +58,11 @@ def _fit_ols_with_transforms(
     y_column: str,
     treatment_name: str,
     base_formula: str,
-    saturation,
-    adstock,
-    lag=None,
+    saturation: SaturationTransform | None,
+    adstock: AdstockTransform | None,
+    lag: LagTransform | None = None,
     hac_maxlags: int | None = None,
-    error_model: str = "hac",
+    error_model: Literal["hac", "arimax"] = "hac",
     arima_order: tuple[int, int, int] | None = None,
 ) -> tuple[float, sm.regression.linear_model.RegressionResultsWrapper]:
     """
@@ -176,7 +177,7 @@ def estimate_transform_params_grid(
     coef_constraint: str = "nonnegative",
     hac_maxlags: int | None = None,
     metric: str = "rmse",
-    error_model: str = "hac",
+    error_model: Literal["hac", "arimax"] = "hac",
     arima_order: tuple[int, int, int] | None = None,
 ) -> dict[str, Any]:
     """
@@ -393,7 +394,7 @@ def estimate_transform_params_optimize(
     hac_maxlags: int | None = None,
     method: str = "L-BFGS-B",
     metric: str = "rmse",
-    error_model: str = "hac",
+    error_model: Literal["hac", "arimax"] = "hac",
     arima_order: tuple[int, int, int] | None = None,
 ) -> dict[str, Any]:
     """

@@ -1171,10 +1171,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         Only used if trend_component is None.
     prior_sigma : float, optional
         Prior standard deviation for the observation noise. Defaults to 5.
-    trend_component : Optional[Any], optional
+    trend_component : Any | None, optional
         A custom trend component model. If None, the default pymc-marketing LinearTrend component is used.
         Must have an `apply(time_data)` method that returns a PyMC tensor.
-    seasonality_component : Optional[Any], optional
+    seasonality_component : Any | None, optional
         A custom seasonality component model. If None, the default pymc-marketing YearlyFourier component is used.
         Must have an `apply(time_data)` method that returns a PyMC tensor.
     sample_kwargs : dict, optional
@@ -2212,10 +2212,10 @@ class TransferFunctionLinearRegression(PyMCModel):
         self.coef_constraint = coef_constraint
 
         # Store for later use
-        self.treatment_names = None
-        self.n_treatments = None
+        self.treatment_names: list[str] | None = None
+        self.n_treatments: int | None = None
 
-    def priors_from_data(self, X, y) -> dict[str, Any]:
+    def priors_from_data(self, X: xr.DataArray, y: xr.DataArray) -> dict[str, Any]:
         """
         Generate data-informed priors that scale with outcome variable.
 
@@ -2232,7 +2232,7 @@ class TransferFunctionLinearRegression(PyMCModel):
 
         Returns
         -------
-        Dict[str, Prior]
+        dict[str, Prior]
             Dictionary with Prior objects for beta, theta_treatment, and sigma.
 
         Notes
@@ -2287,7 +2287,13 @@ class TransferFunctionLinearRegression(PyMCModel):
 
         return priors
 
-    def build_model(self, X, y, coords, treatment_data):
+    def build_model(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        treatment_data: xr.DataArray,
+    ) -> None:
         """
         Build the PyMC model with transforms.
 
@@ -2712,10 +2718,10 @@ class TransferFunctionARRegression(PyMCModel):
         self.coef_constraint = coef_constraint
 
         # Store for later use
-        self.treatment_names = None
-        self.n_treatments = None
+        self.treatment_names: list[str] | None = None
+        self.n_treatments: int | None = None
 
-    def priors_from_data(self, X, y) -> dict[str, Any]:
+    def priors_from_data(self, X: xr.DataArray, y: xr.DataArray) -> dict[str, Any]:
         """
         Generate data-informed priors including AR(1) coefficient.
 
@@ -2731,7 +2737,7 @@ class TransferFunctionARRegression(PyMCModel):
 
         Returns
         -------
-        Dict[str, Prior]
+        dict[str, Prior]
             Dictionary with Prior objects for beta, theta_treatment, sigma, and rho.
 
         Notes
@@ -2795,7 +2801,13 @@ class TransferFunctionARRegression(PyMCModel):
 
         return priors
 
-    def build_model(self, X, y, coords, treatment_data):
+    def build_model(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        treatment_data: xr.DataArray,
+    ) -> None:
         """
         Build the PyMC model with transforms and AR(1) errors using quasi-differencing.
 
