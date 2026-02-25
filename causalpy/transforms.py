@@ -275,6 +275,52 @@ class MichaelisMentenSaturation(SaturationTransform):
 
 
 # ============================================================================
+# Saturation Factory
+# ============================================================================
+
+SATURATION_TYPES: dict[str, type[SaturationTransform]] = {
+    "hill": HillSaturation,
+    "logistic": LogisticSaturation,
+    "michaelis_menten": MichaelisMentenSaturation,
+}
+
+
+def create_saturation(saturation_type: str, **kwargs) -> SaturationTransform:
+    """Create a saturation transform from a type string and parameters.
+
+    Parameters
+    ----------
+    saturation_type : str
+        One of ``"hill"``, ``"logistic"``, or ``"michaelis_menten"``.
+    **kwargs
+        Parameters forwarded to the chosen saturation class constructor.
+
+    Returns
+    -------
+    SaturationTransform
+        An instance of the requested saturation transform.
+
+    Raises
+    ------
+    ValueError
+        If ``saturation_type`` is not a recognised type.
+
+    Examples
+    --------
+    >>> sat = create_saturation("hill", slope=2.0, kappa=5.0)
+    >>> isinstance(sat, HillSaturation)
+    True
+    """
+    cls = SATURATION_TYPES.get(saturation_type)
+    if cls is None:
+        raise ValueError(
+            f"Unknown saturation type: {saturation_type!r}. "
+            f"Choose from: {sorted(SATURATION_TYPES.keys())}"
+        )
+    return cls(**kwargs)
+
+
+# ============================================================================
 # Concrete Adstock Implementations
 # ============================================================================
 

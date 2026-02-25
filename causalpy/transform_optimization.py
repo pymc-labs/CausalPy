@@ -39,11 +39,9 @@ from scipy.optimize import minimize
 from causalpy.transforms import (
     AdstockTransform,
     GeometricAdstock,
-    HillSaturation,
     LagTransform,
-    LogisticSaturation,
-    MichaelisMentenSaturation,
     SaturationTransform,
+    create_saturation,
 )
 
 # FUTURE: Implement AICc metric for model comparison
@@ -287,17 +285,11 @@ def estimate_transform_params_grid(
     for sat_params in sat_combinations:
         # Create saturation object or None
         if sat_params is not None:
+            assert saturation_type is not None
             sat_kwargs = dict(zip(sat_param_names, sat_params, strict=False))
-
-            saturation: SaturationTransform | None
-            if saturation_type == "hill":
-                saturation = HillSaturation(**sat_kwargs)
-            elif saturation_type == "logistic":
-                saturation = LogisticSaturation(**sat_kwargs)
-            elif saturation_type == "michaelis_menten":
-                saturation = MichaelisMentenSaturation(**sat_kwargs)
-            else:
-                raise ValueError(f"Unknown saturation type: {saturation_type}")
+            saturation: SaturationTransform | None = create_saturation(
+                saturation_type, **sat_kwargs
+            )
         else:
             saturation = None
             sat_kwargs = {}
@@ -515,14 +507,7 @@ def estimate_transform_params_optimize(
 
         # Create saturation transform object or None
         if saturation_type is not None and len(sat_kwargs) > 0:
-            if saturation_type == "hill":
-                saturation = HillSaturation(**sat_kwargs)
-            elif saturation_type == "logistic":
-                saturation = LogisticSaturation(**sat_kwargs)
-            elif saturation_type == "michaelis_menten":
-                saturation = MichaelisMentenSaturation(**sat_kwargs)
-            else:
-                raise ValueError(f"Unknown saturation type: {saturation_type}")
+            saturation = create_saturation(saturation_type, **sat_kwargs)
         else:
             saturation = None
 
@@ -581,14 +566,7 @@ def estimate_transform_params_optimize(
     # Create best saturation transform or None
     best_saturation: SaturationTransform | None
     if saturation_type is not None and len(sat_kwargs) > 0:
-        if saturation_type == "hill":
-            best_saturation = HillSaturation(**sat_kwargs)
-        elif saturation_type == "logistic":
-            best_saturation = LogisticSaturation(**sat_kwargs)
-        elif saturation_type == "michaelis_menten":
-            best_saturation = MichaelisMentenSaturation(**sat_kwargs)
-        else:
-            raise ValueError(f"Unknown saturation type: {saturation_type}")
+        best_saturation = create_saturation(saturation_type, **sat_kwargs)
     else:
         best_saturation = None
 
