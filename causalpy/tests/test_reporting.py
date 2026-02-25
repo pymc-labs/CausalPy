@@ -2247,3 +2247,445 @@ def test_effect_summary_pymc_both_false(mock_pymc_sample):
     assert "cumulative" not in stats.table.index
     assert "relative_mean" not in stats.table.columns
     assert "average" in stats.table.index
+
+
+# ==============================================================================
+# Tests for Regression Kink OLS error handling
+# ==============================================================================
+
+
+def test_compute_statistics_rkink_ols_not_implemented():
+    """Test that _compute_statistics_rkink_ols raises NotImplementedError."""
+    from causalpy.reporting import _compute_statistics_rkink_ols
+
+    # Create a mock result object
+    class MockResult:
+        gradient_change = 1.5
+
+    with pytest.raises(NotImplementedError, match="OLS models are not currently"):
+        _compute_statistics_rkink_ols(MockResult(), alpha=0.05)
+
+
+# ==============================================================================
+# Tests for detect experiment type
+# ==============================================================================
+
+
+def test_detect_experiment_type_rd():
+    """Test _detect_experiment_type correctly identifies RD."""
+    from causalpy.reporting import _detect_experiment_type
+
+    class MockRD:
+        discontinuity_at_threshold = 1.5
+
+    result = MockRD()
+    experiment_type = _detect_experiment_type(result)
+    assert experiment_type == "rd"
+
+
+def test_detect_experiment_type_rkink():
+    """Test _detect_experiment_type correctly identifies Regression Kink."""
+    from causalpy.reporting import _detect_experiment_type
+
+    class MockRKink:
+        gradient_change = 0.5
+
+    result = MockRKink()
+    experiment_type = _detect_experiment_type(result)
+    assert experiment_type == "rkink"
+
+
+def test_detect_experiment_type_its_or_sc():
+    """Test _detect_experiment_type correctly identifies ITS or Synthetic Control."""
+    from causalpy.reporting import _detect_experiment_type
+
+    class MockITS:
+        post_impact = np.array([1, 2, 3])
+
+    result = MockITS()
+    experiment_type = _detect_experiment_type(result)
+    assert experiment_type == "its_or_sc"
+
+
+def test_detect_experiment_type_event_study():
+    """Test _detect_experiment_type correctly identifies Event Study."""
+    from causalpy.reporting import _detect_experiment_type
+
+    class MockEventStudy:
+        event_time_coeffs = {-1: 0.0, 0: 1.0, 1: 2.0}
+
+    result = MockEventStudy()
+    experiment_type = _detect_experiment_type(result)
+    assert experiment_type == "event_study"
+
+
+# ==============================================================================
+# Tests for OLS statistics computation edge cases
+# ==============================================================================
+
+
+def test_compute_statistics_ols_no_cumulative_no_relative():
+    """Test _compute_statistics_ols with cumulative=False and relative=False."""
+    from causalpy.reporting import _compute_statistics_ols
+
+    impact = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    counterfactual = np.array([0.5, 1.0, 1.5, 2.0, 2.5])
+
+    stats = _compute_statistics_ols(
+        impact, counterfactual, alpha=0.05, cumulative=False, relative=False
+    )
+
+    assert "avg" in stats
+    assert "cum" not in stats
+    assert "relative_mean" not in stats["avg"]
+
+
+def test_compute_statistics_ols_cumulative_only():
+    """Test _compute_statistics_ols with cumulative=True and relative=False."""
+    from causalpy.reporting import _compute_statistics_ols
+
+    impact = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    counterfactual = np.array([0.5, 1.0, 1.5, 2.0, 2.5])
+
+    stats = _compute_statistics_ols(
+        impact, counterfactual, alpha=0.05, cumulative=True, relative=False
+    )
+
+    assert "avg" in stats
+    assert "cum" in stats
+    assert "relative_mean" not in stats["avg"]
+    assert "relative_mean" not in stats["cum"]
+
+
+def test_compute_statistics_ols_relative_only():
+    """Test _compute_statistics_ols with cumulative=False and relative=True."""
+    from causalpy.reporting import _compute_statistics_ols
+
+    impact = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    counterfactual = np.array([0.5, 1.0, 1.5, 2.0, 2.5])
+
+    stats = _compute_statistics_ols(
+        impact, counterfactual, alpha=0.05, cumulative=False, relative=True
+    )
+
+    assert "avg" in stats
+    assert "cum" not in stats
+    assert "relative_mean" in stats["avg"]
+
+
+def test_compute_statistics_ols_zero_se_edge_case():
+    """Test _compute_statistics_ols handles zero standard error gracefully."""
+    from causalpy.reporting import _compute_statistics_ols
+
+    # All identical impacts will have zero standard deviation
+    impact = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
+    counterfactual = np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+
+    # This should not raise an error even though SE will be zero
+    stats = _compute_statistics_ols(
+        impact, counterfactual, alpha=0.05, cumulative=True, relative=True
+    )
+
+    assert "avg" in stats
+    assert "cum" in stats
+
+
+# ==============================================================================
+# Tests for prose generation with different directions
+# ==============================================================================
+
+
+def test_generate_prose_direction_decrease():
+    """Test _generate_prose with direction='decrease'."""
+    from causalpy.reporting import _generate_prose
+
+    stats = {
+        "avg": {
+            "mean": -2.5,
+            "hdi_lower": -4.0,
+            "hdi_upper": -1.0,
+            "p_lt_0": 0.98,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "decrease" in prose
+    assert "0.980" in prose
+
+
+def test_generate_prose_direction_two_sided():
+    """Test _generate_prose with direction='two-sided'."""
+    from causalpy.reporting import _generate_prose
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "prob_of_effect": 0.90,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="two-sided",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "effect" in prose
+    assert "0.900" in prose
+
+
+def test_generate_prose_cumulative_two_sided():
+    """Test _generate_prose with cumulative=True and direction='two-sided'."""
+    from causalpy.reporting import _generate_prose
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "prob_of_effect": 0.90,
+        },
+        "cum": {
+            "mean": 50.0,
+            "hdi_lower": 30.0,
+            "hdi_upper": 70.0,
+            "prob_of_effect": 0.95,
+        },
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="two-sided",
+        cumulative=True,
+        relative=False,
+    )
+
+    assert "cumulative effect" in prose
+    assert "0.950" in prose
+
+
+def test_generate_prose_empty_window():
+    """Test _generate_prose with empty window_coords."""
+    from causalpy.reporting import _generate_prose
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.95,
+        }
+    }
+
+    # Empty window coords
+    window_coords = pd.Index([])
+
+    prose = _generate_prose(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "post-period" in prose
+
+
+# ==============================================================================
+# Tests for table generation with different tail probabilities
+# ==============================================================================
+
+
+def test_generate_table_with_decrease():
+    """Test _generate_table includes p_lt_0 for decrease direction."""
+    from causalpy.reporting import _generate_table
+
+    stats = {
+        "avg": {
+            "mean": -2.5,
+            "median": -2.4,
+            "hdi_lower": -4.0,
+            "hdi_upper": -1.0,
+            "p_lt_0": 0.98,
+        }
+    }
+
+    table = _generate_table(stats, cumulative=False, relative=False)
+
+    assert "p_lt_0" in table.columns
+    assert "p_gt_0" not in table.columns
+    assert table.loc["average", "p_lt_0"] == 0.98
+
+
+def test_generate_table_cumulative_with_decrease():
+    """Test _generate_table cumulative row with decrease direction."""
+    from causalpy.reporting import _generate_table
+
+    stats = {
+        "avg": {
+            "mean": -2.5,
+            "median": -2.4,
+            "hdi_lower": -4.0,
+            "hdi_upper": -1.0,
+            "p_lt_0": 0.98,
+        },
+        "cum": {
+            "mean": -50.0,
+            "median": -49.0,
+            "hdi_lower": -70.0,
+            "hdi_upper": -30.0,
+            "p_lt_0": 0.99,
+        },
+    }
+
+    table = _generate_table(stats, cumulative=True, relative=False)
+
+    assert "cumulative" in table.index
+    assert "p_lt_0" in table.columns
+    assert table.loc["cumulative", "p_lt_0"] == 0.99
+
+
+# ==============================================================================
+# Tests for OLS prose generation
+# ==============================================================================
+
+
+def test_generate_prose_ols_with_relative():
+    """Test _generate_prose_ols includes relative effect text."""
+    from causalpy.reporting import _generate_prose_ols
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "ci_lower": 1.0,
+            "ci_upper": 4.0,
+            "p_value": 0.05,
+            "relative_mean": 50.0,
+            "relative_ci_lower": 20.0,
+            "relative_ci_upper": 80.0,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=False,
+        relative=True,
+    )
+
+    assert "Relative to the counterfactual" in prose
+    assert "50.00%" in prose
+
+
+# ==============================================================================
+# Tests for DiD OLS prose generation
+# ==============================================================================
+
+
+def test_generate_prose_did_ols():
+    """Test _generate_prose_did_ols generates proper text."""
+    from causalpy.reporting import _generate_prose_did_ols
+
+    stats = {
+        "mean": 2.5,
+        "ci_lower": 1.0,
+        "ci_upper": 4.0,
+        "p_value": 0.03,
+    }
+
+    prose = _generate_prose_did_ols(stats, alpha=0.05)
+
+    assert "treatment effect" in prose
+    assert "2.50" in prose
+    assert "95% CI" in prose
+    assert "1.00" in prose
+    assert "4.00" in prose
+    assert "0.030" in prose
+
+
+def test_generate_table_did_ols():
+    """Test _generate_table_did_ols generates proper table."""
+    from causalpy.reporting import _generate_table_did_ols
+
+    stats = {
+        "mean": 2.5,
+        "ci_lower": 1.0,
+        "ci_upper": 4.0,
+        "p_value": 0.03,
+    }
+
+    table = _generate_table_did_ols(stats)
+
+    assert "treatment_effect" in table.index
+    assert "mean" in table.columns
+    assert "ci_lower" in table.columns
+    assert "ci_upper" in table.columns
+    assert "p_value" in table.columns
+    assert table.loc["treatment_effect", "mean"] == 2.5
+
+
+# ==============================================================================
+# Tests for RD OLS prose and table generation
+# ==============================================================================
+
+
+def test_generate_prose_rd_ols():
+    """Test _generate_prose_rd_ols generates proper text."""
+    from causalpy.reporting import _generate_prose_rd_ols
+
+    stats = {
+        "mean": 0.5,
+        "ci_lower": 0.1,
+        "ci_upper": 0.9,
+        "p_value": 0.02,
+    }
+
+    prose = _generate_prose_rd_ols(stats, alpha=0.05)
+
+    assert "discontinuity at threshold" in prose
+    assert "0.50" in prose
+    assert "95% CI" in prose
+    assert "0.020" in prose
+
+
+def test_generate_table_rd_ols():
+    """Test _generate_table_rd_ols generates proper table."""
+    from causalpy.reporting import _generate_table_rd_ols
+
+    stats = {
+        "mean": 0.5,
+        "ci_lower": 0.1,
+        "ci_upper": 0.9,
+        "p_value": 0.02,
+    }
+
+    table = _generate_table_rd_ols(stats)
+
+    assert "discontinuity" in table.index
+    assert "mean" in table.columns
+    assert table.loc["discontinuity", "mean"] == 0.5

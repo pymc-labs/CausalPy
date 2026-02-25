@@ -63,6 +63,9 @@ Glossary
    Effect decay
       In interrupted time series analysis with temporary interventions, effect decay refers to the reduction in treatment effect magnitude over time after the intervention ends. Decay patterns can be exponential (rapid initial decline), linear (steady decline), or step (sudden drop to zero). Analyzing decay helps understand how long intervention effects persist and whether they fade gradually or disappear abruptly.
 
+   Event study
+      A quasi-experimental method for estimating dynamic treatment effects over event time (time relative to treatment). Unlike standard difference in differences which estimates a single average treatment effect, event studies estimate separate coefficients for each time period before and after treatment. Pre-treatment coefficients serve as placebo tests for the parallel trends assumption, while post-treatment coefficients reveal how causal effects evolve over time. Also known as dynamic difference-in-differences.
+
    Effect persistence
       In interrupted time series analysis with temporary interventions, effect persistence refers to the extent to which treatment effects continue after the intervention period ends. It is measured by comparing post-intervention effects to intervention-period effects, often expressed as a percentage (e.g., "30% of the intervention effect persisted"). High persistence suggests lasting behavioral or structural changes, while low persistence indicates temporary effects that fade quickly.
 

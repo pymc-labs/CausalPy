@@ -115,6 +115,8 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
     To update an existing environment after changes to `environment.yml`:
 
+    **Note:** Use `python -m pip` instead of just `pip` to ensure you're using the conda environment's pip, not a system pip.
+
     ```bash
     conda env update --file environment.yml --prune
     ```

@@ -31,8 +31,15 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 
 ## Documentation
 
+- **Dual README files**: The project has two files that must be kept in sync:
+  - `README.md` (GitHub landing page)
+  - `docs/source/index.md` (documentation website homepage)
+
+  When adding major new features to the Features table or making other content changes, update **both files**. The Features table lists all quasi-experimental methods supported by CausalPy.
+- **Reporting statistics**: When adding new experiment types, update the "Experiment Support" table in `docs/source/knowledgebase/reporting_statistics.md` to document `effect_summary()` support status for the new experiment.
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
 - **Notebook naming**: Use pattern `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`), organized by causal method
+- **Notebook index**: New notebooks must be added to `docs/source/notebooks/index.md` under the appropriate `toctree` section for them to appear in the rendered documentation
 - **MyST directives**: Use `:::{note}` and other MyST features for callouts and formatting
 - **Glossary linking**: Link to glossary terms (defined in `glossary.rst`) on first mention in a file:
   - In Markdown files (`.md`, `.ipynb`): Use MyST syntax `{term}glossary term``

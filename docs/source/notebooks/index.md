@@ -37,6 +37,13 @@ staggered_did_pymc.ipynb
 :::
 
 :::{toctree}
+:caption: Event Studies
+:maxdepth: 1
+
+event_study_pymc.ipynb
+:::
+
+:::{toctree}
 :caption: Interrupted Time Series
 :maxdepth: 1
 

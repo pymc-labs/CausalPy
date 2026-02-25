@@ -14,6 +14,7 @@
 """CausalPy experiment module"""
 
 from .diff_in_diff import DifferenceInDifferences
+from .event_study import EventStudy
 from .instrumental_variable import InstrumentalVariable
 from .interrupted_time_series import InterruptedTimeSeries
 from .inverse_propensity_weighting import InversePropensityWeighting
@@ -25,6 +26,7 @@ from .synthetic_control import SyntheticControl
 
 __all__ = [
     "DifferenceInDifferences",
+    "EventStudy",
     "InstrumentalVariable",
     "InversePropensityWeighting",
     "PrePostNEGD",

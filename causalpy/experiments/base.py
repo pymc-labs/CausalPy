@@ -152,7 +152,7 @@ class BaseExperiment:
         Parameters
         ----------
         window : str, tuple, or slice, default="post"
-            Time window for analysis (ITS/SC only, ignored for DiD/RD):
+            Time window for analysis (ITS/SC only, ignored for DiD/RD/EventStudy):
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
@@ -164,10 +164,10 @@ class BaseExperiment:
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level)
         cumulative : bool, default=True
-            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
+            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD/EventStudy)
         relative : bool, default=True
             Whether to include relative effect statistics (% change vs counterfactual)
-            (ITS/SC only, ignored for DiD/RD)
+            (ITS/SC only, ignored for DiD/RD/EventStudy)
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
             If provided, reports P(|effect| > min_effect) for two-sided or P(effect > min_effect) for one-sided.
