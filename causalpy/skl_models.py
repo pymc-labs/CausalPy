@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -13,8 +13,10 @@
 #   limitations under the License.
 """Custom scikit-learn models for causal inference"""
 
+from __future__ import annotations
+
 from functools import partial
-from typing import Optional, Tuple
+from typing import Any
 
 import numpy as np
 import statsmodels.api as sm
@@ -28,29 +30,44 @@ from causalpy.utils import round_num
 class ScikitLearnAdaptor:
     """Base class for scikit-learn models that can be used for causal inference."""
 
-    def calculate_impact(self, y_true, y_pred):
+    coef_: np.ndarray
+
+    def calculate_impact(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
         """Calculate the causal impact of the intervention."""
         return y_true - y_pred
 
-    def calculate_cumulative_impact(self, impact):
+    def calculate_cumulative_impact(self, impact: np.ndarray) -> np.ndarray:
         """Calculate the cumulative impact intervention."""
         return np.cumsum(impact)
 
-    def print_coefficients(self, labels, round_to=None) -> None:
-        """Print the coefficients of the model with the corresponding labels."""
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print the coefficients of the model with the corresponding labels.
+
+        Parameters
+        ----------
+        labels : list of str
+            List of strings representing the coefficient names.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
         print("Model coefficients:")
         coef_ = self.get_coeffs()
         # Determine the width of the longest label
         max_label_length = max(len(name) for name in labels)
         # Print each coefficient with formatted alignment
-        for name, val in zip(labels, coef_):
+        for name, val in zip(labels, coef_, strict=False):
             # Left-align the name
             formatted_name = f"{name:<{max_label_length}}"
             # Right-align the value with width 10
-            formatted_val = f"{round_num(val, round_to):>10}"
+            formatted_val = (
+                f"{round_num(val, round_to if round_to is not None else 2):>10}"
+            )
             print(f"  {formatted_name}\t{formatted_val}")
 
-    def get_coeffs(self):
+    def get_coeffs(self) -> np.ndarray:
         """Get the coefficients of the model as a numpy array."""
         return np.squeeze(self.coef_)
 
@@ -59,11 +76,11 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
     """Weighted proportion model for causal inference. Used for synthetic control
     methods for example"""
 
-    def loss(self, W, X, y):
+    def loss(self, W: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
         """Compute root mean squared loss with data X, weights W, and predictor y"""
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))
 
-    def fit(self, X, y):
+    def fit(self, X: np.ndarray, y: np.ndarray) -> WeightedProportion:
         """Fit model on data X with predictor y"""
         w_start = [1 / X.shape[1]] * X.shape[1]
         coef_ = fmin_slsqp(
@@ -77,7 +94,7 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
         self.mse = self.loss(W=self.coef_, X=X, y=y)
         return self
 
-    def predict(self, X):
+    def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict results for data X"""
         return np.dot(X, self.coef_.T)
 
@@ -159,14 +176,14 @@ class TransferFunctionOLS(ScikitLearnAdaptor, LinearModel, RegressorMixin):
     def __init__(
         self,
         saturation_type: str = "hill",
-        saturation_grid: Optional[dict] = None,
-        saturation_bounds: Optional[dict] = None,
-        adstock_grid: Optional[dict] = None,
-        adstock_bounds: Optional[dict] = None,
+        saturation_grid: dict | None = None,
+        saturation_bounds: dict | None = None,
+        adstock_grid: dict | None = None,
+        adstock_bounds: dict | None = None,
         estimation_method: str = "grid",
         error_model: str = "hac",
-        arima_order: Optional[Tuple[int, int, int]] = None,
-        hac_maxlags: Optional[int] = None,
+        arima_order: tuple[int, int, int] | None = None,
+        hac_maxlags: int | None = None,
         coef_constraint: str = "nonnegative",
     ):
         """Initialize model with configuration parameters."""
@@ -228,15 +245,15 @@ class TransferFunctionOLS(ScikitLearnAdaptor, LinearModel, RegressorMixin):
             )
 
         # Initialize attributes (set by fit())
-        self.ols_result = None
-        self.treatments = None
-        self.score = None
-        self.coef_ = None  # For sklearn compatibility
-        self.arimax_model = None
+        self.ols_result: Any = None
+        self.treatments: list[Any] | None = None
+        self.score: float | None = None
+        self.coef_: np.ndarray | None = None  # type: ignore[assignment]
+        self.arimax_model: Any = None
 
         # Transform estimation metadata (set by fit())
-        self.transform_estimation_results = None
-        self.transform_search_space = None
+        self.transform_estimation_results: dict[str, Any] | None = None
+        self.transform_search_space: dict[str, Any] | None = None
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """
@@ -330,7 +347,9 @@ def create_causalpy_compatible_class(
     return estimator
 
 
-def _add_mixin_methods(model_instance, mixin_class):
+def _add_mixin_methods(
+    model_instance: RegressorMixin, mixin_class: type
+) -> RegressorMixin:
     """Utility function to bind mixin methods to an existing model instance."""
     for attr_name in dir(mixin_class):
         attr = getattr(mixin_class, attr_name)

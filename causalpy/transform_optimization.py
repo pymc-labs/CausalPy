@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ Since OLS has a closed-form solution, this is computationally tractable.
 """
 
 from itertools import product
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -37,10 +37,12 @@ from patsy import dmatrix
 from scipy.optimize import minimize
 
 from causalpy.transforms import (
+    AdstockTransform,
     GeometricAdstock,
     HillSaturation,
     LogisticSaturation,
     MichaelisMentenSaturation,
+    SaturationTransform,
 )
 
 # FUTURE: Implement AICc metric for model comparison
@@ -58,10 +60,10 @@ def _fit_ols_with_transforms(
     saturation,
     adstock,
     lag=None,
-    hac_maxlags: Optional[int] = None,
+    hac_maxlags: int | None = None,
     error_model: str = "hac",
-    arima_order: Optional[Tuple[int, int, int]] = None,
-) -> Tuple[float, sm.regression.linear_model.RegressionResultsWrapper]:
+    arima_order: tuple[int, int, int] | None = None,
+) -> tuple[float, sm.regression.linear_model.RegressionResultsWrapper]:
     """
     Fit OLS model with specific transform parameters.
 
@@ -102,7 +104,7 @@ def _fit_ols_with_transforms(
     X_baseline = np.asarray(dmatrix(base_formula, data))
 
     # Apply transforms to treatment variable
-    x_raw = data[treatment_name].values
+    x_raw = np.asarray(data[treatment_name].values)
     x_transformed = x_raw
 
     if saturation is not None:
@@ -136,6 +138,7 @@ def _fit_ols_with_transforms(
 
         # ARIMAX requires at least as many observations as parameters
         # Quick validation
+        assert arima_order is not None
         n_obs = len(y)
         n_params = X_full.shape[1] + sum(arima_order)  # exog params + ARIMA params
         if n_obs < n_params + 10:  # Need some degrees of freedom
@@ -167,15 +170,15 @@ def estimate_transform_params_grid(
     y_column: str,
     treatment_name: str,
     base_formula: str,
-    saturation_type: Optional[str],
-    saturation_grid: Optional[Dict[str, List[float]]],
-    adstock_grid: Optional[Dict[str, List[float]]],
+    saturation_type: str | None,
+    saturation_grid: dict[str, list[float]] | None,
+    adstock_grid: dict[str, list[float]] | None,
     coef_constraint: str = "nonnegative",
-    hac_maxlags: Optional[int] = None,
+    hac_maxlags: int | None = None,
     metric: str = "rmse",
     error_model: str = "hac",
-    arima_order: Optional[Tuple[int, int, int]] = None,
-) -> Dict[str, Any]:
+    arima_order: tuple[int, int, int] | None = None,
+) -> dict[str, Any]:
     """
     Estimate transform parameters via grid search.
 
@@ -251,22 +254,26 @@ def estimate_transform_params_grid(
         raise NotImplementedError(f"Metric '{metric}' not yet implemented. Use 'rmse'.")
 
     # Generate saturation combinations (or single None if not used)
+    sat_param_names: list[str]
+    sat_combinations: list[tuple[float, ...] | None]
     if saturation_type is not None and saturation_grid is not None:
         sat_param_names = list(saturation_grid.keys())
         sat_param_values = list(saturation_grid.values())
         sat_combinations = list(product(*sat_param_values))
     else:
         sat_param_names = []
-        sat_combinations = [None]  # Single "no saturation" combination
+        sat_combinations = [None]
 
     # Generate adstock combinations (or single None if not used)
+    adstock_param_names: list[str]
+    adstock_combinations: list[tuple[float, ...] | None]
     if adstock_grid is not None:
         adstock_param_names = list(adstock_grid.keys())
         adstock_param_values = list(adstock_grid.values())
         adstock_combinations = list(product(*adstock_param_values))
     else:
         adstock_param_names = []
-        adstock_combinations = [None]  # Single "no adstock" combination
+        adstock_combinations = [None]
 
     # Store results
     results = []
@@ -279,8 +286,9 @@ def estimate_transform_params_grid(
     for sat_params in sat_combinations:
         # Create saturation object or None
         if sat_params is not None:
-            sat_kwargs = dict(zip(sat_param_names, sat_params))
+            sat_kwargs = dict(zip(sat_param_names, sat_params, strict=False))
 
+            saturation: SaturationTransform | None
             if saturation_type == "hill":
                 saturation = HillSaturation(**sat_kwargs)
             elif saturation_type == "logistic":
@@ -296,8 +304,10 @@ def estimate_transform_params_grid(
         for adstock_params in adstock_combinations:
             # Create adstock object or None
             if adstock_params is not None:
-                adstock_kwargs = dict(zip(adstock_param_names, adstock_params))
-                adstock = GeometricAdstock(**adstock_kwargs)
+                adstock_kwargs = dict(
+                    zip(adstock_param_names, adstock_params, strict=False)
+                )
+                adstock: AdstockTransform | None = GeometricAdstock(**adstock_kwargs)  # type: ignore[arg-type]
             else:
                 adstock = None
                 adstock_kwargs = {}
@@ -375,17 +385,17 @@ def estimate_transform_params_optimize(
     y_column: str,
     treatment_name: str,
     base_formula: str,
-    saturation_type: Optional[str],
-    saturation_bounds: Optional[Dict[str, Tuple[float, float]]],
-    adstock_bounds: Optional[Dict[str, Tuple[float, float]]],
-    initial_params: Optional[Dict[str, float]] = None,
+    saturation_type: str | None,
+    saturation_bounds: dict[str, tuple[float, float]] | None,
+    adstock_bounds: dict[str, tuple[float, float]] | None,
+    initial_params: dict[str, float] | None = None,
     coef_constraint: str = "nonnegative",
-    hac_maxlags: Optional[int] = None,
+    hac_maxlags: int | None = None,
     method: str = "L-BFGS-B",
     metric: str = "rmse",
     error_model: str = "hac",
-    arima_order: Optional[Tuple[int, int, int]] = None,
-) -> Dict[str, Any]:
+    arima_order: tuple[int, int, int] | None = None,
+) -> dict[str, Any]:
     """
     Estimate transform parameters via continuous optimization.
 
@@ -498,7 +508,7 @@ def estimate_transform_params_optimize(
     def objective(params_array):
         """Objective function: returns RMSE for given parameters."""
         # Unpack parameters
-        param_dict = dict(zip(all_param_names, params_array))
+        param_dict = dict(zip(all_param_names, params_array, strict=False))
         sat_kwargs = {k: param_dict[k] for k in sat_param_names}
         adstock_kwargs = {k: param_dict[k] for k in adstock_param_names}
 
@@ -560,7 +570,7 @@ def estimate_transform_params_optimize(
 
     # Extract best parameters
     best_params_array = opt_result.x
-    best_params = dict(zip(all_param_names, best_params_array))
+    best_params = dict(zip(all_param_names, best_params_array, strict=False))
     best_score = opt_result.fun
 
     # Create best transform objects
@@ -568,6 +578,7 @@ def estimate_transform_params_optimize(
     adstock_kwargs = {k: best_params[k] for k in adstock_param_names}
 
     # Create best saturation transform or None
+    best_saturation: SaturationTransform | None
     if saturation_type is not None and len(sat_kwargs) > 0:
         if saturation_type == "hill":
             best_saturation = HillSaturation(**sat_kwargs)
@@ -581,13 +592,14 @@ def estimate_transform_params_optimize(
         best_saturation = None
 
     # Create best adstock transform or None
+    best_adstock: AdstockTransform | None
     if len(adstock_kwargs) > 0:
         # Add defaults for adstock if not optimized
         if "l_max" not in adstock_kwargs:
             adstock_kwargs["l_max"] = 12
         if "normalize" not in adstock_kwargs:
             adstock_kwargs["normalize"] = True
-        best_adstock = GeometricAdstock(**adstock_kwargs)
+        best_adstock = GeometricAdstock(**adstock_kwargs)  # type: ignore[arg-type]
     else:
         best_adstock = None
 

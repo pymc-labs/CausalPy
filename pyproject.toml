@@ -13,12 +13,24 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.5.0"
+version = "0.7.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
 requires-python = ">=3.11"
+keywords = ["causal inference", "statistics", "econometrics", "pymc", "bayesian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 
 # This field lists other packages that your project depends on to run.
 # Any package you put here will be installed by pip when your project is
@@ -31,11 +43,11 @@ dependencies = [
     "graphviz",
     "ipython!=8.7.0",
     "matplotlib>=3.5.3",
-    "numpy",
+    "numpy<2.4",
     "pandas",
     "patsy",
     "pymc>=5.15.1",
-    "pymc-marketing>=0.7.0",
+    "pymc-marketing>=0.13.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
@@ -51,7 +63,14 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = ["pathlib", "pre-commit", "twine", "interrogate", "codespell", "nbformat", "nbconvert"]
+dev = [
+    "pre-commit",
+    "twine",
+    "interrogate",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+]
 docs = [
     "ipykernel",
     "daft-pgm",
@@ -65,6 +84,7 @@ docs = [
     "labs-sphinx-theme",
     "sphinx-copybutton",
     "sphinx-rtd-theme",
+    "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex",
     "sphinx-notfound-page",
@@ -72,13 +92,16 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "pre-commit", "ruff"]
+lint = ["interrogate", "pre-commit", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
-"Source" = "https://github.com/pymc-labs/CausalPy"
+Source = "https://github.com/pymc-labs/CausalPy"
+Documentation = "https://causalpy.readthedocs.io"
+Changelog = "https://github.com/pymc-labs/CausalPy/releases"
+Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 
 [tool.pytest.ini_options]
 addopts = [
@@ -114,15 +137,20 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
-generate-badge = "docs/source/_static/"
-badge-format = "svg"
 
 [tool.ruff.format]
 docstring-code-format = true
 
 [tool.ruff.lint]
 extend-select = [
-    "I", # isort
+    "I",   # isort
+    # "E",   # pycodestyle errors - PEP 8 style violations
+    # "W",   # pycodestyle warnings - PEP 8 warnings
+    "F",   # pyflakes - detect unused imports, undefined names
+    "B",   # flake8-bugbear - find likely bugs and design problems
+    "UP",  # pyupgrade - modern Python syntax upgrades
+    "C4",  # flake8-comprehensions - better list/dict comprehensions
+    "SIM", # flake8-simplify - suggest simpler code
 ]
 
 [tool.codespell]
@@ -130,12 +158,13 @@ ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
-omit = [
-    "*/conftest.py",
-    "*/tests/conftest.py",
-]
+source = ["causalpy"]
+omit = ["*/conftest.py", "*/tests/conftest.py"]
+branch = true  # Also measure branch coverage, not just line coverage
 
 [tool.coverage.report]
+fail_under = 80
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -148,3 +177,25 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+[tool.mypy]
+files = "causalpy/*.py"
+exclude = "build|dist|docs|notebooks|tests|setup.py"
+
+[tool.mypy-matplotlib]
+ignore_missing_imports = true
+
+[tool.mypy-pymc]
+ignore_missing_imports = true
+
+[tool.mypy-seaborn]
+ignore_missing_imports = true
+
+[tool.mypy-sklearn]
+ignore_missing_imports = true
+
+[tool.mypy-scipy]
+ignore_missing_imports = true
+
+[tool.marimo.runtime]
+watcher_on_save = "autorun"

@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ to provide a complete causal inference workflow including visualization,
 diagnostics, and counterfactual effect estimation.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -155,7 +155,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         self,
         data: pd.DataFrame,
         y_column: str,
-        treatment_names: List[str],
+        treatment_names: list[str],
         base_formula: str,
         model=None,
         **kwargs,
@@ -195,7 +195,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         self.base_formula = base_formula
 
         # Extract outcome variable
-        self.y = data[y_column].values
+        self.y = np.asarray(data[y_column].values)
 
         # Build baseline design matrix (like other experiments do)
         self.X_baseline = np.asarray(dmatrix(base_formula, data))
@@ -222,7 +222,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                     "coeffs": self.baseline_labels,
                 },
             )
-            self.y = xr.DataArray(
+            self.y = xr.DataArray(  # type: ignore[assignment]
                 self.y.reshape(-1, 1),
                 dims=["obs_ind", "treated_units"],
                 coords={
@@ -233,7 +233,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
             # Get raw treatment data
             treatment_raw = np.column_stack(
-                [data[name].values for name in treatment_names]
+                [np.asarray(data[name].values) for name in treatment_names]
             )
             treatment_data = xr.DataArray(
                 treatment_raw,
@@ -252,9 +252,12 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 "treatment_names": treatment_names,
             }
 
-            # Fit Bayesian model
-            self.model.fit(
-                X=self.X, y=self.y, coords=COORDS, treatment_data=treatment_data
+            # Fit Bayesian model (subclass overrides accept treatment_data)
+            self.model.fit(  # type: ignore[call-arg]
+                X=self.X,
+                y=self.y,  # type: ignore[arg-type]
+                coords=COORDS,
+                treatment_data=treatment_data,
             )
 
             # Store for later use
@@ -331,7 +334,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 self.treatments.append(treatment)
 
                 # Apply transforms
-                x_raw = data[name].values
+                x_raw = np.asarray(data[name].values)
                 x_transformed = x_raw
                 if treatment.saturation is not None:
                     x_transformed = treatment.saturation.apply(x_transformed)
@@ -388,7 +391,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         self,
         data: pd.DataFrame,
         y_column: str,
-        treatment_names: List[str],
+        treatment_names: list[str],
     ) -> None:
         """Validate input data and parameters."""
         # Check that y_column exists
@@ -425,8 +428,8 @@ class GradedInterventionTimeSeries(BaseExperiment):
             )
 
     def _build_treatment_matrix(
-        self, data: pd.DataFrame, treatments: List[Treatment]
-    ) -> Tuple[np.ndarray, List[str]]:
+        self, data: pd.DataFrame, treatments: list[Treatment]
+    ) -> tuple[np.ndarray, list[str]]:
         """Build the treatment design matrix by applying transforms.
 
         Parameters
@@ -448,7 +451,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         for treatment in treatments:
             # Get raw exposure series
-            x_raw = data[treatment.name].values
+            x_raw = np.asarray(data[treatment.name].values)
 
             # Apply transform pipeline: Saturation → Adstock → Lag
             x_transformed = x_raw
@@ -467,10 +470,10 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def effect(
         self,
-        window: Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]],
-        channels: Optional[List[str]] = None,
+        window: tuple[pd.Timestamp | int, pd.Timestamp | int],
+        channels: list[str] | None = None,
         scale: float = 0.0,
-    ) -> Dict[str, Union[pd.DataFrame, float]]:
+    ) -> dict[str, Any]:
         """Estimate the causal effect of scaling treatment channels in a time window.
 
         This method computes a counterfactual scenario by scaling the specified
@@ -518,10 +521,10 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def _ols_effect(
         self,
-        window: Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]],
-        channels: Optional[List[str]] = None,
+        window: tuple[pd.Timestamp | int, pd.Timestamp | int],
+        channels: list[str] | None = None,
         scale: float = 0.0,
-    ) -> Dict[str, Union[pd.DataFrame, float]]:
+    ) -> dict[str, Any]:
         """Estimate the causal effect for OLS models (point estimates)."""
         # Default to all channels if not specified
         if channels is None:
@@ -535,7 +538,11 @@ class GradedInterventionTimeSeries(BaseExperiment):
         # Get window mask
         window_start, window_end = window
         if isinstance(self.data.index, pd.DatetimeIndex):
-            mask = (self.data.index >= window_start) & (self.data.index <= window_end)
+            mask = (
+                self.data.index >= window_start  # type: ignore[operator]
+            ) & (
+                self.data.index <= window_end  # type: ignore[operator]
+            )
         else:
             mask = (self.data.index >= window_start) & (self.data.index <= window_end)
 
@@ -590,9 +597,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def plot_effect(
         self,
-        effect_result: Dict,
+        effect_result: dict,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot counterfactual effect analysis results.
 
         Creates a 2-panel figure showing:
@@ -639,9 +646,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def _ols_plot_effect(
         self,
-        effect_result: Dict,
+        effect_result: dict,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot counterfactual effect analysis for OLS models."""
         # Extract data from effect result
         effect_df = effect_result["effect_df"]
@@ -718,9 +725,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         plt.tight_layout()
         return fig, axes
 
-    def plot(
-        self, round_to: Optional[int] = 2, **kwargs
-    ) -> Tuple[plt.Figure, plt.Axes]:
+    def plot(self, round_to: int | None = 2, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """Plot the model fit and results.
 
         Creates a 2-panel figure showing:
@@ -744,8 +749,8 @@ class GradedInterventionTimeSeries(BaseExperiment):
             return self._ols_plot(round_to=round_to, **kwargs)
 
     def _ols_plot(
-        self, round_to: Optional[int] = 2, **kwargs
-    ) -> Tuple[plt.Figure, plt.Axes]:
+        self, round_to: int | None = 2, **kwargs
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate OLS-specific plots."""
         fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
@@ -777,7 +782,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def plot_irf(self, channel: str, max_lag: Optional[int] = None) -> plt.Figure:
+    def plot_irf(self, channel: str, max_lag: int | None = None) -> plt.Figure | None:
         """Plot the Impulse Response Function (IRF) for a treatment channel.
 
         Shows how a one-unit impulse in the (saturated) exposure propagates over
@@ -863,7 +868,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         true_adstock=None,
         x_range=None,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot estimated transformation curves (saturation and/or adstock).
 
         Creates a figure with 1-2 panels depending on which transforms are present:
@@ -922,7 +927,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
         true_adstock=None,
         x_range=None,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot estimated transformation curves for OLS models."""
         # Currently only supports single treatment
         if len(self.treatments) != 1:
@@ -964,7 +969,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
             # Determine x range
             if x_range is None:
                 # Use range from data
-                x_raw = self.data[treatment.name].values
+                x_raw = np.asarray(self.data[treatment.name].values)
                 x_min, x_max = x_raw.min(), x_raw.max()
                 # Add some padding
                 x_padding = (x_max - x_min) * 0.1
@@ -1015,7 +1020,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 transform=ax.transAxes,
                 fontsize=9,
                 verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             )
             panel_idx += 1
 
@@ -1102,7 +1107,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 fontsize=9,
                 verticalalignment="top",
                 horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             )
 
         plt.tight_layout()
@@ -1170,7 +1175,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
             print("✓ No significant residual autocorrelation detected.")
         print("=" * 60)
 
-    def summary(self, round_to: Optional[int] = None) -> None:
+    def summary(self, round_to: int | None = None) -> None:
         """Print a summary of the model results.
 
         Parameters
@@ -1200,6 +1205,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
             print("-" * 80)
             print("Transform parameters (Posterior Mean [94% HDI]):")
 
+            assert self.model.idata is not None
             # Extract transform parameters
             if "half_life" in self.model.idata.posterior:
                 half_life_post = az.extract(self.model.idata, var_names=["half_life"])
@@ -1320,6 +1326,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 self.baseline_labels,
                 self.beta_baseline,
                 self.ols_result.bse[: len(self.baseline_labels)],
+                strict=False,
             ):
                 coef_rounded = round_num(coef, round_to)
                 se_rounded = round_num(se, round_to)
@@ -1339,6 +1346,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 self.treatment_labels,
                 self.theta_treatment,
                 treatment_se,
+                strict=False,
             ):
                 coef_rounded = round_num(coef, round_to)
                 se_rounded = round_num(se, round_to)
@@ -1347,11 +1355,12 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     # Methods required by BaseExperiment
     def _bayesian_plot(
-        self, round_to: Optional[int] = 2, **kwargs
-    ) -> Tuple[plt.Figure, plt.Axes]:
+        self, round_to: int | None = 2, **kwargs
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Generate Bayesian-specific plots with credible intervals."""
         import arviz as az
 
+        assert self.model.idata is not None
         fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
         # Extract posterior predictions (mu is in posterior group as Deterministic)
@@ -1397,7 +1406,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
         ax[0].grid(True, alpha=0.3)
 
         # Bottom panel: Residuals with uncertainty
-        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        y_obs = np.asarray(
+            self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        )
         residuals = y_obs - mu_mean
         ax[1].plot(self.data.index, residuals, "o-", alpha=0.6, markersize=3)
         ax[1].axhline(y=0, color="k", linestyle="--", linewidth=1)
@@ -1425,7 +1436,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
         )
         mu_mean = mu_posterior.mean(dim="sample").values.flatten()
 
-        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        y_obs = np.asarray(
+            self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        )
 
         return pd.DataFrame(
             {
@@ -1442,10 +1455,11 @@ class GradedInterventionTimeSeries(BaseExperiment):
         true_adstock=None,
         x_range=None,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot estimated transformation curves for Bayesian models with credible intervals."""
         import arviz as az
 
+        assert self.model.idata is not None
         # Check which transforms are present in the posterior
         has_saturation = (
             "slope" in self.model.idata.posterior
@@ -1501,17 +1515,15 @@ class GradedInterventionTimeSeries(BaseExperiment):
             lags = np.arange(l_max + 1)
 
             # Compute adstock weights for all posterior samples
-            weights_posterior = []
+            weights_list = []
             for half_life_sample in half_life_post.values:
                 alpha_sample = np.power(0.5, 1 / half_life_sample)
                 weights_sample = alpha_sample**lags
                 # Normalize if needed
                 if self.model.adstock_config.get("normalize", True):
                     weights_sample = weights_sample / weights_sample.sum()
-                weights_posterior.append(weights_sample)
-            weights_posterior = np.array(
-                weights_posterior
-            )  # Shape: (n_samples, n_lags)
+                weights_list.append(weights_sample)
+            weights_posterior = np.array(weights_list)  # (n_samples, n_lags)
 
             # Compute 94% credible interval bounds at each lag
             weights_lower = np.percentile(weights_posterior, 3, axis=0)
@@ -1593,7 +1605,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
                 fontsize=9,
                 verticalalignment="top",
                 horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
             )
 
         plt.tight_layout()
@@ -1601,13 +1613,14 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def _bayesian_effect(
         self,
-        window: Tuple[Union[pd.Timestamp, int], Union[pd.Timestamp, int]],
-        channels: Optional[List[str]] = None,
+        window: tuple[pd.Timestamp | int, pd.Timestamp | int],
+        channels: list[str] | None = None,
         scale: float = 0.0,
-    ) -> Dict[str, Union[pd.DataFrame, float]]:
+    ) -> dict[str, Any]:
         """Estimate the causal effect for Bayesian models with posterior uncertainty."""
         import arviz as az
 
+        assert self.model.idata is not None
         # Default to all channels if not specified
         if channels is None:
             channels = self.treatment_labels
@@ -1620,7 +1633,11 @@ class GradedInterventionTimeSeries(BaseExperiment):
         # Get window mask
         window_start, window_end = window
         if isinstance(self.data.index, pd.DatetimeIndex):
-            mask = (self.data.index >= window_start) & (self.data.index <= window_end)
+            mask = (
+                self.data.index >= window_start  # type: ignore[operator]
+            ) & (
+                self.data.index <= window_end  # type: ignore[operator]
+            )
         else:
             mask = (self.data.index >= window_start) & (self.data.index <= window_end)
 
@@ -1631,7 +1648,7 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         # Get counterfactual treatment data
         treatment_raw_cf = np.column_stack(
-            [data_cf[name].values for name in self.treatment_labels]
+            [np.asarray(data_cf[name].values) for name in self.treatment_labels]
         )
 
         # Extract posterior samples
@@ -1700,20 +1717,20 @@ class GradedInterventionTimeSeries(BaseExperiment):
             y_cf_sample = baseline_pred + treatment_pred
             y_cf_samples.append(y_cf_sample.flatten())
 
-        y_cf_samples = np.array(y_cf_samples)  # Shape: (n_samples, n_obs)
+        y_cf_arr = np.array(y_cf_samples)  # Shape: (n_samples, n_obs)
 
         # Compute posterior mean and HDI
-        y_cf_mean = y_cf_samples.mean(axis=0)
-        y_cf_lower = np.percentile(y_cf_samples, 3, axis=0)
-        y_cf_upper = np.percentile(y_cf_samples, 97, axis=0)
+        y_cf_mean = y_cf_arr.mean(axis=0)
+        y_cf_lower = np.percentile(y_cf_arr, 3, axis=0)
+        y_cf_upper = np.percentile(y_cf_arr, 97, axis=0)
 
         # Get observed data
-        y_obs = self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        y_obs = np.asarray(
+            self.y.values.flatten() if hasattr(self.y, "values") else self.y
+        )
 
         # Compute effect
-        effect_samples = (
-            y_obs[np.newaxis, :] - y_cf_samples
-        )  # Shape: (n_samples, n_obs)
+        effect_samples = y_obs[np.newaxis, :] - y_cf_arr  # Shape: (n_samples, n_obs)
         effect_mean = effect_samples.mean(axis=0)
         effect_lower = np.percentile(effect_samples, 3, axis=0)
         effect_upper = np.percentile(effect_samples, 97, axis=0)
@@ -1764,9 +1781,9 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
     def _bayesian_plot_effect(
         self,
-        effect_result: Dict,
+        effect_result: dict,
         **kwargs,
-    ) -> Tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot counterfactual effect analysis for Bayesian models with credible intervals."""
         # Extract data from effect result
         effect_df = effect_result["effect_df"]

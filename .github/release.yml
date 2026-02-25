@@ -21,6 +21,9 @@ changelog:
     - title: Documentation 📖
       labels:
         - documentation
+    - title: Agent-related 🤖
+      labels:
+        - agents
     - title: Maintenance 🔧
       labels:
         - "*"

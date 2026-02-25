@@ -21,16 +21,24 @@ repos:
       - id: end-of-file-fixer
         exclude_types: [svg]
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
       - id: check-added-large-files
-        exclude: &exclude_pattern 'iv_weak_instruments.ipynb'
+        exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test)\.ipynb'
         args: ["--maxkb=1500"]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.2
+    rev: v0.15.2
     hooks:
       # Run the linter
       - id: ruff
         types_or: [ python, pyi, jupyter ]
         args: [ --fix ]
+        # Exclude docs/ to avoid applying strict linting rules to example notebooks
+        # Remove this exclusion if you want to enforce strict rules on documentation
+        exclude: ^docs/
       # Run the formatter
       - id: ruff-format
         types_or: [ python, pyi, jupyter ]
@@ -48,3 +56,22 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports]
+        files: ^causalpy/
+        additional_dependencies: [numpy>=1.20, pandas-stubs]
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.25
+    hooks:
+      - id: validate-pyproject
+  - repo: local
+    hooks:
+      - id: validate-bibtex
+        name: Validate BibTeX files
+        entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
+        language: python
+        files: \.bib$
+        additional_dependencies: [pybtex]

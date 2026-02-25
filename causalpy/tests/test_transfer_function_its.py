@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """Tests for Transfer Function ITS"""
+
+import contextlib
 
 import matplotlib
 
@@ -876,18 +878,14 @@ class TestInputValidation:
 
         # This will print a warning about missing values
         # Grid search will likely fail with NaN values, which is expected
-        try:
+        with contextlib.suppress(ValueError, Exception):
             GradedInterventionTimeSeries(
-                data=df.copy(),  # Will trigger warning
+                data=df.copy(),
                 y_column="y",
                 treatment_names=["x"],
                 base_formula="1",
                 model=model,
             )
-            # If this succeeds (unlikely with NaN), that's okay
-        except (ValueError, Exception):
-            # Expected: grid search will fail with NaN values
-            pass
 
         captured = capsys.readouterr()
         # The warning should have been printed during validation

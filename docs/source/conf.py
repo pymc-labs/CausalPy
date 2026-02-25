@@ -26,6 +26,7 @@ autodoc_mock_imports = [
     "pandas",
     "patsy",
     "pymc",
+    "pymc-extras",
     "scipy",
     "seaborn",
     "sklearn",
@@ -41,6 +42,15 @@ copyright = f"2024, {author}"
 
 release = __version__
 version = release
+
+# The version info for the project you're documenting
+if os.environ.get("READTHEDOCS", False):
+    rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
+    if rtd_version.lower() == "latest":
+        version = "dev"
+else:
+    version = "local"
+    rtd_version = version
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -62,6 +72,7 @@ extensions = [
     "notfound.extension",
     "sphinx_copybutton",
     "sphinx_design",
+    "sphinx_sitemap",
     "sphinx_togglebutton",
 ]
 
@@ -78,7 +89,7 @@ source_suffix = {
     ".myst": "myst-nb",
 }
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".codespell"]
 master_doc = "index"
 
 # bibtex config
@@ -115,6 +126,7 @@ intersphinx_mapping = {
     "mpl": ("https://matplotlib.org/stable", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
+    "pymc-extras": ("https://www.pymc.io/projects/extras/en/latest/", None),
     "pymc": ("https://www.pymc.io/projects/docs/en/stable/", None),
     "python": ("https://docs.python.org/3", None),
     "scikit-learn": ("https://scikit-learn.org/stable/", None),
@@ -132,11 +144,16 @@ myst_enable_extensions = [
     "html_admonition",
 ]
 
+# sitemap extension configuration
+site_url = "https://causalpy.readthedocs.io/"
+sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
+html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -154,6 +171,7 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs/source/",
     "default_mode": "light",
+    "baseurl": "https://causalpy.readthedocs.io/",
 }
 
 # -- Options for autodoc ----------------------------------------------------
@@ -165,12 +183,3 @@ autodoc_typehints = "description"
 
 # Don't show class signature with the class' name.
 autodoc_class_signature = "separated"
-
-# Add "Edit on Github" link. Replaces "view page source" ----------------------
-html_context = {
-    "display_github": True,  # Integrate GitHub
-    "github_user": "pymc-labs",  # Username
-    "github_repo": "CausalPy",  # Repo name
-    "github_version": "master",  # Version
-    "conf_py_path": "/docs/source/",  # Path in the checkout to the docs root
-}

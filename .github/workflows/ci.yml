@@ -6,17 +6,23 @@ on:
   push:
     branches: [main]
 
+permissions: {}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Update pip and setuptools
@@ -24,9 +30,9 @@ jobs:
       - name: Setup environment
         run: pip install -e .[test]
       - name: Run doctests
-        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
+        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
       - name: Run extra tests
-        run: pytest docs/source/.codespell/test_notebook_to_markdown.py
+        run: pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run tests
         run: pytest --cov-report=xml --no-cov-on-fail
       - name: Check codespell for notebooks
@@ -34,7 +40,7 @@ jobs:
           python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
           codespell
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
           name: ${{ matrix.python-version }}

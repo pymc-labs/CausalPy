@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ The strategy pattern (following pymc-marketing design) provides:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from pymc_marketing.mmm.transformers import (
+    ConvMode,
     geometric_adstock,
     hill_function,
     logistic_saturation,
@@ -323,8 +323,8 @@ class GeometricAdstock(AdstockTransform):
 
     def __init__(
         self,
-        alpha: Optional[float] = None,
-        half_life: Optional[float] = None,
+        alpha: float | None = None,
+        half_life: float | None = None,
         l_max: int = 12,
         normalize: bool = True,
     ):
@@ -355,7 +355,7 @@ class GeometricAdstock(AdstockTransform):
             alpha=self.alpha,
             l_max=self.l_max,
             normalize=self.normalize,
-            mode="After",
+            mode=ConvMode.After,
         )
 
         # Ensure we return a numpy array, not a PyTensor symbolic tensor
@@ -480,9 +480,9 @@ class Treatment:
     """
 
     name: str
-    saturation: Optional[SaturationTransform] = None
-    adstock: Optional[AdstockTransform] = None
-    lag: Optional[LagTransform] = None
+    saturation: SaturationTransform | None = None
+    adstock: AdstockTransform | None = None
+    lag: LagTransform | None = None
     coef_constraint: str = "nonnegative"
 
     def __post_init__(self):

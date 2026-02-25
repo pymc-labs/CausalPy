@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import pytest
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.tests.conftest import setup_regression_kink_data
 
 from sklearn.linear_model import LinearRegression
 
@@ -424,32 +425,6 @@ def test_iv_treatment_var_is_present():
 # Regression kink design
 
 
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-
-
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
-
-
 def test_rkink_bandwidth_check():
     """Test that we get exceptions when bandwidth parameter is <= 0"""
     with pytest.raises(ValueError):
@@ -547,3 +522,90 @@ def test_regression_discontinuity_bool_treatment():
 
     # Check that the treatment variable is still bool
     assert result.data["treated"].dtype == bool
+
+
+# Synthetic Control - Convex Hull Assumption
+
+
+def test_synthetic_control_convex_hull_warning():
+    """Test that SyntheticControl issues a warning when convex hull assumption is violated"""
+    # Create synthetic data where treated is above all controls
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    # Create control units that are consistently lower than the treated
+    controls = pd.DataFrame(
+        {
+            "control_1": 1.0 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+            "control_2": 0.5 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+            "control_3": 0.8 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time),
+        }
+    )
+
+    # Create treated unit that is consistently above all controls
+    treated = 5.0 + 0.5 * time_idx + np.random.normal(0, 0.5, n_time)
+
+    df = controls.copy()
+    df["treated"] = treated
+
+    treatment_time = 30
+
+    # Should issue a warning
+    with pytest.warns(UserWarning, match="Convex hull assumption may be violated"):
+        result = cp.SyntheticControl(
+            df,
+            treatment_time,
+            control_units=["control_1", "control_2", "control_3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    # The model should still run and produce results
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_no_warning_when_assumption_satisfied():
+    """Test that SyntheticControl does not issue a warning when assumption is satisfied"""
+    # Create synthetic data where treated is within control range
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    # Create control units with varying levels that span a wide range
+    controls = pd.DataFrame(
+        {
+            "control_1": 1.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+            "control_2": 0.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+            "control_3": 4.0 + 0.5 * time_idx + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    # Create treated unit that falls within the control range
+    # Use the middle value to ensure it's within bounds
+    treated = 2.0 + 0.5 * time_idx + np.random.normal(0, 0.2, n_time)
+
+    df = controls.copy()
+    df["treated"] = treated
+
+    treatment_time = 30
+
+    # Should NOT issue a warning
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter("always")
+        result = cp.SyntheticControl(
+            df,
+            treatment_time,
+            control_units=["control_1", "control_2", "control_3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    # Check that no UserWarning about convex hull was issued
+    convex_hull_warnings = [w for w in warning_list if "Convex hull" in str(w.message)]
+    assert len(convex_hull_warnings) == 0
+
+    # The model should run successfully
+    assert isinstance(result, cp.SyntheticControl)

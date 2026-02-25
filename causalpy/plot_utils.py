@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 Plotting utility functions.
 """
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -24,53 +24,63 @@ import pandas as pd
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
+from pandas.api.extensions import ExtensionArray
 
 
 def plot_xY(
-    x: Union[pd.DatetimeIndex, np.array],
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
     ax: plt.Axes,
-    plot_hdi_kwargs: Optional[Dict[str, Any]] = None,
+    plot_hdi_kwargs: dict[str, Any] | None = None,
     hdi_prob: float = 0.94,
-    label: Union[str, None] = None,
-) -> Tuple[Line2D, PolyCollection]:
-    """
-    Utility function to plot HDI intervals.
+    label: str | None = None,
+) -> tuple[Line2D, PolyCollection]:
+    """Plot HDI intervals.
 
-    :param x:
-        Pandas datetime index or numpy array of x-axis values
-    :param y:
-        Xarray data array of y-axis data
-    :param ax:
-        Matplotlib ax object
-    :param plot_hdi_kwargs:
-        Dictionary of keyword arguments passed to ax.plot()
-    :param hdi_prob:
-        The size of the HDI, default is 0.94
-    :param label:
-        The plot label
+    Parameters
+    ----------
+    x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
+        Pandas datetime index or numpy array of x-axis values.
+    Y : xr.DataArray
+        Xarray data array of y-axis data.
+    ax : plt.Axes
+        Matplotlib axes object.
+    plot_hdi_kwargs : dict, optional
+        Dictionary of keyword arguments passed to ax.plot().
+    hdi_prob : float, optional
+        The size of the HDI. Default is 0.94.
+    label : str, optional
+        The plot label.
+
+    Returns
+    -------
+    tuple
+        Tuple of (Line2D, PolyCollection) handles for the plot line and
+        HDI patch.
     """
 
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
 
+    # Separate fill_kwargs for az.plot_hdi, as ax.plot doesn't accept them
+    line_kwargs = plot_hdi_kwargs.copy()
+    if "fill_kwargs" in line_kwargs:
+        del line_kwargs["fill_kwargs"]
+
     (h_line,) = ax.plot(
         x,
         Y.mean(dim=["chain", "draw"]),
         ls="-",
-        **plot_hdi_kwargs,
-        label=f"{label}",
+        **line_kwargs,  # Use kwargs without fill_kwargs
+        label=label,  # Use the provided label for the mean line
     )
     ax_hdi = az.plot_hdi(
         x,
         Y,
         hdi_prob=hdi_prob,
-        fill_kwargs={
-            "alpha": 0.25,
-            "label": " ",
-        },
-        smooth=False,
         ax=ax,
+        smooth=False,  # To prevent warning about resolution with few data points
+        # Pass original plot_hdi_kwargs which might include fill_kwargs for fill_between
         **plot_hdi_kwargs,
     )
     # Return handle to patch. We get a list of the children of the axis. Filter for just
@@ -85,13 +95,20 @@ def get_hdi_to_df(
     x: xr.DataArray,
     hdi_prob: float = 0.94,
 ) -> pd.DataFrame:
-    """
-    Utility function to calculate and recover HDI intervals.
+    """Calculate and recover HDI intervals.
 
-    :param x:
-        Xarray data array
-    :param hdi_prob:
-        The size of the HDI, default is 0.94
+    Parameters
+    ----------
+    x : xr.DataArray
+        Xarray data array.
+    hdi_prob : float, optional
+        The size of the HDI. Default is 0.94.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the HDI intervals with 'lower' and 'higher'
+        columns.
     """
     hdi_result = az.hdi(x, hdi_prob=hdi_prob)
 

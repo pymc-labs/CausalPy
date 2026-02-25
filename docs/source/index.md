@@ -16,10 +16,10 @@ To get the latest release you can use pip:
 pip install CausalPy
 ```
 
-or conda:
+or conda/mamba/micromamba:
 
 ```bash
-conda install causalpy -c conda-forge
+conda install causalpy -c conda-forge    # or mamba/micromamba
 ```
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:

@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Panel data methods
 
 :::{toctree}
 :caption: ANCOVA
@@ -31,6 +33,7 @@ multi_cell_geolift.ipynb
 did_skl.ipynb
 did_pymc.ipynb
 did_pymc_banks.ipynb
+staggered_did_pymc.ipynb
 :::
 
 :::{toctree}
@@ -39,7 +42,9 @@ did_pymc_banks.ipynb
 
 its_skl.ipynb
 its_pymc.ipynb
+its_post_intervention_analysis.ipynb
 its_covid.ipynb
+its_lift_test.ipynb
 :::
 
 :::{toctree}
@@ -48,6 +53,16 @@ its_covid.ipynb
 
 graded_intervention_time_series_single_channel_ols.ipynb
 :::
+
+:::{toctree}
+:caption: Comparative Interrupted Time Series
+:maxdepth: 1
+
+its_pymc_comparative.ipynb
+:::
+
+## Cross-sectional methods
+
 
 :::{toctree}
 :caption: Regression Discontinuity
@@ -71,6 +86,7 @@ rkink_pymc.ipynb
 
 iv_pymc.ipynb
 iv_weak_instruments.ipynb
+iv_vs_priors.ipynb
 :::
 
 :::{toctree}
