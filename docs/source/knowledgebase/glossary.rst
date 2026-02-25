@@ -23,7 +23,7 @@ Glossary
 
    Comparative interrupted time-series
    CITS
-      An interrupted time series design with added comparison time series observations.
+      An interrupted time series design with added comparison time series observations. In CITS, one or more control units are included as predictors in the model, providing a counterfactual by accounting for common trends and shocks that affect both treated and control units. This approach provides stronger causal inference than standard ITS by controlling for confounding trends. CITS can be implemented using the ``InterruptedTimeSeries`` class by including control unit observations as predictors in the model formula (e.g., ``treated ~ 1 + control``). Unlike synthetic control, CITS typically includes an intercept and has no sum-to-1 constraint on control weights. Additional covariates such as seasonality, time trends, or other predictors can also be included alongside control units.
 
    Confidence interval
    CI
@@ -44,6 +44,10 @@ Glossary
    Difference in differences
    DiD
       Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
+
+   Event study
+   Event-time effects
+      Treatment effect estimates indexed by time relative to treatment onset.
 
    Interrupted time series design
    ITS
@@ -88,6 +92,12 @@ Glossary
 
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
+
+   Staggered Difference-in-Differences
+      A difference-in-differences setting where different units receive treatment at different times (staggered adoption), often analyzed with event-time treatment effects.
+
+   Absorbing treatment
+      A treatment that, once applied, remains in effect permanently. This assumption is required by the Borusyak, Jaravel, and Spiess (2024) imputation estimator used by ``StaggeredDifferenceInDifferences``.
 
    Posterior probability
       In Bayesian statistics, the probability of a hypothesis or parameter value after observing the data. In CausalPy's reporting, posterior probabilities are used for hypothesis testing (e.g., the probability that a treatment effect is positive). Unlike p-values, these are direct probability statements about the hypothesis of interest. See :doc:`reporting_statistics` for examples.

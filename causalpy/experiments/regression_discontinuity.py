@@ -30,7 +30,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
 from .base import BaseExperiment
@@ -51,7 +51,7 @@ class RegressionDiscontinuity(BaseExperiment):
     :param treatment_threshold:
         A scalar threshold value at which the treatment is applied
     :param model:
-        A PyMC model
+        A PyMC or sklearn model. Defaults to LinearRegression.
     :param running_variable_name:
         The name of the predictor variable that the treatment threshold is based upon
     :param epsilon:
@@ -83,6 +83,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -104,7 +105,12 @@ class RegressionDiscontinuity(BaseExperiment):
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data, applying bandwidth filtering."""
         if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
             fmax = self.treatment_threshold + self.bandwidth
@@ -117,14 +123,11 @@ class RegressionDiscontinuity(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(formula, filtered_data, return_type="dataframe")
-            # Filter data to rows that patsy kept (in case NaN values were dropped)
+            y, X = dmatrices(self.formula, filtered_data, return_type="dataframe")
             filtered_data = filtered_data.loc[X.index]
-            # Update self.data to match filtered data
             self.data = filtered_data
         else:
-            y, X = dmatrices(formula, self.data, return_type="dataframe")
-            # Filter data to rows that patsy kept (in case NaN values were dropped)
+            y, X = dmatrices(self.formula, self.data, return_type="dataframe")
             self.data = self.data.loc[X.index]
 
         self._y_design_info = y.design_info
@@ -133,7 +136,8 @@ class RegressionDiscontinuity(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -148,6 +152,8 @@ class RegressionDiscontinuity(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""
         # fit model
         if isinstance(self.model, PyMCModel):
             # fit the model to the observed (pre-intervention) data
@@ -167,6 +173,8 @@ class RegressionDiscontinuity(BaseExperiment):
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
@@ -340,7 +348,6 @@ class RegressionDiscontinuity(BaseExperiment):
             label="treatment threshold",
         )
         ax.legend(fontsize=LEGEND_FONT_SIZE)
-        # TODO: have to convert ax into list because it is somehow a numpy.ndarray
         return (fig, ax)
 
     def effect_summary(

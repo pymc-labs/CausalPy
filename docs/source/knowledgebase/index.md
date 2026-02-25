@@ -4,6 +4,7 @@
 :maxdepth: 1
 
 glossary
+estimands
 reporting_statistics
 design_notation
 quasi_dags.ipynb

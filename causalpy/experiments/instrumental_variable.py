@@ -23,6 +23,8 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import InstrumentalVariableRegression
+
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
 from typing import Any, Literal
@@ -46,8 +48,8 @@ class InstrumentalVariable(BaseExperiment):
     formula : str
         A statistical model formula for the focal regression,
         e.g. ``y ~ 1 + t + x1 + x2 + x3``.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : InstrumentalVariableRegression, optional
+        A PyMC model. Defaults to InstrumentalVariableRegression.
     priors : dict, optional
         Dictionary of priors for the mus and sigmas of both regressions.
         If priors are not specified we will substitute MLE estimates for
@@ -111,6 +113,7 @@ class InstrumentalVariable(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = InstrumentalVariableRegression
 
     def __init__(
         self,
@@ -118,7 +121,7 @@ class InstrumentalVariable(BaseExperiment):
         data: pd.DataFrame,
         instruments_formula: str,
         formula: str,
-        model: BaseExperiment | None = None,
+        model: InstrumentalVariableRegression | None = None,
         priors: dict | None = None,
         vs_prior_type=None,
         vs_hyperparams=None,
@@ -131,14 +134,21 @@ class InstrumentalVariable(BaseExperiment):
         self.instruments_data = instruments_data
         self.formula = formula
         self.instruments_formula = instruments_formula
-        self.model = model
         self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
         self.binary_treatment = binary_treatment
         self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
         self.input_validation()
+        self._build_design_matrices()
 
-        y, X = dmatrices(formula, self.data, return_type="dataframe")
+        # Store user-provided priors (will set defaults in algorithm() if None)
+        self.priors = priors
+
+        self.algorithm()
+
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for outcome and instrument formulas."""
+        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         # Filter data to rows that patsy kept (in case NaN values were dropped)
@@ -148,7 +158,7 @@ class InstrumentalVariable(BaseExperiment):
         self.outcome_variable_name = y.design_info.column_names[0]
 
         t, Z = dmatrices(
-            instruments_formula, self.instruments_data, return_type="dataframe"
+            self.instruments_formula, self.instruments_data, return_type="dataframe"
         )
         self._t_design_info = t.design_info
         self._z_design_info = Z.design_info
@@ -158,16 +168,19 @@ class InstrumentalVariable(BaseExperiment):
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
         self.get_naive_OLS_fit()
         self.get_2SLS_fit()
 
         # fit the model to the data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
-        if priors is None:
-            if binary_treatment:
+        # Only set default priors if user didn't provide custom priors
+        if self.priors is None:
+            if self.binary_treatment:
                 # Different default priors for binary treatment
-                priors = {
+                self.priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "sigma_U": 1.0,
@@ -175,13 +188,12 @@ class InstrumentalVariable(BaseExperiment):
                 }
             else:
                 # Original continuous treatment priors
-                priors = {
+                self.priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "eta": 2,
                     "lkj_sd": 1,
                 }
-        self.priors = priors
         self.model.fit(  # type: ignore[call-arg,union-attr]
             X=self.X,
             Z=self.Z,

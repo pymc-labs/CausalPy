@@ -28,7 +28,7 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
 
@@ -49,7 +49,7 @@ class SyntheticControl(BaseExperiment):
     :param treated_units:
         A list of treated units to be used in the experiment
     :param model:
-        A PyMC model
+        A PyMC or sklearn model. Defaults to WeightedSumFitter.
 
     Example
     --------
@@ -82,6 +82,7 @@ class SyntheticControl(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = WeightedSumFitter
 
     def __init__(
         self,
@@ -95,54 +96,19 @@ class SyntheticControl(BaseExperiment):
         super().__init__(model=model)
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
+        self.data = data
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
         self.expt_type = "SyntheticControl"
-        # split data in to pre and post intervention
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
+        self._prepare_data()
+        self._check_convex_hull()
+        self.algorithm()
 
-        # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray.DataArray objects.
-        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
-        # make constructing the xarray DataArray objects easier.
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-
-        # Check convex hull assumption for each treated unit
+    def _check_convex_hull(self) -> None:
+        """Check convex hull assumption and warn if violated."""
         # Aggregate violations across all treated units
         total_violations = 0
         total_above = 0
@@ -181,6 +147,63 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
+    @property
+    def datapre(self) -> pd.DataFrame:
+        """Data from before the treatment time (exclusive).
+
+        Pre-period: index < treatment_time
+        """
+        return self.data[self.data.index < self.treatment_time]
+
+    @property
+    def datapost(self) -> pd.DataFrame:
+        """Data from on or after the treatment time (inclusive).
+
+        Post-period: index >= treatment_time
+        """
+        return self.data[self.data.index >= self.treatment_time]
+
+    def _prepare_data(self) -> None:
+        """Prepare xarray DataArrays for control and treated units in pre/post periods."""
+        # split data into the 4 quadrants (pre/post, control/treated) and store as
+        # xarray.DataArray objects.
+        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
+        # make constructing the xarray DataArray objects easier.
+        self.datapre_control = xr.DataArray(
+            self.datapre[self.control_units],
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapre[self.control_units].index,
+                "coeffs": self.control_units,
+            },
+        )
+        self.datapre_treated = xr.DataArray(
+            self.datapre[self.treated_units],
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": self.datapre[self.treated_units].index,
+                "treated_units": self.treated_units,
+            },
+        )
+        self.datapost_control = xr.DataArray(
+            self.datapost[self.control_units],
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": self.datapost[self.control_units].index,
+                "coeffs": self.control_units,
+            },
+        )
+        self.datapost_treated = xr.DataArray(
+            self.datapost[self.treated_units],
+            dims=["obs_ind", "treated_units"],
+            coords={
+                "obs_ind": self.datapost[self.treated_units].index,
+                "treated_units": self.treated_units,
+            },
+        )
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -505,8 +528,7 @@ class SyntheticControl(BaseExperiment):
             label="Causal impact",
         )
 
-        # Intervention line
-        # TODO: make this work when treatment_time is a datetime
+        # Intervention line (see #725 for datetime treatment_time support)
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,

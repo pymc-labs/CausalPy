@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _compute_statistics_did_ols,
@@ -73,7 +73,7 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column indicating post-treatment period.
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
-        A PyMC model for difference in differences. Defaults to None.
+        A PyMC model for difference in differences. Defaults to LinearRegression.
 
     Example
     --------
@@ -97,6 +97,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -119,8 +120,13 @@ class DifferenceInDifferences(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.post_treatment_variable_name = post_treatment_variable_name
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
-        y, X = dmatrices(formula, self.data, return_type="dataframe")
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy."""
+        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         # Filter data to rows that patsy kept (in case NaN values were dropped)
@@ -129,7 +135,8 @@ class DifferenceInDifferences(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -144,6 +151,8 @@ class DifferenceInDifferences(BaseExperiment):
             coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit model
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -153,10 +162,9 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, automatically set fit_intercept=False
-            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
-            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
+            # Ensure the intercept is part of the coefficients array rather than
+            # a separate intercept_ attribute.  See #664 / PR #693 for
+            # centralising this in BaseExperiment.
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
@@ -253,8 +261,6 @@ class DifferenceInDifferences(BaseExperiment):
             self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
-
-        return
 
     def input_validation(self) -> None:
         # Validate formula structure and interaction interaction terms

@@ -29,7 +29,7 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
@@ -40,11 +40,25 @@ LEGEND_FONT_SIZE = 12
 class StaggeredDifferenceInDifferences(BaseExperiment):
     """A class to analyse data from staggered adoption Difference-in-Differences settings.
 
-    This estimator uses an imputation-based approach: it fits a model on untreated
-    observations only (pre-treatment periods for eventually-treated units plus all
-    periods for never-treated units), then predicts counterfactual outcomes for all
-    observations. Treatment effects are computed as the difference between observed
-    and predicted outcomes for treated observations.
+    This class implements the Borusyak, Jaravel, and Spiess (BJS, 2024)
+    imputation estimator for staggered adoption settings. It fits a model on
+    untreated observations only (pre-treatment periods for eventually-treated
+    units plus all periods for never-treated units), then predicts
+    counterfactual outcomes for all observations. Treatment effects are computed
+    as the difference between observed and predicted outcomes for treated
+    observations.
+
+    Assumptions
+    -----------
+    This estimator requires the following identifying assumptions:
+
+    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
+       treated in all subsequent periods. Treatment cannot be reversed or
+       temporarily suspended. This is validated at runtime.
+    2. **Parallel trends**: In the absence of treatment, treated and control
+       units would have followed parallel outcome trajectories.
+    3. **No anticipation**: Units do not change their behavior in anticipation
+       of future treatment.
 
     Parameters
     ----------
@@ -66,7 +80,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Value indicating never-treated units in treatment_time column.
         Defaults to np.inf.
     model : PyMCModel or RegressorMixin, optional
-        A model for the untreated outcome. Defaults to None.
+        A model for the untreated outcome. Defaults to LinearRegression.
     event_window : tuple[int, int], optional
         Tuple (min_event_time, max_event_time) to restrict event-time aggregation.
         If None, uses all available event-times.
@@ -124,6 +138,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -174,6 +189,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Step 4: Build design matrices
         self._build_design_matrices()
 
+        self.algorithm()
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict counterfactuals, and aggregate effects."""
         # Step 5: Fit model on untreated observations
         self._fit_model()
 

@@ -15,6 +15,7 @@
 Inverse propensity weighting
 """
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -26,6 +27,7 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
@@ -47,8 +49,8 @@ class InversePropensityWeighting(BaseExperiment):
         'robust', 'doubly robust' or 'overlap'. See Aronow and Miller
         "Foundations of Agnostic Statistics" for discussion and computation
         of these weighting schemes.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : PropensityScore, optional
+        A PyMC model. Defaults to PropensityScore.
 
     Example
     --------
@@ -73,6 +75,7 @@ class InversePropensityWeighting(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = PropensityScore
 
     def __init__(
         self,
@@ -80,7 +83,7 @@ class InversePropensityWeighting(BaseExperiment):
         formula: str,
         outcome_variable: str,
         weighting_scheme: str,
-        model: BaseExperiment | None = None,
+        model: PropensityScore | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -90,8 +93,12 @@ class InversePropensityWeighting(BaseExperiment):
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme
         self.input_validation()
+        self._build_design_matrices()
+        self.algorithm()
 
-        t, X = dmatrices(formula, self.data)
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for propensity score model."""
+        t, X = dmatrices(self.formula, self.data)
         self._t_design_info = t.design_info
         self._t_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -103,7 +110,10 @@ class InversePropensityWeighting(BaseExperiment):
         self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
-        self.model.fit(X=self.X, t=self.t, coords=COORDS)  # type: ignore[call-arg]
+
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit propensity score model."""
+        self.model.fit(X=self.X, t=self.t, coords=self.coords)  # type: ignore[call-arg]
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness"""
@@ -127,12 +137,24 @@ class InversePropensityWeighting(BaseExperiment):
                 """
             )
 
+    def _prepare_ps(self, ps: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+        """Checks for extreme propensity scores and clips them for stability."""
+        if np.any((ps < eps) | (ps > 1 - eps)):
+            warnings.warn(
+                f"Extreme propensity scores detected (outside [{eps}, {1 - eps}]). "
+                "Capping values to prevent numerical instability.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return np.clip(ps, eps, 1 - eps)
+
     def make_robust_adjustments(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, int, int]:
         """This estimator is discussed in Aronow
         and Miller's book as being related to the
         Horvitz Thompson method"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -155,6 +177,7 @@ class InversePropensityWeighting(BaseExperiment):
         """This estimator is discussed in Aronow and
         Miller as the simplest of base form of
         inverse propensity weighting schemes"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -177,6 +200,7 @@ class InversePropensityWeighting(BaseExperiment):
         Lucy D’Agostino McGowan's blog on
         Propensity Score Weights referenced in
         the primary CausalPy explainer notebook"""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         X[self.outcome_variable] = self.y
@@ -201,6 +225,7 @@ class InversePropensityWeighting(BaseExperiment):
         the outcome model to be a simple OLS model.
         In this way the compromise between the outcome model and
         the propensity model is always done with OLS."""
+        ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
@@ -595,7 +620,6 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].set_xlabel("Quantiles")
         axs[1].legend()
         axs[0].legend()
-        # TODO: for some reason ax is type numpy.ndarray, so we need to convert this back to a list to conform to the expected return type.
         return fig, list(axs)
 
     def effect_summary(

@@ -28,7 +28,7 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
@@ -129,6 +129,7 @@ class InterruptedTimeSeries(BaseExperiment):
     expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -144,24 +145,24 @@ class InterruptedTimeSeries(BaseExperiment):
         self.post_y: xr.DataArray
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
+        self.data = data
         self.input_validation(data, treatment_time, treatment_end_time)
         self.treatment_time = treatment_time
         self.treatment_end_time = treatment_end_time
-        # set experiment type - usually done in subclasses
         self.expt_type = "Pre-Post Fit"
-        # split data in to pre and post intervention
-        # NOTE: treatment_time is INCLUSIVE (>=) in post-period
-        # Pre-period: index < treatment_time (exclusive)
-        # Post-period: index >= treatment_time (inclusive)
-        self.datapre = data[data.index < self.treatment_time]
-        self.datapost = data[data.index >= self.treatment_time]
-
         self.formula = formula
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for pre and post intervention periods using patsy."""
         # set things up with pre-intervention data
-        y, X = dmatrices(formula, self.datapre, return_type="dataframe")
-        # Filter datapre to rows that patsy kept (in case NaN values were dropped)
-        self.datapre = self.datapre.loc[X.index]
+        y, X = dmatrices(self.formula, self.datapre, return_type="dataframe")
+        # Remove pre-intervention rows that patsy dropped (e.g. due to NaN values)
+        dropped_pre = self.datapre.index.difference(X.index)
+        if len(dropped_pre) > 0:
+            self.data = self.data.drop(dropped_pre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -173,7 +174,9 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         self.post_X = np.asarray(new_x)
         self.post_y = np.asarray(new_y)
-        # turn into xarray.DataArray's
+
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays for pre and post periods."""
         self.pre_X = xr.DataArray(
             self.pre_X,
             dims=["obs_ind", "coeffs"],
@@ -201,6 +204,8 @@ class InterruptedTimeSeries(BaseExperiment):
             coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         # All PyMC models now accept xr.DataArray with consistent API
         if isinstance(self.model, PyMCModel):
@@ -302,6 +307,22 @@ class InterruptedTimeSeries(BaseExperiment):
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
                 )
+
+    @property
+    def datapre(self) -> pd.DataFrame:
+        """Data from before the treatment time (exclusive).
+
+        Pre-period: index < treatment_time
+        """
+        return self.data[self.data.index < self.treatment_time]
+
+    @property
+    def datapost(self) -> pd.DataFrame:
+        """Data from on or after the treatment time (inclusive).
+
+        Post-period: index >= treatment_time
+        """
+        return self.data[self.data.index >= self.treatment_time]
 
     def _split_post_period(self) -> None:
         """Split post period into intervention and post-intervention periods.

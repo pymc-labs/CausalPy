@@ -30,7 +30,7 @@ from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
@@ -53,7 +53,7 @@ class PrePostNEGD(BaseExperiment):
     :param pretreatment_variable_name:
         Name of the column in data for the pretreatment variable
     :param model:
-        A PyMC model
+        A PyMC model. Defaults to LinearRegression.
 
     Example
     --------
@@ -88,6 +88,7 @@ class PrePostNEGD(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -109,8 +110,13 @@ class PrePostNEGD(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
         self.input_validation()
+        self._build_design_matrices()
+        self._prepare_data()
+        self.algorithm()
 
-        y, X = dmatrices(formula, self.data, return_type="dataframe")
+    def _build_design_matrices(self) -> None:
+        """Build design matrices from formula and data using patsy."""
+        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         # Filter data to rows that patsy kept (in case NaN values were dropped)
@@ -119,7 +125,8 @@ class PrePostNEGD(BaseExperiment):
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        # turn into xarray.DataArray's
+    def _prepare_data(self) -> None:
+        """Convert design matrices to xarray DataArrays."""
         self.X = xr.DataArray(
             self.X,
             dims=["obs_ind", "coeffs"],
@@ -134,6 +141,8 @@ class PrePostNEGD(BaseExperiment):
             coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
         )
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel):
             COORDS = {
@@ -224,7 +233,6 @@ class PrePostNEGD(BaseExperiment):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")
-        # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 

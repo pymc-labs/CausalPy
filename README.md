@@ -10,7 +10,7 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
 ![Read the Docs](https://img.shields.io/readthedocs/causalpy)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
-![Interrogate](docs/source/_static/interrogate_badge.svg)
+![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 # CausalPy
@@ -80,6 +80,7 @@ CausalPy has a broad range of quasi-experimental methods for causal inference:
 | ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
 | Differences in Differences | Compares the changes in outcomes over time between a treatment group and a control group. Used in observational studies to estimate causal effects by accounting for time trends. |
 | Event Study | Estimates dynamic treatment effects over event time (time relative to treatment). Extends difference-in-differences by estimating separate effects for each time period, enabling pre-trend validation and analysis of how causal effects evolve. |
+| Staggered Difference-in-Differences | Estimates event-time treatment effects when different units adopt treatment at different times, using an imputation approach that models untreated outcomes and compares observed outcomes to counterfactual predictions. |
 | Regression discontinuity | Identifies causal effects by exploiting a cutoff or threshold in an assignment variable. Used when treatment is assigned based on a threshold value of an observed variable, allowing comparison just above and below the cutoff. |
 | Regression kink designs | Focuses on changes in the slope (kinks) of the relationship between variables rather than jumps at cutoff points. Used to identify causal effects when treatment intensity changes at a threshold. |
 | Interrupted time series | Analyzes the effect of an intervention by comparing time series data before and after the intervention. Used when data is collected over time and an intervention occurs at a known point, allowing assessment of changes in level or trend. |

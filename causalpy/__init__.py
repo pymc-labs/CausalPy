@@ -29,12 +29,14 @@ from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
+from .utils import extract_lift_for_mmm
 
 __all__ = [
     "__version__",
     "DifferenceInDifferences",
     "EventStudy",
     "create_causalpy_compatible_class",
+    "extract_lift_for_mmm",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",

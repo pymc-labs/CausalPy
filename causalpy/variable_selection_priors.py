@@ -60,7 +60,7 @@ def _relaxed_bernoulli_transform(
 
 
 class SpikeAndSlabPrior:
-    """
+    r"""
     Spike-and-slab prior using pymc-extras Prior class.
 
     Creates a mixture prior with a point mass at zero (spike) and a diffuse
@@ -141,7 +141,7 @@ class SpikeAndSlabPrior:
 
 
 class HorseshoePrior:
-    """
+    r"""
     Regularized horseshoe prior using pymc-extras Prior class.
 
     Provides continuous shrinkage with heavy tails, allowing strong signals
