@@ -168,7 +168,7 @@ def generate_time_series_data_seasonal(
     Generates 10 years of monthly data with seasonality
     """
     dates = pd.date_range(
-        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="ME"
     )
     df = pd.DataFrame(data={"date": dates})
     df = df.assign(
@@ -200,7 +200,7 @@ def generate_time_series_data_simple(
     structure.
     """
     dates = pd.date_range(
-        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="ME"
     )
     df = pd.DataFrame(data={"date": dates})
     df = df.assign(

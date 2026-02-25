@@ -1590,3 +1590,16 @@ def _effect_summary_rkink(
         )
 
     return EffectSummary(table=table, text=text)
+
+
+def _compute_statistics_rkink_ols(result, alpha=0.05):
+    """Compute statistics for Regression Kink scalar effect with OLS model.
+
+    Placeholder: follows the pattern from ``_compute_statistics_rd_ols()``.
+    """
+    raise NotImplementedError(
+        "OLS models are not currently supported for Regression Kink experiments. "
+        "Please use a PyMC model for full statistical inference. "
+        "If OLS support is needed, see _compute_statistics_rd_ols() "
+        "for the implementation pattern."
+    )
