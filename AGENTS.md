@@ -76,6 +76,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
     - `ignore-missing-imports`: Enabled to allow for gradual adoption of type hints without requiring all third-party libraries to have stubs.
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
 - **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
+- **Style**: Use Python 3.10+ type hint syntax. Specifically: `X | None` not `Optional[X]`, lowercase `dict`, `list`, `tuple` not `Dict`, `List`, `Tuple` from `typing`, and `Literal` for constrained string parameters.
 
 ## GitHub Issue Workflows
 
