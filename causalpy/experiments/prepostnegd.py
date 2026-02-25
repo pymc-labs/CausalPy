@@ -231,7 +231,6 @@ class PrePostNEGD(BaseExperiment):
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print("\nResults:")
-        # TODO: extra experiment specific outputs here
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
