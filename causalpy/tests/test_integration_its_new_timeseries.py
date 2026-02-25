@@ -46,7 +46,7 @@ def test_its_with_bsts_model():
     )
 
     # Simple formula (intercept only) avoids exogenous regressors if desired
-    # but we still pass it through patsy for consistency with the experiment
+    # but we still pass it through formulaic for consistency with the experiment
     result = cp.InterruptedTimeSeries(
         data=df[["y"]],
         treatment_time=treatment_time,

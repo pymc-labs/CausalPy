@@ -21,8 +21,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
@@ -57,7 +57,7 @@ class InterruptedTimeSeries(BaseExperiment):
         **INCLUSIVE**: Observations at exactly ``treatment_time`` are included in the
         post-intervention period (uses ``>=`` comparison).
     formula : str
-        A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
+        A statistical model formula using formulaic syntax (e.g., "y ~ 1 + t + C(month)").
     model : Union[PyMCModel, RegressorMixin], optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model.
@@ -156,23 +156,20 @@ class InterruptedTimeSeries(BaseExperiment):
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices for pre and post intervention periods using patsy."""
+        """Build design matrices for pre and post intervention periods using formulaic."""
         # set things up with pre-intervention data
-        y, X = dmatrices(self.formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
+        dm = model_matrix(self.formula, self.datapre)
+        self.labels = list(dm.rhs.columns)
+        self.matrix_spec = dm.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
+        self.pre_y, self.pre_X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         # process post-intervention data
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
+        dm_post = model_matrix(self.matrix_spec, self.datapost)
+        self.post_y, self.post_X = (dm_post.lhs.to_numpy(), dm_post.rhs.to_numpy())
 
     def _prepare_data(self) -> None:
         """Convert design matrices to xarray DataArrays for pre and post periods."""
+        # turn into xarray.DataArray's
         self.pre_X = xr.DataArray(
             self.pre_X,
             dims=["obs_ind", "coeffs"],

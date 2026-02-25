@@ -19,7 +19,7 @@ import warnings  # noqa: I001
 
 import numpy as np
 import pandas as pd
-from patsy import dmatrices
+from formulaic import model_matrix
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
@@ -148,19 +148,17 @@ class InstrumentalVariable(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
-        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
-        self._t_design_info = t.design_info
-        self._z_design_info = Z.design_info
-        self.labels_instruments = Z.design_info.column_names
-        self.t, self.Z = np.asarray(t), np.asarray(Z)
-        self.instrument_variable_name = t.design_info.column_names[0]
+        dm = model_matrix(self.instruments_formula, self.instruments_data)
+        self.labels_instruments = list(dm.rhs.columns)
+        self.t, self.Z = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.instrument_rhs_matrix_spec = dm.rhs.model_spec
+        self.instrument_variable_name = dm.lhs.columns[0]
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
@@ -234,7 +232,7 @@ class InstrumentalVariable(BaseExperiment):
         fitted_Z_values = first_stage_reg.predict(self.Z)
         X2 = self.data.copy(deep=True)
         X2[self.instrument_variable_name] = fitted_Z_values
-        _, X2 = dmatrices(self.formula, X2)
+        X2 = model_matrix(self.formula, X2).rhs.to_numpy()
         second_stage_reg = sk_lin_reg().fit(X=X2, y=self.y)
         betas_first = list(first_stage_reg.coef_[0][1:])
         betas_first.insert(0, first_stage_reg.intercept_[0])
@@ -254,9 +252,7 @@ class InstrumentalVariable(BaseExperiment):
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(
-            zip(self._x_design_info.column_names, beta_params, strict=False)
-        )
+        self.ols_beta_params = dict(zip(self.labels, beta_params, strict=False))
         self.ols_reg = ols_reg
 
     def plot(self, *args, **kwargs) -> None:  # type: ignore[override]

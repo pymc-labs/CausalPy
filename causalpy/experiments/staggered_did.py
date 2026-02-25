@@ -24,8 +24,8 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import xarray as xr
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
-from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import DataException, FormulaException
@@ -321,13 +321,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices using patsy."""
+        """Build design matrices using formulaic."""
         # Build design matrix for the full data
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.outcome_variable_name = y.design_info.column_names[0]
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        y, X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
         # Store full design matrix
         self.X_full = np.asarray(X)

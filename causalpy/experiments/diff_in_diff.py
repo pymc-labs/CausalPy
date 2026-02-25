@@ -22,8 +22,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import xarray as xr
+from formulaic import model_matrix
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
@@ -125,13 +125,12 @@ class DifferenceInDifferences(BaseExperiment):
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+        """Build design matrices from formula and data using formulaic."""
+        dm = model_matrix(self.formula, self.data)
+        self.labels = list(dm.rhs.columns)
+        self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
+        self.rhs_matrix_spec = dm.rhs.model_spec
+        self.outcome_variable_name = dm.lhs.columns[0]
 
     def _prepare_data(self) -> None:
         """Convert design matrices to xarray DataArrays."""
@@ -183,8 +182,10 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self.model.predict(np.asarray(new_x))
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_control
+        ).to_numpy()
+        self.y_pred_control = self.model.predict(new_x)
 
         # predicted outcome for treatment group
         self.x_pred_treatment = (
@@ -200,8 +201,10 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self.model.predict(np.asarray(new_x))
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_treatment
+        ).to_numpy()
+        self.y_pred_treatment = self.model.predict(new_x)
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
@@ -220,9 +223,9 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if self.x_pred_counterfactual.empty:
             raise ValueError("x_pred_counterfactual is empty")
-        (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
-        )
+        new_x = model_matrix(
+            spec=self.rhs_matrix_spec, data=self.x_pred_counterfactual
+        ).to_numpy()
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
@@ -230,8 +233,8 @@ class DifferenceInDifferences(BaseExperiment):
                 self.post_treatment_variable_name in label
                 and self.group_variable_name in label
             ):
-                new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
+                new_x[:, i] = 0
+        self.y_pred_counterfactual = self.model.predict(new_x)
 
         # calculate causal impact
         if isinstance(self.model, PyMCModel):
