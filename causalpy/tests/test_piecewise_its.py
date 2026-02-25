@@ -1467,3 +1467,146 @@ def test_piecewise_its_get_plot_data_stores_attribute():
     # Should store in plot_data attribute
     assert hasattr(result, "plot_data")
     pd.testing.assert_frame_equal(result.plot_data, plot_df)
+
+
+def test_piecewise_its_step_variable_not_in_data():
+    """Test that step/ramp variable not present in data raises FormulaException."""
+    df = pd.DataFrame({"t": np.arange(100), "y": np.random.randn(100)})
+    with pytest.raises(FormulaException, match="not present in the input data"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + t + step(missing_col, 50)",
+            model=LinearRegression(),
+        )
+
+
+def test_piecewise_its_non_numeric_non_datetime_time():
+    """Test that non-numeric, non-datetime time column raises FormulaException."""
+    df = pd.DataFrame(
+        {
+            "t": [f"cat_{i}" for i in range(100)],
+            "y": np.random.randn(100),
+        }
+    )
+    with pytest.raises(FormulaException, match="must be numeric or datetime-like"):
+        cp.PiecewiseITS(
+            df,
+            formula="y ~ 1 + step(t, 50)",
+            model=LinearRegression(),
+        )
+
+
+def test_step_transform_chunked_data():
+    """Test StepTransform with multiple memorize_chunk calls."""
+    transform = StepTransform()
+    x1 = np.array([0, 10, 20, 30, 40])
+    x2 = np.array([50, 60, 70, 80, 90])
+    threshold = 50
+
+    transform.memorize_chunk(x1, threshold)
+    transform.memorize_chunk(x2, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(np.concatenate([x1, x2]), threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_ramp_transform_chunked_data():
+    """Test RampTransform with multiple memorize_chunk calls."""
+    transform = RampTransform()
+    x1 = np.array([0, 10, 20, 30, 40])
+    x2 = np.array([50, 60, 70, 80, 90])
+    threshold = 50
+
+    transform.memorize_chunk(x1, threshold)
+    transform.memorize_chunk(x2, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(np.concatenate([x1, x2]), threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 20.0, 30.0, 40.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_step_transform_datetime_chunked():
+    """Test StepTransform datetime chunked memorize_chunk for origin tracking."""
+    transform = StepTransform()
+    x1 = pd.date_range("2020-01-06", periods=5, freq="D")
+    x2 = pd.date_range("2020-01-01", periods=5, freq="D")
+    threshold = "2020-01-06"
+
+    transform.memorize_chunk(x1, threshold)
+    transform.memorize_chunk(x2, threshold)
+    transform.memorize_finish()
+
+    assert transform._origin == pd.Timestamp("2020-01-01")
+
+
+def test_ramp_transform_datetime_chunked():
+    """Test RampTransform datetime chunked memorize_chunk for origin tracking."""
+    transform = RampTransform()
+    x1 = pd.date_range("2020-01-06", periods=5, freq="D")
+    x2 = pd.date_range("2020-01-01", periods=5, freq="D")
+    threshold = "2020-01-06"
+
+    transform.memorize_chunk(x1, threshold)
+    transform.memorize_chunk(x2, threshold)
+    transform.memorize_finish()
+
+    assert transform._origin == pd.Timestamp("2020-01-01")
+
+
+def test_step_transform_timestamp_threshold():
+    """Test StepTransform with pd.Timestamp threshold directly."""
+    transform = StepTransform()
+    x = pd.date_range("2020-01-01", periods=10, freq="D")
+    threshold = pd.Timestamp("2020-01-06")
+
+    transform.memorize_chunk(x, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(x, threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_ramp_transform_timestamp_threshold():
+    """Test RampTransform with pd.Timestamp threshold directly."""
+    transform = RampTransform()
+    x = pd.date_range("2020-01-01", periods=10, freq="D")
+    threshold = pd.Timestamp("2020-01-06")
+
+    transform.memorize_chunk(x, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(x, threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_step_transform_datetime_series():
+    """Test StepTransform with datetime as pd.Series (not DatetimeIndex)."""
+    transform = StepTransform()
+    x = pd.Series(pd.date_range("2020-01-01", periods=10, freq="D"))
+    threshold = "2020-01-06"
+
+    transform.memorize_chunk(x, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(x, threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_ramp_transform_datetime_series():
+    """Test RampTransform with datetime as pd.Series (not DatetimeIndex)."""
+    transform = RampTransform()
+    x = pd.Series(pd.date_range("2020-01-01", periods=10, freq="D"))
+    threshold = "2020-01-06"
+
+    transform.memorize_chunk(x, threshold)
+    transform.memorize_finish()
+
+    result = transform.transform(x, threshold)
+    expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+    np.testing.assert_array_equal(result, expected)
