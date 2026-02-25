@@ -48,6 +48,13 @@ its_lift_test.ipynb
 :::
 
 :::{toctree}
+:caption: Graded Intervention Time Series
+:maxdepth: 1
+
+graded_intervention_time_series_single_channel_ols.ipynb
+:::
+
+:::{toctree}
 :caption: Comparative Interrupted Time Series
 :maxdepth: 1
 
@@ -55,6 +62,7 @@ its_pymc_comparative.ipynb
 :::
 
 ## Cross-sectional methods
+
 
 :::{toctree}
 :caption: Regression Discontinuity

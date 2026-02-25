@@ -903,6 +903,7 @@ class InstrumentalVariableRegression(PyMCModel):
         with self:
             self.idata = pm.sample(**self.sample_kwargs)
         self.sample_predictive_distribution(ppc_sampler=ppc_sampler)
+        assert self.idata is not None
         return self.idata
 
 
@@ -991,6 +992,7 @@ class PropensityScore(PyMCModel):
                         self.idata, progressbar=False, random_seed=random_seed
                     )
                 )
+        assert self.idata is not None
         return self.idata
 
     def fit_outcome_model(
@@ -1169,10 +1171,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         Only used if trend_component is None.
     prior_sigma : float, optional
         Prior standard deviation for the observation noise. Defaults to 5.
-    trend_component : Optional[Any], optional
+    trend_component : Any | None, optional
         A custom trend component model. If None, the default pymc-marketing LinearTrend component is used.
         Must have an `apply(time_data)` method that returns a PyMC tensor.
-    seasonality_component : Optional[Any], optional
+    seasonality_component : Any | None, optional
         A custom seasonality component model. If None, the default pymc-marketing YearlyFourier component is used.
         Must have an `apply(time_data)` method that returns a PyMC tensor.
     sample_kwargs : dict, optional
@@ -2032,3 +2034,1063 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         # Use base class implementation - X is accepted but not used by predict()
         return super().score(X, y, coords, **kwargs)
+
+
+class TransferFunctionLinearRegression(PyMCModel):
+    r"""
+    Bayesian Transfer Function model for Graded Intervention Time Series.
+
+    This model jointly estimates transform parameters (adstock, saturation) and
+    regression coefficients within a Bayesian framework using PyMC.
+
+    The model applies transforms to treatment variables using pymc-marketing
+    functions, allowing full Bayesian inference on all parameters including
+    the transform parameters themselves.
+
+    Parameters
+    ----------
+    saturation_type : str or None
+        Type of saturation transform. Options: "hill", "logistic", "michaelis_menten", None.
+        If None, no saturation is applied.
+    adstock_config : dict or None
+        Configuration for adstock transform. Required keys:
+        - "half_life_prior": dict with prior specification (e.g., {"dist": "Gamma", "alpha": 4, "beta": 2})
+        - "l_max": int, maximum lag
+        - "normalize": bool, whether to normalize weights
+        If None, no adstock is applied.
+    saturation_config : dict or None
+        Configuration for saturation transform. Structure depends on saturation_type:
+        - For "hill": {"slope_prior": {...}, "kappa_prior": {...}}
+        - For "logistic": {"lam_prior": {...}}
+        - For "michaelis_menten": {"alpha_prior": {...}, "lam_prior": {...}}
+    coef_constraint : str, default="unconstrained"
+        Constraint on treatment coefficients: "nonnegative" or "unconstrained".
+    sample_kwargs : dict, optional
+        Additional kwargs passed to pm.sample().
+
+    Notes
+    -----
+    The current implementation uses independent Normal errors.
+
+    **Autocorrelation in Errors: Implementation Challenges**
+
+    For time series with autocorrelated residuals, see ``TransferFunctionARRegression``,
+    which implements AR(1) errors via quasi-differencing. This note explains why AR
+    errors require special handling and the design decisions made.
+
+    *Why Standard PyMC AR Approaches Fail:*
+
+    The fundamental issue is that **observed data cannot depend on model parameters**
+    in PyMC's computational graph. For AR errors, we want:
+
+    .. math::
+        y[t] = \mu[t] + \epsilon[t]
+        \epsilon[t] = \rho \cdot \epsilon[t-1] + \nu[t]
+
+    But ``\epsilon[t] = y[t] - \mu[t]`` depends on ``\mu`` (which depends on ``\beta``,
+    ``\theta``, ``half_life``, etc.), so this fails::
+
+        # This FAILS with TypeError
+        residuals = y - mu  # depends on parameters!
+        pm.AR("epsilon", rho, observed=residuals)  # ❌
+
+    *Implemented Solution (TransferFunctionARRegression):*
+
+    Uses **quasi-differencing** following Box & Tiao (1975):
+
+    .. math::
+        y[t] - \rho \cdot y[t-1] = \mu[t] - \rho \cdot \mu[t-1] + \nu[t]
+
+    This transforms to independent innovations ``\nu[t]``, allowing manual log-likelihood
+    via ``pm.Potential``. This is the theoretically correct Box & Tiao intervention
+    analysis model where AR(1) represents the noise structure itself.
+
+    *Alternative: AR as Latent Component (Not Implemented):*
+
+    An alternative that avoids the ``observed=`` issue would be:
+
+    .. math::
+        y[t] = \mu_{baseline}[t] + ar[t] + \epsilon_{obs}[t]
+        ar[t] = \rho \cdot ar[t-1] + \eta[t]
+        \epsilon_{obs}[t] \sim N(0, \sigma^2_{obs})
+
+    This could use PyMC's built-in ``pm.AR`` since ``ar[t]`` is latent (unobserved)::
+
+        # This WOULD work (but changes model interpretation)
+        ar = pm.AR("ar", rho=[rho_param], sigma=sigma_ar, shape=n_obs)
+        mu_total = mu_baseline + ar
+        pm.Normal("y", mu=mu_total, sigma=sigma_obs, observed=y_data)  # ✅
+
+    **Why We Don't Use This Approach:**
+
+    1. **Different model class**: Represents AR + white noise, not pure AR errors.
+       Has two variance parameters (``\sigma_{ar}``, ``\sigma_{obs}``) vs. one (``\sigma``).
+
+    2. **Theoretical mismatch**: Box & Tiao's intervention analysis models autocorrelation
+       in the noise process itself, not as an additional latent component. The AR process
+       IS the residual structure, not a separate mean component.
+
+    3. **Identifiability concerns**: With both AR and white noise, parameters may be
+       poorly identified unless ``\sigma_{obs} \approx 0`` (which defeats the purpose).
+
+    4. **Interpretation**: The latent AR component would represent a time-varying offset
+       rather than residual autocorrelation, changing the causal interpretation.
+
+    **When to Use Each Model:**
+
+    - **TransferFunctionLinearRegression** (this class): When residuals show minimal
+      autocorrelation, or computational efficiency is critical.
+
+    - **TransferFunctionARRegression**: When residual diagnostics show significant
+      autocorrelation (e.g., ACF plots, Durbin-Watson test), and you want to follow
+      the classical Box & Tiao specification.
+
+    **Prior Customization**:
+
+    Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
+    customized via the ``priors`` parameter::
+
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.TransferFunctionLinearRegression(
+            saturation_type=None,
+            adstock_config={...},
+            priors={
+                "beta": Prior(
+                    "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+                ),
+                "sigma": Prior("HalfNormal", sigma=50, dims=["treated_units"]),
+            },
+        )
+
+    By default, data-informed priors are set automatically via ``priors_from_data()``:
+
+    - Baseline coefficients (``beta``): ``Normal(0, 5 * std(y))``
+    - Treatment coefficients (``theta_treatment``): ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std (``sigma``): ``HalfNormal(2 * std(y))``
+
+    This adaptive approach ensures priors are reasonable regardless of data scale.
+
+    Examples
+    --------
+    Basic usage::
+
+        import causalpy as cp
+
+        model = cp.pymc_models.TransferFunctionLinearRegression(
+            saturation_type=None,
+            adstock_config={
+                "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+                "l_max": 8,
+                "normalize": True,
+            },
+            sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
+        )
+    """
+
+    def __init__(
+        self,
+        saturation_type: str | None = None,
+        adstock_config: dict | None = None,
+        saturation_config: dict | None = None,
+        coef_constraint: str = "unconstrained",
+        sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
+    ):
+        """Initialize TransferFunctionLinearRegression model."""
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+
+        # Validate that at least one transform is specified
+        if saturation_type is None and adstock_config is None:
+            raise ValueError(
+                "At least one of saturation_type or adstock_config must be specified."
+            )
+
+        self.saturation_type = saturation_type
+        self.adstock_config = adstock_config
+        self.saturation_config = saturation_config or {}
+        self.coef_constraint = coef_constraint
+
+        # Store for later use
+        self.treatment_names: list[str] | None = None
+        self.n_treatments: int | None = None
+
+    def priors_from_data(self, X: xr.DataArray, y: xr.DataArray) -> dict[str, Any]:
+        """
+        Generate data-informed priors that scale with outcome variable.
+
+        Computes priors for baseline coefficients, treatment coefficients,
+        and error standard deviation based on the standard deviation of y.
+        This ensures priors are reasonable regardless of data scale.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+
+        Returns
+        -------
+        dict[str, Prior]
+            Dictionary with Prior objects for beta, theta_treatment, and sigma.
+
+        Notes
+        -----
+        The returned dictionary contains Prior objects with the following structure::
+
+            {
+                "beta": Prior(
+                    "Normal", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+                ),
+                "theta_treatment": Prior(
+                    "Normal",
+                    mu=0,
+                    sigma=2 * y_scale,
+                    dims=["treated_units", "treatment_names"],
+                ),
+                "sigma": Prior("HalfNormal", sigma=2 * y_scale, dims=["treated_units"]),
+            }
+
+        where ``y_scale = std(y)``.
+        """
+        y_scale = float(np.std(y))
+
+        priors = {
+            "beta": Prior(
+                "Normal",
+                mu=0,
+                sigma=5 * y_scale,
+                dims=["treated_units", "coeffs"],
+            ),
+            "sigma": Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units"],
+            ),
+        }
+
+        # Treatment coefficient prior depends on constraint
+        if self.coef_constraint == "nonnegative":
+            priors["theta_treatment"] = Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+        else:
+            priors["theta_treatment"] = Prior(
+                "Normal",
+                mu=0,
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+
+        return priors
+
+    def build_model(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        treatment_data: xr.DataArray,
+    ) -> None:
+        """
+        Build the PyMC model with transforms.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+        coords : dict
+            Coordinate names for PyMC.
+        treatment_data : xr.DataArray
+            Raw treatment variables (n_obs, n_treatments).
+        """
+        from pymc_marketing.mmm.transformers import (
+            geometric_adstock,
+            hill_function,
+            logistic_saturation,
+            michaelis_menten,
+        )
+
+        self.treatment_names = treatment_data.coords.get(
+            "treatment_names",
+            [f"treatment_{i}" for i in range(treatment_data.shape[1])],
+        ).values.tolist()
+        self.n_treatments = treatment_data.shape[1]
+
+        with self:
+            self.add_coords(coords)
+
+            # Register data
+            X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            treatment_raw = pm.Data(
+                "treatment_raw", treatment_data, dims=["obs_ind", "treatment_names"]
+            )
+
+            # ==================================================================
+            # Transform Parameters (if applicable)
+            # ==================================================================
+            transform_params = {}
+
+            # Adstock transform parameters
+            if self.adstock_config is not None:
+                half_life_prior_config = self.adstock_config.get(
+                    "half_life_prior", {"dist": "Gamma", "alpha": 4, "beta": 2}
+                )
+                if half_life_prior_config["dist"] == "Gamma":
+                    half_life = pm.Gamma(
+                        "half_life",
+                        alpha=half_life_prior_config["alpha"],
+                        beta=half_life_prior_config["beta"],
+                    )
+                elif half_life_prior_config["dist"] == "HalfNormal":
+                    half_life = pm.HalfNormal(
+                        "half_life",
+                        sigma=half_life_prior_config["sigma"],
+                    )
+                else:
+                    raise ValueError(
+                        f"Unsupported prior distribution: {half_life_prior_config['dist']}"
+                    )
+
+                transform_params["half_life"] = half_life
+
+                # Convert half_life to alpha for geometric_adstock
+                alpha_adstock = pm.Deterministic(
+                    "alpha_adstock", pt.power(0.5, 1.0 / half_life)
+                )
+
+            # Saturation transform parameters
+            if self.saturation_type == "hill":
+                slope_prior = self.saturation_config.get(
+                    "slope_prior", {"dist": "HalfNormal", "sigma": 2}
+                )
+                kappa_prior = self.saturation_config.get(
+                    "kappa_prior", {"dist": "HalfNormal", "sigma": 10}
+                )
+
+                if slope_prior["dist"] == "HalfNormal":
+                    slope = pm.HalfNormal("slope", sigma=slope_prior["sigma"])
+                elif slope_prior["dist"] == "Gamma":
+                    slope = pm.Gamma(
+                        "slope", alpha=slope_prior["alpha"], beta=slope_prior["beta"]
+                    )
+
+                if kappa_prior["dist"] == "HalfNormal":
+                    kappa = pm.HalfNormal("kappa", sigma=kappa_prior["sigma"])
+                elif kappa_prior["dist"] == "Gamma":
+                    kappa = pm.Gamma(
+                        "kappa", alpha=kappa_prior["alpha"], beta=kappa_prior["beta"]
+                    )
+
+                transform_params["slope"] = slope
+                transform_params["kappa"] = kappa
+
+            elif self.saturation_type == "logistic":
+                lam_prior = self.saturation_config.get(
+                    "lam_prior", {"dist": "HalfNormal", "sigma": 1}
+                )
+                if lam_prior["dist"] == "HalfNormal":
+                    lam = pm.HalfNormal("lam", sigma=lam_prior["sigma"])
+                elif lam_prior["dist"] == "Gamma":
+                    lam = pm.Gamma(
+                        "lam", alpha=lam_prior["alpha"], beta=lam_prior["beta"]
+                    )
+                transform_params["lam"] = lam
+
+            elif self.saturation_type == "michaelis_menten":
+                alpha_prior = self.saturation_config.get(
+                    "alpha_prior", {"dist": "HalfNormal", "sigma": 1}
+                )
+                lam_prior = self.saturation_config.get(
+                    "lam_prior", {"dist": "HalfNormal", "sigma": 100}
+                )
+
+                if alpha_prior["dist"] == "HalfNormal":
+                    alpha_sat = pm.HalfNormal("alpha_sat", sigma=alpha_prior["sigma"])
+                elif alpha_prior["dist"] == "Gamma":
+                    alpha_sat = pm.Gamma(
+                        "alpha_sat",
+                        alpha=alpha_prior["alpha"],
+                        beta=alpha_prior["beta"],
+                    )
+
+                if lam_prior["dist"] == "HalfNormal":
+                    lam = pm.HalfNormal("lam", sigma=lam_prior["sigma"])
+                elif lam_prior["dist"] == "Gamma":
+                    lam = pm.Gamma(
+                        "lam", alpha=lam_prior["alpha"], beta=lam_prior["beta"]
+                    )
+
+                transform_params["alpha_sat"] = alpha_sat
+                transform_params["lam"] = lam
+
+            # ==================================================================
+            # Apply Transforms to Treatment Variables
+            # ==================================================================
+            treatment_transformed_list = []
+
+            for i in range(self.n_treatments):
+                treatment_i = treatment_raw[:, i]
+
+                # Apply saturation
+                if self.saturation_type == "hill":
+                    treatment_i = hill_function(treatment_i, slope=slope, kappa=kappa)
+                elif self.saturation_type == "logistic":
+                    treatment_i = logistic_saturation(treatment_i, lam=lam)
+                elif self.saturation_type == "michaelis_menten":
+                    treatment_i = michaelis_menten(
+                        treatment_i, alpha=alpha_sat, lam=lam
+                    )
+
+                # Apply adstock
+                if self.adstock_config is not None:
+                    l_max = self.adstock_config.get("l_max", 12)
+                    normalize = self.adstock_config.get("normalize", True)
+                    treatment_i = geometric_adstock(
+                        treatment_i,
+                        alpha=alpha_adstock,
+                        l_max=l_max,
+                        normalize=normalize,
+                        mode="After",  # Causal: only past affects present
+                    )
+
+                treatment_transformed_list.append(treatment_i)
+
+            # Stack transformed treatments
+            treatment_transformed = pt.stack(treatment_transformed_list, axis=1)
+
+            # ==================================================================
+            # Regression Coefficients (with data-informed priors)
+            # ==================================================================
+            # Baseline coefficients: data-informed priors set via priors_from_data()
+            beta = self.priors["beta"].create_variable("beta")
+
+            # Treatment coefficients: data-informed priors set via priors_from_data()
+            theta_treatment = self.priors["theta_treatment"].create_variable(
+                "theta_treatment"
+            )
+
+            # ==================================================================
+            # Mean Function
+            # ==================================================================
+            # Baseline contribution
+            mu_baseline = pt.dot(X_data, beta.T)  # (n_obs, n_units)
+
+            # Treatment contribution
+            mu_treatment = pt.dot(
+                treatment_transformed, theta_treatment.T
+            )  # (n_obs, n_units)
+
+            # Combined mean
+            mu = pm.Deterministic(
+                "mu", mu_baseline + mu_treatment, dims=["obs_ind", "treated_units"]
+            )
+
+            # ==================================================================
+            # Likelihood
+            # ==================================================================
+            # Error std: data-informed prior set via priors_from_data()
+            sigma = self.priors["sigma"].create_variable("sigma")
+
+            # For now, use independent Normal errors
+            # Note: AR(1) errors in regression context require more complex implementation
+            # See: https://discourse.pymc.io/t/regression-with-ar-1-errors/
+            # Future enhancement: Implement AR(1) errors via state-space or custom likelihood
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_data,
+                dims=["obs_ind", "treated_units"],
+            )
+
+    def fit(self, X, y, coords, treatment_data):
+        """
+        Fit the Transfer Function model.
+
+        This method overrides the base PyMCModel.fit() to accept treatment_data.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+        coords : dict
+            Coordinate names for PyMC model.
+        treatment_data : xr.DataArray
+            Raw treatment variables (n_obs, n_treatments).
+
+        Returns
+        -------
+        idata : arviz.InferenceData
+            Inference data with posterior, prior predictive, and posterior predictive.
+        """
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        # Merge priors with precedence: user-specified > data-driven > defaults
+        # Data-driven priors are computed first, then user-specified priors override them
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
+
+        # Build the model with treatment data
+        self.build_model(X, y, coords, treatment_data)
+
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata, progressbar=False, random_seed=random_seed
+                )
+            )
+        return self.idata
+
+
+class TransferFunctionARRegression(PyMCModel):
+    r"""
+    Bayesian Transfer Function model with AR(1) errors for Graded Intervention Time Series.
+
+    This model extends the Transfer Function framework by explicitly modeling autocorrelation
+    in the errors using an AR(1) process implemented via quasi-differencing. This approach
+    properly accounts for temporal correlation in the residuals while jointly estimating
+    transform parameters (adstock, saturation) and regression coefficients.
+
+    Mathematical Framework
+    ----------------------
+    The standard regression model with AR(1) errors is:
+
+    .. math::
+        y[t] = \mu[t] + \epsilon[t]
+        \epsilon[t] = \rho \cdot \epsilon[t-1] + \nu[t]
+        \nu[t] \sim N(0, \sigma_\nu^2)
+
+    where :math:`\mu[t]` is the regression mean (baseline + transformed treatment effects),
+    :math:`\rho` is the AR(1) coefficient (|ρ| < 1), and :math:`\nu[t]` is white noise.
+
+    Quasi-Differencing Transformation
+    ----------------------------------
+    To enable Bayesian inference, we apply quasi-differencing:
+
+    .. math::
+        y[t] - \rho \cdot y[t-1] = \mu[t] - \rho \cdot \mu[t-1] + \nu[t]
+
+    This transforms the model into one with independent errors :math:`\nu[t]`, which can
+    be directly sampled in PyMC. The quasi-differenced likelihood is:
+
+    - For t=0: :math:`y[0] \sim N(\mu[0], \sigma_\nu / \sqrt{1-\rho^2})` (stationary initial condition)
+    - For t>0: :math:`y[t] - \rho \cdot y[t-1] \sim N(\mu[t] - \rho \cdot \mu[t-1], \sigma_\nu)`
+
+    Advantages Over Independent Errors
+    -----------------------------------
+    - **Proper uncertainty quantification**: Accounts for temporal correlation in credible intervals
+    - **More efficient inference**: Correctly models the error structure
+    - **Better parameter recovery**: Avoids bias from ignoring autocorrelation
+    - **Diagnostic information**: The :math:`\rho` parameter indicates strength of temporal dependence
+
+    When to Use
+    -----------
+    Use this model when:
+
+    - Time series data exhibits autocorrelation in residuals
+    - Standard transfer function model shows diagnostic issues (e.g., correlated residuals)
+    - You need proper uncertainty propagation with temporal dependence
+
+    Use the standard TransferFunctionLinearRegression when:
+
+    - Residuals show minimal autocorrelation
+    - Computational efficiency is critical (AR model is slower)
+    - You want a simpler baseline model for comparison
+
+    Parameters
+    ----------
+    saturation_type : str or None
+        Type of saturation transform. Options: "hill", "logistic", "michaelis_menten", None.
+        If None, no saturation is applied.
+    adstock_config : dict or None
+        Configuration for adstock transform. Required keys:
+        - "half_life_prior": dict with prior specification (e.g., {"dist": "Gamma", "alpha": 4, "beta": 2})
+        - "l_max": int, maximum lag
+        - "normalize": bool, whether to normalize weights
+        If None, no adstock is applied.
+    saturation_config : dict or None
+        Configuration for saturation transform. Structure depends on saturation_type:
+        - For "hill": {"slope_prior": {...}, "kappa_prior": {...}}
+        - For "logistic": {"lam_prior": {...}}
+        - For "michaelis_menten": {"alpha_prior": {...}, "lam_prior": {...}}
+    coef_constraint : str, default="unconstrained"
+        Constraint on treatment coefficients: "nonnegative" or "unconstrained".
+    sample_kwargs : dict, optional
+        Additional kwargs passed to pm.sample().
+
+    Notes
+    -----
+    - The AR(1) coefficient :math:`\rho` has a Uniform(-0.99, 0.99) prior by default
+    - The quasi-differencing approach ensures the model remains computationally tractable
+    - Posterior predictive sampling requires forward simulation of the AR process
+    - Convergence can be slower than the independent errors model; consider increasing tune/draws
+
+    **Prior Customization**:
+
+    Priors are managed using the ``Prior`` class from ``pymc_extras`` and can be
+    customized via the ``priors`` parameter::
+
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.TransferFunctionARRegression(
+            saturation_type=None,
+            adstock_config={...},
+            priors={
+                "beta": Prior(
+                    "Normal", mu=0, sigma=100, dims=["treated_units", "coeffs"]
+                ),
+                "rho": Prior(
+                    "Uniform", lower=-0.95, upper=0.95, dims=["treated_units"]
+                ),
+            },
+        )
+
+    By default, data-informed priors are set automatically via ``priors_from_data()``:
+
+    - Baseline coefficients (``beta``): ``Normal(0, 5 * std(y))``
+    - Treatment coefficients (``theta_treatment``): ``Normal(0, 2 * std(y))`` or ``HalfNormal(2 * std(y))``
+    - Error std (``sigma``): ``HalfNormal(2 * std(y))``
+    - AR(1) coefficient (``rho``): ``Uniform(-0.99, 0.99)``
+
+    This adaptive approach ensures priors are reasonable regardless of data scale.
+
+    Examples
+    --------
+    Basic usage::
+
+        import causalpy as cp
+
+        model = cp.pymc_models.TransferFunctionARRegression(
+            saturation_type=None,
+            adstock_config={
+                "half_life_prior": {"dist": "Gamma", "alpha": 4, "beta": 2},
+                "l_max": 8,
+                "normalize": True,
+            },
+            sample_kwargs={"chains": 4, "draws": 2000, "tune": 1000},
+        )
+        result = cp.GradedInterventionTimeSeries(
+            data=df,
+            y_column="outcome",
+            treatment_names=["treatment"],
+            base_formula="1 + time + covariate",
+            model=model,
+        )
+
+    References
+    ----------
+    .. [1] Pankratz, A. (1991). "Forecasting with Dynamic Regression Models". Wiley.
+    .. [2] Box, G. E., & Jenkins, G. M. (2015). "Time Series Analysis: Forecasting and Control". Wiley.
+    """
+
+    def __init__(
+        self,
+        saturation_type: str | None = None,
+        adstock_config: dict | None = None,
+        saturation_config: dict | None = None,
+        coef_constraint: str = "unconstrained",
+        sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
+    ):
+        """Initialize TransferFunctionARRegression model."""
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+
+        # Validate that at least one transform is specified
+        if saturation_type is None and adstock_config is None:
+            raise ValueError(
+                "At least one of saturation_type or adstock_config must be specified."
+            )
+
+        self.saturation_type = saturation_type
+        self.adstock_config = adstock_config
+        self.saturation_config = saturation_config or {}
+        self.coef_constraint = coef_constraint
+
+        # Store for later use
+        self.treatment_names: list[str] | None = None
+        self.n_treatments: int | None = None
+
+    def priors_from_data(self, X: xr.DataArray, y: xr.DataArray) -> dict[str, Any]:
+        """
+        Generate data-informed priors including AR(1) coefficient.
+
+        Similar to TransferFunctionLinearRegression but also includes
+        a prior for the AR(1) coefficient rho.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix.
+        y : xr.DataArray
+            Outcome variable.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Dictionary with Prior objects for beta, theta_treatment, sigma, and rho.
+
+        Notes
+        -----
+        The returned dictionary contains Prior objects with the following structure::
+
+            {
+                "beta": Prior(
+                    "Normal", mu=0, sigma=5 * y_scale, dims=["treated_units", "coeffs"]
+                ),
+                "theta_treatment": Prior(
+                    "Normal",
+                    mu=0,
+                    sigma=2 * y_scale,
+                    dims=["treated_units", "treatment_names"],
+                ),
+                "sigma": Prior("HalfNormal", sigma=2 * y_scale, dims=["treated_units"]),
+                "rho": Prior(
+                    "Uniform", lower=-0.99, upper=0.99, dims=["treated_units"]
+                ),
+            }
+
+        where ``y_scale = std(y)``.
+        """
+        y_scale = float(np.std(y))
+
+        priors = {
+            "beta": Prior(
+                "Normal",
+                mu=0,
+                sigma=5 * y_scale,
+                dims=["treated_units", "coeffs"],
+            ),
+            "sigma": Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units"],
+            ),
+            "rho": Prior(
+                "Uniform",
+                lower=-0.99,
+                upper=0.99,
+                dims=["treated_units"],
+            ),
+        }
+
+        # Treatment coefficient prior depends on constraint
+        if self.coef_constraint == "nonnegative":
+            priors["theta_treatment"] = Prior(
+                "HalfNormal",
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+        else:
+            priors["theta_treatment"] = Prior(
+                "Normal",
+                mu=0,
+                sigma=2 * y_scale,
+                dims=["treated_units", "treatment_names"],
+            )
+
+        return priors
+
+    def build_model(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        treatment_data: xr.DataArray,
+    ) -> None:
+        """
+        Build the PyMC model with transforms and AR(1) errors using quasi-differencing.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+        coords : dict
+            Coordinate names for PyMC.
+        treatment_data : xr.DataArray
+            Raw treatment variables (n_obs, n_treatments).
+        """
+        from pymc_marketing.mmm.transformers import (
+            geometric_adstock,
+            hill_function,
+            logistic_saturation,
+            michaelis_menten,
+        )
+
+        self.treatment_names = treatment_data.coords.get(
+            "treatment_names",
+            [f"treatment_{i}" for i in range(treatment_data.shape[1])],
+        ).values.tolist()
+        self.n_treatments = treatment_data.shape[1]
+
+        with self:
+            self.add_coords(coords)
+
+            # Add coordinate for differenced observations (needed for AR(1) likelihood)
+            # Note: y has shape (n_obs, 1), so differenced has shape (n_obs-1, 1)
+            n_obs = y.shape[0]
+            self.add_coords({"obs_ind_diff": range(n_obs - 1)})
+
+            # Register data
+            X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            treatment_raw = pm.Data(
+                "treatment_raw", treatment_data, dims=["obs_ind", "treatment_names"]
+            )
+
+            # ==================================================================
+            # Transform Parameters (if applicable)
+            # ==================================================================
+            transform_params = {}
+
+            # Adstock transform parameters
+            if self.adstock_config is not None:
+                half_life_prior_config = self.adstock_config.get(
+                    "half_life_prior", {"dist": "Gamma", "alpha": 4, "beta": 2}
+                )
+                if half_life_prior_config["dist"] == "Gamma":
+                    half_life = pm.Gamma(
+                        "half_life",
+                        alpha=half_life_prior_config["alpha"],
+                        beta=half_life_prior_config["beta"],
+                    )
+                elif half_life_prior_config["dist"] == "HalfNormal":
+                    half_life = pm.HalfNormal(
+                        "half_life",
+                        sigma=half_life_prior_config["sigma"],
+                    )
+                else:
+                    raise ValueError(
+                        f"Unsupported prior distribution: {half_life_prior_config['dist']}"
+                    )
+
+                transform_params["half_life"] = half_life
+
+                # Convert half_life to alpha for geometric_adstock
+                alpha_adstock = pm.Deterministic(
+                    "alpha_adstock", pt.power(0.5, 1.0 / half_life)
+                )
+
+            # Saturation transform parameters
+            if self.saturation_type == "hill":
+                slope_prior = self.saturation_config.get(
+                    "slope_prior", {"dist": "HalfNormal", "sigma": 2}
+                )
+                kappa_prior = self.saturation_config.get(
+                    "kappa_prior", {"dist": "HalfNormal", "sigma": 10}
+                )
+
+                if slope_prior["dist"] == "HalfNormal":
+                    slope = pm.HalfNormal("slope", sigma=slope_prior["sigma"])
+                elif slope_prior["dist"] == "Gamma":
+                    slope = pm.Gamma(
+                        "slope", alpha=slope_prior["alpha"], beta=slope_prior["beta"]
+                    )
+
+                if kappa_prior["dist"] == "HalfNormal":
+                    kappa = pm.HalfNormal("kappa", sigma=kappa_prior["sigma"])
+                elif kappa_prior["dist"] == "Gamma":
+                    kappa = pm.Gamma(
+                        "kappa", alpha=kappa_prior["alpha"], beta=kappa_prior["beta"]
+                    )
+
+                transform_params["slope"] = slope
+                transform_params["kappa"] = kappa
+
+            elif self.saturation_type == "logistic":
+                lam_prior = self.saturation_config.get(
+                    "lam_prior", {"dist": "HalfNormal", "sigma": 1}
+                )
+                if lam_prior["dist"] == "HalfNormal":
+                    lam = pm.HalfNormal("lam", sigma=lam_prior["sigma"])
+                elif lam_prior["dist"] == "Gamma":
+                    lam = pm.Gamma(
+                        "lam", alpha=lam_prior["alpha"], beta=lam_prior["beta"]
+                    )
+                transform_params["lam"] = lam
+
+            elif self.saturation_type == "michaelis_menten":
+                alpha_prior = self.saturation_config.get(
+                    "alpha_prior", {"dist": "HalfNormal", "sigma": 1}
+                )
+                lam_prior = self.saturation_config.get(
+                    "lam_prior", {"dist": "HalfNormal", "sigma": 100}
+                )
+
+                if alpha_prior["dist"] == "HalfNormal":
+                    alpha_sat = pm.HalfNormal("alpha_sat", sigma=alpha_prior["sigma"])
+                elif alpha_prior["dist"] == "Gamma":
+                    alpha_sat = pm.Gamma(
+                        "alpha_sat",
+                        alpha=alpha_prior["alpha"],
+                        beta=alpha_prior["beta"],
+                    )
+
+                if lam_prior["dist"] == "HalfNormal":
+                    lam = pm.HalfNormal("lam", sigma=lam_prior["sigma"])
+                elif lam_prior["dist"] == "Gamma":
+                    lam = pm.Gamma(
+                        "lam", alpha=lam_prior["alpha"], beta=lam_prior["beta"]
+                    )
+
+                transform_params["alpha_sat"] = alpha_sat
+                transform_params["lam"] = lam
+
+            # ==================================================================
+            # Apply Transforms to Treatment Variables
+            # ==================================================================
+            treatment_transformed_list = []
+
+            for i in range(self.n_treatments):
+                treatment_i = treatment_raw[:, i]
+
+                # Apply saturation
+                if self.saturation_type == "hill":
+                    treatment_i = hill_function(treatment_i, slope=slope, kappa=kappa)
+                elif self.saturation_type == "logistic":
+                    treatment_i = logistic_saturation(treatment_i, lam=lam)
+                elif self.saturation_type == "michaelis_menten":
+                    treatment_i = michaelis_menten(
+                        treatment_i, alpha=alpha_sat, lam=lam
+                    )
+
+                # Apply adstock
+                if self.adstock_config is not None:
+                    l_max = self.adstock_config.get("l_max", 12)
+                    normalize = self.adstock_config.get("normalize", True)
+                    treatment_i = geometric_adstock(
+                        treatment_i,
+                        alpha=alpha_adstock,
+                        l_max=l_max,
+                        normalize=normalize,
+                        mode="After",  # Causal: only past affects present
+                    )
+
+                treatment_transformed_list.append(treatment_i)
+
+            # Stack transformed treatments
+            treatment_transformed = pt.stack(treatment_transformed_list, axis=1)
+
+            # ==================================================================
+            # Regression Coefficients (with data-informed priors)
+            # ==================================================================
+            # Baseline coefficients: data-informed priors set via priors_from_data()
+            beta = self.priors["beta"].create_variable("beta")
+
+            # Treatment coefficients: data-informed priors set via priors_from_data()
+            theta_treatment = self.priors["theta_treatment"].create_variable(
+                "theta_treatment"
+            )
+
+            # ==================================================================
+            # Mean Function
+            # ==================================================================
+            # Baseline contribution
+            mu_baseline = pt.dot(X_data, beta.T)  # (n_obs, n_units)
+
+            # Treatment contribution
+            mu_treatment = pt.dot(
+                treatment_transformed, theta_treatment.T
+            )  # (n_obs, n_units)
+
+            # Combined mean
+            mu = pm.Deterministic(
+                "mu", mu_baseline + mu_treatment, dims=["obs_ind", "treated_units"]
+            )
+
+            # ==================================================================
+            # AR(1) Likelihood via Quasi-Differencing
+            # ==================================================================
+            # AR(1) parameter: data-informed prior set via priors_from_data()
+            rho = self.priors["rho"].create_variable("rho")
+
+            # Innovation standard deviation: data-informed prior set via priors_from_data()
+            sigma = self.priors["sigma"].create_variable("sigma")
+
+            # Quasi-differencing approach using manual log-likelihood
+            # We can't use y_diff as observed data because it depends on rho
+
+            # For t > 0: compute residuals of quasi-differenced model
+            # residuals = (y[t] - rho * y[t-1]) - (mu[t] - rho * mu[t-1])
+            y_diff = y_data[1:, :] - rho * y_data[:-1, :]
+            mu_diff = mu[1:, :] - rho * mu[:-1, :]
+            residuals_diff = y_diff - mu_diff
+
+            # Compute log-likelihood for t > 0 (Gaussian log-likelihood formula)
+            # log p(y[t] | y[t-1], params) = -0.5 * ((y_diff - mu_diff) / sigma)^2 - log(sigma) - 0.5 * log(2π)
+            n_diff = y_data.shape[0] - 1  # Number of differenced observations
+            n_units = y_data.shape[1]  # Number of units
+            logp_diff = (
+                -0.5 * pt.sum((residuals_diff / sigma) ** 2)
+                - n_diff * pt.sum(pt.log(sigma))
+                - 0.5 * n_diff * n_units * pt.log(2 * np.pi)
+            )
+            pm.Potential("logp_diff", logp_diff)
+
+            # Initial observation (t=0) with stationary distribution
+            # For AR(1), the stationary variance is sigma^2 / (1 - rho^2)
+            residuals_0 = y_data[0, :] - mu[0, :]
+            sigma_0 = sigma / pt.sqrt(1.0 - rho**2)
+
+            # Compute log-likelihood for t=0
+            logp_0 = (
+                -0.5 * pt.sum((residuals_0 / sigma_0) ** 2)
+                - pt.sum(pt.log(sigma_0))
+                - 0.5 * n_units * pt.log(2 * np.pi)
+            )
+            pm.Potential("logp_0", logp_0)
+
+    def fit(self, X, y, coords, treatment_data):
+        """
+        Fit the Transfer Function AR(1) model.
+
+        This method overrides the base PyMCModel.fit() to accept treatment_data.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Baseline design matrix (n_obs, n_baseline_features).
+        y : xr.DataArray
+            Outcome variable (n_obs, 1).
+        coords : dict
+            Coordinate names for PyMC model.
+        treatment_data : xr.DataArray
+            Raw treatment variables (n_obs, n_treatments).
+
+        Returns
+        -------
+        idata : arviz.InferenceData
+            Inference data with posterior, prior predictive, and posterior predictive.
+        """
+        # Ensure random_seed is used in sample_prior_predictive() and
+        # sample_posterior_predictive() if provided in sample_kwargs.
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        # Merge priors with precedence: user-specified > data-driven > defaults
+        # Data-driven priors are computed first, then user-specified priors override them
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
+
+        # Build the model with treatment data
+        self.build_model(X, y, coords, treatment_data)
+
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata, progressbar=False, random_seed=random_seed
+                )
+            )
+        return self.idata

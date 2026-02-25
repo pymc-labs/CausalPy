@@ -150,6 +150,10 @@ Glossary
    Treatment effect
       The difference in outcomes between what happened after a treatment is implemented and what would have happened (see Counterfactual) if the treatment had not been implemented, assuming everything else had been the same.
 
+   Transfer-Function Interrupted Time Series
+   TF-ITS
+      An extension of interrupted time series designs for estimating causal effects of graded (non-binary) interventions in single-market or single-unit time series. Unlike standard ITS which typically models binary on/off treatments, TF-ITS handles interventions with varying intensity (e.g., advertising spend, policy intensity) using transfer functions that model saturation (diminishing returns) and adstock (carryover effects). The method constructs counterfactuals by scaling or zeroing the intervention in specific time windows and recomputing transformed inputs with fixed transformation parameters. Commonly implemented using OLS regression with HAC standard errors for non-Bayesian estimation.
+
    Wilkinson notation
       A notation for describing statistical models :footcite:p:`wilkinson1973symbolic`.
 
