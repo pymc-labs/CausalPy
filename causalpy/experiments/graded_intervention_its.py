@@ -23,7 +23,9 @@ to provide a complete causal inference workflow including visualization,
 diagnostics, and counterfactual effect estimation.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,6 +41,9 @@ from causalpy.transforms import Treatment
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
+
+if TYPE_CHECKING:
+    from causalpy.reporting import EffectSummary
 
 LEGEND_FONT_SIZE = 12
 
@@ -467,6 +472,17 @@ class GradedInterventionTimeSeries(BaseExperiment):
 
         Z = np.column_stack(Z_columns)
         return Z, labels
+
+    def effect_summary(self, **kwargs: Any) -> EffectSummary:
+        """Generate a decision-ready summary of causal effects.
+
+        Not yet implemented for GradedInterventionTimeSeries. Use the
+        :meth:`effect` method for counterfactual effect estimation.
+        """
+        raise NotImplementedError(
+            "effect_summary is not yet implemented for GradedInterventionTimeSeries. "
+            "Use the .effect() method for counterfactual effect estimation."
+        )
 
     def effect(
         self,
