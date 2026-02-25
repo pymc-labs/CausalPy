@@ -15,7 +15,7 @@
 Base class for quasi experimental designs.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 import arviz as az
@@ -28,7 +28,7 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class BaseExperiment:
+class BaseExperiment(ABC):
     """Base class for quasi experimental designs.
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
@@ -98,14 +98,12 @@ class BaseExperiment:
             else:
                 raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    @abstractmethod
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
@@ -121,14 +119,12 @@ class BaseExperiment:
         else:
             raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
-    @abstractmethod
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
