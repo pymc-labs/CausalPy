@@ -83,18 +83,66 @@ class BaseExperiment(ABC):
         """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def plot(
+        self,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        ci_prob: float = 0.94,
+        num_samples: int = 50,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple:
         """Plot the model.
 
+        Parameters
+        ----------
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            Type of visualization. Default is "ribbon".
+        ci_kind : {"hdi", "eti"}, optional
+            Type of interval for ribbon plots. Default is "hdi".
+        ci_prob : float, optional
+            The size of the credible interval. Default is 0.94.
+        num_samples : int, optional
+            Number of posterior samples to plot for spaghetti visualization.
+            Default is 50.
+        *args : Any
+            Additional positional arguments passed to `_bayesian_plot` or `_ols_plot`.
+        **kwargs : Any
+            Additional keyword arguments passed to `_bayesian_plot` or `_ols_plot`.
+            Can include deprecated `interval` and `hdi_prob` for backward compatibility.
+
+        Returns
+        -------
+        tuple
+            Tuple of figure and axes objects (format depends on experiment type).
+
+        Notes
+        -----
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
-        depending on the model type.
+        depending on the model type. The `kind`, `ci_kind`, `ci_prob`, and `num_samples`
+        parameters are passed through to the underlying plotting methods, which can use
+        them when calling `plot_xY()`.
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                return self._bayesian_plot(*args, **kwargs)
+                return self._bayesian_plot(
+                    *args,
+                    kind=kind,
+                    ci_kind=ci_kind,
+                    ci_prob=ci_prob,
+                    num_samples=num_samples,
+                    **kwargs,
+                )
             elif isinstance(self.model, RegressorMixin):
-                return self._ols_plot(*args, **kwargs)
+                return self._ols_plot(
+                    *args,
+                    kind=kind,
+                    ci_kind=ci_kind,
+                    ci_prob=ci_prob,
+                    num_samples=num_samples,
+                    **kwargs,
+                )
             else:
                 raise ValueError("Unsupported model type")
 
