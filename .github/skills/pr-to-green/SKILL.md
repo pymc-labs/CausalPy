@@ -26,62 +26,71 @@ If the user provides a PR number (for example `PR #724`), do this first:
 
 1. Resolve PR metadata from GitHub
    - `gh pr view <number>` to get title, state, head branch, base branch, mergeability, and check summary.
+   - `gh pr checks <number>` to get per-check pass/fail/pending status.
 2. Move local repo to the PR branch
    - `gh pr checkout <number>` (preferred) so local branch tracks the PR head.
 3. Verify branch context before edits
    - Confirm current branch, tracking status, and whether local uncommitted work exists.
-4. Continue with the main workflow below using the PR base branch from GitHub metadata (not assumptions).
-
-If the PR cannot be checked out automatically:
-- Report the exact blocker (permissions, missing remote, closed PR, etc.).
-- Ask the maintainer whether to proceed with a manual fetch/checkout strategy.
+4. Continue with the main workflow below using the PR base branch from GitHub metadata (not assumptions about `main`).
 
 ## Workflow
 
-1. Inspect current state
-   - Check git status, branch tracking, and divergence from `main`
-   - Inventory failures from CI or local check output
-   - Classify failure type: conflict, lint/type, test, doctest/docs, packaging, infra-flake
+1. Triage and early exit
+   - Assess PR state from entrypoint metadata: branch divergence, mergeability, and check results.
+   - If the PR is up-to-date with its base branch, has no conflicts, and all remote checks pass:
+     - Report "PR is green — no action needed" and stop.
+   - Otherwise, classify what needs fixing: behind-base, conflicts, failing checks, or a combination.
 
-2. Sync branch with `main`
-   - Prefer `git fetch upstream` then `git rebase upstream/main` (or maintainer-preferred merge strategy)
-   - Resolve conflicts file-by-file with intent preservation
-   - Re-run targeted checks after conflict resolution to detect semantic drift
+2. Sync branch with base
+   - Prefer `git fetch upstream` then `git rebase upstream/<base-branch>` (or maintainer-preferred merge strategy).
+   - If the PR cannot be checked out, report the blocker and ask for maintainer guidance.
+   - Resolve conflicts file-by-file with intent preservation.
+   - Re-run targeted checks after conflict resolution to detect semantic drift.
 
 3. Fix failing checks with smallest valid change
-   - Lint/type: apply minimal code changes, avoid broad refactors
-   - Tests: patch root cause and add/adjust tests under `causalpy/tests/` if behavior changes
-   - Docs/doctest: follow docs placement and glossary/citation conventions
-   - Packaging/release checks: verify version and install/import expectations
+   - Lint/type: apply minimal code changes, avoid broad refactors.
+   - Tests: patch root cause and add/adjust tests under `causalpy/tests/` if behavior changes.
+   - Docs/doctest: follow docs placement and glossary/citation conventions.
+   - Packaging/release checks: verify version and install/import expectations.
 
 4. Re-run checks in escalating scope
-   - Fast local signal first (targeted tests/lint)
-   - Then full gate commands required by project norms
-   - Always run `pre-commit run --all-files` before final handoff
+   - Fast local signal first (targeted tests/lint).
+   - Then full gate commands required by project norms.
+   - Always run `pre-commit run --all-files` before final handoff.
+   - If fixes introduced new failures, loop back to step 3 with the new failure set. Do not push until a full local pass is achieved or blockers are identified.
 
-5. Prepare maintainer-ready status update
-   - What was failing
-   - What changed to fix it
-   - Which checks now pass
-   - Remaining blockers (if any) and exact next steps
+5. Push and verify remote
+   - Push fixes to the PR branch (`git push`).
+   - Monitor remote checks via `gh pr checks <number>` until they complete or a timeout is reached.
+   - If remote checks fail on issues not reproducible locally, note the discrepancy explicitly.
 
-## Optional delegation
+6. Prepare maintainer-ready status update
+   - What was failing.
+   - What changed to fix it.
+   - Which checks now pass (local and remote).
+   - Remaining blockers (if any) and exact next steps.
 
-Use subagents when work is noisy, broad, or high-risk:
+## Subagent delegation
 
-- `ci-failure-investigator`
-  - Trigger when CI logs are long/noisy, failures span multiple jobs, or failure family is unclear.
-  - Handoff:
-    - PR/branch context
-    - Failed job names and links/log snippets
-    - Ask for: root cause ranking, fix-first order, and minimal patch plan
+Use subagents (via the Task tool) when work is noisy, broad, or high-risk. Each subagent runs in its own context window and returns a condensed result.
 
-- `merge-conflict-analyst`
-  - Trigger when rebase/merge produces non-trivial conflicts, intent differs across branches, or conflict count is high.
-  - Handoff:
-    - Target branch and merge/rebase direction
-    - Full conflict list and key conflict markers/snippets
-    - Ask for: conflict risk map, lowest-risk resolution order, and explicit escalations
+### `ci-failure-investigator`
+
+Trigger when CI logs are long/noisy, failures span multiple jobs, or failure family is unclear.
+
+Handoff (include in Task prompt):
+- PR number and branch name
+- Failed job names and relevant log snippets or `gh run view` output
+- Ask for: root cause ranking, fix-first order, and minimal patch plan
+
+### `merge-conflict-analyst`
+
+Trigger when rebase/merge produces non-trivial conflicts, intent differs across branches, or conflict count is high.
+
+Handoff (include in Task prompt):
+- Target branch and merge/rebase direction
+- Full conflict list (`git diff --name-only --diff-filter=U`) and key conflict markers/snippets
+- Ask for: conflict risk map, lowest-risk resolution order, and explicit escalations
 
 ### Maintainer escalation clause (required)
 
