@@ -48,7 +48,7 @@ class EstimateEffect:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> step = cp.EstimateEffect(
+    >>> step = cp.EstimateEffect(  # doctest: +SKIP
     ...     method=cp.InterruptedTimeSeries,
     ...     treatment_time=pd.Timestamp("2020-01-01"),
     ...     formula="y ~ 1 + t",

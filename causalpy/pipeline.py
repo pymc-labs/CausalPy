@@ -130,7 +130,7 @@ class Pipeline:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> result = cp.Pipeline(
+    >>> result = cp.Pipeline(  # doctest: +SKIP
     ...     data=df,
     ...     steps=[
     ...         cp.EstimateEffect(
