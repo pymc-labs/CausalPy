@@ -100,6 +100,16 @@ CausalPy has a broad range of quasi-experimental methods for causal inference:
 | Instrumental variable regression | Addresses endogeneity by using an instrument variable that is correlated with the endogenous explanatory variable but uncorrelated with the error term. Used when explanatory variables are correlated with the error term, providing consistent estimates of causal effects. |
 | Inverse Propensity Score Weighting | Weights observations by the inverse of the probability of receiving the treatment. Used in causal inference to create a synthetic sample where the treatment assignment is independent of measured covariates, helping to adjust for confounding variables in observational studies. |
 
+## Getting Help
+
+Have questions about using CausalPy? We're here to help!
+
+- **Questions & Help**: Visit our [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) to ask questions and get help from the community
+- **Bug Reports & Feature Requests**: Open an [Issue](https://github.com/pymc-labs/CausalPy/issues) for bugs or feature requests
+- **Documentation**: Browse the [knowledgebase](knowledgebase/index), [API documentation](api/index), and [examples](notebooks/index) for detailed guides
+
+Please use GitHub Discussions for general questions rather than opening issues, so we can keep the issue tracker focused on bugs and enhancements.
+
 ## Support
 
 This repository is supported by [PyMC Labs](https://www.pymc-labs.io).

@@ -72,6 +72,8 @@ Items 2-4 require setting up a local development environment, see [Local develop
 
 We appreciate being notified of problems with the existing CausalPy code. We prefer that issues be filed the on [Github Issue Tracker](https://github.com/pymc-labs/CausalPy/issues), rather than on social media or by direct email to the developers.
 
+**Note:** If you have a question about using CausalPy or need help with your analysis, please use [GitHub Discussions](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) instead of opening an issue. The issue tracker is for bug reports and feature requests only.
+
 Please verify that your issue is not being currently addressed by other issues or pull requests by using the GitHub search tool to look for key words in the project issue tracker.
 
 ## Use of agents

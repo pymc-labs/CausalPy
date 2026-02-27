@@ -92,6 +92,16 @@ CausalPy has a broad range of quasi-experimental methods for causal inference:
 
 ---
 
+## Getting Help
+
+Have questions about using CausalPy? We're here to help!
+
+- **Questions & Help**: Visit our [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) to ask questions and get help from the community
+- **Bug Reports & Feature Requests**: Open an [Issue](https://github.com/pymc-labs/CausalPy/issues) for bugs or feature requests
+- **Documentation**: Check out our [documentation](https://causalpy.readthedocs.io) for detailed guides and examples
+
+Please use GitHub Discussions for general questions rather than opening issues, so we can keep the issue tracker focused on bugs and enhancements.
+
 ## Support
 
 <img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="50%" />
