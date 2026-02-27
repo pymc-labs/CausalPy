@@ -90,7 +90,7 @@ class SensitivityAnalysis:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> step = cp.SensitivityAnalysis(
+    >>> step = cp.SensitivityAnalysis(  # doctest: +SKIP
     ...     checks=[
     ...         cp.checks.PlaceboInTime(n_folds=4),
     ...         cp.checks.PriorSensitivity(priors=[...]),
