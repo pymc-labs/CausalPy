@@ -14,5 +14,6 @@
 """Sensitivity and diagnostic checks for causal inference experiments."""
 
 from causalpy.checks.base import Check, CheckResult
+from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
 
-__all__ = ["Check", "CheckResult"]
+__all__ = ["Check", "CheckResult", "PlaceboFoldResult", "PlaceboInTime"]
