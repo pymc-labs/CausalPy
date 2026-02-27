@@ -104,7 +104,7 @@ class EstimateEffect:
 
         try:
             context.effect_summary = experiment.effect_summary()
-        except (NotImplementedError, Exception) as exc:
+        except NotImplementedError as exc:
             logger.debug(
                 "effect_summary() not available for %s: %s",
                 self.method.__name__,
