@@ -11,9 +11,8 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Pipeline steps for causal inference workflows."""
+"""Sensitivity and diagnostic checks for causal inference experiments."""
 
-from causalpy.steps.estimate_effect import EstimateEffect
-from causalpy.steps.sensitivity import SensitivityAnalysis, SensitivitySummary
+from causalpy.checks.base import Check, CheckResult
 
-__all__ = ["EstimateEffect", "SensitivityAnalysis", "SensitivitySummary"]
+__all__ = ["Check", "CheckResult"]
