@@ -14,9 +14,22 @@
 """Sensitivity and diagnostic checks for causal inference experiments."""
 
 from causalpy.checks.base import Check, CheckResult
+from causalpy.checks.convex_hull import ConvexHullCheck
+from causalpy.checks.persistence import PersistenceCheck
 from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
+from causalpy.checks.pre_treatment_placebo import PreTreatmentPlaceboCheck
+from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.steps.sensitivity import register_default_check
 
-__all__ = ["Check", "CheckResult", "PlaceboFoldResult", "PlaceboInTime"]
+__all__ = [
+    "Check",
+    "CheckResult",
+    "ConvexHullCheck",
+    "PersistenceCheck",
+    "PlaceboFoldResult",
+    "PlaceboInTime",
+    "PreTreatmentPlaceboCheck",
+    "PriorSensitivity",
+]
 
 register_default_check(PlaceboInTime, PlaceboInTime.applicable_methods)
