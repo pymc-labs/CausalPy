@@ -168,3 +168,49 @@ class TestGenerateReportPipelineIntegration:
         assert isinstance(result, PipelineResult)
         assert isinstance(result.report, str)
         assert "Effect Summary" in result.report
+
+
+# ---------------------------------------------------------------------------
+# Standalone generate_report() on BaseExperiment
+# ---------------------------------------------------------------------------
+
+
+class TestStandaloneGenerateReport:
+    """Tests for BaseExperiment.generate_report() convenience method."""
+
+    @pytest.fixture
+    def experiment(self):
+        """Return a fitted OLS ITS experiment."""
+        np.random.seed(42)
+        n = 100
+        df = pd.DataFrame({"t": np.arange(n), "y": np.random.normal(size=n)})
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        return InterruptedTimeSeries(
+            df, treatment_time=70, formula="y ~ 1 + t", model=model
+        )
+
+    def test_returns_html_string(self, experiment):
+        html = experiment.generate_report(include_plots=False)
+        assert isinstance(html, str)
+        assert "<!DOCTYPE html>" in html
+        assert "CausalPy Analysis Report" in html
+
+    def test_includes_effect_summary_by_default(self, experiment):
+        html = experiment.generate_report(include_plots=False)
+        assert "Effect Summary" in html
+
+    def test_excludes_effect_summary_when_disabled(self, experiment):
+        html = experiment.generate_report(
+            include_plots=False, include_effect_summary=False
+        )
+        assert "Effect Summary" not in html
+
+    def test_writes_to_file(self, experiment, tmp_path):
+        path = tmp_path / "report.html"
+        html = experiment.generate_report(include_plots=False, output_file=path)
+        assert path.exists()
+        assert path.read_text() == html
+
+    def test_includes_plots(self, experiment):
+        html = experiment.generate_report(include_plots=True)
+        assert "data:image/png;base64," in html
