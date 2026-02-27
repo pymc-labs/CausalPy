@@ -53,6 +53,8 @@ def its_context() -> PipelineContext:
 
 
 class TestGenerateReport:
+    """Tests for the GenerateReport pipeline step."""
+
     def test_satisfies_step_protocol(self):
         assert isinstance(GenerateReport(), Step)
 
@@ -142,6 +144,8 @@ class TestGenerateReport:
 
 
 class TestGenerateReportPipelineIntegration:
+    """Integration tests for GenerateReport within a full pipeline."""
+
     def test_full_pipeline(self):
         np.random.seed(42)
         n = 100

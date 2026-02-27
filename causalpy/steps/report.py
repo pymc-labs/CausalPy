@@ -141,6 +141,7 @@ class GenerateReport:
         return context
 
     def __repr__(self) -> str:
+        """Return a string representation of the step."""
         return (
             f"GenerateReport(include_plots={self.include_plots}, "
             f"include_effect_summary={self.include_effect_summary}, "
