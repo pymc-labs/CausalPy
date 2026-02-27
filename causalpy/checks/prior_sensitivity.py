@@ -62,7 +62,7 @@ class PriorSensitivity:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.PriorSensitivity(
+    >>> check = cp.checks.PriorSensitivity(  # doctest: +SKIP
     ...     alternatives=[
     ...         {"name": "diffuse", "model": cp.pymc_models.LinearRegression(...)},
     ...         {"name": "tight", "model": cp.pymc_models.LinearRegression(...)},
