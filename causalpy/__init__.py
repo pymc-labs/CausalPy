@@ -30,7 +30,12 @@ from .experiments.regression_kink import RegressionKink
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
-from .steps import EstimateEffect, SensitivityAnalysis, SensitivitySummary
+from .steps import (
+    EstimateEffect,
+    GenerateReport,
+    SensitivityAnalysis,
+    SensitivitySummary,
+)
 from .utils import extract_lift_for_mmm
 
 __all__ = [
@@ -40,6 +45,7 @@ __all__ = [
     "DifferenceInDifferences",
     "EstimateEffect",
     "extract_lift_for_mmm",
+    "GenerateReport",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
