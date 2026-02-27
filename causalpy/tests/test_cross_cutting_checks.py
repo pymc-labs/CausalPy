@@ -36,6 +36,8 @@ from causalpy.pipeline import PipelineContext
 
 
 class TestConvexHullCheck:
+    """Tests for ConvexHullCheck (Synthetic Control)."""
+
     def test_satisfies_check_protocol(self):
         assert isinstance(ConvexHullCheck(), Check)
 
@@ -82,6 +84,8 @@ class TestConvexHullCheck:
 
 
 class TestPersistenceCheck:
+    """Tests for PersistenceCheck (three-period ITS)."""
+
     def test_satisfies_check_protocol(self):
         assert isinstance(PersistenceCheck(), Check)
 
@@ -131,6 +135,8 @@ class TestPersistenceCheck:
 
 
 class TestPreTreatmentPlaceboCheck:
+    """Tests for PreTreatmentPlaceboCheck (Staggered DiD)."""
+
     def test_satisfies_check_protocol(self):
         assert isinstance(PreTreatmentPlaceboCheck(), Check)
 
@@ -162,6 +168,8 @@ class TestPreTreatmentPlaceboCheck:
 
 
 class TestPriorSensitivity:
+    """Tests for PriorSensitivity check."""
+
     def test_satisfies_check_protocol(self):
         check = PriorSensitivity(
             alternatives=[{"name": "test", "model": LinearRegression()}]

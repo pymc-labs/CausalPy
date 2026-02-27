@@ -38,12 +38,16 @@ from causalpy.steps.sensitivity import (
 
 
 class _PassingCheck:
+    """Mock check that always passes."""
+
     applicable_methods = {InterruptedTimeSeries}
 
     def validate(self, experiment):
+        """No-op validation."""
         pass
 
     def run(self, experiment, context):
+        """Return a passing CheckResult."""
         return CheckResult(
             check_name="PassingCheck",
             passed=True,
@@ -52,12 +56,16 @@ class _PassingCheck:
 
 
 class _FailingCheck:
+    """Mock check that always fails."""
+
     applicable_methods = {InterruptedTimeSeries}
 
     def validate(self, experiment):
+        """No-op validation."""
         pass
 
     def run(self, experiment, context):
+        """Return a failing CheckResult."""
         return CheckResult(
             check_name="FailingCheck",
             passed=False,
@@ -66,12 +74,16 @@ class _FailingCheck:
 
 
 class _InformationalCheck:
+    """Mock check that returns informational (passed=None) result."""
+
     applicable_methods = {InterruptedTimeSeries}
 
     def validate(self, experiment):
+        """No-op validation."""
         pass
 
     def run(self, experiment, context):
+        """Return an informational CheckResult (passed=None)."""
         return CheckResult(
             check_name="InformationalCheck",
             passed=None,
@@ -85,9 +97,11 @@ class _WrongMethodCheck:
     applicable_methods = {SyntheticControl}
 
     def validate(self, experiment):
+        """No-op validation."""
         pass
 
     def run(self, experiment, context):
+        """Return a passing CheckResult."""
         return CheckResult(check_name="WrongMethodCheck", passed=True)
 
 
@@ -122,6 +136,8 @@ def its_context() -> PipelineContext:
 
 
 class TestCheckResult:
+    """Tests for CheckResult dataclass."""
+
     def test_defaults(self):
         r = CheckResult(check_name="test")
         assert r.passed is None
@@ -142,6 +158,8 @@ class TestCheckResult:
 
 
 class TestCheckProtocol:
+    """Tests for Check protocol conformance."""
+
     def test_mock_satisfies_protocol(self):
         assert isinstance(_PassingCheck(), Check)
 
@@ -155,6 +173,8 @@ class TestCheckProtocol:
 
 
 class TestSensitivitySummary:
+    """Tests for SensitivitySummary aggregation."""
+
     def test_all_pass(self):
         results = [
             CheckResult(check_name="a", passed=True, text="ok"),
@@ -194,6 +214,8 @@ class TestSensitivitySummary:
 
 
 class TestSensitivityAnalysis:
+    """Tests for SensitivityAnalysis pipeline step."""
+
     def test_satisfies_step_protocol(self):
         step = SensitivityAnalysis(checks=[_PassingCheck()])
         assert isinstance(step, Step)
@@ -252,6 +274,8 @@ class TestSensitivityAnalysis:
 
 
 class TestRegisterDefaultCheck:
+    """Tests for register_default_check."""
+
     def test_register_and_retrieve(self):
         original = _DEFAULT_CHECKS.copy()
         try:
@@ -282,6 +306,8 @@ class TestRegisterDefaultCheck:
 
 
 class TestPipelineIntegration:
+    """Integration tests for Pipeline with EstimateEffect and SensitivityAnalysis."""
+
     def test_estimate_then_sensitivity(self):
         np.random.seed(42)
         n = 100

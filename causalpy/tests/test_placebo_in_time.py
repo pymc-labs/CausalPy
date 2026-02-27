@@ -45,6 +45,7 @@ def _make_its_data(n: int = 200, seed: int = 42) -> pd.DataFrame:
 
 
 def _make_model():
+    """Create a minimal OLS-compatible model for ITS tests."""
     return cp.create_causalpy_compatible_class(LinearRegression())
 
 
@@ -55,11 +56,13 @@ def _make_model():
 
 @pytest.fixture
 def its_data() -> pd.DataFrame:
+    """Minimal ITS dataset for PlaceboInTime tests."""
     return _make_its_data()
 
 
 @pytest.fixture
 def its_experiment(its_data: pd.DataFrame) -> InterruptedTimeSeries:
+    """Fitted ITS experiment for PlaceboInTime tests."""
     return InterruptedTimeSeries(
         its_data,
         treatment_time=150,
@@ -73,6 +76,7 @@ def its_context(
     its_data: pd.DataFrame,
     its_experiment: InterruptedTimeSeries,
 ) -> PipelineContext:
+    """PipelineContext with fitted ITS experiment for PlaceboInTime tests."""
     ctx = PipelineContext(data=its_data)
     ctx.experiment = its_experiment
     ctx.experiment_config = {

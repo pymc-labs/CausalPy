@@ -114,5 +114,6 @@ class EstimateEffect:
         return context
 
     def __repr__(self) -> str:
+        """Return a string representation of the step."""
         kwarg_str = ", ".join(f"{k}={v!r}" for k, v in self.kwargs.items())
         return f"EstimateEffect(method={self.method.__name__}, {kwarg_str})"

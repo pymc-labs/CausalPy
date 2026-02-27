@@ -108,9 +108,13 @@ class Step(Protocol):
       ``PipelineContext``, mutates it, and returns it.
     """
 
-    def validate(self, context: PipelineContext) -> None: ...
+    def validate(self, context: PipelineContext) -> None:
+        """Check configuration before execution."""
+        ...
 
-    def run(self, context: PipelineContext) -> PipelineContext: ...
+    def run(self, context: PipelineContext) -> PipelineContext:
+        """Execute the step, mutating and returning the context."""
+        ...
 
 
 class Pipeline:

@@ -135,6 +135,7 @@ class PlaceboInTime:
         kwargs = {k: v for k, v in config.items() if k != "method"}
 
         def _factory(data: pd.DataFrame, treatment_time: Any) -> BaseExperiment:
+            """Create a fresh experiment with the given treatment time."""
             kw = dict(kwargs)
             kw["treatment_time"] = treatment_time
             if "model" in kw and kw["model"] is not None:
@@ -328,4 +329,5 @@ class PlaceboInTime:
         )
 
     def __repr__(self) -> str:
+        """Return a string representation of the check."""
         return f"PlaceboInTime(n_folds={self.n_folds})"

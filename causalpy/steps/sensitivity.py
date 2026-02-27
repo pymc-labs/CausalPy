@@ -179,5 +179,6 @@ class SensitivityAnalysis:
         return context
 
     def __repr__(self) -> str:
+        """Return a string representation of the step."""
         check_names = [type(c).__name__ for c in self.checks]
         return f"SensitivityAnalysis(checks={check_names})"

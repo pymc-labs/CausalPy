@@ -38,9 +38,11 @@ class _MockStep:
         self.ran = False
 
     def validate(self, context: PipelineContext) -> None:
+        """Mark this step as validated."""
         self.validated = True
 
     def run(self, context: PipelineContext) -> PipelineContext:
+        """Mark this step as run and return context unchanged."""
         self.ran = True
         return context
 
@@ -49,9 +51,11 @@ class _FailingValidationStep:
     """Step whose validate() always raises."""
 
     def validate(self, context: PipelineContext) -> None:
+        """Raise ValueError to simulate validation failure."""
         raise ValueError("bad config")
 
     def run(self, context: PipelineContext) -> PipelineContext:
+        """Return context unchanged (unreachable when validation fails)."""
         return context  # pragma: no cover
 
 
@@ -62,9 +66,11 @@ class _ContextMutatingStep:
         self.marker = marker
 
     def validate(self, context: PipelineContext) -> None:
+        """No-op validation."""
         pass
 
     def run(self, context: PipelineContext) -> PipelineContext:
+        """Write marker into context.report and return context."""
         context.report = self.marker
         return context
 
@@ -76,6 +82,7 @@ class _ContextMutatingStep:
 
 @pytest.fixture
 def sample_df() -> pd.DataFrame:
+    """Minimal DataFrame for pipeline tests."""
     return pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]})
 
 
@@ -85,6 +92,8 @@ def sample_df() -> pd.DataFrame:
 
 
 class TestPipeline:
+    """Tests for Pipeline orchestrator."""
+
     def test_empty_steps_raises(self, sample_df: pd.DataFrame) -> None:
         with pytest.raises(ValueError, match="non-empty"):
             Pipeline(data=sample_df, steps=[])
@@ -130,6 +139,8 @@ class TestPipeline:
 
 
 class TestPipelineContext:
+    """Tests for PipelineContext."""
+
     def test_defaults(self, sample_df: pd.DataFrame) -> None:
         ctx = PipelineContext(data=sample_df)
         assert ctx.experiment is None
@@ -149,6 +160,8 @@ class TestPipelineContext:
 
 
 class TestPipelineResult:
+    """Tests for PipelineResult."""
+
     def test_from_context(self, sample_df: pd.DataFrame) -> None:
         ctx = PipelineContext(data=sample_df)
         ctx.report = "test_report"
@@ -164,6 +177,8 @@ class TestPipelineResult:
 
 
 class TestStepProtocol:
+    """Tests for Step protocol conformance."""
+
     def test_mock_step_satisfies_protocol(self) -> None:
         assert isinstance(_MockStep(), Step)
 
@@ -188,6 +203,8 @@ class TestStepProtocol:
 
 
 class TestEstimateEffect:
+    """Tests for EstimateEffect pipeline step."""
+
     def test_repr(self) -> None:
         step = cp.EstimateEffect(
             method=cp.InterruptedTimeSeries,
