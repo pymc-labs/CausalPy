@@ -20,14 +20,13 @@ effect estimates to assess sensitivity to the bandwidth choice.
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from causalpy.checks.base import CheckResult
+from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.regression_discontinuity import RegressionDiscontinuity
 from causalpy.experiments.regression_kink import RegressionKink
@@ -93,7 +92,7 @@ class BandwidthSensitivity:
             kw = dict(base_kwargs)
             kw["bandwidth"] = bw
             if "model" in kw and kw["model"] is not None:
-                kw["model"] = copy.deepcopy(kw["model"])
+                kw["model"] = clone_model(kw["model"])
 
             try:
                 alt_experiment = method(context.data, **kw)

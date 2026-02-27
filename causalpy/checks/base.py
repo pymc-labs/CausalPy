@@ -21,6 +21,7 @@ apply to via ``applicable_methods``.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -28,6 +29,18 @@ import pandas as pd
 
 from causalpy.experiments.base import BaseExperiment
 from causalpy.pipeline import PipelineContext
+
+
+def clone_model(model: Any) -> Any:
+    """Create a fresh, unfitted copy of a model.
+
+    PyMC models cannot survive ``copy.deepcopy`` (the class identity is
+    lost), so we use their ``_clone()`` method instead.  For all other
+    model types we fall back to ``copy.deepcopy``.
+    """
+    if hasattr(model, "_clone"):
+        return model._clone()
+    return copy.deepcopy(model)
 
 
 @dataclass

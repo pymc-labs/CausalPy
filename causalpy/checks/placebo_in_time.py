@@ -25,14 +25,13 @@ and numeric indices.
 
 from __future__ import annotations
 
-import copy
 import logging
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
-from causalpy.checks.base import CheckResult
+from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -139,7 +138,7 @@ class PlaceboInTime:
             kw = dict(kwargs)
             kw["treatment_time"] = treatment_time
             if "model" in kw and kw["model"] is not None:
-                kw["model"] = copy.deepcopy(kw["model"])
+                kw["model"] = clone_model(kw["model"])
             return method(data, **kw)
 
         return _factory

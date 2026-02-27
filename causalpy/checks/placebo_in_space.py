@@ -21,13 +21,12 @@ spurious effects appear.
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any
 
 import pandas as pd
 
-from causalpy.checks.base import CheckResult
+from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
@@ -104,7 +103,7 @@ class PlaceboInSpace:
             kw["control_units"] = donors
             kw["treated_units"] = [placebo_treated]
             if "model" in kw and kw["model"] is not None:
-                kw["model"] = copy.deepcopy(kw["model"])
+                kw["model"] = clone_model(kw["model"])
 
             try:
                 alt_experiment = method(context.data, **kw)

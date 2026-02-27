@@ -21,13 +21,12 @@ are to prior choices.
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any
 
 import pandas as pd
 
-from causalpy.checks.base import CheckResult
+from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.diff_in_diff import DifferenceInDifferences
 from causalpy.experiments.instrumental_variable import InstrumentalVariable
@@ -124,7 +123,7 @@ class PriorSensitivity:
 
         for alt in self.alternatives:
             name = alt["name"]
-            model = copy.deepcopy(alt["model"])
+            model = clone_model(alt["model"])
             logger.info("PriorSensitivity: fitting with '%s'", name)
 
             alt_experiment = method(context.data, model=model, **base_kwargs)
