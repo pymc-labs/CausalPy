@@ -97,3 +97,10 @@ inv_prop_latent.ipynb
 
 pipeline_workflow.ipynb
 :::
+
+:::{toctree}
+:caption: Reporting
+:maxdepth: 1
+
+report_demo.ipynb
+:::
