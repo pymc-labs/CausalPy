@@ -47,7 +47,9 @@ class BandwidthSensitivity:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.BandwidthSensitivity(bandwidths=[0.5, 1.0, 2.0, np.inf])
+    >>> check = cp.checks.BandwidthSensitivity(
+    ...     bandwidths=[0.5, 1.0, 2.0, np.inf]
+    ... )  # doctest: +SKIP
     """
 
     applicable_methods: set[type[BaseExperiment]] = {

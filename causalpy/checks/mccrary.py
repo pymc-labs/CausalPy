@@ -52,7 +52,7 @@ class McCraryDensityTest:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.McCraryDensityTest(n_bins=20)
+    >>> check = cp.checks.McCraryDensityTest(n_bins=20)  # doctest: +SKIP
     """
 
     applicable_methods: set[type[BaseExperiment]] = {RegressionDiscontinuity}

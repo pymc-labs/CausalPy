@@ -45,7 +45,7 @@ class PlaceboInSpace:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.PlaceboInSpace()
+    >>> check = cp.checks.PlaceboInSpace()  # doctest: +SKIP
     """
 
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}

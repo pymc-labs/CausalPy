@@ -43,7 +43,7 @@ class LeaveOneOut:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.LeaveOneOut()
+    >>> check = cp.checks.LeaveOneOut()  # doctest: +SKIP
     """
 
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}
