@@ -28,23 +28,30 @@ from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
+from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
+from .steps import EstimateEffect
 from .utils import extract_lift_for_mmm
 
 __all__ = [
     "__version__",
-    "DifferenceInDifferences",
     "create_causalpy_compatible_class",
+    "DifferenceInDifferences",
+    "EstimateEffect",
     "extract_lift_for_mmm",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "load_data",
+    "Pipeline",
+    "PipelineContext",
+    "PipelineResult",
     "PrePostNEGD",
     "pymc_models",
     "RegressionDiscontinuity",
     "RegressionKink",
     "skl_models",
     "StaggeredDifferenceInDifferences",
+    "Step",
     "SyntheticControl",
     "variable_selection_priors",
 ]
