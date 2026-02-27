@@ -14,6 +14,12 @@
 """Pipeline steps for causal inference workflows."""
 
 from causalpy.steps.estimate_effect import EstimateEffect
+from causalpy.steps.report import GenerateReport
 from causalpy.steps.sensitivity import SensitivityAnalysis, SensitivitySummary
 
-__all__ = ["EstimateEffect", "SensitivityAnalysis", "SensitivitySummary"]
+__all__ = [
+    "EstimateEffect",
+    "GenerateReport",
+    "SensitivityAnalysis",
+    "SensitivitySummary",
+]
