@@ -89,7 +89,7 @@
     <div class="prose">{{ effect_summary.text }}</div>
     {% endif %}
     {% if effect_summary_table_html %}
-    {{ effect_summary_table_html }}
+    {{ effect_summary_table_html | safe }}
     {% endif %}
     {% endif %}
 
@@ -97,7 +97,7 @@
     <h2>Diagnostic Plots</h2>
     {% for plot_b64 in plots %}
     <div class="plot">
-        <img src="data:image/png;base64,{{ plot_b64 }}" alt="Diagnostic plot">
+        <img src="data:image/png;base64,{{ plot_b64 | safe }}" alt="Diagnostic plot">
     </div>
     {% endfor %}
     {% endif %}
@@ -120,7 +120,7 @@
         <p>{{ check_result.text }}</p>
         {% endif %}
         {% if check_result.table_html %}
-        {{ check_result.table_html }}
+        {{ check_result.table_html | safe }}
         {% endif %}
     </div>
     {% endfor %}
