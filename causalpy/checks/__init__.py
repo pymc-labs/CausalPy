@@ -15,5 +15,8 @@
 
 from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
+from causalpy.steps.sensitivity import register_default_check
 
 __all__ = ["Check", "CheckResult", "PlaceboFoldResult", "PlaceboInTime"]
+
+register_default_check(PlaceboInTime, PlaceboInTime.applicable_methods)
