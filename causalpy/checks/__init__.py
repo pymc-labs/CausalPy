@@ -13,6 +13,17 @@
 #   limitations under the License.
 """Sensitivity and diagnostic checks for causal inference experiments."""
 
+from causalpy.checks.bandwidth import BandwidthSensitivity
 from causalpy.checks.base import Check, CheckResult
+from causalpy.checks.leave_one_out import LeaveOneOut
+from causalpy.checks.mccrary import McCraryDensityTest
+from causalpy.checks.placebo_in_space import PlaceboInSpace
 
-__all__ = ["Check", "CheckResult"]
+__all__ = [
+    "BandwidthSensitivity",
+    "Check",
+    "CheckResult",
+    "LeaveOneOut",
+    "McCraryDensityTest",
+    "PlaceboInSpace",
+]
