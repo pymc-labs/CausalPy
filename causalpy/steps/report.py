@@ -52,7 +52,9 @@ class GenerateReport:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> step = cp.GenerateReport(include_plots=True, output_file="report.html")
+    >>> step = cp.GenerateReport(
+    ...     include_plots=True, output_file="report.html"
+    ... )  # doctest: +SKIP
     """
 
     def __init__(
