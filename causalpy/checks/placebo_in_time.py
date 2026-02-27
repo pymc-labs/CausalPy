@@ -91,7 +91,7 @@ class PlaceboInTime:
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
-    >>> check = cp.checks.PlaceboInTime(n_folds=3)
+    >>> check = cp.checks.PlaceboInTime(n_folds=3)  # doctest: +SKIP
     """
 
     applicable_methods: set[type[BaseExperiment]] = {
