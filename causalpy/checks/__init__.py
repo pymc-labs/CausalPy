@@ -14,5 +14,16 @@
 """Sensitivity and diagnostic checks for causal inference experiments."""
 
 from causalpy.checks.base import Check, CheckResult
+from causalpy.checks.convex_hull import ConvexHullCheck
+from causalpy.checks.persistence import PersistenceCheck
+from causalpy.checks.pre_treatment_placebo import PreTreatmentPlaceboCheck
+from causalpy.checks.prior_sensitivity import PriorSensitivity
 
-__all__ = ["Check", "CheckResult"]
+__all__ = [
+    "Check",
+    "CheckResult",
+    "ConvexHullCheck",
+    "PersistenceCheck",
+    "PreTreatmentPlaceboCheck",
+    "PriorSensitivity",
+]
