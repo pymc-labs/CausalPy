@@ -37,8 +37,12 @@ from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
+from causalpy.pymc_models import PyMCModel
+from causalpy.reporting import EffectSummary
 
 logger = logging.getLogger(__name__)
+
+MIN_FOLD_OBSERVATIONS = 3
 
 
 @dataclass
@@ -53,11 +57,18 @@ class PlaceboFoldResult:
         The shifted treatment time for this fold.
     experiment : BaseExperiment
         The fitted experiment for this fold.
+    effect_summary : EffectSummary or None
+        The effect summary for this fold, if available.
+    effect_is_null : bool or None
+        Whether the fold's effect interval contains zero (i.e. no spurious
+        effect detected). ``True`` means the placebo fold passed.
     """
 
     fold: int
     pseudo_treatment_time: Any
     experiment: BaseExperiment
+    effect_summary: EffectSummary | None = None
+    effect_is_null: bool | None = None
 
 
 class PlaceboInTime:
@@ -65,7 +76,8 @@ class PlaceboInTime:
 
     Shifts the treatment time backward into the pre-intervention period
     to create ``n_folds`` placebo experiments.  If any placebo fold shows
-    a significant effect, the causal claim may be spurious.
+    a significant effect (its confidence/credible interval excludes zero),
+    the overall check fails, casting doubt on the causal claim.
 
     Parameters
     ----------
@@ -96,7 +108,6 @@ class PlaceboInTime:
             raise ValueError("n_folds must be >= 1")
         self.n_folds = n_folds
         self.experiment_factory = experiment_factory
-        self.fold_results: list[PlaceboFoldResult] = []
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Check that the experiment has a treatment_time attribute."""
@@ -174,6 +185,24 @@ class PlaceboInTime:
         pseudo_end = pseudo_treatment_time + intervention_length
         return data.loc[data.index < pseudo_end].copy()
 
+    @staticmethod
+    def _fold_effect_is_null(experiment: BaseExperiment) -> tuple[bool, EffectSummary]:
+        """Check whether the fold's effect interval contains zero.
+
+        Returns ``(is_null, effect_summary)`` where ``is_null`` is ``True``
+        when the confidence/credible interval includes zero (no spurious
+        effect detected).
+        """
+        summary = experiment.effect_summary()
+        table = summary.table
+        if isinstance(experiment.model, PyMCModel):
+            lower = table["hdi_lower"].iloc[0]
+            upper = table["hdi_upper"].iloc[0]
+        else:
+            lower = table["ci_lower"].iloc[0]
+            upper = table["ci_upper"].iloc[0]
+        return bool(lower <= 0 <= upper), summary
+
     def run(
         self,
         experiment: BaseExperiment,
@@ -185,10 +214,15 @@ class PlaceboInTime:
         time backward.  Each fold uses only data before the placebo
         intervention window ends, ensuring no actual treatment data leaks.
 
+        A fold **passes** when its effect interval (HDI for Bayesian, CI
+        for OLS) contains zero, indicating no spurious effect.  The overall
+        check passes when every completed fold passes.
+
         Returns
         -------
         CheckResult
-            With ``metadata["fold_results"]`` containing the
+            With ``passed`` indicating whether all folds found null effects,
+            and ``metadata["fold_results"]`` containing the
             :class:`PlaceboFoldResult` objects.
         """
         factory = self._get_factory(context)
@@ -200,8 +234,10 @@ class PlaceboInTime:
             treatment_time, intervention_length
         )
 
-        self.fold_results = []
+        fold_results: list[PlaceboFoldResult] = []
         fold_summaries: list[str] = []
+        fold_passes: list[bool] = []
+        skipped_folds: list[int] = []
 
         for fold_idx, pseudo_tt in enumerate(fold_treatment_times):
             fold_num = fold_idx + 1
@@ -214,33 +250,82 @@ class PlaceboInTime:
 
             fold_data = self._get_fold_data(data, pseudo_tt, intervention_length)
 
-            if len(fold_data) < 3:
+            if len(fold_data) < MIN_FOLD_OBSERVATIONS:
                 logger.warning(
-                    "Fold %d has only %d observations, skipping.",
+                    "Fold %d has only %d observations (minimum %d), skipping.",
                     fold_num,
                     len(fold_data),
+                    MIN_FOLD_OBSERVATIONS,
+                )
+                skipped_folds.append(fold_num)
+                fold_summaries.append(
+                    f"Fold {fold_num}: SKIPPED (only {len(fold_data)} "
+                    f"observations, need >= {MIN_FOLD_OBSERVATIONS})"
                 )
                 continue
 
-            fold_experiment = factory(fold_data, pseudo_tt)
+            try:
+                fold_experiment = factory(fold_data, pseudo_tt)
+                is_null, effect_summary = self._fold_effect_is_null(fold_experiment)
+            except Exception:
+                logger.warning(
+                    "Fold %d failed to fit (pseudo_treatment_time=%s), skipping.",
+                    fold_num,
+                    pseudo_tt,
+                )
+                skipped_folds.append(fold_num)
+                fold_summaries.append(
+                    f"Fold {fold_num}: SKIPPED (experiment failed to fit "
+                    f"at pseudo treatment time {pseudo_tt})"
+                )
+                continue
+
+            fold_passes.append(is_null)
             fold_result = PlaceboFoldResult(
                 fold=fold_num,
                 pseudo_treatment_time=pseudo_tt,
                 experiment=fold_experiment,
+                effect_summary=effect_summary,
+                effect_is_null=is_null,
             )
-            self.fold_results.append(fold_result)
+            fold_results.append(fold_result)
 
-            fold_summaries.append(f"Fold {fold_num}: pseudo treatment at {pseudo_tt}")
+            status = "PASS (null)" if is_null else "FAIL (spurious effect)"
+            fold_summaries.append(
+                f"Fold {fold_num}: pseudo treatment at {pseudo_tt} — {status}"
+            )
 
-        n_completed = len(self.fold_results)
-        text = (
-            f"Placebo-in-time analysis: {n_completed} of {self.n_folds} "
-            f"folds completed.\n" + "\n".join(fold_summaries)
-        )
+        n_completed = len(fold_results)
+        n_skipped = len(skipped_folds)
+        all_passed = all(fold_passes) if fold_passes else None
+
+        if all_passed is True:
+            verdict = "PASSED — no spurious effects detected in any fold."
+        elif all_passed is False:
+            n_failed = sum(not p for p in fold_passes)
+            verdict = (
+                f"FAILED — {n_failed} of {n_completed} fold(s) detected "
+                f"a spurious effect."
+            )
+        else:
+            verdict = "INCONCLUSIVE — no folds completed."
+
+        parts = [
+            f"Placebo-in-time analysis: {n_completed} of {self.n_folds} folds completed"
+        ]
+        if n_skipped:
+            parts[0] += f" ({n_skipped} skipped)"
+        parts[0] += "."
+        parts.append(verdict)
+        parts.extend(fold_summaries)
+        text = "\n".join(parts)
 
         return CheckResult(
             check_name="PlaceboInTime",
-            passed=None,
+            passed=all_passed,
             text=text,
-            metadata={"fold_results": self.fold_results},
+            metadata={"fold_results": fold_results},
         )
+
+    def __repr__(self) -> str:
+        return f"PlaceboInTime(n_folds={self.n_folds})"
