@@ -42,7 +42,7 @@ class EffectSummary:
     table : pd.DataFrame
         DataFrame containing summary statistics (mean, median, HDI, tail probabilities)
     text : str
-        Detailed multi-paragraph narrative report (CausalImpact-style) with
+        Detailed multi-paragraph narrative report with
         observed vs counterfactual breakdown, statistical credibility assessment,
         and assumptions/guidance.
     """
@@ -956,7 +956,7 @@ def _generate_prose_detailed(
     counterfactual_cum: float | None = None,
     experiment_type: str | None = None,
 ):
-    """Generate detailed multi-paragraph narrative report (CausalImpact-style).
+    """Generate detailed multi-paragraph narrative report.
 
     This function produces a comprehensive plain-language interpretation of the
     causal effect, including observed vs counterfactual values, statistical
