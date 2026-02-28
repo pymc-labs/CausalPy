@@ -1174,6 +1174,43 @@ def test_compute_statistics_rope_near_threshold():
     assert 0.3 < stats["avg"]["p_rope"] < 0.7
 
 
+def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
+    """ROPE should follow the auto-detected sign direction for one-sided requests."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    # Request increase, but true effect is strongly negative.
+    # p_rope should align with the detected "decrease" direction.
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    assert stats["avg"]["mean"] < 0
+    assert stats["cum"]["mean"] < 0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
 def test_format_number():
     """Test _format_number helper."""
     from causalpy.reporting import _format_number

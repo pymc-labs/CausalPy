@@ -770,8 +770,11 @@ def _compute_statistics(
 
     # ROPE for average
     if min_effect is not None:
+        rope_direction_avg = direction
+        if direction != "two-sided":
+            rope_direction_avg = "increase" if stats["avg"]["mean"] >= 0 else "decrease"
         stats["avg"]["p_rope"] = _compute_rope_probability(
-            avg_effect, min_effect, direction
+            avg_effect, min_effect, rope_direction_avg
         )
 
     # Cumulative effect
@@ -810,8 +813,13 @@ def _compute_statistics(
 
         # ROPE for cumulative
         if min_effect is not None:
+            rope_direction_cum = direction
+            if direction != "two-sided":
+                rope_direction_cum = (
+                    "increase" if stats["cum"]["mean"] >= 0 else "decrease"
+                )
             stats["cum"]["p_rope"] = _compute_rope_probability(
-                cum_final, min_effect, direction
+                cum_final, min_effect, rope_direction_cum
             )
 
     # Relative effects
