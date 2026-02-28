@@ -28,7 +28,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import FormulaException
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import round_num
@@ -147,6 +147,7 @@ class PiecewiseITS(BaseExperiment):
     expt_type = "Piecewise Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -536,7 +537,7 @@ class PiecewiseITS(BaseExperiment):
         plot_xY(
             time_values,
             self.cumulative_effect,
-            ax=ax[1 + 1],
+            ax=ax[2],
             plot_hdi_kwargs={"color": "C3"},
         )
         ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)
