@@ -15,6 +15,8 @@
 Tests for utility functions
 """
 
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,6 +28,7 @@ from causalpy.utils import (
     check_convex_hull_violation,
     extract_lift_for_mmm,
     get_interaction_terms,
+    plot_correlations,
     round_num,
 )
 
@@ -369,3 +372,87 @@ def test_extract_lift_for_mmm_raises_for_ols():
             x=0.0,
             delta_x=1000,
         )
+
+
+# ============================================================================
+# Tests for plot_correlations
+# ============================================================================
+
+
+@pytest.fixture
+def panel_data():
+    """Simple wide-format panel data for correlation tests."""
+    rng = np.random.default_rng(0)
+    n = 50
+    base = np.sin(np.linspace(0, 4 * np.pi, n))
+    return pd.DataFrame(
+        {
+            "A": base + rng.normal(0, 0.1, n),
+            "B": base + rng.normal(0, 0.1, n),
+            "C": -base + rng.normal(0, 0.1, n),
+        }
+    )
+
+
+def test_plot_correlations_returns_matrix_and_axes(panel_data):
+    corr, ax = plot_correlations(panel_data)
+    assert isinstance(corr, pd.DataFrame)
+    assert corr.shape == (3, 3)
+    assert isinstance(ax, matplotlib.axes.Axes)
+    plt.close("all")
+
+
+def test_plot_correlations_diagonal_is_one(panel_data):
+    corr, _ = plot_correlations(panel_data)
+    np.testing.assert_allclose(np.diag(corr.values), 1.0)
+    plt.close("all")
+
+
+def test_plot_correlations_symmetric(panel_data):
+    corr, _ = plot_correlations(panel_data)
+    np.testing.assert_allclose(corr.values, corr.values.T)
+    plt.close("all")
+
+
+def test_plot_correlations_column_subset(panel_data):
+    corr, _ = plot_correlations(panel_data, columns=["A", "B"])
+    assert corr.shape == (2, 2)
+    assert list(corr.columns) == ["A", "B"]
+    plt.close("all")
+
+
+def test_plot_correlations_custom_ax(panel_data):
+    fig, provided_ax = plt.subplots()
+    _, returned_ax = plot_correlations(panel_data, ax=provided_ax)
+    assert returned_ax is provided_ax
+    plt.close("all")
+
+
+def test_plot_correlations_kwargs_forwarded(panel_data):
+    corr, _ = plot_correlations(panel_data, annot=False, vmin=0)
+    assert isinstance(corr, pd.DataFrame)
+    plt.close("all")
+
+
+# ============================================================================
+# Tests for SyntheticControl._pre_treatment_correlations
+# ============================================================================
+
+
+def test_pre_treatment_correlations_single_unit(sc_result_single_unit):
+    corrs = sc_result_single_unit._pre_treatment_correlations()
+    assert "actual" in corrs
+    assert 0 < corrs["actual"] <= 1.0
+
+
+def test_pre_treatment_correlations_multi_unit(sc_result_multi_unit):
+    corrs = sc_result_multi_unit._pre_treatment_correlations()
+    assert set(corrs.keys()) == {"t1", "t2"}
+    for r in corrs.values():
+        assert -1 <= r <= 1
+
+
+def test_summary_prints_correlation(sc_result_single_unit, capsys):
+    sc_result_single_unit.summary()
+    captured = capsys.readouterr()
+    assert "Pre-treatment correlation" in captured.out

@@ -267,6 +267,30 @@ class SyntheticControl(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
+    def _pre_treatment_correlations(self) -> dict[str, float]:
+        """Compute Pearson correlation between each treated unit and its
+        synthetic control prediction in the pre-treatment period.
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping from treated unit name to correlation coefficient.
+        """
+        correlations: dict[str, float] = {}
+        for unit in self.treated_units:
+            observed = self.datapre_treated.sel(treated_units=unit).values.flatten()
+            if isinstance(self.model, PyMCModel):
+                predicted = (
+                    self.pre_pred["posterior_predictive"]["mu"]
+                    .sel(treated_units=unit)
+                    .mean(dim=["chain", "draw"])
+                    .values.flatten()
+                )
+            else:
+                predicted = np.asarray(self.pre_pred).flatten()
+            correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
+        return correlations
+
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -280,6 +304,9 @@ class SyntheticControl(BaseExperiment):
         else:
             print(f"Treated unit: {self.treated_units[0]}")
         self.print_coefficients(round_to)
+        corrs = self._pre_treatment_correlations()
+        for unit, r in corrs.items():
+            print(f"Pre-treatment correlation ({unit}): {r:.4f}")
 
     @staticmethod
     def _convert_treatment_time_for_axis(
