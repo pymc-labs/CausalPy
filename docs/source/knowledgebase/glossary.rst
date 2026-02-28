@@ -45,6 +45,10 @@ Glossary
    DiD
       Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
 
+   Donor pool
+   Donor pool selection
+      In synthetic control methods, the donor pool is the set of untreated units available to construct the synthetic control. Donor pool selection (or curation) is the process of choosing which untreated units to include. Units that are structurally dissimilar to the treated unit -- for example, those with negative pre-treatment correlations -- should be excluded because they can introduce interpolation bias and degrade the synthetic control fit. This is especially important in Bayesian implementations where priors (e.g. Dirichlet) assign non-zero weight to every donor by construction :footcite:p:`abadie2021using,abadie2010synthetic`.
+
    Donut regression discontinuity
    Donut RDD
       A robustness approach for regression discontinuity designs where observations within a specified distance from the treatment threshold are excluded from model fitting. This technique is used when observations closest to the cutoff may be problematic due to manipulation, sorting, or heaping/rounding of the running variable. By excluding the "donut hole" around the threshold, the analysis relies on observations that are less likely to be affected by such issues. See :footcite:t:`noack2024donut` for formal discussion of donut RDD properties.
