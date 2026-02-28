@@ -88,3 +88,19 @@ iv_vs_priors.ipynb
 inv_prop_pymc.ipynb
 inv_prop_latent.ipynb
 :::
+
+## Workflow
+
+:::{toctree}
+:caption: Pipeline
+:maxdepth: 1
+
+pipeline_workflow.ipynb
+:::
+
+:::{toctree}
+:caption: Reporting
+:maxdepth: 1
+
+report_demo.ipynb
+:::

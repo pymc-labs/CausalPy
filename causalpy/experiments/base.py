@@ -15,7 +15,11 @@
 Base class for quasi experimental designs.
 """
 
+from __future__ import annotations
+
+import contextlib
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Literal
 
 import arviz as az
@@ -37,6 +41,7 @@ class BaseExperiment(ABC):
     """
 
     labels: list[str]
+    data: pd.DataFrame
 
     supports_bayes: bool
     supports_ols: bool
@@ -183,3 +188,48 @@ class BaseExperiment(ABC):
             Object with .table (DataFrame) and .text (str) attributes
         """
         raise NotImplementedError("effect_summary method not yet implemented")
+
+    def generate_report(
+        self,
+        *,
+        include_plots: bool = True,
+        include_effect_summary: bool = True,
+        output_file: str | Path | None = None,
+    ) -> str:
+        """Generate a self-contained HTML report for this experiment.
+
+        This is a convenience wrapper around
+        :class:`~causalpy.steps.report.GenerateReport` that does not require
+        a full pipeline.
+
+        Parameters
+        ----------
+        include_plots : bool, default True
+            Embed diagnostic plots in the report.
+        include_effect_summary : bool, default True
+            Include the effect-summary section.
+        output_file : str or Path, optional
+            If provided, write the HTML report to this path.
+
+        Returns
+        -------
+        str
+            The rendered HTML report.
+        """
+        from causalpy.pipeline import PipelineContext
+        from causalpy.steps.report import GenerateReport
+
+        ctx = PipelineContext(data=self.data)
+        ctx.experiment = self
+        if include_effect_summary:
+            with contextlib.suppress(Exception):
+                ctx.effect_summary = self.effect_summary()
+
+        step = GenerateReport(
+            include_plots=include_plots,
+            include_effect_summary=include_effect_summary,
+            include_sensitivity=False,
+            output_file=output_file,
+        )
+        step.run(ctx)
+        return ctx.report
