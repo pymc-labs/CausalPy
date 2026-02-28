@@ -8,7 +8,7 @@ description: Transform a GitHub issue into a complete pull request through a str
 ## Branch preflight (required before any code edits)
 1. Check current branch and working tree state.
 2. Switch to `main` and update it from remote.
-3. Create the issue branch from `main`: `git checkout -b issue-<number>-<short-description>`
+3. Create the issue branch from `main`: `git checkout -b issue-<issue_number>-<short-description>`
 4. Only start implementation after confirming the new branch is based on `main`.
 
 ## Discovery
@@ -35,6 +35,6 @@ description: Transform a GitHub issue into a complete pull request through a str
 
 ## Create PR
 ```bash
-git push -u origin issue-<number>-<short-description>
+git push -u origin issue-<issue_number>-<short-description>
 gh pr create --title "<PR title>" --body-file .github/pr_summaries/<issue_number> - <short-description>.md --base main
 ```
