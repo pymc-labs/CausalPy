@@ -855,7 +855,7 @@ def test_piecewise_its_effect_summary_ols():
 
     # Text should not be empty
     assert len(summary.text) > 0
-    assert "post-period" in summary.text
+    assert "Post-period" in summary.text
 
 
 def test_piecewise_its_effect_summary_pymc():
@@ -897,7 +897,7 @@ def test_piecewise_its_effect_summary_pymc():
 
     # Text should not be empty
     assert len(summary.text) > 0
-    assert "post-period" in summary.text
+    assert "Post-period" in summary.text
 
 
 def test_piecewise_its_effect_summary_period_not_supported():
