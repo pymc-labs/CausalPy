@@ -826,15 +826,16 @@ class SyntheticControl(BaseExperiment):
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
             _compute_statistics,
             _compute_statistics_ols,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose,
-            _generate_prose_ols,
+            _generate_prose_detailed,
+            _generate_prose_detailed_ols,
             _generate_table,
             _generate_table_ols,
         )
@@ -877,8 +878,8 @@ class SyntheticControl(BaseExperiment):
             # Generate table
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose(
+            # Generate detailed prose report
+            text = _generate_prose_detailed(
                 stats,
                 window_coords,
                 alpha=alpha,
@@ -910,8 +911,8 @@ class SyntheticControl(BaseExperiment):
             # Generate table
             table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose_ols(
+            # Generate detailed prose report
+            text = _generate_prose_detailed_ols(
                 stats,
                 window_coords,
                 alpha=alpha,

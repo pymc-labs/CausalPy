@@ -23,6 +23,7 @@ and their interpretation, see the documentation:
 https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.html
 """
 
+import textwrap
 from dataclasses import dataclass
 from typing import Literal
 
@@ -42,7 +43,9 @@ class EffectSummary:
     table : pd.DataFrame
         DataFrame containing summary statistics (mean, median, HDI, tail probabilities)
     text : str
-        Formatted prose summary of the effect
+        Detailed multi-paragraph narrative report (CausalImpact-style) with
+        observed vs counterfactual breakdown, statistical credibility assessment,
+        and assumptions/guidance.
     """
 
     table: pd.DataFrame
@@ -1023,6 +1026,445 @@ def _generate_prose(
         )
 
     return " ".join(prose_parts)
+
+
+def _generate_prose_detailed(
+    stats,
+    window_coords,
+    alpha=0.05,
+    direction="increase",
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Generate detailed multi-paragraph narrative report (CausalImpact-style).
+
+    This function produces a comprehensive plain-language interpretation of the
+    causal effect, including observed vs counterfactual values, statistical
+    credibility assessment, assumptions, and guidance on interpretation.
+
+    Parameters
+    ----------
+    stats : dict
+        Statistics dictionary from _compute_statistics()
+    window_coords : pd.Index
+        Window coordinates for the analysis period
+    alpha : float, default=0.05
+        Significance level for HDI interval
+    direction : {"increase", "decrease", "two-sided"}, default="increase"
+        Direction for tail probability interpretation
+    cumulative : bool, default=True
+        Whether cumulative effects were computed
+    relative : bool, default=True
+        Whether relative effects were computed
+    prefix : str, default="Post-period"
+        Prefix describing the analysis window
+
+    Returns
+    -------
+    str
+        Detailed multi-paragraph narrative report
+    """
+    hdi_pct = int((1 - alpha) * 100)
+
+    # Format window string
+    if len(window_coords) > 0:
+        start_str = str(window_coords[0])
+        end_str = str(window_coords[-1])
+        window_str = f"{start_str} to {end_str}"
+        n_periods = len(window_coords)
+    else:
+        window_str = "post-period"
+        n_periods = 0
+
+    # Format numbers
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    # Extract statistics
+    avg_mean = stats["avg"]["mean"]
+    avg_lower = stats["avg"]["hdi_lower"]
+    avg_upper = stats["avg"]["hdi_upper"]
+
+    # Direction-specific probability
+    if direction == "increase":
+        p_val = stats["avg"].get("p_gt_0", 0.0)
+        direction_text = "increase"
+    elif direction == "decrease":
+        p_val = stats["avg"].get("p_lt_0", 0.0)
+        direction_text = "decrease"
+    else:  # two-sided
+        p_val = stats["avg"].get("prob_of_effect", 0.0)
+        direction_text = "effect"
+
+    # Paragraph 1: Observed vs counterfactual (average)
+    paragraphs = []
+
+    # Calculate observed and counterfactual averages from effect and relative effect
+    # effect = observed - counterfactual, so observed = counterfactual + effect
+    # relative_effect = (effect / counterfactual) * 100
+    # So counterfactual = effect / (relative_effect / 100)
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        # Avoid division by zero
+        if abs(rel_mean) > 0.01:
+            counterfactual_avg = avg_mean / (rel_mean / 100)
+            observed_avg = counterfactual_avg + avg_mean
+        else:
+            # Fallback when relative effect is near zero
+            observed_avg = avg_mean
+            counterfactual_avg = 0.0
+    else:
+        # Without relative effect, we can only report the effect size
+        observed_avg = None
+        counterfactual_avg = None
+
+    # Build paragraph 1: Average effect description
+    if observed_avg is not None and counterfactual_avg is not None:
+        para1 = (
+            f"During the {prefix.lower()} ({window_str}), the response variable had "
+            f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
+            f"absence of an intervention, we would have expected an average response of "
+            f"{fmt_num(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
+            f"prediction is [{fmt_num(avg_lower + counterfactual_avg)}, "
+            f"{fmt_num(avg_upper + counterfactual_avg)}]. Subtracting this prediction "
+            f"from the observed response yields an estimate of the causal effect the "
+            f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
+            f"with a {hdi_pct}% interval of [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]."
+        )
+    else:
+        para1 = (
+            f"During the {prefix.lower()} ({window_str}), the estimated average causal "
+            f"effect of the intervention is {fmt_num(avg_mean)} "
+            f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"This represents the difference between the observed response and the "
+            f"counterfactual prediction of what would have occurred without the intervention."
+        )
+    paragraphs.append(para1)
+
+    # Paragraph 2: Cumulative effect (if applicable)
+    if cumulative and "cum" in stats:
+        cum_mean = stats["cum"]["mean"]
+        cum_lower = stats["cum"]["hdi_lower"]
+        cum_upper = stats["cum"]["hdi_upper"]
+
+        if (
+            observed_avg is not None
+            and counterfactual_avg is not None
+            and n_periods > 0
+        ):
+            observed_cum = observed_avg * n_periods
+            counterfactual_cum = counterfactual_avg * n_periods
+            cum_lower_cf = cum_lower + counterfactual_cum
+            cum_upper_cf = cum_upper + counterfactual_cum
+
+            para2 = (
+                f"Summing up the individual data points during the {prefix.lower()}, "
+                f"the response variable had an overall value of {fmt_num(observed_cum)}. "
+                f"By contrast, had the intervention not taken place, we would have expected "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_pct}% interval of this "
+                f"prediction is [{fmt_num(cum_lower_cf)}, {fmt_num(cum_upper_cf)}]."
+            )
+        else:
+            para2 = (
+                f"The cumulative effect over the {n_periods} periods in the {prefix.lower()} "
+                f"was {fmt_num(cum_mean)} ({hdi_pct}% HDI [{fmt_num(cum_lower)}, "
+                f"{fmt_num(cum_upper)}])."
+            )
+        paragraphs.append(para2)
+
+    # Paragraph 3: Statistical credibility assessment
+    credibility_parts = []
+
+    # Check if effect is statistically credible (HDI excludes zero)
+    hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
+
+    if hdi_excludes_zero and p_val > 0.95:
+        credibility_parts.append(
+            f"The effect is statistically credible: the {hdi_pct}% HDI excludes zero, "
+            f"and the posterior probability of an effect is {fmt_num(p_val, 3)}."
+        )
+    elif hdi_excludes_zero:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI excludes zero, suggesting a credible effect, though "
+            f"the posterior probability ({fmt_num(p_val, 3)}) is below the conventional "
+            f"0.95 threshold."
+        )
+    elif p_val > 0.95:
+        credibility_parts.append(
+            f"While the {hdi_pct}% HDI includes zero, the posterior probability of an "
+            f"effect is {fmt_num(p_val, 3)}, suggesting the effect may be credible but "
+            f"with greater uncertainty."
+        )
+    else:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI includes zero, and the posterior probability of an "
+            f"effect is {fmt_num(p_val, 3)}. This suggests the evidence for a causal "
+            f"effect is weak or inconclusive."
+        )
+
+    # Add ROPE interpretation if available
+    if "p_rope" in stats["avg"]:
+        p_rope = stats["avg"]["p_rope"]
+        if direction == "two-sided":
+            credibility_parts.append(
+                f"The probability that the effect exceeds the minimum effect size "
+                f"threshold is {fmt_num(p_rope, 3)}."
+            )
+        else:
+            credibility_parts.append(
+                f"The probability that the {direction_text} exceeds the minimum effect "
+                f"size threshold is {fmt_num(p_rope, 3)}."
+            )
+
+    # Add relative effect interpretation
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        rel_lower = stats["avg"]["relative_hdi_lower"]
+        rel_upper = stats["avg"]["relative_hdi_upper"]
+        credibility_parts.append(
+            f"Relative to the counterfactual, the effect represents a "
+            f"{fmt_num(rel_mean)}% change ({hdi_pct}% HDI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_upper)}%])."
+        )
+
+    para3 = " ".join(credibility_parts)
+    paragraphs.append(para3)
+
+    # Paragraph 4: Assumptions and guidance
+    para4 = (
+        "This analysis assumes that the covariates used to construct the counterfactual "
+        "were not themselves affected by the intervention. It also assumes that the "
+        "relationship between the covariates and the response observed during the pre-"
+        "intervention period remains stable throughout the post-intervention period. "
+    )
+
+    if hdi_excludes_zero and p_val > 0.95:
+        para4 += (
+            "Given the strong statistical evidence, these results can be interpreted with "
+            "reasonable confidence, provided the modeling assumptions hold."
+        )
+    elif hdi_excludes_zero or p_val > 0.80:
+        para4 += (
+            "While the results suggest a potential effect, caution is warranted given "
+            "the uncertainty. Consider checking model fit, examining pre-intervention "
+            "trends, and conducting sensitivity analyses (e.g., placebo tests) before "
+            "drawing firm conclusions."
+        )
+    else:
+        para4 += (
+            "Given the weak statistical evidence, these results should be interpreted "
+            "with substantial caution. The data do not provide strong support for a "
+            "causal effect. Consider whether the model is appropriately specified, "
+            "whether the intervention timing is correct, and whether important "
+            "confounding factors may be present."
+        )
+    paragraphs.append(para4)
+
+    # Wrap each paragraph at 80 characters for readability
+    wrapped_paragraphs = [textwrap.fill(p, width=80) for p in paragraphs]
+    return "\n\n".join(wrapped_paragraphs)
+
+
+def _generate_prose_detailed_ols(
+    stats,
+    window_coords,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Generate detailed multi-paragraph narrative report for OLS models.
+
+    This function produces a comprehensive plain-language interpretation of the
+    causal effect from OLS models, including observed vs counterfactual values,
+    statistical significance assessment, assumptions, and guidance on interpretation.
+
+    Parameters
+    ----------
+    stats : dict
+        Statistics dictionary from _compute_statistics_ols()
+    window_coords : pd.Index
+        Window coordinates for the analysis period
+    alpha : float, default=0.05
+        Significance level for CI interval
+    cumulative : bool, default=True
+        Whether cumulative effects were computed
+    relative : bool, default=True
+        Whether relative effects were computed
+    prefix : str, default="Post-period"
+        Prefix describing the analysis window
+
+    Returns
+    -------
+    str
+        Detailed multi-paragraph narrative report
+    """
+    ci_pct = int((1 - alpha) * 100)
+
+    # Format window string
+    if len(window_coords) > 0:
+        start_str = str(window_coords[0])
+        end_str = str(window_coords[-1])
+        window_str = f"{start_str} to {end_str}"
+        n_periods = len(window_coords)
+    else:
+        window_str = "post-period"
+        n_periods = 0
+
+    # Format numbers
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    # Extract statistics
+    avg_mean = stats["avg"]["mean"]
+    avg_lower = stats["avg"]["ci_lower"]
+    avg_upper = stats["avg"]["ci_upper"]
+    p_val = stats["avg"]["p_value"]
+
+    # Paragraph 1: Average effect description
+    paragraphs = []
+
+    # Calculate observed and counterfactual from effect and relative effect
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        if abs(rel_mean) > 0.01:
+            counterfactual_avg = avg_mean / (rel_mean / 100)
+            observed_avg = counterfactual_avg + avg_mean
+        else:
+            observed_avg = avg_mean
+            counterfactual_avg = 0.0
+    else:
+        observed_avg = None
+        counterfactual_avg = None
+
+    if observed_avg is not None and counterfactual_avg is not None:
+        para1 = (
+            f"During the {prefix.lower()} ({window_str}), the response variable had "
+            f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
+            f"absence of an intervention, we would have expected an average response of "
+            f"{fmt_num(counterfactual_avg)}. The {ci_pct}% confidence interval of this "
+            f"counterfactual prediction is [{fmt_num(avg_lower + counterfactual_avg)}, "
+            f"{fmt_num(avg_upper + counterfactual_avg)}]. Subtracting this prediction "
+            f"from the observed response yields an estimate of the causal effect the "
+            f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
+            f"with a {ci_pct}% confidence interval of [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}]."
+        )
+    else:
+        para1 = (
+            f"During the {prefix.lower()} ({window_str}), the estimated average causal "
+            f"effect of the intervention is {fmt_num(avg_mean)} "
+            f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"This represents the difference between the observed response and the "
+            f"counterfactual prediction of what would have occurred without the intervention."
+        )
+    paragraphs.append(para1)
+
+    # Paragraph 2: Cumulative effect (if applicable)
+    if cumulative and "cum" in stats:
+        cum_mean = stats["cum"]["mean"]
+        cum_lower = stats["cum"]["ci_lower"]
+        cum_upper = stats["cum"]["ci_upper"]
+        cum_p_val = stats["cum"]["p_value"]
+
+        if (
+            observed_avg is not None
+            and counterfactual_avg is not None
+            and n_periods > 0
+        ):
+            observed_cum = observed_avg * n_periods
+            counterfactual_cum = counterfactual_avg * n_periods
+            cum_lower_cf = cum_lower + counterfactual_cum
+            cum_upper_cf = cum_upper + counterfactual_cum
+
+            para2 = (
+                f"Summing up the individual data points during the {prefix.lower()}, "
+                f"the response variable had an overall value of {fmt_num(observed_cum)}. "
+                f"By contrast, had the intervention not taken place, we would have expected "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_pct}% confidence interval "
+                f"of this prediction is [{fmt_num(cum_lower_cf)}, {fmt_num(cum_upper_cf)}]."
+            )
+        else:
+            para2 = (
+                f"The cumulative effect over the {n_periods} periods in the {prefix.lower()} "
+                f"was {fmt_num(cum_mean)} ({ci_pct}% CI [{fmt_num(cum_lower)}, "
+                f"{fmt_num(cum_upper)}], p-value {fmt_num(cum_p_val, 3)})."
+            )
+        paragraphs.append(para2)
+
+    # Paragraph 3: Statistical significance assessment
+    ci_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
+
+    if ci_excludes_zero and p_val < 0.05:
+        para3 = (
+            f"The effect is statistically significant at the {alpha} level: the "
+            f"{ci_pct}% confidence interval excludes zero, with a p-value of "
+            f"{fmt_num(p_val, 3)}."
+        )
+    elif ci_excludes_zero:
+        para3 = (
+            f"The {ci_pct}% confidence interval excludes zero, but the p-value "
+            f"({fmt_num(p_val, 3)}) is above the conventional 0.05 threshold, suggesting "
+            f"marginal significance."
+        )
+    elif p_val < 0.05:
+        para3 = (
+            f"While the p-value ({fmt_num(p_val, 3)}) is below 0.05, the {ci_pct}% "
+            f"confidence interval includes zero, indicating the effect may not be robust."
+        )
+    else:
+        para3 = (
+            f"The {ci_pct}% confidence interval includes zero, and the p-value is "
+            f"{fmt_num(p_val, 3)}. This suggests the evidence for a causal effect is weak "
+            f"or inconclusive."
+        )
+
+    # Add relative effect interpretation
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        rel_lower = stats["avg"]["relative_ci_lower"]
+        rel_upper = stats["avg"]["relative_ci_upper"]
+        para3 += (
+            f" Relative to the counterfactual, the effect represents a "
+            f"{fmt_num(rel_mean)}% change ({ci_pct}% CI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_upper)}%])."
+        )
+
+    paragraphs.append(para3)
+
+    # Paragraph 4: Assumptions and guidance
+    para4 = (
+        "This analysis assumes that the covariates used to construct the counterfactual "
+        "were not themselves affected by the intervention. It also assumes that the "
+        "relationship between the covariates and the response observed during the pre-"
+        "intervention period remains stable throughout the post-intervention period. "
+    )
+
+    if ci_excludes_zero and p_val < 0.05:
+        para4 += (
+            "Given the statistically significant result, these findings can be interpreted "
+            "with reasonable confidence, provided the modeling assumptions hold."
+        )
+    elif ci_excludes_zero or p_val < 0.10:
+        para4 += (
+            "While the results suggest a potential effect, caution is warranted given "
+            "the marginal statistical significance. Consider checking model fit, "
+            "examining pre-intervention trends, and conducting sensitivity analyses "
+            "before drawing firm conclusions."
+        )
+    else:
+        para4 += (
+            "Given the lack of statistical significance, these results should be interpreted "
+            "with substantial caution. The data do not provide strong evidence for a "
+            "causal effect. Consider whether the model is appropriately specified and "
+            "whether important confounding factors may be present."
+        )
+    paragraphs.append(para4)
+
+    # Wrap each paragraph at 80 characters for readability
+    wrapped_paragraphs = [textwrap.fill(p, width=80) for p in paragraphs]
+    return "\n\n".join(wrapped_paragraphs)
 
 
 def _compute_statistics_ols(

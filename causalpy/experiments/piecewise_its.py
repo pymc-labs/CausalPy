@@ -750,8 +750,8 @@ class PiecewiseITS(BaseExperiment):
             _compute_statistics_ols,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose,
-            _generate_prose_ols,
+            _generate_prose_detailed,
+            _generate_prose_detailed_ols,
             _generate_table,
             _generate_table_ols,
         )
@@ -781,7 +781,7 @@ class PiecewiseITS(BaseExperiment):
                 min_effect=min_effect,
             )
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
-            text = _generate_prose(
+            text = _generate_prose_detailed(
                 stats,
                 window_coords,
                 alpha=alpha,
@@ -801,7 +801,7 @@ class PiecewiseITS(BaseExperiment):
                 relative=relative,
             )
             table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-            text = _generate_prose_ols(
+            text = _generate_prose_detailed_ols(
                 stats,
                 window_coords,
                 alpha=alpha,
