@@ -83,20 +83,31 @@ class BaseExperiment(ABC):
         """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def plot(self, *args: Any, show: bool = True, **kwargs: Any) -> tuple:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
         depending on the model type.
+
+        Parameters
+        ----------
+        show : bool, optional
+            Whether to automatically display the plot. Defaults to True.
+            Set to False if you want to modify the figure before displaying it.
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                return self._bayesian_plot(*args, **kwargs)
+                fig, ax = self._bayesian_plot(*args, **kwargs)
             elif isinstance(self.model, RegressorMixin):
-                return self._ols_plot(*args, **kwargs)
+                fig, ax = self._ols_plot(*args, **kwargs)
             else:
                 raise ValueError("Unsupported model type")
+
+        if show:
+            plt.show()
+
+        return fig, ax
 
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
