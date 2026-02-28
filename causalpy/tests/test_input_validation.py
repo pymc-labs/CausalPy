@@ -839,3 +839,179 @@ def test_synthetic_control_no_warning_when_assumption_satisfied():
 
     # The model should run successfully
     assert isinstance(result, cp.SyntheticControl)
+
+
+# Synthetic Control - Donor Pool Correlation Warning
+
+
+def test_synthetic_control_donor_correlation_warning():
+    """Test that SyntheticControl warns when a control unit is negatively correlated."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    controls = pd.DataFrame(
+        {
+            "good_1": trend + np.random.normal(0, 0.3, n_time),
+            "good_2": trend + np.random.normal(0, 0.3, n_time),
+            "bad": -trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+    controls["treated"] = trend + np.random.normal(0, 0.3, n_time)
+
+    with pytest.warns(
+        UserWarning, match=r"pre-treatment correlation below .+ or undefined"
+    ):
+        result = cp.SyntheticControl(
+            controls,
+            treatment_time=30,
+            control_units=["good_1", "good_2", "bad"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_no_warning():
+    """Test that no warning is issued when all donors are well correlated."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "c1": trend + np.random.normal(0, 0.3, n_time),
+            "c2": trend + np.random.normal(0, 0.3, n_time),
+            "c3": trend + np.random.normal(0, 0.3, n_time),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter("always")
+        result = cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["c1", "c2", "c3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [
+        w for w in warning_list if "pre-treatment correlation" in str(w.message)
+    ]
+    assert len(corr_warnings) == 0
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_custom_threshold():
+    """Test that a custom min_donor_correlation threshold triggers warnings."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "high_corr": trend + np.random.normal(0, 0.1, n_time),
+            "low_corr": 10 + np.random.normal(0, 5, n_time),
+            "treated": trend + np.random.normal(0, 0.1, n_time),
+        }
+    )
+
+    with pytest.warns(
+        UserWarning, match=r"pre-treatment correlation below 0.8 or undefined"
+    ):
+        cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["high_corr", "low_corr"],
+            treated_units=["treated"],
+            min_donor_correlation=0.8,
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+
+def test_synthetic_control_donor_correlation_warning_message_contents():
+    """Test that the warning includes r values, plot_correlations, and Abadie."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "good": trend + np.random.normal(0, 0.3, n_time),
+            "bad": -trend + np.random.normal(0, 0.3, n_time),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    with pytest.warns(UserWarning) as record:
+        cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["good", "bad"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [w for w in record if "pre-treatment correlation" in str(w.message)]
+    assert len(corr_warnings) == 1
+    msg = str(corr_warnings[0].message)
+    assert "'bad'" in msg
+    assert "r=-" in msg
+    assert "cp.plot_correlations()" in msg
+    assert "Abadie (2021)" in msg
+
+
+def test_synthetic_control_donor_correlation_constant_donor():
+    """Test that a constant-valued (zero-variance) control unit triggers the warning."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "good": trend + np.random.normal(0, 0.3, n_time),
+            "constant": np.full(n_time, 5.0),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    with pytest.warns(UserWarning, match="r=undefined, likely constant") as record:
+        result = cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["good", "constant"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [w for w in record if "pre-treatment correlation" in str(w.message)]
+    msg = str(corr_warnings[0].message)
+    assert "'constant'" in msg
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_invalid_threshold():
+    """Test that min_donor_correlation outside [-1, 1] raises ValueError."""
+    df = pd.DataFrame(
+        {"c1": [1, 2, 3, 4], "treated": [1, 2, 3, 4]},
+    )
+
+    with pytest.raises(ValueError, match="min_donor_correlation must be between"):
+        cp.SyntheticControl(
+            df,
+            treatment_time=2,
+            control_units=["c1"],
+            treated_units=["treated"],
+            min_donor_correlation=2.0,
+            model=cp.skl_models.WeightedProportion(),
+        )
