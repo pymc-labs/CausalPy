@@ -333,53 +333,66 @@ def generate_ancova_data(
     return df
 
 
-def generate_geolift_data() -> pd.DataFrame:
-    """Generate synthetic data for a geolift example. This will consists of 6 untreated
-    countries. The treated unit `Denmark` is a weighted combination of the untreated
-    units. We additionally specify a treatment effect which takes effect after the
-    `treatment_time`. The timeseries data is observed at weekly resolution and has
-    annual seasonality, with this seasonality being a drawn from a Gaussian Process with
-    a periodic kernel."""
+def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
+    """Generate synthetic geolift data using a latent factor model.
+
+    Each unit's time series is a linear combination of K=3 shared seasonal
+    factors (GP draws) with unit-specific loadings, plus observation noise.
+    Most countries share positive loadings and are therefore positively
+    correlated, while 2 "contrarian" countries carry a negative loading on
+    one factor, making them negatively correlated with the majority. The
+    treated unit (Denmark) is a Dirichlet-weighted combination of the
+    positively-loaded countries only, so it is well-reconstructed by good
+    donors but poorly correlated with the contrarian ones.
+
+    This mirrors the latent factor DGP used to motivate synthetic control
+    methods in Abadie (2010, 2021).
+    """
+    rng = np.random.default_rng(seed)
     n_years = 4
     treatment_time = pd.to_datetime("2022-01-01")
     causal_impact = 0.2
-
     time = pd.date_range(start="2019-01-01", periods=52 * n_years, freq="W")
+    n_obs = len(time)
 
-    untreated = [
+    K = 3
+    factors = np.column_stack(
+        [create_series(n_years=n_years, intercept=0) for _ in range(K)]
+    )  # (n_obs, K)
+
+    similar = [
         "Austria",
         "Belgium",
         "Bulgaria",
         "Croatia",
         "Cyprus",
         "Czech_Republic",
+        "Estonia",
+        "Finland",
     ]
+    contrarian = ["Greece", "Hungary"]
+    untreated = similar + contrarian
 
-    df = (
-        pd.DataFrame(
-            {
-                country: create_series(n_years=n_years, intercept=3)
-                for country in untreated
-            }
-        )
-        .assign(time=time)
-        .set_index("time")
-    )
+    # Positive loadings for similar countries, one negative loading for contrarians
+    loadings: dict[str, np.ndarray] = {}
+    for country in similar:
+        loadings[country] = rng.uniform(0.3, 1.0, size=K)
+    loadings["Greece"] = np.array([-0.6, -0.3, 0.8])
+    loadings["Hungary"] = np.array([0.3, -0.7, -0.5])
 
-    # create treated unit as a weighted sum of the untreated units
-    weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
-    df = df.assign(Denmark=np.dot(df[untreated].values, weights))
+    df = pd.DataFrame(index=time)
+    df.index.name = "time"
+    for country in untreated:
+        df[country] = factors @ loadings[country] + 3 + rng.normal(0, 0.1, size=n_obs)
 
-    # add observation noise
-    for col in untreated + ["Denmark"]:
-        df[col] += np.random.normal(size=len(df), scale=0.1)
+    # Denmark as a weighted sum of similar countries only
+    w = rng.dirichlet(np.ones(len(similar)))
+    df["Denmark"] = df[similar].values @ w + rng.normal(0, 0.1, size=n_obs)
 
-    # add treatment effect
+    # treatment effect
     df["Denmark"] += np.where(df.index < treatment_time, 0, causal_impact)
 
-    # ensure we never see any negative sales
     df = df.clip(lower=0)
-
     return df
 
 
