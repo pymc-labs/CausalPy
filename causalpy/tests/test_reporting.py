@@ -1035,6 +1035,145 @@ def test_compute_rope_probability_decrease():
     assert result == 0.4  # 2 out of 5
 
 
+def test_compute_statistics_rope_decrease():
+    """Regression test: ROPE in _compute_statistics must use effect < -min_effect
+    for direction='decrease', not effect > min_effect (which was the bug)."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    # 8 posterior draws, 3 time points.
+    # All draws are strongly negative (around -5).
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="decrease",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around -5, virtually all should satisfy effect < -1.0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_increase():
+    """Test ROPE in _compute_statistics for direction='increase'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around +5, virtually all should satisfy effect > 1.0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_two_sided():
+    """Test ROPE in _compute_statistics for direction='two-sided'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around -5, |effect| > 1.0 for virtually all
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_near_threshold():
+    """Test ROPE when effect is near the threshold — should give intermediate prob."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    # Draws centered at -2.0 with sd=1.0; min_effect=2.0 tests effect < -2.0
+    draws = rng.normal(loc=-2.0, scale=1.0, size=(1, 500, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 500, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+        min_effect=2.0,
+    )
+
+    # Mean at -2.0, threshold at -2.0 → should be roughly 0.5
+    assert 0.3 < stats["avg"]["p_rope"] < 0.7
+
+
 def test_format_number():
     """Test _format_number helper."""
     from causalpy.reporting import _format_number
@@ -1914,6 +2053,109 @@ def test_generate_prose_detailed_with_relative():
     assert "5.00%" in prose
     assert "2.00%" in prose
     assert "8.00%" in prose
+
+
+def test_generate_prose_detailed_rope_in_prose():
+    """Test that ROPE probability appears in prose when provided."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+            "p_rope": 0.85,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+
+    assert "minimum effect size threshold" in prose
+    assert "0.850" in prose
+
+
+def test_generate_prose_detailed_is_descriptive():
+    """Ensure prose uses descriptive language, not prescriptive judgments."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+
+    # Should NOT contain prescriptive language from the old four-way branching
+    assert "statistically credible" not in prose
+    assert "caution is warranted" not in prose
+    assert "weak or inconclusive" not in prose
+    assert "strong statistical evidence" not in prose
+    # Should contain descriptive factual statements
+    assert "does not include zero" in prose
+    assert "posterior probability" in prose
+    assert "We recommend" in prose
+
+
+def test_generate_prose_detailed_ols_is_descriptive():
+    """Ensure OLS prose uses descriptive language, not prescriptive judgments."""
+    from causalpy.reporting import _generate_prose_detailed_ols
+
+    stats = {
+        "avg": {
+            "mean": 0.5,
+            "ci_lower": -0.2,
+            "ci_upper": 1.2,
+            "p_value": 0.15,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=False,
+        relative=False,
+        observed_avg=50.5,
+        counterfactual_avg=50.0,
+    )
+
+    # Should NOT contain prescriptive language
+    assert "statistically significant" not in prose
+    assert "caution is warranted" not in prose
+    assert "lack of statistical significance" not in prose
+    # Should contain descriptive factual statements
+    assert "includes zero" in prose
+    assert "p-value" in prose
+    assert "We recommend" in prose
 
 
 def test_generate_table_ols_basic():
