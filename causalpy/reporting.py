@@ -1054,7 +1054,7 @@ def _generate_prose_detailed(
         cf_interval_upper = observed_avg - avg_lower
 
         para1 = (
-            f"During the {prefix.lower()} ({window_str}), the response variable had "
+            f"During the {prefix} ({window_str}), the response variable had "
             f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
             f"absence of an intervention, we would have expected an average response of "
             f"{fmt_num(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
@@ -1066,7 +1066,7 @@ def _generate_prose_detailed(
         )
     else:
         para1 = (
-            f"During the {prefix.lower()} ({window_str}), the estimated average causal "
+            f"During the {prefix} ({window_str}), the estimated average causal "
             f"effect of the intervention is {fmt_num(avg_mean)} "
             f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
             f"This represents the difference between the observed response and the "
@@ -1085,7 +1085,7 @@ def _generate_prose_detailed(
             cum_cf_upper = observed_cum - cum_lower
 
             para2 = (
-                f"Summing up the individual data points during the {prefix.lower()}, "
+                f"Summing up the individual data points during the {prefix}, "
                 f"the response variable had an overall value of {fmt_num(observed_cum)}. "
                 f"By contrast, had the intervention not taken place, we would have expected "
                 f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_pct}% interval of this "
@@ -1093,7 +1093,7 @@ def _generate_prose_detailed(
             )
         else:
             para2 = (
-                f"The cumulative effect over the {prefix.lower()} "
+                f"The cumulative effect over the {prefix} "
                 f"was {fmt_num(cum_mean)} ({hdi_pct}% HDI [{fmt_num(cum_lower)}, "
                 f"{fmt_num(cum_upper)}])."
             )
@@ -1114,8 +1114,9 @@ def _generate_prose_detailed(
             f"{fmt_num(avg_upper)}] includes zero."
         )
 
+    article = "an" if direction_text[0].lower() in "aeiou" else "a"
     credibility_parts.append(
-        f"The posterior probability of a {direction_text} is {fmt_num(p_val, 3)}."
+        f"The posterior probability of {article} {direction_text} is {fmt_num(p_val, 3)}."
     )
 
     if "p_rope" in stats["avg"]:
@@ -1266,7 +1267,7 @@ def _generate_prose_detailed_ols(
         cf_interval_upper = observed_avg - avg_lower
 
         para1 = (
-            f"During the {prefix.lower()} ({window_str}), the response variable had "
+            f"During the {prefix} ({window_str}), the response variable had "
             f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
             f"absence of an intervention, we would have expected an average response of "
             f"{fmt_num(counterfactual_avg)}. The {ci_pct}% confidence interval of this "
@@ -1279,7 +1280,7 @@ def _generate_prose_detailed_ols(
         )
     else:
         para1 = (
-            f"During the {prefix.lower()} ({window_str}), the estimated average causal "
+            f"During the {prefix} ({window_str}), the estimated average causal "
             f"effect of the intervention is {fmt_num(avg_mean)} "
             f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
             f"This represents the difference between the observed response and the "
@@ -1298,7 +1299,7 @@ def _generate_prose_detailed_ols(
             cum_cf_upper = observed_cum - cum_lower
 
             para2 = (
-                f"Summing up the individual data points during the {prefix.lower()}, "
+                f"Summing up the individual data points during the {prefix}, "
                 f"the response variable had an overall value of {fmt_num(observed_cum)}. "
                 f"By contrast, had the intervention not taken place, we would have expected "
                 f"a sum of {fmt_num(counterfactual_cum)}. The {ci_pct}% confidence interval "
@@ -1306,7 +1307,7 @@ def _generate_prose_detailed_ols(
             )
         else:
             para2 = (
-                f"The cumulative effect over the {prefix.lower()} "
+                f"The cumulative effect over the {prefix} "
                 f"was {fmt_num(cum_mean)} ({ci_pct}% CI [{fmt_num(cum_lower)}, "
                 f"{fmt_num(cum_upper)}])."
             )

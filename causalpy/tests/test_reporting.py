@@ -1871,7 +1871,7 @@ def test_generate_prose_detailed_basic():
         counterfactual_avg=50.0,
     )
 
-    assert "post-period" in prose
+    assert "Post-period" in prose
     assert "10 to 14" in prose
     assert "52.50" in prose
     assert "50.00" in prose
@@ -1977,6 +1977,60 @@ def test_generate_prose_detailed_direction_autodetect_positive():
 
     assert "increase" in prose
     assert "does not include zero" in prose
+
+
+def test_generate_prose_detailed_two_sided_uses_correct_article():
+    """Test that two-sided prose uses 'an effect' (not 'a effect')."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 0.5,
+            "hdi_lower": -0.2,
+            "hdi_upper": 1.2,
+            "prob_of_effect": 0.9,
+        }
+    }
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="two-sided",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "posterior probability of an effect" in prose
+    assert "posterior probability of a effect" not in prose
+
+
+def test_generate_prose_detailed_preserves_custom_prefix_casing():
+    """Test that prose preserves caller-provided prefix casing."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+        }
+    }
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        prefix="Post-Intervention",
+    )
+
+    assert "During the Post-Intervention" in prose
 
 
 def test_generate_prose_detailed_cumulative():
@@ -2256,7 +2310,7 @@ def test_generate_prose_detailed_ols_basic():
         counterfactual_avg=50.0,
     )
 
-    assert "post-period" in prose
+    assert "Post-period" in prose
     assert "10 to 12" in prose
     assert "52.50" in prose
     assert "50.00" in prose
