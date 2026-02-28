@@ -108,6 +108,11 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        if not (-1 <= min_donor_correlation <= 1):
+            raise ValueError(
+                f"min_donor_correlation must be between -1 and 1, "
+                f"got {min_donor_correlation}."
+            )
         self.min_donor_correlation = min_donor_correlation
         self.expt_type = "SyntheticControl"
         self._prepare_data()
@@ -165,25 +170,33 @@ class SyntheticControl(BaseExperiment):
         :func:`warnings.warn`.
         """
         pre = self.datapre
-        flagged: dict[str, list[str]] = {}
+        flagged: dict[str, list[tuple[str, float | None]]] = {}
 
         for treated in self.treated_units:
             treated_series = pre[treated]
-            low: list[str] = []
+            low: list[tuple[str, float | None]] = []
             for control in self.control_units:
                 r = treated_series.corr(pre[control])
-                if pd.isna(r) or r < self.min_donor_correlation:
-                    low.append(control)
+                if pd.isna(r):
+                    low.append((control, None))
+                elif r < self.min_donor_correlation:
+                    low.append((control, float(r)))
             if low:
                 flagged[treated] = low
 
         if flagged:
             parts: list[str] = []
             for treated, controls in flagged.items():
+                details = []
+                for name, corr_val in controls:
+                    if corr_val is None:
+                        details.append(f"'{name}' (r=undefined, likely constant)")
+                    else:
+                        details.append(f"'{name}' (r={corr_val:.3f})")
                 parts.append(
-                    f"Control units {controls} have pre-treatment correlation "
-                    f"below {self.min_donor_correlation} with treated unit "
-                    f"'{treated}'."
+                    f"Control units [{', '.join(details)}] have pre-treatment "
+                    f"correlation below {self.min_donor_correlation} or undefined "
+                    f"with treated unit '{treated}'."
                 )
             msg = (
                 " ".join(parts)
