@@ -23,6 +23,9 @@ import causalpy as cp
 @pytest.mark.integration
 def test_its_with_bsts_model():
     """InterruptedTimeSeries integration using BayesianBasisExpansionTimeSeries."""
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
     # Prepare data
     df = (
         cp.load_data("its")

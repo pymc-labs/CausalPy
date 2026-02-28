@@ -115,7 +115,9 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda env create -f environment.yml
     ```
 
-    To update an existing environment after changes to `environment.yml`:
+    **Note:** `environment.yml` is generated from `pyproject.toml` by a pre-commit hook. To change dependencies, edit `pyproject.toml` and run `pre-commit run --all-files` (or regenerate with `pyproject2conda yaml` using the same args as in `.pre-commit-config.yaml`). Do not edit `environment.yml` by hand—it will be overwritten when `pyproject.toml` is committed.
+
+    To update an existing environment after changes to `environment.yml` (e.g. after pulling or after regenerating it from `pyproject.toml`):
 
     ```bash
     conda env update --file environment.yml --prune
