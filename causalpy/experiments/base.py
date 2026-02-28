@@ -191,6 +191,7 @@ class BaseExperiment(ABC):
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         raise NotImplementedError("effect_summary method not yet implemented")

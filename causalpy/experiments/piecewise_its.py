@@ -750,8 +750,8 @@ class PiecewiseITS(BaseExperiment):
             _compute_statistics_ols,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose,
-            _generate_prose_ols,
+            _generate_prose_detailed,
+            _generate_prose_detailed_ols,
             _generate_table,
             _generate_table_ols,
         )
@@ -781,7 +781,16 @@ class PiecewiseITS(BaseExperiment):
                 min_effect=min_effect,
             )
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
-            text = _generate_prose(
+
+            time_dim = "obs_ind"
+            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(
+                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
+            )
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed(
                 stats,
                 window_coords,
                 alpha=alpha,
@@ -789,6 +798,11 @@ class PiecewiseITS(BaseExperiment):
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="piecewise_its",
             )
         else:
             impact_array = np.asarray(windowed_impact)
@@ -801,13 +815,24 @@ class PiecewiseITS(BaseExperiment):
                 relative=relative,
             )
             table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-            text = _generate_prose_ols(
+
+            cf_avg = float(np.mean(counterfactual_array))
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(np.sum(counterfactual_array))
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed_ols(
                 stats,
                 window_coords,
                 alpha=alpha,
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="piecewise_its",
             )
 
         return EffectSummary(table=table, text=text)
