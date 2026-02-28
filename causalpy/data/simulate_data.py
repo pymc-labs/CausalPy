@@ -645,3 +645,180 @@ def generate_staggered_did_data(
 
     df = pd.DataFrame(rows)
     return df
+
+
+def generate_piecewise_its_data(
+    N: int = 100,
+    interruption_times: list[int] | None = None,
+    baseline_intercept: float = 10.0,
+    baseline_slope: float = 0.1,
+    level_changes: list[float] | None = None,
+    slope_changes: list[float] | None = None,
+    noise_sigma: float = 1.0,
+    seed: int | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Generate piecewise Interrupted Time Series data with known ground truth parameters.
+
+    This function creates synthetic data for testing and demonstrating piecewise ITS
+    / segmented regression models. The data follows the model:
+
+    y_t = β₀ + β₁t + Σₖ(level_k · I_k(t) + slope_k · R_k(t)) + ε_t
+
+    Where:
+    - I_k(t) = 1 if t >= T_k else 0 (step function for level change)
+    - R_k(t) = max(0, t - T_k) (ramp function for slope change)
+
+    Parameters
+    ----------
+    N : int, default=100
+        Number of time points in the series.
+    interruption_times : list[int], optional
+        List of time indices where interruptions occur. Defaults to [50].
+    baseline_intercept : float, default=10.0
+        The intercept (β₀) of the baseline trend.
+    baseline_slope : float, default=0.1
+        The slope (β₁) of the baseline trend.
+    level_changes : list[float], optional
+        List of level changes at each interruption. Length must match
+        interruption_times. If None, defaults to [5.0] for single interruption.
+    slope_changes : list[float], optional
+        List of slope changes at each interruption. Length must match
+        interruption_times. If None, defaults to [0.0] (no slope change).
+    noise_sigma : float, default=1.0
+        Standard deviation of the Gaussian noise.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        DataFrame with columns:
+        - 't': time index (0 to N-1)
+        - 'y': observed outcome with noise
+        - 'y_true': outcome without noise (ground truth)
+        - 'counterfactual': baseline trend without intervention effects
+        - 'effect': true causal effect at each time point
+    params : dict
+        Dictionary containing the true parameters:
+        - 'baseline_intercept': β₀
+        - 'baseline_slope': β₁
+        - 'level_changes': list of level changes
+        - 'slope_changes': list of slope changes
+        - 'interruption_times': list of interruption times
+        - 'noise_sigma': noise standard deviation
+
+    Examples
+    --------
+    >>> from causalpy.data.simulate_data import generate_piecewise_its_data
+    >>> # Single interruption with level and slope change
+    >>> df, params = generate_piecewise_its_data(
+    ...     N=100,
+    ...     interruption_times=[50],
+    ...     level_changes=[5.0],
+    ...     slope_changes=[0.2],
+    ...     seed=42,
+    ... )
+    >>> df.shape
+    (100, 5)
+
+    >>> # Multiple interruptions
+    >>> df, params = generate_piecewise_its_data(
+    ...     N=150,
+    ...     interruption_times=[50, 100],
+    ...     level_changes=[3.0, -2.0],
+    ...     slope_changes=[0.1, -0.15],
+    ...     seed=42,
+    ... )
+    >>> len(params["interruption_times"])
+    2
+
+    >>> # Level change only (no slope change)
+    >>> df, params = generate_piecewise_its_data(
+    ...     N=100,
+    ...     interruption_times=[50],
+    ...     level_changes=[5.0],
+    ...     slope_changes=[0.0],
+    ...     seed=42,
+    ... )
+    """
+    # Set defaults
+    if interruption_times is None:
+        interruption_times = [50]
+
+    n_interruptions = len(interruption_times)
+
+    if level_changes is None:
+        level_changes = [5.0] * n_interruptions
+
+    if slope_changes is None:
+        slope_changes = [0.0] * n_interruptions
+
+    # Validate inputs
+    if len(level_changes) != n_interruptions:
+        raise ValueError(
+            f"level_changes length ({len(level_changes)}) must match "
+            f"interruption_times length ({n_interruptions})"
+        )
+
+    if len(slope_changes) != n_interruptions:
+        raise ValueError(
+            f"slope_changes length ({len(slope_changes)}) must match "
+            f"interruption_times length ({n_interruptions})"
+        )
+
+    for t_k in interruption_times:
+        if t_k < 0 or t_k >= N:
+            raise ValueError(
+                f"Interruption time {t_k} is outside valid range [0, {N - 1}]"
+            )
+
+    # Set random seed
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Generate time index
+    t = np.arange(N)
+
+    # Compute baseline (counterfactual)
+    counterfactual = baseline_intercept + baseline_slope * t
+
+    # Compute intervention effects
+    effect = np.zeros(N)
+    for k, t_k in enumerate(interruption_times):
+        # Step function: I_k(t) = 1 if t >= t_k
+        step = (t >= t_k).astype(float)
+        # Ramp function: R_k(t) = max(0, t - t_k)
+        ramp = np.maximum(0, t - t_k).astype(float)
+
+        effect += level_changes[k] * step + slope_changes[k] * ramp
+
+    # Compute true outcome (without noise)
+    y_true = counterfactual + effect
+
+    # Add noise
+    noise = np.random.normal(0, noise_sigma, N)
+    y = y_true + noise
+
+    # Create DataFrame
+    df = pd.DataFrame(
+        {
+            "t": t,
+            "y": y,
+            "y_true": y_true,
+            "counterfactual": counterfactual,
+            "effect": effect,
+        }
+    )
+
+    # Store parameters
+    params = {
+        "baseline_intercept": baseline_intercept,
+        "baseline_slope": baseline_slope,
+        "level_changes": level_changes,
+        "slope_changes": slope_changes,
+        "interruption_times": interruption_times,
+        "noise_sigma": noise_sigma,
+    }
+
+    return df, params

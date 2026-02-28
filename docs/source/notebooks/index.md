@@ -54,6 +54,13 @@ its_lift_test.ipynb
 its_pymc_comparative.ipynb
 :::
 
+:::{toctree}
+:caption: Piecewise Interrupted Time Series
+:maxdepth: 1
+
+piecewise_its_pymc.ipynb
+:::
+
 ## Cross-sectional methods
 
 :::{toctree}
