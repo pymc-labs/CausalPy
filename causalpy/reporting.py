@@ -770,12 +770,9 @@ def _compute_statistics(
 
     # ROPE for average
     if min_effect is not None:
-        if direction == "two-sided":
-            stats["avg"]["p_rope"] = float(
-                (np.abs(avg_effect) > min_effect).mean().values
-            )
-        else:
-            stats["avg"]["p_rope"] = float((avg_effect > min_effect).mean().values)
+        stats["avg"]["p_rope"] = _compute_rope_probability(
+            avg_effect, min_effect, direction
+        )
 
     # Cumulative effect
     if cumulative:
@@ -813,12 +810,9 @@ def _compute_statistics(
 
         # ROPE for cumulative
         if min_effect is not None:
-            if direction == "two-sided":
-                stats["cum"]["p_rope"] = float(
-                    (np.abs(cum_final) > min_effect).mean().values
-                )
-            else:
-                stats["cum"]["p_rope"] = float((cum_final > min_effect).mean().values)
+            stats["cum"]["p_rope"] = _compute_rope_probability(
+                cum_final, min_effect, direction
+            )
 
     # Relative effects
     if relative:
@@ -1105,36 +1099,25 @@ def _generate_prose_detailed(
             )
         paragraphs.append(para2)
 
-    # Paragraph 3: Statistical credibility assessment
-    credibility_parts = []
-
+    # Paragraph 3: Posterior summary
     hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
 
-    if hdi_excludes_zero and p_val > 0.95:
+    credibility_parts = []
+    if hdi_excludes_zero:
         credibility_parts.append(
-            f"The effect is statistically credible: the {hdi_pct}% HDI excludes zero, "
-            f"and the posterior probability of a {direction_text} is {fmt_num(p_val, 3)}."
-        )
-    elif hdi_excludes_zero:
-        credibility_parts.append(
-            f"The {hdi_pct}% HDI excludes zero, suggesting a credible {direction_text}, "
-            f"though the posterior probability ({fmt_num(p_val, 3)}) is below the "
-            f"conventional 0.95 threshold."
-        )
-    elif p_val > 0.95:
-        credibility_parts.append(
-            f"While the {hdi_pct}% HDI includes zero, the posterior probability of a "
-            f"{direction_text} is {fmt_num(p_val, 3)}, suggesting the effect may be "
-            f"credible but with greater uncertainty."
+            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] does not include zero."
         )
     else:
         credibility_parts.append(
-            f"The {hdi_pct}% HDI includes zero, and the posterior probability of a "
-            f"{direction_text} is {fmt_num(p_val, 3)}. This suggests the evidence for "
-            f"a causal effect is weak or inconclusive."
+            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] includes zero."
         )
 
-    # Add ROPE interpretation if available
+    credibility_parts.append(
+        f"The posterior probability of a {direction_text} is {fmt_num(p_val, 3)}."
+    )
+
     if "p_rope" in stats["avg"]:
         p_rope = stats["avg"]["p_rope"]
         credibility_parts.append(
@@ -1142,7 +1125,6 @@ def _generate_prose_detailed(
             f"size threshold is {fmt_num(p_rope, 3)}."
         )
 
-    # Add relative effect interpretation
     if relative and "relative_mean" in stats["avg"]:
         rel_mean = stats["avg"]["relative_mean"]
         rel_lower = stats["avg"]["relative_hdi_lower"]
@@ -1158,27 +1140,11 @@ def _generate_prose_detailed(
 
     # Paragraph 4: Assumptions and guidance
     para4 = _assumptions_text(experiment_type)
-
-    if hdi_excludes_zero and p_val > 0.95:
-        para4 += (
-            "Given the strong statistical evidence, these results can be interpreted with "
-            "reasonable confidence, provided the modeling assumptions hold."
-        )
-    elif hdi_excludes_zero or p_val > 0.80:
-        para4 += (
-            "While the results suggest a potential effect, caution is warranted given "
-            "the uncertainty. Consider checking model fit, examining pre-intervention "
-            "trends, and conducting sensitivity analyses (e.g., placebo tests) before "
-            "drawing firm conclusions."
-        )
-    else:
-        para4 += (
-            "Given the weak statistical evidence, these results should be interpreted "
-            "with substantial caution. The data do not provide strong support for a "
-            "causal effect. Consider whether the model is appropriately specified, "
-            "whether the intervention timing is correct, and whether important "
-            "confounding factors may be present."
-        )
+    para4 += (
+        "We recommend inspecting model fit, examining pre-intervention trends, "
+        "and conducting sensitivity analyses (e.g., placebo tests) to support "
+        "any causal conclusions drawn from this analysis."
+    )
     paragraphs.append(para4)
 
     return "\n\n".join(paragraphs)
@@ -1346,68 +1312,41 @@ def _generate_prose_detailed_ols(
             )
         paragraphs.append(para2)
 
-    # Paragraph 3: Statistical significance assessment
+    # Paragraph 3: Statistical summary
     ci_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
 
-    if ci_excludes_zero and p_val < 0.05:
-        para3 = (
-            f"The effect is statistically significant at the {alpha} level: the "
-            f"{ci_pct}% confidence interval excludes zero, with a p-value of "
-            f"{fmt_num(p_val, 3)}."
-        )
-    elif ci_excludes_zero:
-        para3 = (
-            f"The {ci_pct}% confidence interval excludes zero, but the p-value "
-            f"({fmt_num(p_val, 3)}) is above the conventional 0.05 threshold, suggesting "
-            f"marginal significance."
-        )
-    elif p_val < 0.05:
-        para3 = (
-            f"While the p-value ({fmt_num(p_val, 3)}) is below 0.05, the {ci_pct}% "
-            f"confidence interval includes zero, indicating the effect may not be robust."
+    significance_parts = []
+    if ci_excludes_zero:
+        significance_parts.append(
+            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] does not include zero (p-value {fmt_num(p_val, 3)})."
         )
     else:
-        para3 = (
-            f"The {ci_pct}% confidence interval includes zero, and the p-value is "
-            f"{fmt_num(p_val, 3)}. This suggests the evidence for a causal effect is weak "
-            f"or inconclusive."
+        significance_parts.append(
+            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] includes zero (p-value {fmt_num(p_val, 3)})."
         )
 
-    # Add relative effect interpretation
     if relative and "relative_mean" in stats["avg"]:
         rel_mean = stats["avg"]["relative_mean"]
         rel_lower = stats["avg"]["relative_ci_lower"]
         rel_upper = stats["avg"]["relative_ci_upper"]
-        para3 += (
-            f" Relative to the counterfactual, the effect represents a "
+        significance_parts.append(
+            f"Relative to the counterfactual, the effect represents a "
             f"{fmt_num(rel_mean)}% change ({ci_pct}% CI [{fmt_num(rel_lower)}%, "
             f"{fmt_num(rel_upper)}%])."
         )
 
+    para3 = " ".join(significance_parts)
     paragraphs.append(para3)
 
     # Paragraph 4: Assumptions and guidance
     para4 = _assumptions_text(experiment_type)
-
-    if ci_excludes_zero and p_val < 0.05:
-        para4 += (
-            "Given the statistically significant result, these findings can be interpreted "
-            "with reasonable confidence, provided the modeling assumptions hold."
-        )
-    elif ci_excludes_zero or p_val < 0.10:
-        para4 += (
-            "While the results suggest a potential effect, caution is warranted given "
-            "the marginal statistical significance. Consider checking model fit, "
-            "examining pre-intervention trends, and conducting sensitivity analyses "
-            "before drawing firm conclusions."
-        )
-    else:
-        para4 += (
-            "Given the lack of statistical significance, these results should be interpreted "
-            "with substantial caution. The data do not provide strong evidence for a "
-            "causal effect. Consider whether the model is appropriately specified and "
-            "whether important confounding factors may be present."
-        )
+    para4 += (
+        "We recommend inspecting model fit, examining pre-intervention trends, "
+        "and conducting sensitivity analyses (e.g., placebo tests) to support "
+        "any causal conclusions drawn from this analysis."
+    )
     paragraphs.append(para4)
 
     return "\n\n".join(paragraphs)

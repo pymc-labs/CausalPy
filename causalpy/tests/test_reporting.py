@@ -1804,11 +1804,10 @@ def test_generate_prose_detailed_direction_autodetect_negative():
 
     # Should auto-detect decrease: P(decrease) = 1 - P(increase) = 1.0
     assert "decrease" in prose
-    # Should report credible (HDI excludes zero + high p)
-    assert "statistically credible" in prose
-    # Should NOT say "caution is warranted"
-    assert "caution is warranted" not in prose
-    assert "strong statistical evidence" in prose
+    # HDI excludes zero, so it should say "does not include zero"
+    assert "does not include zero" in prose
+    # Posterior probability should be 1.000 (auto-detected)
+    assert "1.000" in prose
 
 
 def test_generate_prose_detailed_direction_autodetect_positive():
@@ -1838,7 +1837,7 @@ def test_generate_prose_detailed_direction_autodetect_positive():
     )
 
     assert "increase" in prose
-    assert "statistically credible" in prose
+    assert "does not include zero" in prose
 
 
 def test_generate_prose_detailed_cumulative():
@@ -2021,7 +2020,7 @@ def test_generate_prose_detailed_ols_basic():
     assert "50.00" in prose
     assert "2.50" in prose
     assert "95% confidence interval" in prose
-    assert "statistically significant" in prose
+    assert "does not include zero" in prose
 
 
 def test_generate_prose_detailed_ols_counterfactual_interval():
