@@ -963,3 +963,30 @@ def test_synthetic_control_donor_correlation_warning_message_contents():
     assert "bad" in msg
     assert "cp.plot_correlations()" in msg
     assert "Abadie (2021)" in msg
+
+
+def test_synthetic_control_donor_correlation_constant_donor():
+    """Test that a constant-valued (zero-variance) control unit triggers the warning."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "good": trend + np.random.normal(0, 0.3, n_time),
+            "constant": np.full(n_time, 5.0),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    with pytest.warns(UserWarning, match="pre-treatment correlation below"):
+        result = cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["good", "constant"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    assert isinstance(result, cp.SyntheticControl)

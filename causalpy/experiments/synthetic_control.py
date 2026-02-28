@@ -160,7 +160,9 @@ class SyntheticControl(BaseExperiment):
 
         Computes pairwise Pearson correlations between each control and treated
         unit in the pre-treatment period. Control units correlated below
-        ``self.min_donor_correlation`` are reported via :func:`warnings.warn`.
+        ``self.min_donor_correlation`` — or whose correlation is undefined
+        (``NaN``, e.g. constant-valued donors) — are reported via
+        :func:`warnings.warn`.
         """
         pre = self.datapre
         flagged: dict[str, list[str]] = {}
@@ -170,7 +172,7 @@ class SyntheticControl(BaseExperiment):
             low: list[str] = []
             for control in self.control_units:
                 r = treated_series.corr(pre[control])
-                if r < self.min_donor_correlation:
+                if pd.isna(r) or r < self.min_donor_correlation:
                     low.append(control)
             if low:
                 flagged[treated] = low
