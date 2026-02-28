@@ -137,6 +137,19 @@ class TestGenerateReport:
         ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
         GenerateReport().validate(ctx)
 
+    def test_handles_plot_rendering_failure(self, its_context):
+        from unittest.mock import patch
+
+        with patch.object(
+            type(its_context.experiment),
+            "plot",
+            side_effect=RuntimeError("plot failed"),
+        ):
+            step = GenerateReport(include_plots=True)
+            ctx = step.run(its_context)
+        assert isinstance(ctx.report, str)
+        assert "data:image/png;base64," not in ctx.report
+
 
 # ---------------------------------------------------------------------------
 # Pipeline integration

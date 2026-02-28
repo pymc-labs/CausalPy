@@ -280,6 +280,33 @@ class TestEstimateEffect:
         assert ctx.experiment_config["method"] is cp.InterruptedTimeSeries
         assert ctx.effect_summary is not None
 
+    def test_run_handles_unimplemented_effect_summary(self) -> None:
+        """EstimateEffect gracefully handles NotImplementedError from effect_summary."""
+        from unittest.mock import patch
+
+        from sklearn.linear_model import LinearRegression
+
+        np.random.seed(42)
+        n = 100
+        df = pd.DataFrame({"t": np.arange(n), "y": np.random.normal(size=n)})
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        step = cp.EstimateEffect(
+            method=cp.InterruptedTimeSeries,
+            treatment_time=70,
+            formula="y ~ 1 + t",
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        with patch.object(
+            cp.InterruptedTimeSeries,
+            "effect_summary",
+            side_effect=NotImplementedError("not implemented"),
+        ):
+            ctx = step.run(ctx)
+
+        assert ctx.experiment is not None
+        assert ctx.effect_summary is None
+
     def test_pipeline_with_estimate_effect(self) -> None:
         """Integration test: full pipeline with a single EstimateEffect step."""
         np.random.seed(42)

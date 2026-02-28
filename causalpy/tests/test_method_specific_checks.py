@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -263,3 +265,252 @@ class TestMcCraryDensityTest:
 
         result = McCraryDensityTest().run(rd, ctx)
         assert result.passed
+
+    def test_empty_data_returns_none_passed(self):
+        """When no data exists around the threshold, return inconclusive."""
+        from unittest.mock import Mock
+
+        mock_rd = Mock()
+        mock_rd.treatment_threshold = 100
+        mock_rd.running_variable_name = "x"
+        mock_rd.data = pd.DataFrame({"x": [], "y": []})
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = McCraryDensityTest().run(mock_rd, ctx)
+        assert result.passed is None
+        assert "No observations" in result.text
+
+
+# ---------------------------------------------------------------------------
+# Edge-case and error-path tests
+# ---------------------------------------------------------------------------
+
+
+class TestBandwidthSensitivityEdgeCases:
+    """Edge-case tests for BandwidthSensitivity."""
+
+    def test_run_missing_experiment_config_raises(self):
+        df = cp.load_data("rd")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        rd = RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            treatment_threshold=0.5,
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = rd
+        with pytest.raises(RuntimeError, match="experiment_config"):
+            BandwidthSensitivity().run(rd, ctx)
+
+    def test_run_handles_failing_bandwidth(self):
+        df = cp.load_data("rd")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        rd = RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            treatment_threshold=0.5,
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = rd
+        ctx.experiment_config = {
+            "method": RegressionDiscontinuity,
+            "formula": "y ~ 1 + x + treated + x:treated",
+            "treatment_threshold": 0.5,
+            "model": cp.create_causalpy_compatible_class(LinearRegression()),
+        }
+        check = BandwidthSensitivity(bandwidths=[0.001])
+        result = check.run(rd, ctx)
+        assert isinstance(result, CheckResult)
+        assert result.table is not None
+
+    def test_run_handles_fitting_exception(self):
+        df = cp.load_data("rd")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        rd = RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            treatment_threshold=0.5,
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = rd
+        ctx.experiment_config = {
+            "method": RegressionDiscontinuity,
+            "formula": "y ~ 1 + x + treated + x:treated",
+            "treatment_threshold": 0.5,
+            "model": model,
+        }
+        with patch.object(
+            RegressionDiscontinuity,
+            "__init__",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            result = BandwidthSensitivity(bandwidths=[0.5]).run(rd, ctx)
+        assert result.table is not None
+        assert "error" in result.table.columns
+
+
+class TestLeaveOneOutEdgeCases:
+    """Edge-case tests for LeaveOneOut."""
+
+    def test_run_missing_experiment_config_raises(self):
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a", "b", "c"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        with pytest.raises(RuntimeError, match="experiment_config"):
+            LeaveOneOut().run(sc, ctx)
+
+    def test_run_with_single_control(self):
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": ["a"],
+            "treated_units": ["actual"],
+            "model": model,
+        }
+        result = LeaveOneOut().run(sc, ctx)
+        assert result.passed is None
+        assert "fewer than 2" in result.text
+
+    def test_run_handles_fitting_failure(self):
+        df = cp.load_data("sc")
+        controls = ["a", "b"]
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=controls,
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": controls,
+            "treated_units": ["actual"],
+            "model": model,
+        }
+        with patch.object(
+            SyntheticControl,
+            "__init__",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            result = LeaveOneOut().run(sc, ctx)
+        assert result.table is not None
+        assert "error" in result.table.columns
+
+
+class TestPlaceboInSpaceEdgeCases:
+    """Edge-case tests for PlaceboInSpace."""
+
+    def test_run_missing_experiment_config_raises(self):
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a", "b", "c"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        with pytest.raises(RuntimeError, match="experiment_config"):
+            PlaceboInSpace().run(sc, ctx)
+
+    def test_run_with_single_control(self):
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": ["a"],
+            "treated_units": ["actual"],
+            "model": model,
+        }
+        result = PlaceboInSpace().run(sc, ctx)
+        assert result.passed is None
+        assert "fewer than 2" in result.text
+
+    def test_run_handles_fitting_failure(self):
+        df = cp.load_data("sc")
+        controls = ["a", "b"]
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=controls,
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": controls,
+            "treated_units": ["actual"],
+            "model": model,
+        }
+        with patch.object(
+            SyntheticControl,
+            "__init__",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            result = PlaceboInSpace().run(sc, ctx)
+        assert result.table is not None
+        assert "error" in result.table.columns
+
+    def test_run_skips_unit_with_no_donors(self):
+        """When a control is also listed as treated, it should be skipped."""
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a", "b"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": ["a", "b"],
+            "treated_units": ["a", "actual"],
+            "model": model,
+        }
+        result = PlaceboInSpace().run(sc, ctx)
+        assert isinstance(result, CheckResult)

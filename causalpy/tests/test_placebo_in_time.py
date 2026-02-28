@@ -273,6 +273,68 @@ def test_no_experiment_config_and_no_factory_raises(its_experiment):
         check.run(its_experiment, ctx)
 
 
+def test_three_period_its_intervention_length():
+    """PlaceboInTime uses treatment_end_time when available."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({"t": np.arange(n), "y": rng.normal(size=n)})
+    model = _make_model()
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=100,
+        treatment_end_time=130,
+        formula="y ~ 1 + t",
+        model=model,
+    )
+    ctx = PipelineContext(data=df)
+    ctx.experiment = experiment
+    ctx.experiment_config = {
+        "method": InterruptedTimeSeries,
+        "treatment_time": 100,
+        "treatment_end_time": 130,
+        "formula": "y ~ 1 + t",
+        "model": _make_model(),
+    }
+    check = PlaceboInTime(n_folds=2)
+    result = check.run(experiment, ctx)
+    assert isinstance(result, CheckResult)
+    fold_results = result.metadata["fold_results"]
+    for fr in fold_results:
+        assert fr.pseudo_treatment_time < 100
+
+
+def test_fold_fitting_failure_is_skipped():
+    """When the experiment factory raises, the fold is skipped gracefully."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({"t": np.arange(n), "y": rng.normal(size=n)})
+    model = _make_model()
+    experiment = InterruptedTimeSeries(
+        df, treatment_time=150, formula="y ~ 1 + t", model=model
+    )
+
+    call_count = 0
+
+    def _failing_factory(data, treatment_time):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("Simulated fitting failure")
+        return InterruptedTimeSeries(
+            data,
+            treatment_time=treatment_time,
+            formula="y ~ 1 + t",
+            model=_make_model(),
+        )
+
+    ctx = PipelineContext(data=df)
+    ctx.experiment = experiment
+    check = PlaceboInTime(n_folds=2, experiment_factory=_failing_factory)
+    result = check.run(experiment, ctx)
+    assert "SKIPPED" in result.text
+    assert "failed to fit" in result.text
+
+
 def test_skipped_folds_reported_in_text():
     """When folds have too few observations or fail to fit, they are
     reported as skipped in the result text."""
