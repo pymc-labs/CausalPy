@@ -281,6 +281,18 @@ class SyntheticControl(BaseExperiment):
             print(f"Treated unit: {self.treated_units[0]}")
         self.print_coefficients(round_to)
 
+    @staticmethod
+    def _convert_treatment_time_for_axis(
+        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
+    ) -> int | float | pd.Timestamp:
+        """
+        Convert treatment time into the plotting units expected by a specific axis.
+        """
+        try:
+            return axis.xaxis.convert_units(treatment_time)
+        except (TypeError, ValueError):
+            return treatment_time
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -402,8 +414,11 @@ class SyntheticControl(BaseExperiment):
 
         # Intervention line
         for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
             ax[i].axvline(
-                x=self.treatment_time,
+                x=treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
@@ -528,10 +543,13 @@ class SyntheticControl(BaseExperiment):
             label="Causal impact",
         )
 
-        # Intervention line (see #725 for datetime treatment_time support)
+        # Intervention line
         for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
             ax[i].axvline(
-                x=self.treatment_time,
+                x=treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
