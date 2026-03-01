@@ -95,6 +95,12 @@ repos:
           - "marimo[mcp]"
   - repo: local
     hooks:
+      - id: validate-notebooks
+        name: Validate notebook schema
+        entry: python scripts/validate_notebooks.py
+        language: python
+        files: \.ipynb$
+        additional_dependencies: [nbformat]
       - id: validate-bibtex
         name: Validate BibTeX files
         entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"

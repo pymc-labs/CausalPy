@@ -213,7 +213,11 @@ We recommend that your contribution complies with the following guidelines befor
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
 
+- Notebook files are validated by pre-commit using `nbformat` schema checks (`validate-notebooks`). Run `pre-commit run --all-files` before pushing to catch malformed `.ipynb` files early.
+
 - If you have changed the documentation, you should [build the docs locally](#Building-the-documentation-locally) and check that the changes look correct.
+
+- If notebook schema validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `pre-commit run --all-files`, and (4) for docs notebook changes run `conda run -n CausalPy make html` before pushing.
 
 - Run any of the pre-existing examples in `CausalPy/docs/source/*` that contain analyses that would be affected by your changes to ensure that nothing breaks. This is a useful opportunity to not only check your work for bugs that might not be revealed by unit test, but also to show how your contribution improves CausalPy for end users.
 
