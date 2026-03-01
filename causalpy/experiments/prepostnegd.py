@@ -222,6 +222,23 @@ class PrePostNEGD(BaseExperiment):
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact + ci}"
 
+    def _group_level_summary_stats(self, round_to: int | None = None) -> pd.DataFrame:
+        """Compute group-level sample sizes and pre/post means."""
+        summary_df = (
+            self.data.groupby(self.group_variable_name)
+            .agg(
+                n=(self.group_variable_name, "size"),
+                pre_mean=(self.pretreatment_variable_name, "mean"),
+                post_mean=(self.outcome_variable_name, "mean"),
+            )
+            .reset_index()
+        )
+        if round_to is not None:
+            summary_df[["pre_mean", "post_mean"]] = summary_df[
+                ["pre_mean", "post_mean"]
+            ].round(round_to)
+        return summary_df
+
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -230,6 +247,8 @@ class PrePostNEGD(BaseExperiment):
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
+        print("\nGroup-level descriptive stats:")
+        print(self._group_level_summary_stats(round_to).to_string(index=False))
         print("\nResults:")
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
