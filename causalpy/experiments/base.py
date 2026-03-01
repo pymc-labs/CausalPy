@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.base import RegressorMixin
 
+from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
@@ -34,6 +35,13 @@ class BaseExperiment(ABC):
     Subclasses should set ``_default_model_class`` to a PyMC model class
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
     Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+
+    Notes
+    -----
+    Optional ``maketables`` integration is exposed through ``__maketables_*``
+    hooks. Users can control the HDI interval level used by
+    ``ETable(result)`` via :meth:`set_maketables_options`, for example:
+    ``result.set_maketables_options(hdi_prob=0.95)``.
     """
 
     labels: list[str]
@@ -82,6 +90,67 @@ class BaseExperiment(ABC):
             in which case 2 significant figures are used.
         """
         self.model.print_coefficients(self.labels, round_to)
+
+    def set_maketables_options(self, *, hdi_prob: float | None = None) -> None:
+        """Set optional maketables rendering options for this experiment.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Bayesian HDI probability used for PyMC coefficient interval columns in
+            ``__maketables_coef_table__`` and therefore in ``ETable(result)``.
+            Must satisfy ``0 < hdi_prob < 1``.
+
+        Examples
+        --------
+        >>> result.set_maketables_options(hdi_prob=0.95)  # doctest: +SKIP
+        >>> # Subsequent ETable(result) calls use 95% HDI bounds
+        """
+        if hdi_prob is not None:
+            hdi_prob = float(hdi_prob)
+            if not 0 < hdi_prob < 1:
+                msg = f"hdi_prob must be in (0, 1), got {hdi_prob!r}"
+                raise ValueError(msg)
+            self._maketables_hdi_prob = hdi_prob
+
+    @property
+    def __maketables_coef_table__(self) -> pd.DataFrame:
+        """Optional maketables plugin hook for coefficient tables.
+
+        For PyMC-backed experiments, interval columns use the HDI probability set
+        by :meth:`set_maketables_options` (or backend defaults if not set).
+        """
+        return get_maketables_adapter(self.model).coef_table(self)
+
+    def __maketables_stat__(self, key: str) -> Any:
+        """Optional maketables plugin hook for model-level statistics."""
+        return get_maketables_adapter(self.model).stat(self, key)
+
+    @property
+    def __maketables_depvar__(self) -> str:
+        """Optional maketables plugin hook for dependent variable name."""
+        return str(
+            getattr(
+                self,
+                "outcome_variable_name",
+                getattr(self, "outcome_variable", "y"),
+            )
+        )
+
+    @property
+    def __maketables_vcov_info__(self) -> dict[str, Any]:
+        """Optional maketables plugin hook for variance-covariance info."""
+        return get_maketables_adapter(self.model).vcov_info(self)
+
+    @property
+    def __maketables_stat_labels__(self) -> dict[str, str] | None:
+        """Optional maketables plugin hook for statistic labels."""
+        return get_maketables_adapter(self.model).stat_labels(self)
+
+    @property
+    def __maketables_default_stat_keys__(self) -> list[str] | None:
+        """Optional maketables plugin hook for default statistic rows."""
+        return get_maketables_adapter(self.model).default_stat_keys(self)
 
     def plot(self, *args: Any, show: bool = True, **kwargs: Any) -> tuple:
         """Plot the model.
