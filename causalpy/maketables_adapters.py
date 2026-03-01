@@ -154,35 +154,64 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     return hdi_prob
 
 
+def _resolve_pymc_coef_draws(experiment: Any) -> xr.DataArray:
+    """Resolve posterior coefficient draws across supported PyMC model families."""
+    posterior = experiment.model.idata.posterior
+    labels = list(getattr(experiment, "labels", []))
+
+    coef_var_candidates = ("beta", "b", "beta_z")
+    coef_name = next((name for name in coef_var_candidates if name in posterior), None)
+    if coef_name is None:
+        msg = (
+            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' for "
+            "maketables coefficient export."
+        )
+        raise ValueError(msg)
+
+    coef_draws = posterior[coef_name]
+
+    if (
+        "treated_units" in coef_draws.dims
+        and int(coef_draws.sizes["treated_units"]) > 1
+    ):
+        msg = (
+            "Ambiguous multi-treated-unit coefficient table for maketables. "
+            "Provide an explicit treated unit selection before exporting."
+        )
+        raise ValueError(msg)
+    if "treated_units" in coef_draws.dims:
+        coef_draws = coef_draws.isel(treated_units=0)
+
+    if not labels:
+        return coef_draws
+
+    possible_label_dims = ("coeffs", "covariates", "instruments", "outcome_coeffs")
+    label_dim = next(
+        (dim for dim in possible_label_dims if dim in coef_draws.dims), None
+    )
+    if label_dim is None:
+        msg = (
+            "Resolved PyMC coefficient draws do not include a label dimension "
+            f"compatible with experiment labels: expected one of {possible_label_dims}, "
+            f"got dims={tuple(coef_draws.dims)!r}."
+        )
+        raise ValueError(msg)
+
+    coef_draws = coef_draws.sel({label_dim: labels})
+    if label_dim != "coeffs":
+        coef_draws = coef_draws.rename({label_dim: "coeffs"})
+    return coef_draws
+
+
 class PyMCMaketablesAdapter:
     """Adapter for experiments backed by PyMCModel."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
-        posterior = experiment.model.idata.posterior["beta"]
         labels = list(getattr(experiment, "labels", []))
         if not labels:
             msg = "Experiment has no coefficient labels for maketables export."
             raise ValueError(msg)
-
-        if "coeffs" not in posterior.dims:
-            msg = "PyMC posterior 'beta' must include 'coeffs' dimension."
-            raise ValueError(msg)
-
-        if (
-            "treated_units" in posterior.dims
-            and int(posterior.sizes["treated_units"]) > 1
-        ):
-            msg = (
-                "Ambiguous multi-treated-unit coefficient table for maketables. "
-                "Provide an explicit treated unit selection before exporting."
-            )
-            raise ValueError(msg)
-
-        coef_draws = posterior
-        if "treated_units" in coef_draws.dims:
-            coef_draws = coef_draws.isel(treated_units=0)
-
-        coef_draws = coef_draws.sel(coeffs=labels)
+        coef_draws = _resolve_pymc_coef_draws(experiment)
         mean = coef_draws.mean(dim=["chain", "draw"]).values.astype(float)
         std = coef_draws.std(dim=["chain", "draw"]).values.astype(float)
         hdi_prob = _get_maketables_hdi_prob(experiment)
