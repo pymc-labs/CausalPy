@@ -501,7 +501,7 @@ class PanelRegression(BaseExperiment):
         return self._plot_coefficients_internal()
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None
+        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -510,7 +510,13 @@ class PanelRegression(BaseExperiment):
         var_names : list[str], optional
             Specific coefficient names to plot.  If ``None``, plots all
             non-FE coefficients (as determined by ``_get_non_fe_labels``).
+        hdi_prob : float, default=0.94
+            Probability mass for the HDI interval when plotting Bayesian
+            coefficients. Must be in (0, 1).
         """
+        if not 0 < hdi_prob < 1:
+            raise ValueError("hdi_prob must be between 0 and 1")
+
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
         if isinstance(self.model, PyMCModel):
@@ -520,11 +526,11 @@ class PanelRegression(BaseExperiment):
                 var_names=["beta"],
                 coords={"coeffs": coeff_names},
                 combined=True,
-                hdi_prob=0.94,
+                hdi_prob=hdi_prob,
             )
             ax = axes.ravel()[0]
             fig = ax.figure
-            ax.set_title("Model Coefficients with 94% HDI")
+            ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
         else:
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
@@ -600,7 +606,7 @@ class PanelRegression(BaseExperiment):
         return plot_data
 
     def plot_coefficients(
-        self, var_names: list[str] | None = None
+        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
     ) -> tuple[plt.Figure, plt.Axes]:
         """Plot coefficient estimates with credible/confidence intervals.
 
@@ -613,13 +619,16 @@ class PanelRegression(BaseExperiment):
             Specific coefficient names to plot.  Names must match the patsy
             design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
             If ``None``, plots all non-FE coefficients.
+        hdi_prob : float, default=0.94
+            Probability mass for the HDI interval when plotting Bayesian
+            coefficients. Must be in (0, 1). Ignored for OLS models.
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal(var_names=var_names)
+        return self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
 
     def plot_unit_effects(
         self, highlight: list[str] | None = None, label_extreme: int = 0
@@ -703,6 +712,7 @@ class PanelRegression(BaseExperiment):
         select: Literal["random", "extreme", "high_variance"] = "random",
         show_mean: bool = True,
         hdi_prob: float = 0.94,
+        interval_type: Literal["mean", "predictive"] = "mean",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
 
@@ -725,6 +735,11 @@ class PanelRegression(BaseExperiment):
         hdi_prob : float, default=0.94
             Probability mass for the HDI credible interval (Bayesian models only).
             Common values are 0.94 (default) or 0.89.
+        interval_type : {"mean", "predictive"}, default="mean"
+            Which uncertainty interval to show for Bayesian models:
+            - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
+            - "predictive": HDI of posterior predictive ``y_hat``
+              (includes observation noise)
 
         Returns
         -------
@@ -740,6 +755,8 @@ class PanelRegression(BaseExperiment):
             raise ValueError(
                 "plot_trajectories() requires time_fe_variable to be specified"
             )
+        if interval_type not in {"mean", "predictive"}:
+            raise ValueError("interval_type must be 'mean' or 'predictive'")
 
         # Check if model is Bayesian
         is_bayesian = isinstance(self.model, PyMCModel)
@@ -747,6 +764,20 @@ class PanelRegression(BaseExperiment):
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
             mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
+            if interval_type == "predictive":
+                posterior_predictive = getattr(
+                    self.model.idata,
+                    "posterior_predictive",
+                    None,  # type: ignore[union-attr]
+                )
+                if posterior_predictive is None or "y_hat" not in posterior_predictive:
+                    raise ValueError(
+                        "interval_type='predictive' requires posterior predictive "
+                        "samples ('y_hat') in idata.posterior_predictive"
+                    )
+                interval_source = posterior_predictive["y_hat"]
+            else:
+                interval_source = mu
 
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
@@ -820,6 +851,11 @@ class PanelRegression(BaseExperiment):
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
                     unit_mu = unit_mu.squeeze("treated_units", drop=True)
+                unit_interval = interval_source.isel(
+                    obs_ind=sorted_obs_indices.tolist()
+                )
+                if "treated_units" in unit_interval.dims:
+                    unit_interval = unit_interval.squeeze("treated_units", drop=True)
 
                 # Plot fitted mean
                 ax.plot(
@@ -833,7 +869,7 @@ class PanelRegression(BaseExperiment):
                 # Plot HDI using az.plot_hdi
                 az.plot_hdi(
                     sorted_time_vals,
-                    unit_mu,
+                    unit_interval,
                     hdi_prob=hdi_prob,
                     ax=ax,
                     smooth=False,

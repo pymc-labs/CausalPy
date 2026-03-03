@@ -283,6 +283,11 @@ def test_panel_regression_plot_coefficients(mock_pymc_sample, small_panel_data):
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
 
+    fig, ax = result.plot_coefficients(hdi_prob=0.89)
+    assert isinstance(fig, plt.Figure)
+    assert "89% HDI" in ax.get_title()
+    plt.close(fig)
+
 
 @pytest.mark.integration
 def test_panel_regression_plot_unit_effects(mock_pymc_sample, small_panel_data):
@@ -332,6 +337,14 @@ def test_panel_regression_plot_trajectories(mock_pymc_sample, small_panel_data):
     assert len(axes) >= 5
     plt.close(fig)
 
+    # Test predictive intervals when posterior predictive samples are available
+    posterior_predictive = getattr(result.model.idata, "posterior_predictive", None)
+    if posterior_predictive is not None and "y_hat" in posterior_predictive:
+        fig, axes = result.plot_trajectories(n_sample=5, interval_type="predictive")
+        assert isinstance(fig, plt.Figure)
+        assert len(axes) >= 5
+        plt.close(fig)
+
     # Test with specific units
     fig, axes = result.plot_trajectories(units=["unit_0", "unit_1", "unit_2"])
     assert isinstance(fig, plt.Figure)
@@ -348,6 +361,9 @@ def test_panel_regression_plot_trajectories(mock_pymc_sample, small_panel_data):
 
     with pytest.raises(ValueError, match="requires time_fe_variable"):
         result_no_time.plot_trajectories()
+
+    with pytest.raises(ValueError, match="interval_type must be"):
+        result.plot_trajectories(interval_type="invalid")  # type: ignore[arg-type]
 
 
 @pytest.mark.integration
@@ -589,6 +605,20 @@ def test_plot_coefficients_with_var_names(small_panel_data):
     # Should have exactly one bar (horizontal bar chart)
     assert len(ax.patches) == 1
     plt.close(fig)
+
+
+def test_plot_coefficients_rejects_invalid_hdi_prob(small_panel_data):
+    """plot_coefficients() should validate hdi_prob bounds."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+    with pytest.raises(ValueError, match="hdi_prob must be between 0 and 1"):
+        result.plot_coefficients(hdi_prob=1.2)
 
 
 def test_group_means_from_original_data(large_panel_data):
