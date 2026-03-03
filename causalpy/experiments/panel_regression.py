@@ -41,7 +41,7 @@ class PanelRegression(BaseExperiment):
     """Panel regression with fixed effects estimation.
 
     Enables panel-aware visualization and diagnostics, with support for both
-    dummy variable and demeaned (de-meaned) transformation approaches to fixed effects.
+    unpooled dummy-variable and demeaned (de-meaned) fixed effects.
 
     Parameters
     ----------
@@ -49,9 +49,11 @@ class PanelRegression(BaseExperiment):
         A pandas dataframe with panel data. Each row is an observation for a
         unit at a time period.
     formula : str
-        A statistical model formula using patsy syntax. For dummy variable
-        approach, include C(unit_var) in the formula.         For demeaned transformation,
-        do NOT include C(unit_var) as it will be automatically removed.
+        A statistical model formula using patsy syntax. For the unpooled
+        dummy-variable fixed-effects approach, include ``C(unit_var)`` (and
+        optionally ``C(time_var)``) in the formula. For the demeaned
+        transformation, do NOT include those ``C(...)`` terms; fixed effects
+        are removed by transformation before fitting.
     unit_fe_variable : str
         Column name for the unit identifier (e.g., "state", "id", "country").
     time_fe_variable : str, optional
@@ -59,8 +61,9 @@ class PanelRegression(BaseExperiment):
         If provided, time fixed effects will be included. Default is None.
     fe_method : {"dummies", "demeaned"}, default="dummies"
         Method for handling fixed effects:
-        - "dummies": Use dummy variables (C(unit) in formula). Gets individual
-          unit effect estimates but creates N-1 dummy columns. Best for small N.
+        - "dummies": Use unpooled dummy-variable fixed effects
+          (``C(unit)``/``C(time)`` in formula). Gets individual unit effect
+          estimates but creates N-1 dummy columns. Best for small N.
         - "demeaned": Use demeaned (de-meaned) transformation. Scales to large N
           but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
@@ -145,10 +148,15 @@ class PanelRegression(BaseExperiment):
     -----
     The demeaned transformation (de-meaning by group) removes time-invariant
     confounders but also drops time-invariant covariates from the model. For
-    the dummy approach, individual unit effects can be extracted from the
-    coefficients. For the demeaned approach, unit effects can be recovered
-    post-hoc using the stored group means (``_group_means``), which are always
-    computed from the original (pre-demeaning) data.
+    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    extracted from the coefficients. For the demeaned approach, unit effects
+    can be recovered post-hoc using the stored group means (``_group_means``),
+    which are always computed from the original (pre-demeaning) data.
+
+    This class does not yet implement hierarchical/partial-pooling fixed
+    effects. Those semantics are intentionally kept out of scope here so
+    ``fe_method="dummies"`` remains an accurate label for the current
+    unpooled estimator.
 
     Two-way fixed effects (unit + time) control for both unit-specific and
     time-specific unobserved heterogeneity. This is the standard approach in
@@ -223,7 +231,9 @@ class PanelRegression(BaseExperiment):
             )
 
         if self.fe_method not in ["dummies", "demeaned"]:
-            raise ValueError("fe_method must be 'dummies' or 'demeaned'")
+            raise ValueError(
+                "fe_method must be 'dummies' (unpooled fixed effects) or 'demeaned'"
+            )
 
         # Check if formula includes C(unit_var) or C(time_var) when using demeaned method
         if (

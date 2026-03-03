@@ -216,12 +216,32 @@ def test_panel_regression_validation_errors(small_panel_data):
         )
 
     # Invalid fe_method
-    with pytest.raises(ValueError, match="fe_method must be"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "fe_method must be 'dummies' \\(unpooled fixed effects\\) or 'demeaned'"
+        ),
+    ):
         cp.PanelRegression(
             data=small_panel_data,
             formula="y ~ treatment + x1",
             unit_fe_variable="unit",
             fe_method="invalid",
+            model=LinearRegression(),
+        )
+
+    # Hierarchical naming is reserved for future partial-pooling work
+    with pytest.raises(
+        ValueError,
+        match=(
+            "fe_method must be 'dummies' \\(unpooled fixed effects\\) or 'demeaned'"
+        ),
+    ):
+        cp.PanelRegression(
+            data=small_panel_data,
+            formula="y ~ treatment + x1",
+            unit_fe_variable="unit",
+            fe_method="hierarchical",  # type: ignore[arg-type]
             model=LinearRegression(),
         )
 
