@@ -51,6 +51,17 @@ from .base import BaseExperiment
 LEGEND_FONT_SIZE = 12
 
 
+def _as_scalar(value: Any) -> float:
+    """Convert scalar-like values (including singleton arrays) to float."""
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return float(arr)
+    if arr.size == 1:
+        return float(arr.reshape(()))
+    msg = f"Expected scalar-like value for plotting annotation, got shape {arr.shape}."
+    raise TypeError(msg)
+
+
 class DifferenceInDifferences(BaseExperiment):
     """A class to analyse data from Difference in Difference settings.
 
@@ -359,6 +370,8 @@ class DifferenceInDifferences(BaseExperiment):
             y_pred_counterfactual = (
                 results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
             )
+            y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
+            y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
             # Calculate the x position to plot at
             # Note that we force to be float to avoid a type error using np.ptp with boolean
             # values
@@ -374,16 +387,19 @@ class DifferenceInDifferences(BaseExperiment):
             # Plot the arrow
             ax.annotate(
                 "",
-                xy=(x, y_pred_counterfactual),
+                xy=(x, y_pred_counterfactual_scalar),
                 xycoords="data",
-                xytext=(x, y_pred_treatment),
+                xytext=(x, y_pred_treatment_scalar),
                 textcoords="data",
                 arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
             )
             # Plot text annotation next to arrow
             ax.annotate(
                 "causal\nimpact",
-                xy=(x, np.mean([y_pred_counterfactual, y_pred_treatment])),
+                xy=(
+                    x,
+                    np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
+                ),
                 xycoords="data",
                 xytext=(5, 0),
                 textcoords="offset points",
@@ -528,12 +544,14 @@ class DifferenceInDifferences(BaseExperiment):
             markersize=10,
             label="counterfactual",
         )
+        y_pred_counterfactual_scalar = _as_scalar(self.y_pred_counterfactual)
+        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment[1])
         # arrow to label the causal impact
         ax.annotate(
             "",
-            xy=(1.05, self.y_pred_counterfactual),
+            xy=(1.05, y_pred_counterfactual_scalar),
             xycoords="data",
-            xytext=(1.05, self.y_pred_treatment[1]),
+            xytext=(1.05, y_pred_treatment_post_scalar),
             textcoords="data",
             arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
         )
@@ -541,7 +559,7 @@ class DifferenceInDifferences(BaseExperiment):
             "causal\nimpact",
             xy=(
                 1.05,
-                np.mean([self.y_pred_counterfactual[0], self.y_pred_treatment[1]]),
+                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_post_scalar]),
             ),
             xycoords="data",
             xytext=(5, 0),
