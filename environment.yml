@@ -24,7 +24,7 @@ dependencies:
   - numpy<2.4
   - pandas
   - patsy
-  - pre-commit
+  - prek
   - pymc-bart
   - pymc-extras>=0.3.0
   - pymc>=5.15.1
