@@ -179,6 +179,7 @@ class BaseExperiment(ABC):
             cloned.fit_intercept = False
 
         self.model = create_causalpy_compatible_class(cloned)
+
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")
 
