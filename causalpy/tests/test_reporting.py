@@ -15,6 +15,8 @@
 Tests for reporting utilities.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -942,6 +944,17 @@ def test_extract_hdi_bounds_dataarray():
     assert upper == 3.0
 
 
+def test_as_float_handles_singleton_arrays():
+    """_as_float should work for both scalar and singleton-array values."""
+    import xarray as xr
+
+    from causalpy.reporting import _as_float
+
+    assert _as_float(np.array(2.5)) == 2.5
+    assert _as_float(np.array([2.5])) == 2.5
+    assert _as_float(xr.DataArray([2.5], dims=["treated_units"])) == 2.5
+
+
 def test_compute_tail_probabilities_increase():
     """Test _compute_tail_probabilities with direction='increase'."""
     import xarray as xr
@@ -1070,6 +1083,116 @@ def test_compute_statistics_rope_decrease():
     # With draws around -5, virtually all should satisfy effect < -1.0
     assert stats["avg"]["p_rope"] > 0.95
     assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_with_singleton_treated_unit_dim():
+    """Regression test for singleton dims surviving reductions in xarray workflows."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(123)
+    impact = xr.DataArray(
+        rng.normal(loc=2.0, scale=0.1, size=(1, 100, 4, 1)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 100, 4, 1)) * 10.0,
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["mean"], float)
+    assert isinstance(stats["cum"]["mean"], float)
+    assert isinstance(stats["avg"]["relative_mean"], float)
+    assert isinstance(stats["cum"]["relative_mean"], float)
+
+
+def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
+    """Exercise _compute_statistics branches where az.hdi returns a DataArray."""
+    import xarray as xr
+
+    from causalpy import reporting as reporting_mod
+
+    def fake_hdi(_obj, hdi_prob=0.95):
+        _ = hdi_prob
+        return xr.DataArray(
+            [0.1, 0.9], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+        )
+
+    monkeypatch.setattr(reporting_mod.az, "hdi", fake_hdi)
+
+    impact = xr.DataArray(
+        np.random.normal(1.0, 0.1, (2, 20, 4)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((2, 20, 4)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+
+    stats = reporting_mod._compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["hdi_lower"], float)
+    assert isinstance(stats["cum"]["hdi_lower"], float)
+    assert isinstance(stats["avg"]["relative_hdi_lower"], float)
+    assert isinstance(stats["cum"]["relative_hdi_lower"], float)
+
+
+def test_extract_window_ols_xarray_post_impact_branch():
+    """Ensure OLS xarray post_impact path uses numpy conversion safely."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_impact=xr.DataArray([1.0, 2.0, 3.0], dims=["obs_ind"]),
+        datapost=datapost,
+    )
+
+    windowed_impact, window_coords = _extract_window(result, window="post")
+
+    assert isinstance(windowed_impact, np.ndarray)
+    assert window_coords.equals(datapost.index)
+
+
+def test_extract_counterfactual_ols_xarray_branch():
+    """Ensure OLS xarray post_pred branch converts via numpy safely."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_counterfactual
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_pred=xr.DataArray([5.0, 6.0, 7.0], dims=["obs_ind"]),
+        datapost=datapost,
+    )
+
+    window_coords = datapost.index[:2]
+    counterfactual = _extract_counterfactual(result, window_coords)
+
+    assert isinstance(counterfactual, np.ndarray)
+    np.testing.assert_array_equal(counterfactual, np.array([5.0, 6.0]))
 
 
 def test_compute_statistics_rope_increase():
