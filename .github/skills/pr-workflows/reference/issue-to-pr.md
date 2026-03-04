@@ -21,7 +21,7 @@ description: Transform a GitHub issue into a complete pull request through a str
 
 ## Implementation
 1. Implement the fix, following `AGENTS.md` policies.
-2. Run pre-commit and tests until green (see `pre-commit.md`).
+2. Run prek and tests until green (see `pre-commit.md`). Use scoped prek runs during iteration and `--all-files` before handoff.
 
 ## Prepare PR
 1. Create `.scratch/pr_summaries/<issue_number> - <short-description>.md` with:

@@ -63,7 +63,7 @@ dependencies = [
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
 dev = [
-    "pre-commit",
+    "prek",
     "twine",
     "interrogate",
     "codespell",
@@ -92,7 +92,7 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "pre-commit", "ruff", "mypy"]
+lint = ["interrogate", "prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
 
 [tool.pyproject2conda]

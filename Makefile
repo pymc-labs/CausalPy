@@ -16,7 +16,7 @@ init: ## Install the package in editable mode
 setup: ## Set up complete dev environment (run inside CausalPy env, e.g. conda run -n CausalPy make setup)
 	python -m pip install --no-deps -e .
 	python -m pip install -e '.[dev,docs,test,lint]'
-	pre-commit install
+	prek install -f
 	@echo "Development environment ready!"
 
 lint: ## Run ruff linter and formatter
