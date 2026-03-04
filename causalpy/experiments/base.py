@@ -88,25 +88,8 @@ class BaseExperiment(ABC):
             UserWarning,
             stacklevel=3,
         )
-        try:
-            cloned = clone(self.model)
-        except (
-            Exception
-        ) as exc:  # pragma: no cover - defensive for non-cloneable estimators
-            raise ValueError(
-                "This experiment requires a scikit-learn estimator with "
-                "fit_intercept=False. Set fit_intercept=False on your estimator or "
-                "pass an estimator that supports sklearn.base.clone()."
-            ) from exc
-
-        if hasattr(cloned, "set_params"):
-            try:
-                cloned.set_params(fit_intercept=False)
-            except ValueError:
-                cloned.fit_intercept = False
-        else:
-            cloned.fit_intercept = False
-
+        cloned = clone(self.model)
+        cloned.set_params(fit_intercept=False)
         self.model = create_causalpy_compatible_class(cloned)
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
