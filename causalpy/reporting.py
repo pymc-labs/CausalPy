@@ -58,16 +58,7 @@ class EffectSummary:
 
 def _as_float(value) -> float:
     """Convert scalar-like values (including singleton arrays) to Python float."""
-    arr = np.asarray(value)
-    if arr.ndim == 0:
-        return float(arr)
-    if arr.size == 1:
-        return float(arr.reshape(()))
-    msg = (
-        "Expected scalar-compatible value, got array with "
-        f"shape {arr.shape}. Reduce extra dimensions first."
-    )
-    raise TypeError(msg)
+    return float(np.asarray(value).reshape(()))
 
 
 def _extract_hdi_bounds(

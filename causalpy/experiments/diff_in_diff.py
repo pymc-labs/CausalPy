@@ -53,13 +53,7 @@ LEGEND_FONT_SIZE = 12
 
 def _as_scalar(value: Any) -> float:
     """Convert scalar-like values (including singleton arrays) to float."""
-    arr = np.asarray(value)
-    if arr.ndim == 0:
-        return float(arr)
-    if arr.size == 1:
-        return float(arr.reshape(()))
-    msg = f"Expected scalar-like value for plotting annotation, got shape {arr.shape}."
-    raise TypeError(msg)
+    return float(np.asarray(value).reshape(()))
 
 
 class DifferenceInDifferences(BaseExperiment):
