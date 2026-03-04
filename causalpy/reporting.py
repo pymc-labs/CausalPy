@@ -56,6 +56,20 @@ class EffectSummary:
 # ==============================================================================
 
 
+def _as_float(value) -> float:
+    """Convert scalar-like values (including singleton arrays) to Python float."""
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return float(arr)
+    if arr.size == 1:
+        return float(arr.reshape(()))
+    msg = (
+        "Expected scalar-compatible value, got array with "
+        f"shape {arr.shape}. Reduce extra dimensions first."
+    )
+    raise TypeError(msg)
+
+
 def _extract_hdi_bounds(
     hdi_result: xr.Dataset | xr.DataArray, hdi_prob: float = 0.95
 ) -> tuple[float, float]:
@@ -77,11 +91,11 @@ def _extract_hdi_bounds(
     """
     if isinstance(hdi_result, xr.Dataset):
         hdi_data = list(hdi_result.data_vars.values())[0]
-        lower = float(hdi_data.sel(hdi="lower").values)
-        upper = float(hdi_data.sel(hdi="higher").values)
+        lower = _as_float(hdi_data.sel(hdi="lower").values)
+        upper = _as_float(hdi_data.sel(hdi="higher").values)
     else:
-        lower = float(hdi_result.sel(hdi="lower").values)
-        upper = float(hdi_result.sel(hdi="higher").values)
+        lower = _as_float(hdi_result.sel(hdi="lower").values)
+        upper = _as_float(hdi_result.sel(hdi="higher").values)
     return lower, upper
 
 
@@ -103,12 +117,12 @@ def _compute_tail_probabilities(
         Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
     """
     if direction == "increase":
-        return {"p_gt_0": float((effect > 0).mean().values)}
+        return {"p_gt_0": _as_float((effect > 0).mean().values)}
     elif direction == "decrease":
-        return {"p_lt_0": float((effect < 0).mean().values)}
+        return {"p_lt_0": _as_float((effect < 0).mean().values)}
     else:  # two-sided
-        p_gt = float((effect > 0).mean().values)
-        p_lt = float((effect < 0).mean().values)
+        p_gt = _as_float((effect > 0).mean().values)
+        p_lt = _as_float((effect < 0).mean().values)
         p_two_sided = 2 * min(p_gt, p_lt)
         return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
 
@@ -135,11 +149,11 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return float((np.abs(effect) > min_effect).mean().values)
+        return _as_float((np.abs(effect) > min_effect).mean().values)
     elif direction == "increase":
-        return float((effect > min_effect).mean().values)
+        return _as_float((effect > min_effect).mean().values)
     elif direction == "decrease":
-        return float((effect < -min_effect).mean().values)
+        return _as_float((effect < -min_effect).mean().values)
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
@@ -192,8 +206,8 @@ def _compute_statistics_scalar(
         Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
     """
     stats = {
-        "mean": float(effect.mean(dim=["chain", "draw"]).values),
-        "median": float(effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_float(effect.mean(dim=["chain", "draw"]).values),
+        "median": _as_float(effect.median(dim=["chain", "draw"]).values),
     }
 
     # HDI using helper
@@ -739,8 +753,8 @@ def _compute_statistics(
     # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
     stats["avg"] = {
-        "mean": float(avg_effect.mean(dim=["chain", "draw"]).values),
-        "median": float(avg_effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_float(avg_effect.mean(dim=["chain", "draw"]).values),
+        "median": _as_float(avg_effect.median(dim=["chain", "draw"]).values),
     }
 
     # HDI for average
@@ -749,21 +763,21 @@ def _compute_statistics(
     # Handle both Dataset and DataArray returns
     if isinstance(hdi_avg, xr.Dataset):
         hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_float(hdi_data.sel(hdi="lower").values)
+        stats["avg"]["hdi_upper"] = _as_float(hdi_data.sel(hdi="higher").values)
     else:
         # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = float(hdi_avg.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_avg.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_float(hdi_avg.sel(hdi="lower").values)
+        stats["avg"]["hdi_upper"] = _as_float(hdi_avg.sel(hdi="higher").values)
 
     # Tail probabilities for average
     if direction == "increase":
-        stats["avg"]["p_gt_0"] = float((avg_effect > 0).mean().values)
+        stats["avg"]["p_gt_0"] = _as_float((avg_effect > 0).mean().values)
     elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = float((avg_effect < 0).mean().values)
+        stats["avg"]["p_lt_0"] = _as_float((avg_effect < 0).mean().values)
     else:  # two-sided
-        p_gt = float((avg_effect > 0).mean().values)
-        p_lt = float((avg_effect < 0).mean().values)
+        p_gt = _as_float((avg_effect > 0).mean().values)
+        p_lt = _as_float((avg_effect < 0).mean().values)
         p_two_sided = 2 * min(p_gt, p_lt)
         stats["avg"]["p_two_sided"] = p_two_sided
         stats["avg"]["prob_of_effect"] = 1 - p_two_sided
@@ -785,28 +799,28 @@ def _compute_statistics(
         cum_final = cum_effect.isel({time_dim: -1})
 
         stats["cum"] = {
-            "mean": float(cum_final.mean(dim=["chain", "draw"]).values),
-            "median": float(cum_final.median(dim=["chain", "draw"]).values),
+            "mean": _as_float(cum_final.mean(dim=["chain", "draw"]).values),
+            "median": _as_float(cum_final.median(dim=["chain", "draw"]).values),
         }
 
         # HDI for cumulative
         hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
         if isinstance(hdi_cum, xr.Dataset):
             hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = float(hdi_cum_data.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum_data.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_float(hdi_cum_data.sel(hdi="lower").values)
+            stats["cum"]["hdi_upper"] = _as_float(hdi_cum_data.sel(hdi="higher").values)
         else:
-            stats["cum"]["hdi_lower"] = float(hdi_cum.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_float(hdi_cum.sel(hdi="lower").values)
+            stats["cum"]["hdi_upper"] = _as_float(hdi_cum.sel(hdi="higher").values)
 
         # Tail probabilities for cumulative
         if direction == "increase":
-            stats["cum"]["p_gt_0"] = float((cum_final > 0).mean().values)
+            stats["cum"]["p_gt_0"] = _as_float((cum_final > 0).mean().values)
         elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = float((cum_final < 0).mean().values)
+            stats["cum"]["p_lt_0"] = _as_float((cum_final < 0).mean().values)
         else:  # two-sided
-            p_gt = float((cum_final > 0).mean().values)
-            p_lt = float((cum_final < 0).mean().values)
+            p_gt = _as_float((cum_final > 0).mean().values)
+            p_lt = _as_float((cum_final < 0).mean().values)
             p_two_sided = 2 * min(p_gt, p_lt)
             stats["cum"]["p_two_sided"] = p_two_sided
             stats["cum"]["prob_of_effect"] = 1 - p_two_sided
@@ -828,24 +842,24 @@ def _compute_statistics(
         counterfactual_mean = counterfactual.mean(dim=time_dim)
         rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
 
-        stats["avg"]["relative_mean"] = float(
+        stats["avg"]["relative_mean"] = _as_float(
             rel_avg.mean(dim=["chain", "draw"]).values
         )
 
         hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
         if isinstance(hdi_rel_avg, xr.Dataset):
             hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = float(
+            stats["avg"]["relative_hdi_lower"] = _as_float(
                 hdi_rel_avg_data.sel(hdi="lower").values
             )
-            stats["avg"]["relative_hdi_upper"] = float(
+            stats["avg"]["relative_hdi_upper"] = _as_float(
                 hdi_rel_avg_data.sel(hdi="higher").values
             )
         else:
-            stats["avg"]["relative_hdi_lower"] = float(
+            stats["avg"]["relative_hdi_lower"] = _as_float(
                 hdi_rel_avg.sel(hdi="lower").values
             )
-            stats["avg"]["relative_hdi_upper"] = float(
+            stats["avg"]["relative_hdi_upper"] = _as_float(
                 hdi_rel_avg.sel(hdi="higher").values
             )
 
@@ -856,24 +870,24 @@ def _compute_statistics(
             )
             rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
 
-            stats["cum"]["relative_mean"] = float(
+            stats["cum"]["relative_mean"] = _as_float(
                 rel_cum.mean(dim=["chain", "draw"]).values
             )
 
             hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
             if isinstance(hdi_rel_cum, xr.Dataset):
                 hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = float(
+                stats["cum"]["relative_hdi_lower"] = _as_float(
                     hdi_rel_cum_data.sel(hdi="lower").values
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
+                stats["cum"]["relative_hdi_upper"] = _as_float(
                     hdi_rel_cum_data.sel(hdi="higher").values
                 )
             else:
-                stats["cum"]["relative_hdi_lower"] = float(
+                stats["cum"]["relative_hdi_lower"] = _as_float(
                     hdi_rel_cum.sel(hdi="lower").values
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
+                stats["cum"]["relative_hdi_upper"] = _as_float(
                     hdi_rel_cum.sel(hdi="higher").values
                 )
 
