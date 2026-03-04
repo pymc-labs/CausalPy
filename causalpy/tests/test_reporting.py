@@ -944,10 +944,13 @@ def test_extract_hdi_bounds_dataarray():
 
 def test_as_float_handles_singleton_arrays():
     """_as_float should work for both scalar and singleton-array values."""
+    import xarray as xr
+
     from causalpy.reporting import _as_float
 
     assert _as_float(np.array(2.5)) == 2.5
     assert _as_float(np.array([2.5])) == 2.5
+    assert _as_float(xr.DataArray([2.5], dims=["treated_units"])) == 2.5
 
 
 def test_compute_tail_probabilities_increase():
