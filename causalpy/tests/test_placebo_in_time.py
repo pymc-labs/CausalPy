@@ -82,6 +82,7 @@ def _make_pymc_factory():
     """Factory that creates PyMC ITS experiments."""
 
     def factory(data, treatment_time):
+        """Test factory."""
         return InterruptedTimeSeries(
             data,
             treatment_time=treatment_time,
@@ -98,21 +99,25 @@ def _make_pymc_factory():
 
 
 def test_default_n_folds():
+    """Test default n folds."""
     check = PlaceboInTime()
     assert check.n_folds == 3
 
 
 def test_custom_n_folds():
+    """Test custom n folds."""
     check = PlaceboInTime(n_folds=5)
     assert check.n_folds == 5
 
 
 def test_invalid_n_folds():
+    """Test invalid n folds."""
     with pytest.raises(ValueError, match="n_folds must be >= 1"):
         PlaceboInTime(n_folds=0)
 
 
 def test_default_sample_kwargs():
+    """Test default sample kwargs."""
     check = PlaceboInTime()
     assert check.sample_kwargs["draws"] == 1000
     assert check.sample_kwargs["chains"] == 4
@@ -120,6 +125,7 @@ def test_default_sample_kwargs():
 
 
 def test_custom_sample_kwargs():
+    """Test custom sample kwargs."""
     check = PlaceboInTime(sample_kwargs={"draws": 200, "chains": 2})
     assert check.sample_kwargs["draws"] == 200
     assert check.sample_kwargs["chains"] == 2
@@ -127,27 +133,32 @@ def test_custom_sample_kwargs():
 
 
 def test_default_threshold_and_prior_scale():
+    """Test default threshold and prior scale."""
     check = PlaceboInTime()
     assert check.threshold == 0.95
     assert check.prior_scale == 1.0
 
 
 def test_custom_threshold():
+    """Test custom threshold."""
     check = PlaceboInTime(threshold=0.99)
     assert check.threshold == 0.99
 
 
 def test_custom_prior_scale():
+    """Test custom prior scale."""
     check = PlaceboInTime(prior_scale=2.0)
     assert check.prior_scale == 2.0
 
 
 def test_expected_effect_prior_without_rope_raises():
+    """Test expected effect prior without rope raises."""
     with pytest.raises(ValueError, match="rope_half_width is required"):
         PlaceboInTime(expected_effect_prior=np.array([1.0, 2.0, 3.0]))
 
 
 def test_expected_effect_prior_with_rope_ok():
+    """Test expected effect prior with rope ok."""
     check = PlaceboInTime(
         expected_effect_prior=np.array([1.0, 2.0, 3.0]),
         rope_half_width=0.5,
@@ -156,20 +167,24 @@ def test_expected_effect_prior_with_rope_ok():
 
 
 def test_satisfies_check_protocol():
+    """Test satisfies check protocol."""
     assert isinstance(PlaceboInTime(), Check)
 
 
 def test_applicable_methods():
+    """Test applicable methods."""
     check = PlaceboInTime()
     assert InterruptedTimeSeries in check.applicable_methods
     assert cp.SyntheticControl in check.applicable_methods
 
 
 def test_repr_basic():
+    """Test repr basic."""
     assert "n_folds=3" in repr(PlaceboInTime())
 
 
 def test_repr_with_assurance():
+    """Test repr with assurance."""
     check = PlaceboInTime(
         expected_effect_prior=np.array([1.0]),
         rope_half_width=0.5,
@@ -184,6 +199,7 @@ def test_repr_with_assurance():
 
 @pytest.mark.integration
 def test_validate_accepts_pymc_its(mock_pymc_sample):
+    """Test validate accepts pymc its."""
     df = _make_its_data()
     experiment = InterruptedTimeSeries(
         df,
@@ -195,6 +211,7 @@ def test_validate_accepts_pymc_its(mock_pymc_sample):
 
 
 def test_validate_rejects_ols_model():
+    """Test validate rejects ols model."""
     df = _make_its_data()
     experiment = InterruptedTimeSeries(
         df,
@@ -207,6 +224,8 @@ def test_validate_rejects_ols_model():
 
 
 def test_validate_rejects_no_treatment_time():
+    """Test validate rejects no treatment time."""
+
     class _FakeExperiment:
         pass
 
@@ -220,18 +239,21 @@ def test_validate_rejects_no_treatment_time():
 
 
 def test_rope_decision_positive():
+    """Test rope decision positive."""
     samples = np.full(1000, 10.0)
     result = PlaceboInTime.bayesian_rope_decision(samples, 5.0, 0.95)
     assert result == "positive"
 
 
 def test_rope_decision_null():
+    """Test rope decision null."""
     samples = np.full(1000, 0.0)
     result = PlaceboInTime.bayesian_rope_decision(samples, 5.0, 0.95)
     assert result == "null"
 
 
 def test_rope_decision_indeterminate():
+    """Test rope decision indeterminate."""
     rng = np.random.default_rng(42)
     samples = rng.normal(loc=3.0, scale=5.0, size=1000)
     result = PlaceboInTime.bayesian_rope_decision(samples, 5.0, 0.95)
@@ -239,12 +261,14 @@ def test_rope_decision_indeterminate():
 
 
 def test_rope_decision_with_mixed_samples():
+    """Test rope decision with mixed samples."""
     samples = np.concatenate([np.full(960, 10.0), np.full(40, 0.0)])
     result = PlaceboInTime.bayesian_rope_decision(samples, 5.0, 0.95)
     assert result == "positive"
 
 
 def test_rope_decision_barely_below_threshold():
+    """Test rope decision barely below threshold."""
     samples = np.concatenate([np.full(940, 10.0), np.full(60, 0.0)])
     result = PlaceboInTime.bayesian_rope_decision(samples, 5.0, 0.95)
     assert result == "indeterminate"
@@ -257,6 +281,7 @@ def test_rope_decision_barely_below_threshold():
 
 @pytest.mark.integration
 def test_extract_cumulative_impact(mock_pymc_sample):
+    """Test extract cumulative impact."""
     df = _make_its_data()
     experiment = InterruptedTimeSeries(
         df,
@@ -278,6 +303,7 @@ def test_extract_cumulative_impact(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_run_produces_check_result(mock_pymc_sample):
+    """Test run produces check result."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -300,6 +326,7 @@ def test_run_produces_check_result(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_run_produces_fold_results(mock_pymc_sample):
+    """Test run produces fold results."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -326,6 +353,7 @@ def test_run_produces_fold_results(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_run_metadata_contains_null_distribution(mock_pymc_sample):
+    """Test run metadata contains null distribution."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -355,6 +383,7 @@ def test_run_metadata_contains_null_distribution(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_fold_treatment_times_are_shifted(mock_pymc_sample):
+    """Test fold treatment times are shifted."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -374,6 +403,7 @@ def test_fold_treatment_times_are_shifted(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_single_fold(mock_pymc_sample):
+    """Test single fold."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -392,6 +422,7 @@ def test_single_fold(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_no_mutable_state_on_check(mock_pymc_sample):
+    """Test no mutable state on check."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -430,6 +461,7 @@ def test_standalone_run_without_context(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_standalone_no_factory_no_context_raises(mock_pymc_sample):
+    """Test standalone no factory no context raises."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -468,6 +500,7 @@ def test_run_with_context(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_text_contains_hierarchical_summary(mock_pymc_sample):
+    """Test text contains hierarchical summary."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -488,6 +521,7 @@ def test_text_contains_hierarchical_summary(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
+    """Test fold fitting failure is skipped."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -499,6 +533,7 @@ def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
     call_count = 0
 
     def _failing_factory(data, treatment_time):
+        """Factory that raises on first call to test skip logic."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -527,6 +562,7 @@ def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_assurance_with_numpy_array(mock_pymc_sample):
+    """Test assurance with numpy array."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -593,6 +629,7 @@ def test_assurance_with_rvs_object(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_assurance_text_in_report(mock_pymc_sample):
+    """Test assurance text in report."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -616,6 +653,7 @@ def test_assurance_text_in_report(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_no_assurance_without_prior(mock_pymc_sample):
+    """Test no assurance without prior."""
     df = _make_its_data(n=2000)
     experiment = InterruptedTimeSeries(
         df,
@@ -640,6 +678,7 @@ def test_no_assurance_without_prior(mock_pymc_sample):
 
 
 def test_placebo_in_time_registered_as_default():
+    """Test placebo in time registered as default."""
     its_defaults = _DEFAULT_CHECKS.get(InterruptedTimeSeries, [])
     assert PlaceboInTime in its_defaults
 
@@ -648,6 +687,7 @@ def test_placebo_in_time_registered_as_default():
 
 
 def test_default_for_includes_placebo_in_time():
+    """Test default for includes placebo in time."""
     step = SensitivityAnalysis.default_for(InterruptedTimeSeries)
     assert any(isinstance(c, PlaceboInTime) for c in step.checks)
 
@@ -659,6 +699,7 @@ def test_default_for_includes_placebo_in_time():
 
 @pytest.mark.integration
 def test_pipeline_with_placebo_in_time(mock_pymc_sample):
+    """Test pipeline with placebo in time."""
     n = 2000
     rng = np.random.default_rng(42)
     data = pd.DataFrame({"t": np.arange(n), "y": rng.normal(size=n)})
@@ -696,6 +737,7 @@ def test_pipeline_with_placebo_in_time(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_pipeline_with_assurance(mock_pymc_sample):
+    """Test pipeline with assurance."""
     n = 2000
     rng = np.random.default_rng(42)
     data = pd.DataFrame({"t": np.arange(n), "y": rng.normal(size=n)})
