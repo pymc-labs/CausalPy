@@ -10,6 +10,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
+"causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
@@ -42,6 +43,7 @@ dependencies = [
     "arviz>=0.14.0",
     "graphviz",
     "ipython!=8.7.0",
+    "jinja2",
     "matplotlib>=3.5.3",
     "numpy<2.4",
     "pandas",
