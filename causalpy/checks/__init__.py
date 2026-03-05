@@ -20,12 +20,17 @@ from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
 from causalpy.checks.persistence import PersistenceCheck
 from causalpy.checks.placebo_in_space import PlaceboInSpace
-from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
+from causalpy.checks.placebo_in_time import (
+    AssuranceResult,
+    PlaceboFoldResult,
+    PlaceboInTime,
+)
 from causalpy.checks.pre_treatment_placebo import PreTreatmentPlaceboCheck
 from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.steps.sensitivity import register_default_check
 
 __all__ = [
+    "AssuranceResult",
     "BandwidthSensitivity",
     "Check",
     "CheckResult",
