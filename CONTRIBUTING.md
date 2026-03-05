@@ -38,7 +38,7 @@ Then:
 ```bash
 git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
 conda env create -f environment.yml
-conda run -n CausalPy make setup  # Installs package + all dev dependencies + pre-commit hooks
+conda run -n CausalPy make setup  # Installs package + all dev dependencies + prek hooks
 ```
 
 For interactive development, either activate the environment or drop into a subshell:
@@ -115,7 +115,9 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     conda env create -f environment.yml
     ```
 
-    To update an existing environment after changes to `environment.yml`:
+    **Note:** `environment.yml` is generated from `pyproject.toml` by a prek hook. To change dependencies, edit `pyproject.toml` and run `prek run --all-files` (or regenerate with `pyproject2conda yaml` using the same args as in `.pre-commit-config.yaml`). During iterative work, prefer scoped runs like `prek run --files <file1> <file2>`. Do not edit `environment.yml` by hand—it will be overwritten when `pyproject.toml` is committed.
+
+    To update an existing environment after changes to `environment.yml` (e.g. after pulling or after regenerating it from `pyproject.toml`):
 
     ```bash
     conda env update --file environment.yml --prune
@@ -140,7 +142,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     This single command:
     - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
     - Installs all development extras (`dev`, `docs`, `test`, `lint`)
-    - Sets up pre-commit hooks
+    - Sets up prek hooks
 
     It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
@@ -211,7 +213,11 @@ We recommend that your contribution complies with the following guidelines befor
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
 
+- Notebook files are validated by prek using `nbformat` schema checks (`validate-notebooks`). Run `prek run --all-files` before pushing to catch malformed `.ipynb` files early.
+
 - If you have changed the documentation, you should [build the docs locally](#Building-the-documentation-locally) and check that the changes look correct.
+
+- If notebook schema validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `conda run -n CausalPy make html` before pushing.
 
 - Run any of the pre-existing examples in `CausalPy/docs/source/*` that contain analyses that would be affected by your changes to ensure that nothing breaks. This is a useful opportunity to not only check your work for bugs that might not be revealed by unit test, but also to show how your contribution improves CausalPy for end users.
 

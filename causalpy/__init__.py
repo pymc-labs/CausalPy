@@ -17,6 +17,7 @@ import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
 import causalpy.variable_selection_priors as variable_selection_priors
 from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.transforms import ramp, step
 from causalpy.version import __version__
 
 from .data import load_data
@@ -24,6 +25,7 @@ from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
@@ -36,7 +38,7 @@ from .steps import (
     SensitivityAnalysis,
     SensitivitySummary,
 )
-from .utils import extract_lift_for_mmm
+from .utils import extract_lift_for_mmm, plot_correlations
 
 __all__ = [
     "__version__",
@@ -50,17 +52,21 @@ __all__ = [
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "load_data",
+    "PiecewiseITS",
     "Pipeline",
     "PipelineContext",
     "PipelineResult",
+    "plot_correlations",
     "PrePostNEGD",
     "pymc_models",
+    "ramp",
     "RegressionDiscontinuity",
     "RegressionKink",
     "SensitivityAnalysis",
     "SensitivitySummary",
     "skl_models",
     "StaggeredDifferenceInDifferences",
+    "step",
     "Step",
     "SyntheticControl",
     "variable_selection_priors",

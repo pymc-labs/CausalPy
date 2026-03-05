@@ -1035,6 +1035,182 @@ def test_compute_rope_probability_decrease():
     assert result == 0.4  # 2 out of 5
 
 
+def test_compute_statistics_rope_decrease():
+    """Regression test: ROPE in _compute_statistics must use effect < -min_effect
+    for direction='decrease', not effect > min_effect (which was the bug)."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    # 8 posterior draws, 3 time points.
+    # All draws are strongly negative (around -5).
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="decrease",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around -5, virtually all should satisfy effect < -1.0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_increase():
+    """Test ROPE in _compute_statistics for direction='increase'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around +5, virtually all should satisfy effect > 1.0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_two_sided():
+    """Test ROPE in _compute_statistics for direction='two-sided'."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    # With draws around -5, |effect| > 1.0 for virtually all
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_rope_near_threshold():
+    """Test ROPE when effect is near the threshold — should give intermediate prob."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    # Draws centered at -2.0 with sd=1.0; min_effect=2.0 tests effect < -2.0
+    draws = rng.normal(loc=-2.0, scale=1.0, size=(1, 500, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 500, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+        min_effect=2.0,
+    )
+
+    # Mean at -2.0, threshold at -2.0 → should be roughly 0.5
+    assert 0.3 < stats["avg"]["p_rope"] < 0.7
+
+
+def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
+    """ROPE should follow the auto-detected sign direction for one-sided requests."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
+    impact = xr.DataArray(
+        draws,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 200, 3)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+
+    # Request increase, but true effect is strongly negative.
+    # p_rope should align with the detected "decrease" direction.
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    assert stats["avg"]["mean"] < 0
+    assert stats["cum"]["mean"] < 0
+    assert stats["avg"]["p_rope"] > 0.95
+    assert stats["cum"]["p_rope"] > 0.95
+
+
 def test_format_number():
     """Test _format_number helper."""
     from causalpy.reporting import _format_number
@@ -1706,107 +1882,371 @@ def test_generate_table_with_two_sided():
     assert table.loc["average", "prob_of_effect"] == 0.90
 
 
-def test_generate_prose_basic():
-    """Test _generate_prose generates proper text."""
-    from causalpy.reporting import _generate_prose
+def test_generate_prose_detailed_basic():
+    """Test _generate_prose_detailed generates proper text with observed/cf values."""
+    from causalpy.reporting import _generate_prose_detailed
 
     stats = {
         "avg": {
             "mean": 2.5,
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
-            "p_gt_0": 0.95,
+            "p_gt_0": 0.99,
         }
     }
 
     window_coords = pd.Index([10, 11, 12, 13, 14])
 
-    prose = _generate_prose(
+    prose = _generate_prose_detailed(
         stats,
         window_coords,
         alpha=0.05,
         direction="increase",
         cumulative=False,
         relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
     )
 
     assert "Post-period" in prose
     assert "10 to 14" in prose
+    assert "52.50" in prose
+    assert "50.00" in prose
     assert "2.50" in prose
-    assert "95% HDI" in prose
-    assert "1.00" in prose
-    assert "4.00" in prose
-    assert "0.950" in prose
+    assert "95%" in prose
     assert "increase" in prose
 
 
-def test_generate_prose_with_cumulative():
-    """Test _generate_prose includes cumulative effect text."""
-    from causalpy.reporting import _generate_prose
+def test_generate_prose_detailed_counterfactual_interval():
+    """Test that counterfactual interval brackets the counterfactual mean."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": -2.0,
+            "hdi_lower": -3.0,
+            "hdi_upper": -1.0,
+            "p_gt_0": 0.001,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=18.0,
+        counterfactual_avg=20.0,
+    )
+
+    # cf_interval_lower = observed - effect_upper = 18 - (-1) = 19.0
+    # cf_interval_upper = observed - effect_lower = 18 - (-3) = 21.0
+    # Both bracket the counterfactual mean of 20.0
+    assert "19.00" in prose
+    assert "21.00" in prose
+    # The counterfactual mean should appear
+    assert "20.00" in prose
+
+
+def test_generate_prose_detailed_direction_autodetect_negative():
+    """Test that a negative effect with direction='increase' auto-detects decrease."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": -1.72,
+            "hdi_lower": -2.15,
+            "hdi_upper": -1.33,
+            "p_gt_0": 0.0,
+        }
+    }
+
+    window_coords = pd.Index(range(70, 100))
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=17.1,
+        counterfactual_avg=18.82,
+    )
+
+    # Should auto-detect decrease: P(decrease) = 1 - P(increase) = 1.0
+    assert "decrease" in prose
+    # HDI excludes zero, so it should say "does not include zero"
+    assert "does not include zero" in prose
+    # Posterior probability should be 1.000 (auto-detected)
+    assert "1.000" in prose
+
+
+def test_generate_prose_detailed_direction_autodetect_positive():
+    """Test that a positive effect with direction='decrease' auto-detects increase."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 3.0,
+            "hdi_lower": 1.5,
+            "hdi_upper": 4.5,
+            "p_lt_0": 0.001,
+        }
+    }
+
+    window_coords = pd.Index(range(10, 20))
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+        observed_avg=53.0,
+        counterfactual_avg=50.0,
+    )
+
+    assert "increase" in prose
+    assert "does not include zero" in prose
+
+
+def test_generate_prose_detailed_two_sided_uses_correct_article():
+    """Test that two-sided prose uses 'an effect' (not 'a effect')."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 0.5,
+            "hdi_lower": -0.2,
+            "hdi_upper": 1.2,
+            "prob_of_effect": 0.9,
+        }
+    }
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="two-sided",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "posterior probability of an effect" in prose
+    assert "posterior probability of a effect" not in prose
+
+
+def test_generate_prose_detailed_preserves_custom_prefix_casing():
+    """Test that prose preserves caller-provided prefix casing."""
+    from causalpy.reporting import _generate_prose_detailed
 
     stats = {
         "avg": {
             "mean": 2.5,
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
-            "p_gt_0": 0.95,
+            "p_gt_0": 0.99,
+        }
+    }
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        prefix="Post-Intervention",
+    )
+
+    assert "During the Post-Intervention" in prose
+
+
+def test_generate_prose_detailed_cumulative():
+    """Test _generate_prose_detailed includes cumulative with correct intervals."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.0,
+            "hdi_lower": 1.0,
+            "hdi_upper": 3.0,
+            "p_gt_0": 0.99,
         },
         "cum": {
-            "mean": 50.0,
-            "hdi_lower": 30.0,
-            "hdi_upper": 70.0,
-            "p_gt_0": 0.98,
+            "mean": 20.0,
+            "hdi_lower": 10.0,
+            "hdi_upper": 30.0,
         },
     }
 
-    window_coords = pd.Index([10, 11, 12])
+    window_coords = pd.Index(range(10, 20))
 
-    prose = _generate_prose(
+    prose = _generate_prose_detailed(
         stats,
         window_coords,
         alpha=0.05,
         direction="increase",
         cumulative=True,
         relative=False,
+        observed_avg=52.0,
+        counterfactual_avg=50.0,
+        observed_cum=520.0,
+        counterfactual_cum=500.0,
     )
 
-    assert "cumulative effect" in prose
-    assert "50.00" in prose
-    assert "30.00" in prose
-    assert "70.00" in prose
+    assert "Summing up" in prose
+    assert "520.00" in prose
+    assert "500.00" in prose
+    # cum_cf_lower = 520 - 30 = 490, cum_cf_upper = 520 - 10 = 510
+    assert "490.00" in prose
+    assert "510.00" in prose
 
 
-def test_generate_prose_with_relative():
-    """Test _generate_prose includes relative effect text."""
-    from causalpy.reporting import _generate_prose
+def test_generate_prose_detailed_with_relative():
+    """Test _generate_prose_detailed includes relative effect text."""
+    from causalpy.reporting import _generate_prose_detailed
 
     stats = {
         "avg": {
             "mean": 2.5,
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
-            "p_gt_0": 0.95,
-            "relative_mean": 50.0,
-            "relative_hdi_lower": 20.0,
-            "relative_hdi_upper": 80.0,
+            "p_gt_0": 0.99,
+            "relative_mean": 5.0,
+            "relative_hdi_lower": 2.0,
+            "relative_hdi_upper": 8.0,
         }
     }
 
     window_coords = pd.Index([10, 11, 12])
 
-    prose = _generate_prose(
+    prose = _generate_prose_detailed(
         stats,
         window_coords,
         alpha=0.05,
         direction="increase",
         cumulative=False,
         relative=True,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
     )
 
     assert "Relative to the counterfactual" in prose
-    assert "50.00%" in prose
-    assert "20.00%" in prose
-    assert "80.00%" in prose
+    assert "5.00%" in prose
+    assert "2.00%" in prose
+    assert "8.00%" in prose
+
+
+def test_generate_prose_detailed_rope_in_prose():
+    """Test that ROPE probability appears in prose when provided."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+            "p_rope": 0.85,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+
+    assert "minimum effect size threshold" in prose
+    assert "0.850" in prose
+
+
+def test_generate_prose_detailed_is_descriptive():
+    """Ensure prose uses descriptive language, not prescriptive judgments."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+
+    # Should NOT contain prescriptive language from the old four-way branching
+    assert "statistically credible" not in prose
+    assert "caution is warranted" not in prose
+    assert "weak or inconclusive" not in prose
+    assert "strong statistical evidence" not in prose
+    # Should contain descriptive factual statements
+    assert "does not include zero" in prose
+    assert "posterior probability" in prose
+    assert "We recommend" in prose
+
+
+def test_generate_prose_detailed_ols_is_descriptive():
+    """Ensure OLS prose uses descriptive language, not prescriptive judgments."""
+    from causalpy.reporting import _generate_prose_detailed_ols
+
+    stats = {
+        "avg": {
+            "mean": 0.5,
+            "ci_lower": -0.2,
+            "ci_upper": 1.2,
+            "p_value": 0.15,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=False,
+        relative=False,
+        observed_avg=50.5,
+        counterfactual_avg=50.0,
+    )
+
+    # Should NOT contain prescriptive language
+    assert "statistically significant" not in prose
+    assert "caution is warranted" not in prose
+    assert "lack of statistical significance" not in prose
+    # Should contain descriptive factual statements
+    assert "includes zero" in prose
+    assert "p-value" in prose
+    assert "We recommend" in prose
 
 
 def test_generate_table_ols_basic():
@@ -1882,22 +2322,193 @@ def test_generate_table_ols_with_relative():
     assert table.loc["average", "relative_mean"] == 50.0
 
 
-def test_generate_prose_ols_basic():
-    """Test _generate_prose_ols generates proper text."""
-    from causalpy.reporting import _generate_prose_ols
+def test_generate_prose_detailed_ols_basic():
+    """Test _generate_prose_detailed_ols generates proper text."""
+    from causalpy.reporting import _generate_prose_detailed_ols
 
     stats = {
         "avg": {
             "mean": 2.5,
             "ci_lower": 1.0,
             "ci_upper": 4.0,
-            "p_value": 0.05,
+            "p_value": 0.03,
         }
     }
 
     window_coords = pd.Index([10, 11, 12])
 
-    prose = _generate_prose_ols(
+    prose = _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+
+    assert "Post-period" in prose
+    assert "10 to 12" in prose
+    assert "52.50" in prose
+    assert "50.00" in prose
+    assert "2.50" in prose
+    assert "95% confidence interval" in prose
+    assert "does not include zero" in prose
+
+
+def test_generate_prose_detailed_ols_counterfactual_interval():
+    """Test OLS counterfactual interval brackets counterfactual mean."""
+    from causalpy.reporting import _generate_prose_detailed_ols
+
+    stats = {
+        "avg": {
+            "mean": -1.5,
+            "ci_lower": -2.5,
+            "ci_upper": -0.5,
+            "p_value": 0.01,
+        }
+    }
+
+    window_coords = pd.Index([1, 2, 3])
+
+    prose = _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=False,
+        relative=False,
+        observed_avg=18.5,
+        counterfactual_avg=20.0,
+    )
+
+    # cf_interval_lower = 18.5 - (-0.5) = 19.0
+    # cf_interval_upper = 18.5 - (-2.5) = 21.0
+    assert "19.00" in prose
+    assert "21.00" in prose
+    assert "20.00" in prose
+
+
+def test_generate_prose_detailed_ols_with_cumulative():
+    """Test _generate_prose_detailed_ols includes cumulative effect text."""
+    from causalpy.reporting import _generate_prose_detailed_ols
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "ci_lower": 1.0,
+            "ci_upper": 4.0,
+            "p_value": 0.03,
+        },
+        "cum": {
+            "mean": 25.0,
+            "ci_lower": 10.0,
+            "ci_upper": 40.0,
+        },
+    }
+
+    window_coords = pd.Index(range(10, 20))
+
+    prose = _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=0.05,
+        cumulative=True,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+        observed_cum=525.0,
+        counterfactual_cum=500.0,
+    )
+
+    assert "Summing up" in prose
+    assert "525.00" in prose
+    assert "500.00" in prose
+
+
+# ==============================================================================
+# Tests for _assumptions_text
+# ==============================================================================
+
+
+def test_assumptions_text_its():
+    """Test ITS-specific assumptions text."""
+    from causalpy.reporting import _assumptions_text
+
+    text = _assumptions_text("its")
+    assert "time-based predictors" in text
+    assert "external covariates" in text
+
+
+def test_assumptions_text_sc():
+    """Test SC-specific assumptions text."""
+    from causalpy.reporting import _assumptions_text
+
+    text = _assumptions_text("sc")
+    assert "control units" in text
+    assert "synthetic counterfactual" in text
+
+
+def test_assumptions_text_default():
+    """Test default assumptions text."""
+    from causalpy.reporting import _assumptions_text
+
+    text = _assumptions_text(None)
+    assert "covariates" in text
+    assert "pre-intervention period" in text
+
+    text_piecewise = _assumptions_text("piecewise_its")
+    assert text_piecewise == text
+
+
+# ==============================================================================
+# Tests for direction auto-detection without observed/cf values
+# ==============================================================================
+
+
+def test_prose_detailed_no_observed_values():
+    """Test fallback prose when observed/counterfactual are not provided."""
+    from causalpy.reporting import _generate_prose_detailed
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "hdi_lower": 1.0,
+            "hdi_upper": 4.0,
+            "p_gt_0": 0.99,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=0.05,
+        direction="increase",
+        cumulative=False,
+        relative=False,
+    )
+
+    assert "estimated average causal effect" in prose
+    assert "2.50" in prose
+
+
+def test_prose_detailed_ols_no_observed_values():
+    """Test OLS fallback prose when observed/counterfactual are not provided."""
+    from causalpy.reporting import _generate_prose_detailed_ols
+
+    stats = {
+        "avg": {
+            "mean": 2.5,
+            "ci_lower": 1.0,
+            "ci_upper": 4.0,
+            "p_value": 0.03,
+        }
+    }
+
+    window_coords = pd.Index([10, 11, 12])
+
+    prose = _generate_prose_detailed_ols(
         stats,
         window_coords,
         alpha=0.05,
@@ -1905,47 +2516,8 @@ def test_generate_prose_ols_basic():
         relative=False,
     )
 
-    assert "Post-period" in prose
-    assert "10 to 12" in prose
+    assert "estimated average causal effect" in prose
     assert "2.50" in prose
-    assert "95% CI" in prose
-    assert "1.00" in prose
-    assert "4.00" in prose
-    assert "p-value of 0.050" in prose
-
-
-def test_generate_prose_ols_with_cumulative():
-    """Test _generate_prose_ols includes cumulative effect text."""
-    from causalpy.reporting import _generate_prose_ols
-
-    stats = {
-        "avg": {
-            "mean": 2.5,
-            "ci_lower": 1.0,
-            "ci_upper": 4.0,
-            "p_value": 0.05,
-        },
-        "cum": {
-            "mean": 50.0,
-            "ci_lower": 30.0,
-            "ci_upper": 70.0,
-            "p_value": 0.01,
-        },
-    }
-
-    window_coords = pd.Index([10, 11, 12])
-
-    prose = _generate_prose_ols(
-        stats,
-        window_coords,
-        alpha=0.05,
-        cumulative=True,
-        relative=False,
-    )
-
-    assert "cumulative effect" in prose
-    assert "50.00" in prose
-    assert "p-value 0.010" in prose
 
 
 # ==============================================================================

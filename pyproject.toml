@@ -14,7 +14,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [project]
 name = "CausalPy"
-version = "0.7.0"
+version = "0.8.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -49,7 +49,6 @@ dependencies = [
     "pandas",
     "patsy",
     "pymc>=5.15.1",
-    "pymc-marketing>=0.13.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
@@ -66,7 +65,7 @@ dependencies = [
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
 dev = [
-    "pre-commit",
+    "prek",
     "twine",
     "interrogate",
     "codespell",
@@ -75,6 +74,7 @@ dev = [
 ]
 docs = [
     "ipykernel",
+    "pymc-marketing>=0.13.1",
     "daft-pgm",
     "linkify-it-py",
     "myst-nb<=1.0.0",
@@ -94,8 +94,11 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "pre-commit", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
+lint = ["interrogate", "prek", "ruff", "mypy"]
+test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
+
+[tool.pyproject2conda]
+channels = ["conda-forge"]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
