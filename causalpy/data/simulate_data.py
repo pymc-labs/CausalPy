@@ -79,7 +79,9 @@ def generate_synthetic_control_data(
     Example
     --------
     >>> from causalpy.data.simulate_data import generate_synthetic_control_data
-    >>> df, weightings_true = generate_synthetic_control_data(treatment_time=70, seed=42)
+    >>> df, weightings_true = generate_synthetic_control_data(
+    ...     treatment_time=70, seed=42
+    ... )
     """
     rng = np.random.default_rng(seed)
     # 1. Generate non-treated variables
@@ -335,7 +337,9 @@ def generate_regression_discontinuity_data(
     --------
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_regression_discontinuity_data
-    >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5, seed=42)
+    >>> df = generate_regression_discontinuity_data(
+    ...     true_treatment_threshold=0.5, seed=42
+    ... )
     """
     rng = np.random.default_rng(seed)
 
@@ -373,7 +377,10 @@ def generate_ancova_data(
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_ancova_data
     >>> df = generate_ancova_data(
-    ...     N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1,
+    ...     N=200,
+    ...     pre_treatment_means=np.array([10, 12]),
+    ...     treatment_effect=2,
+    ...     sigma=1,
     ...     seed=42,
     ... )
     """
@@ -413,8 +420,12 @@ def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
     factors = np.column_stack(
         [
             _create_series(
-                n=52, amplitude=1, length_scale=2,
-                n_years=n_years, intercept=0, rng=rng,
+                n=52,
+                amplitude=1,
+                length_scale=2,
+                n_years=n_years,
+                intercept=0,
+                rng=rng,
             )
             for _ in range(K)
         ]
@@ -494,8 +505,12 @@ def generate_multicell_geolift_data(
         pd.DataFrame(
             {
                 country: _create_series(
-                    n=52, amplitude=1, length_scale=2,
-                    n_years=n_years, intercept=3, rng=rng,
+                    n=52,
+                    amplitude=1,
+                    length_scale=2,
+                    n_years=n_years,
+                    intercept=3,
+                    rng=rng,
                 )
                 for country in untreated
             }
