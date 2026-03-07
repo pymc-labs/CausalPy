@@ -144,7 +144,6 @@ class PiecewiseITS(BaseExperiment):
       the evaluation of public health interventions: a tutorial. Int J Epidemiol.
     """
 
-    expt_type = "Piecewise Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
@@ -159,6 +158,7 @@ class PiecewiseITS(BaseExperiment):
         super().__init__(model=model)
 
         # Store configuration
+        self.expt_type = "Piecewise Interrupted Time Series"
         self.formula = formula
         self.data = data.copy()
 

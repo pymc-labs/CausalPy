@@ -952,7 +952,6 @@ def test_piecewise_its_post_impact_attributes():
 
 def test_piecewise_its_class_attributes():
     """Test that class-level attributes are correctly set."""
-    assert cp.PiecewiseITS.expt_type == "Piecewise Interrupted Time Series"
     assert cp.PiecewiseITS.supports_ols is True
     assert cp.PiecewiseITS.supports_bayes is True
 
@@ -966,6 +965,9 @@ def test_piecewise_its_instance_attributes():
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
     )
+
+    # Check expt_type is set as an instance attribute
+    assert result.expt_type == "Piecewise Interrupted Time Series"
 
     # Check formula and time column extraction
     assert result.formula == "y ~ 1 + t + step(t, 50) + ramp(t, 50)"

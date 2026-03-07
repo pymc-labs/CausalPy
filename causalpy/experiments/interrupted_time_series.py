@@ -126,7 +126,6 @@ class InterruptedTimeSeries(BaseExperiment):
     after the intervention ends.
     """
 
-    expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
