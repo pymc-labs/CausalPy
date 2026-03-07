@@ -15,6 +15,7 @@
 Functions to load example datasets
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +37,7 @@ _DATA_DIR = Path(__file__).parent
 # Synthetic datasets are generated programmatically for reproducibility.
 # .reset_index() on ITS functions because generators set date as the index,
 # but the old CSV-based load_data returned date as a column.
-SYNTHETIC_DATASETS: dict[str, callable] = {
+SYNTHETIC_DATASETS: dict[str, Callable[[], pd.DataFrame]] = {
     "did": lambda: generate_did(seed=RANDOM_SEED),
     "rd": lambda: generate_regression_discontinuity_data(
         true_treatment_threshold=0.5, seed=RANDOM_SEED
