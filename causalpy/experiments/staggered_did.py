@@ -33,6 +33,7 @@ from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from causalpy.experiments.constants import LEGEND_FONT_SIZE
+from causalpy.utils import HDI_PROB
 
 from .base import BaseExperiment
 
@@ -444,7 +445,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self,
         treated_data: pd.DataFrame,
         pretreatment_data: pd.DataFrame,
-        hdi_prob: float = 0.94,
+        hdi_prob: float = HDI_PROB,
     ) -> None:
         """Aggregate effects for Bayesian model with posterior uncertainty.
 
@@ -816,7 +817,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """Get plotting data for Bayesian model.
 
         Parameters
@@ -832,7 +833,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """
         # If the requested hdi_prob matches what was used during aggregation,
         # return the pre-computed results
-        stored_hdi_prob = getattr(self, "hdi_prob_", 0.94)
+        stored_hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         if np.isclose(hdi_prob, stored_hdi_prob):
             return self.att_event_time_.copy()
 

@@ -33,6 +33,7 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
 
 from causalpy.experiments.constants import LEGEND_FONT_SIZE
+from causalpy.utils import HDI_PROB
 
 from .base import BaseExperiment
 
@@ -670,7 +671,7 @@ class SyntheticControl(BaseExperiment):
         return self.plot_data
 
     def get_plot_data_bayesian(
-        self, hdi_prob: float = 0.94, treated_unit: str | None = None
+        self, hdi_prob: float = HDI_PROB, treated_unit: str | None = None
     ) -> pd.DataFrame:
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.

@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
+from causalpy.utils import HDI_PROB, _is_variable_dummy_coded, convert_to_string, round_num
 
 from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
@@ -333,7 +333,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # create strings to compose title
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
+        percentiles = self.discontinuity_at_threshold.quantile([(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]).values
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"

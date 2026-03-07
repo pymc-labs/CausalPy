@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
+HDI_PROB: float = 0.94
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -106,7 +108,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
         # In the case of an xarray object, we return the mean and 94% CI
-        percentiles = x.quantile([0.03, 1 - 0.03]).to_numpy()
+        percentiles = x.quantile([(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]).to_numpy()
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"

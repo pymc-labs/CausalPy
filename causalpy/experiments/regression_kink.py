@@ -34,7 +34,7 @@ from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
 from typing import Any, Literal
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import HDI_PROB, _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -272,7 +272,7 @@ class RegressionKink(BaseExperiment):
         # create strings to compose title
         title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
+        percentiles = self.gradient_change.quantile([(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]).values
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
