@@ -131,62 +131,6 @@ def generate_synthetic_control_data(
     return df, weightings_true
 
 
-def generate_time_series_data(
-    N: int = 100,
-    treatment_time: int = 70,
-    beta_temp: float = -1,
-    beta_linear: float = 0.5,
-    beta_intercept: float = 3,
-    seed: int | None = None,
-) -> pd.DataFrame:
-    """
-    Generates interrupted time series example data
-
-    :param N:
-        Length of the time series
-    :param treatment_time:
-        Index of when treatment begins
-    :param beta_temp:
-        The temperature coefficient
-    :param beta_linear:
-        The linear coefficient
-    :param beta_intercept:
-        The intercept
-    :param seed:
-        Random seed for reproducibility
-
-    """
-    rng = np.random.default_rng(seed)
-    x = np.arange(0, N, 1)
-    df = pd.DataFrame(
-        {
-            "temperature": np.sin(x * 0.5) + 1,
-            "linear": np.linspace(0, 1, N),
-            "causal effect": 10 * gamma(10).pdf(np.arange(0, N, 1) - treatment_time),
-        }
-    )
-
-    df["deaths_counterfactual"] = (
-        beta_intercept + beta_temp * df["temperature"] + beta_linear * df["linear"]
-    )
-
-    # generate the actually observed data
-    # ie the treated with the causal effect applied
-    df["deaths_actual"] = df["deaths_counterfactual"] + df["causal effect"]
-
-    # apply observation noise to all relevant variables
-    # NOTE: no observation noise on the linear trend component
-    for var in ["deaths_actual", "temperature"]:
-        df[var] += rng.normal(0, 0.1, N)
-
-    # add intercept column of ones (for modeling purposes)
-    # This is correctly a column of ones, not beta_intercept, as beta_intercept
-    # is already incorporated in the data generation above
-    df["intercept"] = np.ones(df.shape[0])
-
-    return df
-
-
 def generate_time_series_data_seasonal(
     treatment_time: pd.Timestamp,
     seed: int | None = None,
