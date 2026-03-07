@@ -29,12 +29,11 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import HDI_PROB, _is_variable_dummy_coded, round_num
-
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
 
@@ -214,7 +213,9 @@ class PrePostNEGD(BaseExperiment):
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
-        percentiles = self.causal_impact.quantile([(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]).values
+        percentiles = self.causal_impact.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).values
         ci = (
             r"$CI_{94%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"

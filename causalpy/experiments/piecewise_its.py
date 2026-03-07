@@ -27,13 +27,12 @@ from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import FormulaException
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import HDI_PROB, round_num
-
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
 

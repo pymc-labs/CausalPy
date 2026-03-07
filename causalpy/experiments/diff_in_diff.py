@@ -30,6 +30,7 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -45,8 +46,6 @@ from causalpy.utils import (
     get_interaction_terms,
     round_num,
 )
-
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
 

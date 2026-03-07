@@ -27,12 +27,11 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import HDI_PROB, round_num
-
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
 
@@ -226,7 +225,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         # get the model predictions of the observed (pre-intervention) data
-        if isinstance(self.model, (PyMCModel, RegressorMixin)):
+        if isinstance(self.model, PyMCModel | RegressorMixin):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
