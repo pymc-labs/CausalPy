@@ -16,7 +16,7 @@ Regression discontinuity design
 """
 
 import warnings  # noqa: I001
-
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -29,15 +29,18 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
+from causalpy.reporting import EffectSummary, _effect_summary_rd
+from causalpy.utils import (
+    HDI_PROB,
+    _is_variable_dummy_coded,
+    convert_to_string,
+    round_num,
+)
 
 from .base import BaseExperiment
-from causalpy.reporting import EffectSummary, _effect_summary_rd
-from typing import Any, Literal
-
-LEGEND_FONT_SIZE = 12
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -101,7 +104,7 @@ class RegressionDiscontinuity(BaseExperiment):
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
         donut_hole: float = 0.0,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
@@ -244,7 +247,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 "A predictor called `treated` should be in the formula"
             )
 
-        if _is_variable_dummy_coded(self.data["treated"]) is False:
+        if not _is_variable_dummy_coded(self.data["treated"]):
             raise DataException(
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
@@ -296,7 +299,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
@@ -333,7 +336,9 @@ class RegressionDiscontinuity(BaseExperiment):
         # create strings to compose title
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
+        percentiles = self.discontinuity_at_threshold.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).values
         ci = (
             r"$CI_{94\%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
@@ -372,7 +377,7 @@ class RegressionDiscontinuity(BaseExperiment):
         return (fig, ax)
 
     def _ols_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()

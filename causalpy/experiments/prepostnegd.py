@@ -29,14 +29,13 @@ from sklearn.base import RegressorMixin
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import HDI_PROB, _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class PrePostNEGD(BaseExperiment):
@@ -97,7 +96,7 @@ class PrePostNEGD(BaseExperiment):
         group_variable_name: str,
         pretreatment_variable_name: str,
         model: PyMCModel | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
@@ -184,7 +183,7 @@ class PrePostNEGD(BaseExperiment):
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
         self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
 
-        # Evaluate causal impact as equal to the trestment effect
+        # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )
@@ -214,7 +213,9 @@ class PrePostNEGD(BaseExperiment):
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and 94% credible interval bounds for the causal impact."""
-        percentiles = self.causal_impact.quantile([0.03, 1 - 0.03]).values
+        percentiles = self.causal_impact.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).values
         ci = (
             r"$CI_{94%}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
@@ -235,7 +236,7 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(
