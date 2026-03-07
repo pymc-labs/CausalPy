@@ -33,11 +33,11 @@ from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
 
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
+
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from typing import Any, Literal
-
-LEGEND_FONT_SIZE = 12
 
 
 class RegressionDiscontinuity(BaseExperiment):

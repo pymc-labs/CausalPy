@@ -33,9 +33,9 @@ from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import round_num
 
-from .base import BaseExperiment
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
-LEGEND_FONT_SIZE = 12
+from .base import BaseExperiment
 
 
 class PiecewiseITS(BaseExperiment):

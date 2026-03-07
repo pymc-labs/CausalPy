@@ -32,9 +32,9 @@ from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
 
-from .base import BaseExperiment
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
-LEGEND_FONT_SIZE = 12
+from .base import BaseExperiment
 
 
 class SyntheticControl(BaseExperiment):

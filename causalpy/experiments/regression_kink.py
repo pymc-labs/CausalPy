@@ -30,17 +30,15 @@ from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
 
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
+
 from .base import BaseExperiment
 from typing import Any, Literal
-from causalpy.utils import round_num
+from causalpy.utils import _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.utils import _is_variable_dummy_coded
-
-
-LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):

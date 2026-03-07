@@ -34,9 +34,9 @@ from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
-from .base import BaseExperiment
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
-LEGEND_FONT_SIZE = 12
+from .base import BaseExperiment
 
 
 class PrePostNEGD(BaseExperiment):

@@ -46,9 +46,9 @@ from causalpy.utils import (
     round_num,
 )
 
-from .base import BaseExperiment
+from causalpy.experiments.constants import LEGEND_FONT_SIZE
 
-LEGEND_FONT_SIZE = 12
+from .base import BaseExperiment
 
 
 class DifferenceInDifferences(BaseExperiment):
