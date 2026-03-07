@@ -154,7 +154,7 @@ class PiecewiseITS(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
 
@@ -446,7 +446,7 @@ class PiecewiseITS(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict[str, Any]
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for Bayesian models.
@@ -563,7 +563,7 @@ class PiecewiseITS(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict[str, Any]
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS models.

@@ -101,7 +101,7 @@ class RegressionDiscontinuity(BaseExperiment):
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
         donut_hole: float = 0.0,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
@@ -296,7 +296,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
@@ -372,7 +372,7 @@ class RegressionDiscontinuity(BaseExperiment):
         return (fig, ax)
 
     def _ols_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()

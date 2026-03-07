@@ -152,7 +152,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         model: PyMCModel | RegressorMixin | None = None,
         event_window: tuple[int, int] | None = None,
         reference_event_time: int = -1,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         # NOTE: kwargs is accepted for API compatibility with other experiment classes
         # and is intentionally not used inside this constructor.
@@ -645,7 +645,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for Bayesian model.
 
         Returns
@@ -723,7 +723,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def _ols_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for OLS model.
 
         Returns

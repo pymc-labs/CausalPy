@@ -97,7 +97,7 @@ class SyntheticControl(BaseExperiment):
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         # rename the index to "obs_ind"
@@ -383,7 +383,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for a specific treated unit
@@ -549,7 +549,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS model for a specific treated unit

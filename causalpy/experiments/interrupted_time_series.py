@@ -138,7 +138,7 @@ class InterruptedTimeSeries(BaseExperiment):
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.pre_y: xr.DataArray
@@ -601,7 +601,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -797,7 +797,7 @@ class InterruptedTimeSeries(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results

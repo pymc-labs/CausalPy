@@ -107,7 +107,7 @@ class DifferenceInDifferences(BaseExperiment):
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
@@ -335,7 +335,7 @@ class DifferenceInDifferences(BaseExperiment):
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
@@ -485,7 +485,7 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
         fig, ax = plt.subplots()

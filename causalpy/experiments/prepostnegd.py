@@ -97,7 +97,7 @@ class PrePostNEGD(BaseExperiment):
         group_variable_name: str,
         pretreatment_variable_name: str,
         model: PyMCModel | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
@@ -235,7 +235,7 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
         fig, ax = plt.subplots(

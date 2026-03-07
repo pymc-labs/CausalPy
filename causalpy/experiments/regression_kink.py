@@ -76,7 +76,7 @@ class RegressionKink(BaseExperiment):
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
@@ -248,7 +248,7 @@ class RegressionKink(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression kink designs."""
         fig, ax = plt.subplots()
