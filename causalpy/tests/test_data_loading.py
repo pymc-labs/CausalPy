@@ -19,28 +19,35 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
+from causalpy.data.datasets import REAL_WORLD_DATASETS, SYNTHETIC_DATASETS
 
-tests = [
-    "banks",
-    "brexit",
-    "covid",
-    "did",
-    "drinking",
-    "its",
-    "its simple",
-    "rd",
-    "sc",
-    "anova1",
-]
+all_datasets = list(SYNTHETIC_DATASETS.keys()) + list(REAL_WORLD_DATASETS.keys())
 
 
-@pytest.mark.parametrize("dataset_name", tests)
+@pytest.mark.parametrize("dataset_name", all_datasets)
 def test_data_loading(dataset_name):
-    """
-    Checks that test data can be loaded into data frames and that there are no
-    missing values in any column.
-    """
+    """Checks that test data can be loaded into data frames."""
     df = cp.load_data(dataset_name)
     assert isinstance(df, pd.DataFrame)
-    # Check that there are no missing values in any column
+    assert len(df) > 0
+
+
+@pytest.mark.parametrize("dataset_name", list(SYNTHETIC_DATASETS.keys()))
+def test_synthetic_data_no_nulls(dataset_name):
+    """Synthetic datasets should never contain missing values."""
+    df = cp.load_data(dataset_name)
     assert df.isnull().sum().sum() == 0
+
+
+def test_synthetic_data_reproducibility():
+    """Verify that synthetic datasets are deterministic across calls."""
+    for key in SYNTHETIC_DATASETS:
+        df1 = cp.load_data(key)
+        df2 = cp.load_data(key)
+        assert df1.equals(df2), f"load_data({key!r}) is not reproducible"
+
+
+def test_unknown_dataset_raises():
+    """Verify that requesting a nonexistent dataset raises ValueError."""
+    with pytest.raises(ValueError, match="not found"):
+        cp.load_data("nonexistent_dataset")
