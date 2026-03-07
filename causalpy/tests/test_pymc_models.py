@@ -180,11 +180,10 @@ class TestPyMCModel:
         assert isinstance(predictions, az.InferenceData)
 
 
-def test_idata_property(mock_pymc_sample):
+def test_idata_property(mock_pymc_sample, did_data):
     """Test that we can access the idata property of the model"""
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
@@ -198,25 +197,23 @@ seeds = [1234, 42, 123456789]
 
 
 @pytest.mark.parametrize("seed", seeds)
-def test_result_reproducibility(seed, mock_pymc_sample):
+def test_result_reproducibility(seed, mock_pymc_sample, did_data):
     """Test that we can reproduce the results from the model. We could in theory test
     this with all the model and experiment types, but what is being targeted is
     the PyMCModel.fit method, so we should be safe testing with just one model. Here
     we use the DifferenceInDifferences experiment class."""
-    # Load the data
-    df = cp.load_data("did")
     # Set a random seed
     sample_kwargs["random_seed"] = seed
     # Calculate the result twice
     result1 = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     result2 = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
