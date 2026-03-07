@@ -184,7 +184,7 @@ class PrePostNEGD(BaseExperiment):
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
         self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
 
-        # Evaluate causal impact as equal to the trestment effect
+        # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )

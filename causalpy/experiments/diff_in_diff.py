@@ -517,7 +517,7 @@ class DifferenceInDifferences(BaseExperiment):
             "o",
             c="C1",
             markersize=10,
-            label="model fit (treament group)",
+            label="model fit (treatment group)",
         )
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
