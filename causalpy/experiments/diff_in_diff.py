@@ -282,7 +282,7 @@ class DifferenceInDifferences(BaseExperiment):
                 "Require a `unit` column to label unique units. This is used for plotting purposes"  # noqa: E501
             )
 
-        if _is_variable_dummy_coded(self.data[self.group_variable_name]) is False:
+        if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""The grouping variable {self.group_variable_name} should be dummy
                 coded. Consisting of 0's and 1's only."""

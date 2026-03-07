@@ -244,7 +244,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 "A predictor called `treated` should be in the formula"
             )
 
-        if _is_variable_dummy_coded(self.data["treated"]) is False:
+        if not _is_variable_dummy_coded(self.data["treated"]):
             raise DataException(
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
