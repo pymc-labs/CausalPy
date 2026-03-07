@@ -261,10 +261,9 @@ class DifferenceInDifferences(BaseExperiment):
             raise ValueError("Model type not recognized")
 
     def input_validation(self) -> None:
+        """Validate the input data and model formula for correctness"""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-
-        """Validate the input data and model formula for correctness"""
         # Check if post_treatment_variable_name is in formula
         if self.post_treatment_variable_name not in self.formula:
             raise FormulaException(
