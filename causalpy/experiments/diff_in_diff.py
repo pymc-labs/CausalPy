@@ -40,6 +40,7 @@ from causalpy.reporting import (
     _generate_table_did_ols,
 )
 from causalpy.utils import (
+    _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
     get_interaction_terms,
@@ -49,11 +50,6 @@ from causalpy.utils import (
 from .base import BaseExperiment
 
 LEGEND_FONT_SIZE = 12
-
-
-def _as_scalar(value: Any) -> float:
-    """Convert scalar-like values (including singleton arrays) to float."""
-    return float(np.asarray(value).reshape(()))
 
 
 class DifferenceInDifferences(BaseExperiment):

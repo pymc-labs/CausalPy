@@ -30,6 +30,25 @@ if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
 
+def _as_scalar(value: Any) -> float:
+    """Convert scalar-like values (including singleton arrays) to Python float.
+
+    Handles plain floats, 0-d and 1-element numpy arrays, and singleton
+    xarray DataArrays that arise when NumPy >= 2.4 enforces stricter
+    scalar-conversion rules.
+
+    Examples
+    --------
+    >>> _as_scalar(3.14)
+    3.14
+    >>> _as_scalar(np.array(2.5))
+    2.5
+    >>> _as_scalar(np.array([2.5]))
+    2.5
+    """
+    return float(np.asarray(value).reshape(()))
+
+
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
     only."""
