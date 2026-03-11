@@ -583,14 +583,10 @@ def test_ancova(mock_pymc_sample, capsys):
     assert "post_mean" in output
     rounded_stats = result._group_level_summary_stats(round_to=1)
     assert isinstance(rounded_stats, pd.DataFrame)
-    assert np.allclose(
-        rounded_stats["pre_mean"],
-        rounded_stats["pre_mean"].round(1),
-    )
-    assert np.allclose(
-        rounded_stats["post_mean"],
-        rounded_stats["post_mean"].round(1),
-    )
+    for col in ["pre_mean", "post_mean"]:
+        assert pd.api.types.is_string_dtype(rounded_stats[col])
+        for val in rounded_stats[col]:
+            float(val)
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes

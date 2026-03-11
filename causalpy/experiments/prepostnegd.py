@@ -234,9 +234,8 @@ class PrePostNEGD(BaseExperiment):
             .reset_index()
         )
         if round_to is not None:
-            summary_df[["pre_mean", "post_mean"]] = summary_df[
-                ["pre_mean", "post_mean"]
-            ].round(round_to)
+            for col in ["pre_mean", "post_mean"]:
+                summary_df[col] = summary_df[col].map(lambda x: round_num(x, round_to))
         return summary_df
 
     def summary(self, round_to: int | None = None) -> None:
