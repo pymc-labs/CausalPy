@@ -34,15 +34,25 @@ from causalpy.pymc_models import PyMCModel
 class MaketablesAdapter(Protocol):
     """Protocol for backend-specific maketables extraction."""
 
-    def coef_table(self, experiment: Any) -> pd.DataFrame: ...
+    def coef_table(self, experiment: Any) -> pd.DataFrame:
+        """Return canonical coefficient table for maketables."""
+        ...
 
-    def stat(self, experiment: Any, key: str) -> Any: ...
+    def stat(self, experiment: Any, key: str) -> Any:
+        """Return a single model-level statistic by key."""
+        ...
 
-    def vcov_info(self, experiment: Any) -> dict[str, Any]: ...
+    def vcov_info(self, experiment: Any) -> dict[str, Any]:
+        """Return variance-covariance metadata dict."""
+        ...
 
-    def stat_labels(self, experiment: Any) -> dict[str, str] | None: ...
+    def stat_labels(self, experiment: Any) -> dict[str, str] | None:
+        """Return display labels for statistics."""
+        ...
 
-    def default_stat_keys(self, experiment: Any) -> list[str] | None: ...
+    def default_stat_keys(self, experiment: Any) -> list[str] | None:
+        """Return ordered list of default statistic keys."""
+        ...
 
 
 def _safe_observation_count(experiment: Any) -> int | None:
@@ -207,6 +217,7 @@ class PyMCMaketablesAdapter:
     """Adapter for experiments backed by PyMCModel."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
+        """Build coefficient table from PyMC posterior draws with HDI intervals."""
         labels = list(getattr(experiment, "labels", []))
         if not labels:
             msg = "Experiment has no coefficient labels for maketables export."
@@ -230,6 +241,7 @@ class PyMCMaketablesAdapter:
         )
 
     def stat(self, experiment: Any, key: str) -> Any:
+        """Return a single Bayesian model-level statistic by key."""
         stats: dict[str, Any] = {
             "N": _safe_observation_count(experiment),
             "r2": _safe_r2_value(experiment),
@@ -240,12 +252,15 @@ class PyMCMaketablesAdapter:
         return stats.get(key)
 
     def vcov_info(self, experiment: Any) -> dict[str, Any]:
+        """Return Bayesian posterior variance-covariance metadata."""
         return {"se_type": "Bayesian posterior", "vcov": None}
 
     def stat_labels(self, experiment: Any) -> dict[str, str] | None:
+        """Return display labels for Bayesian model statistics."""
         return {"N": "N", "r2": "Bayesian R2", "se_type": "SE type"}
 
     def default_stat_keys(self, experiment: Any) -> list[str] | None:
+        """Return ordered list of default statistic keys for Bayesian models."""
         keys = ["N"]
         if _safe_r2_value(experiment) is not None:
             keys.append("r2")
@@ -256,6 +271,7 @@ class SklearnMaketablesAdapter:
     """Adapter for experiments backed by sklearn RegressorMixin."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
+        """Build coefficient table from sklearn model coefficients."""
         labels = list(getattr(experiment, "labels", []))
         if not labels:
             msg = "Experiment has no coefficient labels for maketables export."
@@ -274,6 +290,7 @@ class SklearnMaketablesAdapter:
         return _canonical_frame(labels=labels, b=coeffs, se=nans, p=nans)
 
     def stat(self, experiment: Any, key: str) -> Any:
+        """Return a single OLS model-level statistic by key."""
         stats: dict[str, Any] = {
             "N": _safe_observation_count(experiment),
             "r2": _safe_r2_value(experiment),
@@ -284,12 +301,15 @@ class SklearnMaketablesAdapter:
         return stats.get(key)
 
     def vcov_info(self, experiment: Any) -> dict[str, Any]:
+        """Return OLS variance-covariance metadata."""
         return {"se_type": "Not available", "vcov": None}
 
     def stat_labels(self, experiment: Any) -> dict[str, str] | None:
+        """Return display labels for OLS model statistics."""
         return {"N": "N", "r2": "R2", "se_type": "SE type"}
 
     def default_stat_keys(self, experiment: Any) -> list[str] | None:
+        """Return ordered list of default statistic keys for OLS models."""
         keys = ["N"]
         if _safe_r2_value(experiment) is not None:
             keys.append("r2")
