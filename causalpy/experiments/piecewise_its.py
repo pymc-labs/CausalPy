@@ -31,7 +31,7 @@ from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
-from causalpy.utils import round_num
+from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
 
@@ -783,10 +783,10 @@ class PiecewiseITS(BaseExperiment):
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
             time_dim = "obs_ind"
-            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
+            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
             obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
+            cf_cum = _as_scalar(
+                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
             )
             obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
 
