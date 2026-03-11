@@ -24,7 +24,16 @@ from causalpy.data.simulate_data import (
     generate_piecewise_its_data,
     generate_staggered_did_data,
 )
-from causalpy.maketables_adapters import _extract_hdi_bounds
+from causalpy.maketables_adapters import (
+    PyMCMaketablesAdapter,
+    SklearnMaketablesAdapter,
+    _canonical_frame,
+    _extract_hdi_bounds,
+    _get_maketables_hdi_prob,
+    _safe_observation_count,
+    _safe_r2_value,
+    get_maketables_adapter,
+)
 
 sample_kwargs = {
     "chains": 2,
@@ -537,3 +546,270 @@ def test_maketables_incompatible_pymc_label_dim_raises(mock_pymc_sample):
         match="do not include a label dimension compatible with experiment labels",
     ):
         _ = result.__maketables_coef_table__
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for internal adapter helpers
+# ---------------------------------------------------------------------------
+
+
+class _Stub:
+    """Lightweight test stub accepting arbitrary keyword attributes."""
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class TestSafeObservationCount:
+    def test_returns_count_from_data_attr(self):
+        stub = _Stub(data=np.zeros((42, 3)))
+        assert _safe_observation_count(stub) == 42
+
+    def test_returns_count_from_X_attr(self):
+        stub = _Stub(X=np.zeros((10, 2)))
+        assert _safe_observation_count(stub) == 10
+
+    def test_returns_none_when_no_attrs(self):
+        stub = _Stub()
+        assert _safe_observation_count(stub) is None
+
+    def test_skips_none_attrs(self):
+        stub = _Stub(data=None, X=None, datapre=np.zeros((5, 1)))
+        assert _safe_observation_count(stub) == 5
+
+    def test_skips_attr_without_shape(self):
+        stub = _Stub(data="not an array", datapre=np.zeros((7,)))
+        assert _safe_observation_count(stub) == 7
+
+    def test_skips_empty_shape(self):
+        stub = _Stub(data=np.float64(3.0), datapost=np.zeros((8,)))
+        assert _safe_observation_count(stub) == 8
+
+
+class TestSafeR2Value:
+    def test_returns_none_when_no_score(self):
+        assert _safe_r2_value(_Stub()) is None
+
+    def test_returns_none_when_score_is_none(self):
+        assert _safe_r2_value(_Stub(score=None)) is None
+
+    def test_returns_float_for_numeric_score(self):
+        assert _safe_r2_value(_Stub(score=0.85)) == pytest.approx(0.85)
+
+    def test_returns_float_for_numpy_int(self):
+        assert _safe_r2_value(_Stub(score=np.int64(1))) == pytest.approx(1.0)
+
+    def test_series_with_r2_key(self):
+        s = pd.Series({"r2": 0.9, "r2_std": 0.05})
+        result = _safe_r2_value(_Stub(score=s))
+        assert result == pytest.approx(0.9)
+
+    def test_series_with_no_r2_keys(self):
+        s = pd.Series({"rmse": 1.5, "mae": 0.8})
+        assert _safe_r2_value(_Stub(score=s)) is None
+
+    def test_series_with_only_nan_r2(self):
+        s = pd.Series({"r2": np.nan})
+        assert _safe_r2_value(_Stub(score=s)) is None
+
+    def test_returns_none_for_string_score(self):
+        assert _safe_r2_value(_Stub(score="high")) is None
+
+    def test_returns_none_for_dict_score(self):
+        assert _safe_r2_value(_Stub(score={"r2": 0.9})) is None
+
+    def test_exception_in_series_ops_returns_none(self):
+        class _ExplodingSeries(pd.Series):
+            def __getitem__(self, key):
+                raise RuntimeError("kaboom")
+
+        s = _ExplodingSeries({"r2_mean": 0.9})
+        assert _safe_r2_value(_Stub(score=s)) is None
+
+
+class TestCanonicalFrame:
+    def test_fills_nan_when_ci_not_provided(self):
+        frame = _canonical_frame(
+            labels=["a", "b"],
+            b=np.array([1.0, 2.0]),
+            se=np.array([0.1, 0.2]),
+            p=np.array([0.01, 0.02]),
+        )
+        assert frame["ci95l"].isna().all()
+        assert frame["ci95u"].isna().all()
+        assert frame.index.name == "Coefficient"
+
+
+class TestExtractHdiBoundsDataArray:
+    def test_dataarray_path(self):
+        import xarray as xr
+
+        da = xr.DataArray([1.0, 3.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
+        lo, hi = _extract_hdi_bounds(da)
+        assert lo == pytest.approx(1.0)
+        assert hi == pytest.approx(3.0)
+
+    def test_dataset_with_explicit_var(self):
+        import xarray as xr
+
+        da = xr.DataArray([1.5, 2.5], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
+        ds = xr.Dataset({"my_var": da, "other_var": da * 2})
+        lo, hi = _extract_hdi_bounds(ds, var_name="my_var")
+        assert lo == pytest.approx(1.5)
+        assert hi == pytest.approx(2.5)
+
+    def test_dataset_without_var_name_uses_first(self):
+        import xarray as xr
+
+        da = xr.DataArray([2.0, 4.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
+        ds = xr.Dataset({"only_var": da})
+        lo, hi = _extract_hdi_bounds(ds)
+        assert lo == pytest.approx(2.0)
+        assert hi == pytest.approx(4.0)
+
+    def test_dataset_with_missing_var_name_uses_first(self):
+        import xarray as xr
+
+        da = xr.DataArray([0.5, 1.5], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
+        ds = xr.Dataset({"actual": da})
+        lo, hi = _extract_hdi_bounds(ds, var_name="nonexistent")
+        assert lo == pytest.approx(0.5)
+        assert hi == pytest.approx(1.5)
+
+
+class TestGetMaketablesHdiProb:
+    def test_explicit_override(self):
+        stub = _Stub(_maketables_hdi_prob=0.89)
+        assert _get_maketables_hdi_prob(stub) == pytest.approx(0.89)
+
+    def test_fallback_to_hdi_prob_attr(self):
+        stub = _Stub(hdi_prob_=0.95)
+        assert _get_maketables_hdi_prob(stub) == pytest.approx(0.95)
+
+    def test_default_094(self):
+        stub = _Stub()
+        assert _get_maketables_hdi_prob(stub) == pytest.approx(0.94)
+
+    def test_none_hdi_prob_attr_falls_to_default(self):
+        stub = _Stub(hdi_prob_=None)
+        assert _get_maketables_hdi_prob(stub) == pytest.approx(0.94)
+
+    def test_non_convertible_raises(self):
+        stub = _Stub(_maketables_hdi_prob="not_a_number")
+        with pytest.raises(ValueError, match="Invalid HDI probability"):
+            _get_maketables_hdi_prob(stub)
+
+    def test_out_of_range_raises(self):
+        stub = _Stub(_maketables_hdi_prob=1.5)
+        with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
+            _get_maketables_hdi_prob(stub)
+
+    def test_zero_raises(self):
+        stub = _Stub(_maketables_hdi_prob=0.0)
+        with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
+            _get_maketables_hdi_prob(stub)
+
+
+class TestGetMaketablesAdapter:
+    def test_unsupported_model_raises(self):
+        with pytest.raises(TypeError, match="Unsupported model backend"):
+            get_maketables_adapter("not_a_model")
+
+
+class TestSklearnAdapterUnit:
+    def test_coef_table_success(self):
+        adapter = SklearnMaketablesAdapter()
+        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b"], model=model)
+        frame = adapter.coef_table(stub)
+        assert list(frame.index) == ["a", "b"]
+        assert frame["b"].notna().all()
+        assert frame["se"].isna().all()
+
+    def test_stat_returns_expected_keys(self):
+        adapter = SklearnMaketablesAdapter()
+        stub = _Stub(data=np.zeros((20, 3)), score=0.75)
+        assert adapter.stat(stub, "N") == 20
+        assert adapter.stat(stub, "r2") == pytest.approx(0.75)
+        assert adapter.stat(stub, "model_type") == "ols"
+        assert adapter.stat(stub, "unknown") is None
+
+    def test_vcov_info(self):
+        adapter = SklearnMaketablesAdapter()
+        info = adapter.vcov_info(_Stub())
+        assert info["se_type"] == "Not available"
+
+    def test_stat_labels(self):
+        adapter = SklearnMaketablesAdapter()
+        labels = adapter.stat_labels(_Stub())
+        assert labels is not None
+        assert "N" in labels
+
+    def test_default_stat_keys_includes_r2_when_available(self):
+        adapter = SklearnMaketablesAdapter()
+        stub = _Stub(score=0.9)
+        keys = adapter.default_stat_keys(stub)
+        assert keys is not None
+        assert "r2" in keys
+
+    def test_default_stat_keys_excludes_r2_when_none(self):
+        adapter = SklearnMaketablesAdapter()
+        stub = _Stub()
+        keys = adapter.default_stat_keys(stub)
+        assert keys is not None
+        assert "r2" not in keys
+
+
+class TestSklearnAdapterCoefMismatch:
+    def test_coef_count_mismatch_raises(self):
+        adapter = SklearnMaketablesAdapter()
+        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b", "c"], model=model)
+        with pytest.raises(ValueError, match="Coefficient count mismatch"):
+            adapter.coef_table(stub)
+
+
+class TestSklearnAdapterNoLabelsRaises:
+    def test_empty_labels_raises(self):
+        adapter = SklearnMaketablesAdapter()
+        stub = _Stub(labels=[])
+        with pytest.raises(ValueError, match="no coefficient labels"):
+            adapter.coef_table(stub)
+
+
+@pytest.mark.integration
+def test_maketables_pymc_stat_hooks(mock_pymc_sample):
+    """PyMC adapter stat/metadata methods should return expected types."""
+    df = cp.load_data("did")
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    adapter = PyMCMaketablesAdapter()
+    assert adapter.stat(result, "N") is not None
+    assert adapter.stat(result, "model_type") == "bayesian"
+    assert adapter.stat(result, "se_type") == "Bayesian posterior"
+    assert adapter.stat(result, "experiment_type") == "DifferenceInDifferences"
+    assert adapter.stat(result, "unknown_key") is None
+    assert adapter.vcov_info(result) == {"se_type": "Bayesian posterior", "vcov": None}
+    labels = adapter.stat_labels(result)
+    assert labels is not None
+    assert labels["N"] == "N"
+    assert "Bayesian R2" in labels.values()
+    defaults = adapter.default_stat_keys(result)
+    assert defaults is not None
+    assert "N" in defaults
+
+
+@pytest.mark.integration
+def test_maketables_pymc_no_labels_raises(mock_pymc_sample):
+    """PyMC adapter should raise when experiment has empty labels."""
+    adapter = PyMCMaketablesAdapter()
+    stub = _Stub(labels=[])
+    with pytest.raises(ValueError, match="no coefficient labels"):
+        adapter.coef_table(stub)
