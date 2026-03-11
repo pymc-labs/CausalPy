@@ -17,6 +17,7 @@ dependencies:
   - graphviz
   - interrogate
   - ipython!=8.7.0
+  - jinja2
   - make
   - matplotlib>=3.5.3
   - nbconvert
