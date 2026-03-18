@@ -102,14 +102,6 @@ Click on the thumbnail below to watch a video about CausalPy on YouTube.
 - You want fully automated "black box" causal answers without specifying assumptions
 - You primarily need production workflow tooling (pipelines, governance, multi-user collaboration)
 
-## Need expert help?
-
-<img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="40%" />
-
-CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team needs to move faster or faces high-stakes causal questions, our [Expert Access Program](https://www.pymc-labs.com/blog-posts/expert-access-program) gives you on-demand access to the causal inference specialists behind this library — for design review, implementation guidance, and analysis support.
-
-📬 [**Get in touch →**](https://www.pymc-labs.com/contact)
-
 ## Methods and Workflows
 
 CausalPy provides methods for common causal inference decision contexts:
@@ -169,14 +161,20 @@ Plans for the repository can be seen in the [Issues](https://github.com/pymc-lab
 
 ---
 
-## Getting Help
+## Get Help
 
-Have questions about using CausalPy? We're here to help!
+### Community and Documentation
 
-- **Questions & Help**: Visit our [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) to ask questions and get help from the community
-- **Bug Reports & Feature Requests**: Open an [Issue](https://github.com/pymc-labs/CausalPy/issues) for bugs or feature requests
-- **Documentation**: Check out our [documentation](https://causalpy.readthedocs.io) for detailed guides and examples
+- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a)
+- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
+- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
 
-Please use GitHub Discussions for general questions rather than opening issues, so we can keep the issue tracker focused on bugs and enhancements.
+Please use GitHub Discussions for general questions so the issue tracker stays focused on bugs and enhancements.
 
-CausalPy is supported by [PyMC Labs](https://www.pymc-labs.com).
+### Expert Consulting
+
+CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call.
+
+### 📅 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
+
+_These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation listed above._
