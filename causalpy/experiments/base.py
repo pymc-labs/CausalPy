@@ -15,7 +15,7 @@
 Base class for quasi experimental designs.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 import arviz as az
@@ -28,13 +28,20 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class BaseExperiment:
-    """Base class for quasi experimental designs."""
+class BaseExperiment(ABC):
+    """Base class for quasi experimental designs.
+
+    Subclasses should set ``_default_model_class`` to a PyMC model class
+    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
+    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    """
 
     labels: list[str]
 
     supports_bayes: bool
     supports_ols: bool
+
+    _default_model_class: type[PyMCModel] | None = None
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
@@ -42,17 +49,20 @@ class BaseExperiment:
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
 
+        if model is None and self._default_model_class is not None:
+            model = self._default_model_class()
+
         if model is not None:
             self.model = model
+
+        if getattr(self, "model", None) is None:
+            raise ValueError("model not set or passed.")
 
         if isinstance(self.model, PyMCModel) and not self.supports_bayes:
             raise ValueError("Bayesian models not supported.")
 
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
-
-        if self.model is None:
-            raise ValueError("model not set or passed.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")
@@ -88,14 +98,12 @@ class BaseExperiment:
             else:
                 raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    @abstractmethod
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
@@ -111,14 +119,12 @@ class BaseExperiment:
         else:
             raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
-    @abstractmethod
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod

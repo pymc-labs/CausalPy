@@ -27,8 +27,10 @@ from patsy import build_design_matrices, dmatrices
 import xarray as xr
 from causalpy.plot_utils import plot_xY
 
-from .base import BaseExperiment
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
+
+from .base import BaseExperiment
 from typing import Any, Literal
 from causalpy.utils import round_num
 from causalpy.custom_exceptions import (
@@ -42,17 +44,35 @@ LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):
-    """Regression Kink experiment class."""
+    """A class to analyse regression kink designs.
+
+    :param data:
+        A pandas dataframe
+    :param formula:
+        A statistical model formula
+    :param kink_point:
+        A scalar value at which the kink occurs
+    :param model:
+        A PyMC model. Defaults to LinearRegression.
+    :param running_variable_name:
+        The name of the running variable column
+    :param epsilon:
+        A small scalar for evaluating the causal impact above/below the kink
+    :param bandwidth:
+        Data outside of the bandwidth (relative to the kink) is not used to fit
+        the model.
+    """
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
         data: pd.DataFrame,
         formula: str,
         kink_point: float,
-        model: BaseExperiment | None = None,
+        model: PyMCModel | None = None,
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,

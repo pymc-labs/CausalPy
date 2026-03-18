@@ -43,11 +43,10 @@ dependencies = [
     "graphviz",
     "ipython!=8.7.0",
     "matplotlib>=3.5.3",
-    "numpy",
+    "numpy<2.4",
     "pandas",
     "patsy",
     "pymc>=5.15.1",
-    "pymc-marketing>=0.13.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
@@ -73,6 +72,7 @@ dev = [
 ]
 docs = [
     "ipykernel",
+    "pymc-marketing>=0.13.1",
     "daft-pgm",
     "linkify-it-py",
     "myst-nb<=1.0.0",
@@ -93,7 +93,10 @@ docs = [
     "sphinx-togglebutton",
 ]
 lint = ["interrogate", "pre-commit", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert"]
+test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
+
+[tool.pyproject2conda]
+channels = ["conda-forge"]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
@@ -137,8 +140,6 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
-generate-badge = "docs/source/_static/"
-badge-format = "svg"
 
 [tool.ruff.format]
 docstring-code-format = true

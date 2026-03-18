@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _compute_statistics_did_ols,
@@ -73,7 +73,7 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column indicating post-treatment period.
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
-        A PyMC model for difference in differences. Defaults to None.
+        A PyMC model for difference in differences. Defaults to LinearRegression.
 
     Example
     --------
@@ -97,6 +97,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -159,10 +160,9 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, automatically set fit_intercept=False
-            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
-            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
+            # Ensure the intercept is part of the coefficients array rather than
+            # a separate intercept_ attribute.  See #664 / PR #693 for
+            # centralising this in BaseExperiment.
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)

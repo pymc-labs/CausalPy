@@ -45,6 +45,10 @@ Glossary
    DiD
       Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
 
+   Event study
+   Event-time effects
+      Treatment effect estimates indexed by time relative to treatment onset.
+
    Interrupted time series design
    ITS
       A quasi-experimental design to estimate a treatment effect where a series of observations are collected before and after a treatment. No control group is present.
@@ -85,6 +89,12 @@ Glossary
 
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
+
+   Staggered Difference-in-Differences
+      A difference-in-differences setting where different units receive treatment at different times (staggered adoption), often analyzed with event-time treatment effects.
+
+   Absorbing treatment
+      A treatment that, once applied, remains in effect permanently. This assumption is required by the Borusyak, Jaravel, and Spiess (2024) imputation estimator used by ``StaggeredDifferenceInDifferences``.
 
    Posterior probability
       In Bayesian statistics, the probability of a hypothesis or parameter value after observing the data. In CausalPy's reporting, posterior probabilities are used for hypothesis testing (e.g., the probability that a treatment effect is positive). Unlike p-values, these are direct probability statements about the hypothesis of interest. See :doc:`reporting_statistics` for examples.

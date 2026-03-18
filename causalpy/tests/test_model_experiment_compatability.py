@@ -16,44 +16,13 @@ Test exceptions are raised when an experiment object is provided a model type (e
 `PyMCModel` or `ScikitLearnAdaptor`) that is not supported by the experiment object.
 """
 
-import numpy as np
-import pandas as pd
 import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-
-# TODO: THE TWO FUNCTIONS BELOW ARE COPIED FROM causalpy/tests/test_regression_kink.py
-
-
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    kink = 0.5
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
+from causalpy.tests.conftest import setup_regression_kink_data
 
 
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
-
-
-# Test that a ValueError is raised when a ScikitLearnAdaptor is provided to a RegressionKink object
 def test_olsmodel_and_regressionkink():
     """RegressionKink does not support OLS models, so a ValueError should be raised"""
 
