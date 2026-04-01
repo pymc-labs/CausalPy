@@ -10,15 +10,28 @@ exclude = ["causalpy.test*", "docs*"]
 
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
+"causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
-version = "0.2.3"
+version = "0.8.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
+keywords = ["causal inference", "statistics", "econometrics", "pymc", "bayesian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 
 # This field lists other packages that your project depends on to run.
 # Any package you put here will be installed by pip when your project is
@@ -27,19 +40,21 @@ requires-python = ">=3.10"
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
-    "arviz>=0.14.0",
+    "arviz>=0.14.0,<1.0",
     "graphviz",
     "ipython!=8.7.0",
+    "jinja2",
     "matplotlib>=3.5.3",
-    "numpy<1.26.0",
+    "numpy<2.4",
     "pandas",
     "patsy",
-    "pymc>=5.0.0",
+    "pymc>=5.15.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
     "xarray>=v2022.11.0",
+    "pymc-extras>=0.3.0",
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
@@ -49,31 +64,49 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
-dev = ["pathlib", "pre-commit", "twine", "interrogate"]
+dev = [
+    "prek",
+    "twine",
+    "interrogate",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+]
 docs = [
     "ipykernel",
+    "pymc-marketing>=0.13.1",
+    "daft-pgm",
     "linkify-it-py",
-    "myst-nb",
+    "myst-nb<=1.0.0",
     "pathlib",
+    "pylint",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
-    "sphinx-design",
+    "labs-sphinx-theme",
+    "sphinx-copybutton",
     "sphinx-rtd-theme",
+    "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex",
+    "sphinx-notfound-page",
+    "ipywidgets",
+    "sphinx-design",
+    "sphinx-togglebutton",
 ]
-lint = ["interrogate", "nbqa", "pre-commit", "ruff"]
-test = ["pytest", "pytest-cov"]
+lint = ["interrogate", "prek", "ruff", "mypy"]
+test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
 
-[metadata]
-description-file = 'README.md'
-license_files = 'LICENSE'
+[tool.pyproject2conda]
+channels = ["conda-forge"]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
-"Source" = "https://github.com/pymc-labs/CausalPy"
+Source = "https://github.com/pymc-labs/CausalPy"
+Documentation = "https://causalpy.readthedocs.io"
+Changelog = "https://github.com/pymc-labs/CausalPy/releases"
+Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 
 [tool.pytest.ini_options]
 addopts = [
@@ -82,7 +115,6 @@ addopts = [
     "--strict-config",
     "--cov=causalpy",
     "--cov-report=term-missing",
-    "--doctest-modules",
 ]
 testpaths = "causalpy/tests"
 markers = [
@@ -110,10 +142,65 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
-generate-badge = "docs/source/_static/"
-badge-format = "svg"
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
 extend-select = [
-    "I", # isort
+    "I",   # isort
+    # "E",   # pycodestyle errors - PEP 8 style violations
+    # "W",   # pycodestyle warnings - PEP 8 warnings
+    "F",   # pyflakes - detect unused imports, undefined names
+    "B",   # flake8-bugbear - find likely bugs and design problems
+    "UP",  # pyupgrade - modern Python syntax upgrades
+    "C4",  # flake8-comprehensions - better list/dict comprehensions
+    "SIM", # flake8-simplify - suggest simpler code
 ]
+
+[tool.codespell]
+ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
+skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
+
+[tool.coverage.run]
+source = ["causalpy"]
+omit = ["*/conftest.py", "*/tests/conftest.py"]
+branch = true  # Also measure branch coverage, not just line coverage
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.mypy]
+files = "causalpy/*.py"
+exclude = "build|dist|docs|notebooks|tests|setup.py"
+
+[tool.mypy-matplotlib]
+ignore_missing_imports = true
+
+[tool.mypy-pymc]
+ignore_missing_imports = true
+
+[tool.mypy-seaborn]
+ignore_missing_imports = true
+
+[tool.mypy-sklearn]
+ignore_missing_imports = true
+
+[tool.mypy-scipy]
+ignore_missing_imports = true
+
+[tool.marimo.runtime]
+watcher_on_save = "autorun"

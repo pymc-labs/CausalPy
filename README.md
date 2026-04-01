@@ -1,27 +1,50 @@
 <div align="center">
-  <a href="https://github.com/pymc-labs/CausalPy"><img width="60%" src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/logo.png"></a>
+  <a href="https://github.com/pymc-labs/CausalPy"><img width="40%" src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/logo.png"></a>
 </div>
 
 ----
 
-![Build](https://github.com/pymc-labs/CausalPy/workflows/ci/badge.svg)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)]([https://codecov.io/gh/pymc-labs/CausalPy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json))
 [![PyPI version](https://badge.fury.io/py/CausalPy.svg)](https://badge.fury.io/py/CausalPy)
-![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=social)
-![Read the Docs](https://img.shields.io/readthedocs/causalpy)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
-![Interrogate](docs/source/_static/interrogate_badge.svg)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/causalpy.svg?color=green)](https://anaconda.org/conda-forge/causalpy)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
-# CausalPy
+![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
+![Read the Docs](https://img.shields.io/readthedocs/causalpy)
+[![Downloads](https://static.pepy.tech/badge/causalpy)](https://pepy.tech/project/causalpy)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/causalpy)
 
-A Python package focussing on causal inference in quasi-experimental settings. The package allows for sophisticated Bayesian model fitting methods to be used in addition to traditional OLS.
+<!-- docs-start -->
+
+# Causal Inference for Quasi-Experiments
+
+**Research-grade causal inference workflows** for quasi-experimental designs in Python.
+
+CausalPy helps you estimate causal effects with transparent assumptions, uncertainty-aware modeling, and reproducible outputs:
+
+- **Quasi-experimental methods:** Difference-in-differences, synthetic control, regression discontinuity, interrupted time series, instrumental variables, and more
+- **Bayesian-first estimation** via [PyMC](https://www.pymc.io/) with full uncertainty quantification, plus traditional OLS via [scikit-learn](https://scikit-learn.org)
+- **Decision-ready outputs:** Effect summaries with credible intervals (HDI), practical significance (ROPE), and publication-quality plots
+
+**Non-goals:** CausalPy focuses on research-grade causal analysis. It does not include production workflow tooling such as scheduled runs, pipeline orchestration, access controls, or experiment/model registries.
 
 ## Installation
 
 To get the latest release:
+
 ```bash
 pip install CausalPy
+```
+
+or via conda:
+
+```bash
+conda install causalpy -c conda-forge
 ```
 
 Alternatively, if you want the very latest version of the package you can install from GitHub:
@@ -34,170 +57,103 @@ pip install git+https://github.com/pymc-labs/CausalPy.git
 
 ```python
 import causalpy as cp
-
+import matplotlib.pyplot as plt
 
 # Import and process data
 df = (
     cp.load_data("drinking")
     .rename(columns={"agecell": "age"})
     .assign(treated=lambda df_: df_.age > 21)
-    )
+)
 
 # Run the analysis
-result = cp.pymc_experiments.RegressionDiscontinuity(
+result = cp.RegressionDiscontinuity(
     df,
     formula="all ~ 1 + age + treated",
     running_variable_name="age",
     model=cp.pymc_models.LinearRegression(),
     treatment_threshold=21,
-    )
+)
 
-# Visualize outputs
-fig, ax = result.plot();
+# Visualize the causal effect at the threshold
+fig, ax = result.plot()
 
-# Get a results summary
+# Get a results summary with posterior estimates
 result.summary()
+```
+
+The `result.plot()` visualizes the regression discontinuity design, showing the estimated jump at the treatment threshold. The `result.summary()` prints posterior estimates of the causal effect with uncertainty intervals.
+
+## Videos
+
+Click on the thumbnail below to watch a video about CausalPy on YouTube.
+
+[![Youtube video thumbnail image](https://img.youtube.com/vi/gV6wzTk3o1U/maxresdefault.jpg)](https://www.youtube.com/watch?v=gV6wzTk3o1U)
+
+## When CausalPy is a good fit
+
+- You have a plausible quasi-experimental design (threshold rule, policy change, staggered rollout, geo lift, etc.)
+- You want uncertainty-aware estimates and diagnostics, not only point estimates
+- You need reproducible analysis artifacts for review and communication
+
+## When CausalPy is not a fit
+
+- You need causal discovery from weakly identified observational data
+- You want fully automated "black box" causal answers without specifying assumptions
+- You primarily need production workflow tooling (pipelines, governance, multi-user collaboration)
+
+## Methods and Workflows
+
+CausalPy provides methods for common causal inference decision contexts:
+
+| Decision context | Methods |
+|------------------|---------|
+| Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
+| Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
+| Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
+| Can't randomize, correct for selection | Instrumental variables, Inverse propensity weighting |
+| Group differences, control for covariates | ANCOVA |
+
+### Available methods
+
+| Method | Description |
+|-|-|
+| Synthetic control | Constructs a synthetic version of the treatment group from a weighted combination of control units. Used for causal inference in comparative case studies when a single unit is treated, and there are multiple control units. |
+| Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
+| ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
+| Differences in Differences | Compares the changes in outcomes over time between a treatment group and a control group. Used in observational studies to estimate causal effects by accounting for time trends. |
+| Staggered Difference-in-Differences | Estimates event-time treatment effects when different units adopt treatment at different times, using an imputation approach that models untreated outcomes and compares observed outcomes to counterfactual predictions. |
+| Regression discontinuity | Identifies causal effects by exploiting a cutoff or threshold in an assignment variable. Used when treatment is assigned based on a threshold value of an observed variable, allowing comparison just above and below the cutoff. |
+| Regression kink designs | Focuses on changes in the slope (kinks) of the relationship between variables rather than jumps at cutoff points. Used to identify causal effects when treatment intensity changes at a threshold. |
+| Interrupted time series | Analyzes the effect of an intervention by comparing time series data before and after the intervention. Used when data is collected over time and an intervention occurs at a known point, allowing assessment of changes in level or trend. |
+| Instrumental variable regression | Addresses endogeneity by using an instrument variable that is correlated with the endogenous explanatory variable but uncorrelated with the error term. Used when explanatory variables are correlated with the error term, providing consistent estimates of causal effects. |
+| Inverse Propensity Score Weighting | Weights observations by the inverse of the probability of receiving the treatment. Used in causal inference to create a synthetic sample where the treatment assignment is independent of measured covariates, helping to adjust for confounding variables in observational studies. |
+
+## Diagnostics-first by design
+
+CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal analysis:
+
+- **Effect summaries:** Every experiment provides `effect_summary()` returning decision-ready statistics with both tabular and prose formats
+- **Uncertainty quantification:** Bayesian models report HDI (Highest Density Intervals); OLS models report confidence intervals
+- **Practical significance:** ROPE (Region of Practical Equivalence) analysis to assess whether effects exceed meaningful thresholds
+- **Direction testing:** Tail probabilities (e.g., P(effect > 0)) for directional inference
+
+## Citing CausalPy
+
+If you use CausalPy in your research, please cite it. A Zenodo DOI for stable releases is planned. In the meantime, you can cite the repository:
+
+```
+@software{causalpy,
+  author = {{PyMC Labs}},
+  title = {CausalPy: Causal inference for quasi-experiments in Python},
+  url = {https://github.com/pymc-labs/CausalPy},
+  year = {2026}
+}
 ```
 
 ## Roadmap
 
 Plans for the repository can be seen in the [Issues](https://github.com/pymc-labs/CausalPy/issues).
-
-## Videos
-Click on the thumbnail below to watch a video about CausalPy on YouTube.
-[![Youtube video thumbnail image](https://img.youtube.com/vi/gV6wzTk3o1U/maxresdefault.jpg)](https://www.youtube.com/watch?v=gV6wzTk3o1U)
-
-## Overview of package capabilities
-
-### Synthetic control
-This is appropriate when you have multiple units, one of which is treated. You build a synthetic control as a weighted combination of the untreated units.
-
-| Time | Outcome   | Control 1 | Control 2 | Control 3 |
-|------|-----------|-----------|-----------|-----------|
-| 0    | $y_0$ | $x_{1,0}$ | $x_{2,0}$ | $x_{3,0}$ |
-| 1    | $y_1$ | $x_{1,1}$ | $x_{2,1}$ | $x_{3,1}$ |
-|$\ldots$ | $\ldots$  | $\ldots$  | $\ldots$  | $\ldots$  |
-| T    | $y_T$ | $x_{1,T}$ | $x_{2,T}$ | $x_{3,T}$ |
-
-
-| Frequentist | Bayesian |
-|--|--|
-| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/synthetic_control_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/synthetic_control_pymc.svg) |
-
-> The data (treated and untreated units), pre-treatment model fit, and counterfactual (i.e. the synthetic control) are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
-
-### Geographical lift (Geolift)
-We can also use synthetic control methods to analyse data from geographical lift studies. For example, we can try to evaluate the causal impact of an intervention (e.g. a marketing campaign) run in one geographical area by using control geographical areas which are similar to the intervention area but which did not recieve the specific marketing intervention.
-
-### ANCOVA
-
-This is appropriate for non-equivalent group designs when you have a single pre and post intervention measurement and have a treament and a control group.
-
-| Group | pre | post |
-|------|---|-------|
-| 0    | $x_1$ | $y_1$ |
-| 0    | $x_2$ | $y_2$ |
-| 1    | $x_3$ | $y_3$ |
-| 1    | $x_4$ | $y_4$ |
-
-| Frequentist | Bayesian |
-|--|--|
-| coming soon | ![](docs/source/_static/anova_pymc.svg) |
-
-> The data from the control and treatment group are plotted, along with posterior predictive 94% credible intervals. The lower panel shows the estimated treatment effect.
-
-### Difference in Differences
-
-This is appropriate for non-equivalent group designs when you have pre and post intervention measurement and have a treament and a control group. Unlike the ANCOVA approach, difference in differences is appropriate when there are multiple pre and/or post treatment measurements.
-
-Data is expected to be in the following form. Shown are just two units - one in the treated group (`group=1`) and one in the untreated group (`group=0`), but there can of course be multiple units per group. This is panel data (also known as repeated measures) where each unit is measured at 2 time points.
-
-| Unit | Time | Group | Outcome         |
-|------|---|-------|-----------|
-| 0    | 0 | 0     | $y_{0,0}$ |
-| 0    | 1 | 0     | $y_{0,0}$ |
-| 1    | 0 | 1     | $y_{1,0}$ |
-| 1    | 1 | 1     | $y_{1,1}$ |
-
-| Frequentist | Bayesian |
-|--|--|
-| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/difference_in_differences_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/difference_in_differences_pymc.svg) |
-
->The data, model fit, and counterfactual are plotted. Frequentist model fits result in points estimates, but the Bayesian analysis results in posterior distributions, represented by the violin plots. The causal impact is the difference between the counterfactual prediction (treated group, post treatment) and the observed values for the treated group, post treatment.
-
-### Regression discontinuity designs
-
-Regression discontinuity designs are used when treatment is applied to units according to a cutoff on the running variable (e.g. $x$) which is typically _not_ time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
-
-| Running variable | Outcome | Treated  |
-|-----------|-----------|----------|
-| $x_0$     | $y_0$     | False    |
-| $x_1$     | $y_0$     | False    |
-| $\ldots$  | $\ldots$  | $\ldots$ |
-| $x_{N-1}$ | $y_{N-1}$ | True     |
-| $x_N$     | $y_N$     | True     |
-
-
-| Frequentist | Bayesian |
-|--|--|
-| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_discontinuity_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_discontinuity_pymc.svg) |
-
-> The data, model fit, and counterfactual are plotted (top). Frequentist analysis shows the causal impact with the blue shaded region, but this is not shown in the Bayesian analysis to avoid a cluttered chart. Instead, the Bayesian analysis shows shaded Bayesian credible regions of the model fits. The Frequentist analysis visualises the point estimate of the causal impact, but the Bayesian analysis also plots the posterior distribution of the regression discontinuity effect (bottom).
-
-### Regression kink designs
-
-Regression discontinuity designs are used when treatment is applied to units according to a cutoff on a running variable, which is typically not time. By looking for the presence of a discontinuity at the precise point of the treatment cutoff then we can make causal claims about the potential impact of the treatment.
-
-| Running variable | Outcome |
-|-----------|-----------|
-| $x_0$     | $y_0$     |
-| $x_1$     | $y_0$     |
-| $\ldots$  | $\ldots$  |
-| $x_{N-1}$ | $y_{N-1}$ |
-| $x_N$     | $y_N$     |
-
-
-| Frequentist | Bayesian |
-|--|--|
-| coming soon | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/regression_kink_pymc.svg) |
-
-> The data and model fit. The Bayesian analysis shows the posterior mean with credible intervals (shaded regions). We also report the Bayesian $R^2$ on the data along with the posterior mean and credible intervals of the change in gradient at the kink point.
-
-### Interrupted time series
-
-Interrupted time series analysis is appropriate when you have a time series of observations which undergo treatment at a particular point in time. This kind of analysis has no control group and looks for the presence of a change in the outcome measure at or soon after the treatment time. Multiple predictors can be included.
-
-| Time | Outcome | Treated  | Predictor |
-|-----------|-----------|----------|----------|
-| $t_0$     | $y_0$     | False    | $x_0$     |
-| $t_1$     | $y_0$     | False    | $x_1$     |
-| $\ldots$  | $\ldots$  | $\ldots$ | $\ldots$  |
-| $t_{N-1}$ | $y_{N-1}$ | True     | $x_{N-1}$ |
-| $t_N$     | $y_N$     | True     | $x_N$     |
-
-
-| Frequentist | Bayesian |
-|--|--|
-| ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_skl.svg) | ![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/interrupted_time_series_pymc.svg) |
-
-> The data, pre-treatment model fit, and counterfactual are plotted (top). The causal impact is shown as a blue shaded region. The Bayesian analysis shows shaded Bayesian credible regions of the model fit and counterfactual. Also shown is the causal impact (middle) and cumulative causal impact (bottom).
-
-### Instrumental Variable Regression
-
-Instrumental Variable regression is an appropriate technique when you wish to estimate the treatment effect of some variable on another, but are concerned that the treatment variable is endogenous in the system of interest i.e. correlated with the errors. In this case an “instrument” variable can be used in a regression context to disentangle treatment effect due to the threat of confounding due to endogeneity.
-
-![](https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/iv_reg1.png)
-
-## Learning resources
-
-Here are some general resources about causal inference:
-
-* The official [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) has a set of examples specifically relating to causal inference.
-* Angrist, J. D., & Pischke, J. S. (2009). Mostly harmless econometrics: An empiricist's companion. Princeton university press.
-* Angrist, J. D., & Pischke, J. S. (2014). Mastering'metrics: The path from cause to effect. Princeton university press.
-* Cunningham, S. (2021). [Causal inference: The Mixtape](https://mixtape.scunning.com). Yale University Press.
-* Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
-* Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.
 
 ## License
 
@@ -205,10 +161,20 @@ Here are some general resources about causal inference:
 
 ---
 
-## Support
+## Get Help
 
-<img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/pymc-labs-log.png" align="right" width="50%" />
+### Community and Documentation
 
-This repository is supported by [PyMC Labs](https://www.pymc-labs.com).
+- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a)
+- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
+- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
 
-If you are interested in seeing what PyMC Labs can do for you, then please email [ben.vincent@pymc-labs.com](mailto:ben.vincent@pymc-labs.com). We work with companies at a variety of scales and with varying levels of existing modeling capacity. We also run corporate workshop training events and can provide sessions ranging from introduction to Bayes to more advanced topics.
+Please use GitHub Discussions for general questions so the issue tracker stays focused on bugs and enhancements.
+
+### Expert Consulting
+
+CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call.
+
+### 📅 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
+
+_These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation listed above._

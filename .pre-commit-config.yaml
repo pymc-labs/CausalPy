@@ -1,29 +1,109 @@
+ci:
+  autofix_prs: false
+
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+  - repo: https://github.com/lucianopaz/head_of_apache
+    rev: "0.1.1"
     hooks:
+      - id: head_of_apache
+        args:
+          - --author=The PyMC Labs Developers
+          - --exclude=docs/
+          - --exclude=scripts/
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: debug-statements
       - id: trailing-whitespace
         exclude_types: [svg]
       - id: end-of-file-fixer
         exclude_types: [svg]
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
       - id: check-added-large-files
-        args: ['--maxkb=1500']
-  - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.1.4
+        exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test|piecewise_its_pymc)\.ipynb'
+        args: ["--maxkb=1500"]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
     hooks:
+      # Run the linter
       - id: ruff
+        types_or: [ python, pyi, jupyter ]
+        args: [ --fix ]
+        # Exclude docs/ to avoid applying strict linting rules to example notebooks
+        # Remove this exclusion if you want to enforce strict rules on documentation
+        exclude: ^docs/
+      # Run the formatter
       - id: ruff-format
-  - repo: https://github.com/nbQA-dev/nbQA
-    rev: 1.7.0
-    hooks:
-      - id: nbqa-ruff
+        types_or: [ python, pyi, jupyter ]
   - repo: https://github.com/econchick/interrogate
-    rev: 1.5.0
+    rev: 1.7.0
     hooks:
       - id: interrogate
         # needed to make excludes in pyproject.toml work
         # see here https://github.com/econchick/interrogate/issues/60#issuecomment-735436566
         pass_filenames: false
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+        additional_dependencies:
+          # Support pyproject.toml configuration
+          - tomli
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports]
+        files: ^causalpy/
+        additional_dependencies: [numpy>=1.20, pandas-stubs]
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.25
+    hooks:
+      - id: validate-pyproject
+  # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
+  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
+  - repo: https://github.com/usnistgov/pyproject2conda
+    rev: v0.22.1
+    hooks:
+      - id: pyproject2conda-yaml
+        name: Sync environment.yml from pyproject.toml
+        args:
+          - -e
+          - dev
+          - -o
+          - environment.yml
+          - -n
+          - CausalPy
+          - -w
+          - force
+          - --python-include
+          - "python>=3.12"
+          - -d
+          - make
+          - -d
+          - pip
+          - -d
+          - pymc-bart
+          - -r
+          - "marimo[mcp]"
+  - repo: local
+    hooks:
+      - id: validate-notebooks
+        name: Validate notebook schema
+        entry: python scripts/validate_notebooks.py
+        language: python
+        files: \.ipynb$
+        additional_dependencies: [nbformat]
+      - id: validate-bibtex
+        name: Validate BibTeX files
+        entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
+        language: python
+        files: \.bib$
+        additional_dependencies: [pybtex]

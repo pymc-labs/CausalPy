@@ -1,9 +1,18 @@
-"""
-Scikit-Learn Models
+#   Copyright 2022 - 2026 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+"""Custom scikit-learn models for causal inference"""
 
-- Weighted Proportion
-
-"""
 from functools import partial
 
 import numpy as np
@@ -11,39 +20,63 @@ from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
 from sklearn.linear_model._base import LinearModel
 
+from causalpy.utils import round_num
 
-class WeightedProportion(LinearModel, RegressorMixin):
-    """
-    Model which minimises sum squared error subject to:
 
-    - All weights are bound between 0-1
-    - Weights sum to 1.
+class ScikitLearnAdaptor:
+    """Base class for scikit-learn models that can be used for causal inference."""
 
-    Inspiration taken from this blog post
-    https://towardsdatascience.com/understanding-synthetic-control-methods-dd9a291885a1
+    coef_: np.ndarray
 
-    Example
-    --------
-    >>> import numpy as np
-    >>> from causalpy.skl_models import WeightedProportion
-    >>> rng = np.random.default_rng(seed=42)
-    >>> X = rng.normal(loc=0, scale=1, size=(20,2))
-    >>> y = rng.normal(loc=0, scale=1, size=(20,))
-    >>> wp = WeightedProportion()
-    >>> wp.fit(X, y)
-    WeightedProportion()
-    >>> wp.coef_
-    array([[0.36719946, 0.63280054]])
-    >>> X_new = rng.normal(loc=0, scale=1, size=(10,2))
-    >>> wp.predict(X_new)
-    array(...)
-    """
+    def calculate_impact(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+        """Calculate the causal impact of the intervention."""
+        return y_true - y_pred
 
-    def loss(self, W, X, y):
+    def calculate_cumulative_impact(self, impact: np.ndarray) -> np.ndarray:
+        """Calculate the cumulative impact intervention."""
+        return np.cumsum(impact)
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print the coefficients of the model with the corresponding labels.
+
+        Parameters
+        ----------
+        labels : list of str
+            List of strings representing the coefficient names.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to None,
+            in which case 2 significant figures are used.
+        """
+        print("Model coefficients:")
+        coef_ = self.get_coeffs()
+        # Determine the width of the longest label
+        max_label_length = max(len(name) for name in labels)
+        # Print each coefficient with formatted alignment
+        for name, val in zip(labels, coef_, strict=False):
+            # Left-align the name
+            formatted_name = f"{name:<{max_label_length}}"
+            # Right-align the value with width 10
+            formatted_val = (
+                f"{round_num(val, round_to if round_to is not None else 2):>10}"
+            )
+            print(f"  {formatted_name}\t{formatted_val}")
+
+    def get_coeffs(self) -> np.ndarray:
+        """Get the coefficients of the model as a numpy array."""
+        return np.squeeze(self.coef_)
+
+
+class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
+    """Weighted proportion model for causal inference. Used for synthetic control
+    methods for example"""
+
+    def loss(self, W: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
         """Compute root mean squared loss with data X, weights W, and predictor y"""
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))
 
-    def fit(self, X, y):
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "WeightedProportion":
         """Fit model on data X with predictor y"""
         w_start = [1 / X.shape[1]] * X.shape[1]
         coef_ = fmin_slsqp(
@@ -57,6 +90,28 @@ class WeightedProportion(LinearModel, RegressorMixin):
         self.mse = self.loss(W=self.coef_, X=X, y=y)
         return self
 
-    def predict(self, X):
+    def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict results for data X"""
         return np.dot(X, self.coef_.T)
+
+
+def create_causalpy_compatible_class(
+    estimator: type[RegressorMixin],
+) -> type[RegressorMixin]:
+    """This function takes a scikit-learn estimator and returns a new class that is
+    compatible with CausalPy."""
+    _add_mixin_methods(estimator, ScikitLearnAdaptor)
+    return estimator
+
+
+def _add_mixin_methods(
+    model_instance: RegressorMixin, mixin_class: type
+) -> RegressorMixin:
+    """Utility function to bind mixin methods to an existing model instance."""
+    for attr_name in dir(mixin_class):
+        attr = getattr(mixin_class, attr_name)
+        if callable(attr) and not attr_name.startswith("__"):
+            # Bind the method to the instance
+            method = attr.__get__(model_instance, model_instance.__class__)
+            setattr(model_instance, attr_name, method)
+    return model_instance

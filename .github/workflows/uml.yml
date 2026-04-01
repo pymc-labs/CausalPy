@@ -1,0 +1,87 @@
+name: Update the UML Diagrams
+on:
+  workflow_dispatch:
+  schedule:
+    - cron:  '0 12 * * 1'
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to push branches
+      pull-requests: write # to create PRs
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          persist-credentials: true # needed for git push
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'causalpy[docs]'
+          sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Install pylint explicitly
+        run: python -m pip install pylint
+
+      - name: Verify pylint and pyreverse
+        run: |
+          python -m pip show pylint
+          which pyreverse
+          pyreverse --version
+
+      - name: Configure Git Identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Update the UML Diagrams
+        run: |
+          make uml
+
+      - name: Detect UML changes
+        id: changes
+        run: |
+          git add docs/source/_static/*.png
+          if git diff --staged --exit-code; then
+            echo "No changes to commit"
+            echo "changes_exist=false" >> $GITHUB_OUTPUT
+          else
+            echo "changes_exist=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create PR for changes
+        if: steps.changes.outputs.changes_exist == 'true'
+        run: |
+          BRANCH_NAME="update-uml-diagrams"
+
+          # Delete the branch locally and remotely if it exists
+          git branch -D $BRANCH_NAME 2>/dev/null || true
+          git push origin --delete $BRANCH_NAME 2>/dev/null || true
+
+          # Create and push the new branch
+          git checkout -b $BRANCH_NAME
+          git commit -m "Update UML Diagrams"
+          git push -u origin $BRANCH_NAME
+
+          # Create PR (will fail gracefully if PR already exists)
+          gh pr create \
+            --base main \
+            --title "Update UML Diagrams" \
+            --body "This PR updates the UML diagrams
+            This PR was created automatically by the [UML workflow](https://github.com/pymc-labs/CausalPy/blob/main/.github/workflows/uml.yml).
+            See the logs [here](https://github.com/pymc-labs/CausalPy/actions/workflows/uml.yml) for more details." \
+            --label "no releasenotes" \
+            --reviewer drbenvincent || echo "PR may already exist"
+        env:
+          GH_TOKEN: ${{ github.token }}
