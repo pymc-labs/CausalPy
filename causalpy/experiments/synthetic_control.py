@@ -57,6 +57,11 @@ class SyntheticControl(BaseExperiment):
         A list of treated units to be used in the experiment
     :param model:
         A PyMC or sklearn model. Defaults to WeightedSumFitter.
+    :param min_donor_correlation:
+        Minimum acceptable Pearson correlation between each control unit and
+        treated unit in the pre-treatment period. Control units below this
+        threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
+        negatively correlated donors).
 
     Example
     --------
@@ -98,6 +103,7 @@ class SyntheticControl(BaseExperiment):
         control_units: list[str],
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
+        min_donor_correlation: float = 0.0,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
@@ -109,8 +115,15 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        if not (-1 <= min_donor_correlation <= 1):
+            raise ValueError(
+                f"min_donor_correlation must be between -1 and 1, "
+                f"got {min_donor_correlation}."
+            )
+        self.min_donor_correlation = min_donor_correlation
         self.expt_type = "SyntheticControl"
         self._prepare_data()
+        self._check_donor_correlations()
         self._check_convex_hull()
         self.algorithm()
 
@@ -153,6 +166,52 @@ class SyntheticControl(BaseExperiment):
                 UserWarning,
                 stacklevel=2,
             )
+
+    def _check_donor_correlations(self) -> None:
+        """Warn if any control unit has low pre-treatment correlation with treated units.
+
+        Computes pairwise Pearson correlations between each control and treated
+        unit in the pre-treatment period. Control units correlated below
+        ``self.min_donor_correlation`` — or whose correlation is undefined
+        (``NaN``, e.g. constant-valued donors) — are reported via
+        :func:`warnings.warn`.
+        """
+        pre = self.datapre
+        flagged: dict[str, list[tuple[str, float | None]]] = {}
+
+        for treated in self.treated_units:
+            treated_series = pre[treated]
+            low: list[tuple[str, float | None]] = []
+            for control in self.control_units:
+                r = treated_series.corr(pre[control])
+                if pd.isna(r):
+                    low.append((control, None))
+                elif r < self.min_donor_correlation:
+                    low.append((control, float(r)))
+            if low:
+                flagged[treated] = low
+
+        if flagged:
+            parts: list[str] = []
+            for treated, controls in flagged.items():
+                details = []
+                for name, corr_val in controls:
+                    if corr_val is None:
+                        details.append(f"'{name}' (r=undefined, likely constant)")
+                    else:
+                        details.append(f"'{name}' (r={corr_val:.3f})")
+                parts.append(
+                    f"Control units [{', '.join(details)}] have pre-treatment "
+                    f"correlation below {self.min_donor_correlation} or undefined "
+                    f"with treated unit '{treated}'."
+                )
+            msg = (
+                " ".join(parts)
+                + " Consider excluding them from the donor pool."
+                + " Use cp.plot_correlations() to inspect."
+                + " See Abadie (2021) for guidance on donor pool selection."
+            )
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
     @property
     def datapre(self) -> pd.DataFrame:
@@ -280,6 +339,30 @@ class SyntheticControl(BaseExperiment):
                 "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
             )
 
+    def _pre_treatment_correlations(self) -> dict[str, float]:
+        """Compute Pearson correlation between each treated unit and its
+        synthetic control prediction in the pre-treatment period.
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping from treated unit name to correlation coefficient.
+        """
+        correlations: dict[str, float] = {}
+        for unit in self.treated_units:
+            observed = self.datapre_treated.sel(treated_units=unit).values.flatten()
+            if isinstance(self.model, PyMCModel):
+                predicted = (
+                    self.pre_pred["posterior_predictive"]["mu"]
+                    .sel(treated_units=unit)
+                    .mean(dim=["chain", "draw"])
+                    .values.flatten()
+                )
+            else:
+                predicted = np.asarray(self.pre_pred).flatten()
+            correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
+        return correlations
+
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -293,6 +376,21 @@ class SyntheticControl(BaseExperiment):
         else:
             print(f"Treated unit: {self.treated_units[0]}")
         self.print_coefficients(round_to)
+        corrs = self._pre_treatment_correlations()
+        for unit, r in corrs.items():
+            print(f"Pre-treatment correlation ({unit}): {r:.4f}")
+
+    @staticmethod
+    def _convert_treatment_time_for_axis(
+        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
+    ) -> int | float | pd.Timestamp:
+        """
+        Convert treatment time into the plotting units expected by a specific axis.
+        """
+        try:
+            return axis.xaxis.convert_units(treatment_time)
+        except (TypeError, ValueError):
+            return treatment_time
 
     def _bayesian_plot(
         self,
@@ -471,8 +569,11 @@ class SyntheticControl(BaseExperiment):
 
         # Intervention line
         for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
             ax[i].axvline(
-                x=self.treatment_time,
+                x=treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
@@ -602,10 +703,12 @@ class SyntheticControl(BaseExperiment):
         )
 
         # Intervention line
-        # TODO: make this work when treatment_time is a datetime
         for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
             ax[i].axvline(
-                x=self.treatment_time,
+                x=treatment_time,
                 ls="-",
                 lw=3,
                 color="r",
@@ -836,15 +939,16 @@ class SyntheticControl(BaseExperiment):
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
             _compute_statistics,
             _compute_statistics_ols,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose,
-            _generate_prose_ols,
+            _generate_prose_detailed,
+            _generate_prose_detailed_ols,
             _generate_table,
             _generate_table_ols,
         )
@@ -891,11 +995,18 @@ class SyntheticControl(BaseExperiment):
                 min_effect=min_effect,
             )
 
-            # Generate table
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose(
+            # Compute observed/counterfactual averages for prose
+            time_dim = "obs_ind"
+            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(
+                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
+            )
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed(
                 stats,
                 window_coords,
                 alpha=alpha,
@@ -903,10 +1014,13 @@ class SyntheticControl(BaseExperiment):
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="sc",
             )
         else:
-            # OLS model: use point estimates and CIs
-            # Convert to numpy arrays if needed
             if hasattr(windowed_impact, "values"):
                 impact_array = windowed_impact.values
             else:
@@ -924,17 +1038,25 @@ class SyntheticControl(BaseExperiment):
                 relative=relative,
             )
 
-            # Generate table
             table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose_ols(
+            cf_avg = float(np.mean(counterfactual_array))
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(np.sum(counterfactual_array))
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed_ols(
                 stats,
                 window_coords,
                 alpha=alpha,
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="sc",
             )
 
         return EffectSummary(table=table, text=text)

@@ -620,7 +620,6 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].set_xlabel("Quantiles")
         axs[1].legend()
         axs[0].legend()
-        # TODO: for some reason ax is type numpy.ndarray, so we need to convert this back to a list to conform to the expected return type.
         return fig, list(axs)
 
     def effect_summary(
