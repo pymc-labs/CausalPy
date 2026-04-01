@@ -1,18 +1,21 @@
 name: "PR Issue Label Sync"
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, edited]
+
+permissions: {}
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      issues: read  # to read labels from linked issues
 
     steps:
       - name: Sync labels from closing issues
-        uses: williambdean/closing-labels@v0.0.6
+        uses: williambdean/closing-labels@7a4384e0e725b80eee0142265d36c1332fda5f7a # v0.0.6
         with:
           exclude: "help wanted,good first issue"
           respect_unlabeled: true

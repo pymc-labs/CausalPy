@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz_stats import eti
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
@@ -90,6 +89,16 @@ def plot_xY(
         )
 
 
+def _get_equal_tailed_interval(
+    Y: xr.DataArray,
+    ci_prob: float,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Compute equal-tailed interval bounds without relying on arviz_stats internals."""
+    tail_prob = (1 - ci_prob) / 2
+    eti_result = Y.quantile([tail_prob, 1 - tail_prob], dim=["chain", "draw"])
+    return eti_result.isel(quantile=0), eti_result.isel(quantile=1)
+
+
 def _plot_ribbon(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
@@ -129,13 +138,7 @@ def _plot_ribbon(
             **plot_hdi_kwargs,
         )
     else:  # ci_kind == "eti"
-        # Compute ETI using arviz_stats
-        eti_result = eti(Y, prob=ci_prob)
-
-        # ETI returns a DataArray with 'ci_bound' dimension containing 'lower' and 'upper'
-        # Extract lower and upper bounds
-        lower = eti_result.sel(ci_bound="lower")
-        upper = eti_result.sel(ci_bound="upper")
+        lower, upper = _get_equal_tailed_interval(Y, ci_prob)
 
         # Extract fill_kwargs if provided
         fill_kwargs = plot_hdi_kwargs.get("fill_kwargs", {})

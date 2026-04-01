@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Panel data methods
 
 :::{toctree}
 :caption: ANCOVA
@@ -53,12 +55,22 @@ its_pymc_comparative.ipynb
 :::
 
 :::{toctree}
+:caption: Piecewise Interrupted Time Series
+:maxdepth: 1
+
+piecewise_its_pymc.ipynb
+:::
+
+## Cross-sectional methods
+
+:::{toctree}
 :caption: Regression Discontinuity
 :maxdepth: 1
 
 rd_skl.ipynb
 rd_pymc.ipynb
 rd_pymc_drinking.ipynb
+rd_donut_pymc.ipynb
 :::
 
 :::{toctree}
@@ -83,4 +95,20 @@ iv_vs_priors.ipynb
 
 inv_prop_pymc.ipynb
 inv_prop_latent.ipynb
+:::
+
+## Workflow
+
+:::{toctree}
+:caption: Pipeline
+:maxdepth: 1
+
+pipeline_workflow.ipynb
+:::
+
+:::{toctree}
+:caption: Reporting
+:maxdepth: 1
+
+report_demo.ipynb
 :::

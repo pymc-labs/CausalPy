@@ -15,7 +15,11 @@
 Base class for quasi experimental designs.
 """
 
-from abc import abstractmethod
+from __future__ import annotations
+
+import contextlib
+from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Literal
 
 import arviz as az
@@ -28,13 +32,21 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
-class BaseExperiment:
-    """Base class for quasi experimental designs."""
+class BaseExperiment(ABC):
+    """Base class for quasi experimental designs.
+
+    Subclasses should set ``_default_model_class`` to a PyMC model class
+    (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
+    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    """
 
     labels: list[str]
+    data: pd.DataFrame
 
     supports_bayes: bool
     supports_ols: bool
+
+    _default_model_class: type[PyMCModel] | None = None
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type
@@ -42,17 +54,20 @@ class BaseExperiment:
         if isinstance(model, RegressorMixin):
             model = create_causalpy_compatible_class(model)
 
+        if model is None and self._default_model_class is not None:
+            model = self._default_model_class()
+
         if model is not None:
             self.model = model
+
+        if getattr(self, "model", None) is None:
+            raise ValueError("model not set or passed.")
 
         if isinstance(self.model, PyMCModel) and not self.supports_bayes:
             raise ValueError("Bayesian models not supported.")
 
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
-
-        if self.model is None:
-            raise ValueError("model not set or passed.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")
@@ -75,17 +90,23 @@ class BaseExperiment:
 
     def plot(
         self,
+        *args: Any,
+        show: bool = True,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         ci_prob: float = 0.94,
         num_samples: int = 50,
-        *args: Any,
         **kwargs: Any,
     ) -> tuple:
         """Plot the model.
 
         Parameters
         ----------
+        *args : Any
+            Additional positional arguments passed to `_bayesian_plot` or `_ols_plot`.
+        show : bool, optional
+            Whether to automatically display the plot. Defaults to True.
+            Set to False if you want to modify the figure before displaying it.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             Type of visualization. Default is "ribbon".
         ci_kind : {"hdi", "eti"}, optional
@@ -95,8 +116,6 @@ class BaseExperiment:
         num_samples : int, optional
             Number of posterior samples to plot for spaghetti visualization.
             Default is 50.
-        *args : Any
-            Additional positional arguments passed to `_bayesian_plot` or `_ols_plot`.
         **kwargs : Any
             Additional keyword arguments passed to `_bayesian_plot` or `_ols_plot`.
             Can include deprecated `interval` and `hdi_prob` for backward compatibility.
@@ -109,14 +128,14 @@ class BaseExperiment:
         Notes
         -----
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
-        depending on the model type. The `kind`, `ci_kind`, `ci_prob`, and `num_samples`
-        parameters are passed through to the underlying plotting methods, which can use
-        them when calling `plot_xY()`.
+        depending on the model type. The `kind`, `ci_kind`, `ci_prob`, and
+        `num_samples` parameters are passed through to the underlying plotting methods,
+        which can use them when calling `plot_xY()`.
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                return self._bayesian_plot(
+                fig, ax = self._bayesian_plot(
                     *args,
                     kind=kind,
                     ci_kind=ci_kind,
@@ -125,7 +144,7 @@ class BaseExperiment:
                     **kwargs,
                 )
             elif isinstance(self.model, RegressorMixin):
-                return self._ols_plot(
+                fig, ax = self._ols_plot(
                     *args,
                     kind=kind,
                     ci_kind=ci_kind,
@@ -136,14 +155,17 @@ class BaseExperiment:
             else:
                 raise ValueError("Unsupported model type")
 
-    @abstractmethod
+        if show:
+            plt.show()
+
+        return fig, ax
+
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    @abstractmethod
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Abstract method for plotting the model."""
+        """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
@@ -159,14 +181,12 @@ class BaseExperiment:
         else:
             raise ValueError("Unsupported model type")
 
-    @abstractmethod
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
-    @abstractmethod
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Abstract method for recovering plot data."""
+        """Return plot data for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
@@ -222,6 +242,52 @@ class BaseExperiment:
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         raise NotImplementedError("effect_summary method not yet implemented")
+
+    def generate_report(
+        self,
+        *,
+        include_plots: bool = True,
+        include_effect_summary: bool = True,
+        output_file: str | Path | None = None,
+    ) -> str:
+        """Generate a self-contained HTML report for this experiment.
+
+        This is a convenience wrapper around
+        :class:`~causalpy.steps.report.GenerateReport` that does not require
+        a full pipeline.
+
+        Parameters
+        ----------
+        include_plots : bool, default True
+            Embed diagnostic plots in the report.
+        include_effect_summary : bool, default True
+            Include the effect-summary section.
+        output_file : str or Path, optional
+            If provided, write the HTML report to this path.
+
+        Returns
+        -------
+        str
+            The rendered HTML report.
+        """
+        from causalpy.pipeline import PipelineContext
+        from causalpy.steps.report import GenerateReport
+
+        ctx = PipelineContext(data=self.data)
+        ctx.experiment = self
+        if include_effect_summary:
+            with contextlib.suppress(Exception):
+                ctx.effect_summary = self.effect_summary()
+
+        step = GenerateReport(
+            include_plots=include_plots,
+            include_effect_summary=include_effect_summary,
+            include_sensitivity=False,
+            output_file=output_file,
+        )
+        step.run(ctx)
+        return ctx.report

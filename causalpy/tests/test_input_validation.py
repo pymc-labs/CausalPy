@@ -16,10 +16,12 @@
 import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
+from matplotlib import pyplot as plt
 
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.tests.conftest import setup_regression_kink_data
 
 from sklearn.linear_model import LinearRegression
 
@@ -424,32 +426,6 @@ def test_iv_treatment_var_is_present():
 # Regression kink design
 
 
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-
-
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
-
-
 def test_rkink_bandwidth_check():
     """Test that we get exceptions when bandwidth parameter is <= 0"""
     with pytest.raises(ValueError):
@@ -549,6 +525,236 @@ def test_regression_discontinuity_bool_treatment():
     assert result.data["treated"].dtype == bool
 
 
+def test_rd_donut_hole_zero_same_as_default():
+    """Test that donut_hole=0 reproduces current behavior (no filtering)."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.0,
+    )
+
+    # With donut_hole=0, fit_data should equal data
+    assert len(result.fit_data) == len(result.data)
+
+
+def test_rd_donut_hole_filters_data():
+    """Test that donut_hole filters out observations near threshold."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    # fit_data should have fewer observations than data
+    assert len(result.fit_data) < len(result.data)
+
+    # No observations in fit_data should be within 0.1 of threshold
+    x_vals = result.fit_data["x"]
+    assert all(np.abs(x_vals - threshold) >= 0.1)
+
+
+def test_rd_donut_hole_with_bandwidth():
+    """Test that donut_hole works correctly with bandwidth."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        bandwidth=0.3,
+        donut_hole=0.05,
+    )
+
+    # Check that fit_data respects both constraints
+    x_vals = result.fit_data["x"]
+    assert all(np.abs(x_vals - threshold) <= 0.3)  # within bandwidth
+    assert all(np.abs(x_vals - threshold) >= 0.05)  # outside donut
+
+
+def test_rd_donut_hole_validation_negative():
+    """Test that negative donut_hole raises ValueError."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    with pytest.raises(ValueError):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            donut_hole=-0.1,
+        )
+
+
+def test_rd_donut_hole_validation_exceeds_bandwidth():
+    """Test that donut_hole >= bandwidth raises ValueError."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    with pytest.raises(ValueError):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.3,
+            donut_hole=0.3,  # Equal to bandwidth, should fail
+        )
+
+    with pytest.raises(ValueError):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.3,
+            donut_hole=0.4,  # Greater than bandwidth, should fail
+        )
+
+
+def test_rd_running_variable_name_not_x():
+    """Test that running_variable_name works correctly with non-default names."""
+    np.random.seed(42)
+    threshold = 21
+    age = np.random.uniform(18, 25, 100)
+    treated = np.where(age >= threshold, 1, 0)
+    y = 2 * age + treated * 0.5 + np.random.normal(0, 1, 100)
+    df = pd.DataFrame({"age": age, "treated": treated, "y": y})
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + age + treated + age:treated",
+        running_variable_name="age",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        bandwidth=2.0,
+        donut_hole=0.5,
+    )
+
+    # Check that filtering works with non-default running variable name
+    age_vals = result.fit_data["age"]
+    assert all(np.abs(age_vals - threshold) <= 2.0)
+    assert all(np.abs(age_vals - threshold) >= 0.5)
+
+
+def test_rd_few_datapoints_warning():
+    """Test that a warning is raised when bandwidth/donut_hole filter too aggressively."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    # Use aggressive bandwidth that leaves very few datapoints
+    with pytest.warns(UserWarning, match="remaining datapoints"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.05,  # Very narrow bandwidth
+        )
+
+
+def test_rd_few_datapoints_warning_with_donut():
+    """Test warning when both bandwidth and donut_hole are mentioned."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    # Use aggressive settings that leave very few datapoints
+    with pytest.warns(UserWarning, match="bandwidth.*donut_hole"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            treatment_threshold=threshold,
+            bandwidth=0.1,
+            donut_hole=0.08,  # Large donut relative to bandwidth
+        )
+
+
+def test_rd_unrecognized_model_type():
+    """Test that an unrecognized model type raises ValueError."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    class FakeModel:
+        """A fake model that is neither PyMCModel nor RegressorMixin."""
+
+        pass
+
+    with pytest.raises(ValueError, match="Model type not recognized"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated + x:treated",
+            model=FakeModel(),
+            treatment_threshold=threshold,
+        )
+
+
+def test_rd_ols_plot_with_donut_hole():
+    """Test that OLS plot shows donut hole boundary lines."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=LinearRegression(),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+    # Check that donut boundary lines were added (2 orange dashed lines)
+    donut_lines = [
+        line
+        for line in ax.get_lines()
+        if line.get_linestyle() == "--" and line.get_color() == "orange"
+    ]
+    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    plt.close(fig)
+
+
+def test_rd_bayesian_plot_with_donut_hole():
+    """Test that Bayesian plot shows donut hole boundary lines."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=threshold,
+        donut_hole=0.1,
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+    # Check that donut boundary lines were added (2 orange dashed lines)
+    donut_lines = [
+        line
+        for line in ax.get_lines()
+        if line.get_linestyle() == "--" and line.get_color() == "orange"
+    ]
+    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    plt.close(fig)
+
+
 # Synthetic Control - Convex Hull Assumption
 
 
@@ -607,7 +813,6 @@ def test_synthetic_control_no_warning_when_assumption_satisfied():
     )
 
     # Create treated unit that falls within the control range
-    # Use the middle value to ensure it's within bounds
     treated = 2.0 + 0.5 * time_idx + np.random.normal(0, 0.2, n_time)
 
     df = controls.copy()
@@ -634,3 +839,179 @@ def test_synthetic_control_no_warning_when_assumption_satisfied():
 
     # The model should run successfully
     assert isinstance(result, cp.SyntheticControl)
+
+
+# Synthetic Control - Donor Pool Correlation Warning
+
+
+def test_synthetic_control_donor_correlation_warning():
+    """Test that SyntheticControl warns when a control unit is negatively correlated."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    controls = pd.DataFrame(
+        {
+            "good_1": trend + np.random.normal(0, 0.3, n_time),
+            "good_2": trend + np.random.normal(0, 0.3, n_time),
+            "bad": -trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+    controls["treated"] = trend + np.random.normal(0, 0.3, n_time)
+
+    with pytest.warns(
+        UserWarning, match=r"pre-treatment correlation below .+ or undefined"
+    ):
+        result = cp.SyntheticControl(
+            controls,
+            treatment_time=30,
+            control_units=["good_1", "good_2", "bad"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_no_warning():
+    """Test that no warning is issued when all donors are well correlated."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "c1": trend + np.random.normal(0, 0.3, n_time),
+            "c2": trend + np.random.normal(0, 0.3, n_time),
+            "c3": trend + np.random.normal(0, 0.3, n_time),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter("always")
+        result = cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["c1", "c2", "c3"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [
+        w for w in warning_list if "pre-treatment correlation" in str(w.message)
+    ]
+    assert len(corr_warnings) == 0
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_custom_threshold():
+    """Test that a custom min_donor_correlation threshold triggers warnings."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "high_corr": trend + np.random.normal(0, 0.1, n_time),
+            "low_corr": 10 + np.random.normal(0, 5, n_time),
+            "treated": trend + np.random.normal(0, 0.1, n_time),
+        }
+    )
+
+    with pytest.warns(
+        UserWarning, match=r"pre-treatment correlation below 0.8 or undefined"
+    ):
+        cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["high_corr", "low_corr"],
+            treated_units=["treated"],
+            min_donor_correlation=0.8,
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+
+def test_synthetic_control_donor_correlation_warning_message_contents():
+    """Test that the warning includes r values, plot_correlations, and Abadie."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "good": trend + np.random.normal(0, 0.3, n_time),
+            "bad": -trend + np.random.normal(0, 0.3, n_time),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    with pytest.warns(UserWarning) as record:
+        cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["good", "bad"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [w for w in record if "pre-treatment correlation" in str(w.message)]
+    assert len(corr_warnings) == 1
+    msg = str(corr_warnings[0].message)
+    assert "'bad'" in msg
+    assert "r=-" in msg
+    assert "cp.plot_correlations()" in msg
+    assert "Abadie (2021)" in msg
+
+
+def test_synthetic_control_donor_correlation_constant_donor():
+    """Test that a constant-valued (zero-variance) control unit triggers the warning."""
+    np.random.seed(42)
+    n_time = 50
+    time_idx = np.arange(n_time)
+
+    trend = 0.5 * time_idx
+    df = pd.DataFrame(
+        {
+            "good": trend + np.random.normal(0, 0.3, n_time),
+            "constant": np.full(n_time, 5.0),
+            "treated": trend + np.random.normal(0, 0.3, n_time),
+        }
+    )
+
+    with pytest.warns(UserWarning, match="r=undefined, likely constant") as record:
+        result = cp.SyntheticControl(
+            df,
+            treatment_time=30,
+            control_units=["good", "constant"],
+            treated_units=["treated"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+    corr_warnings = [w for w in record if "pre-treatment correlation" in str(w.message)]
+    msg = str(corr_warnings[0].message)
+    assert "'constant'" in msg
+    assert isinstance(result, cp.SyntheticControl)
+
+
+def test_synthetic_control_donor_correlation_invalid_threshold():
+    """Test that min_donor_correlation outside [-1, 1] raises ValueError."""
+    df = pd.DataFrame(
+        {"c1": [1, 2, 3, 4], "treated": [1, 2, 3, 4]},
+    )
+
+    with pytest.raises(ValueError, match="min_donor_correlation must be between"):
+        cp.SyntheticControl(
+            df,
+            treatment_time=2,
+            control_units=["c1"],
+            treated_units=["treated"],
+            min_donor_correlation=2.0,
+            model=cp.skl_models.WeightedProportion(),
+        )

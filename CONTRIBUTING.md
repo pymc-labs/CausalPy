@@ -25,16 +25,31 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 
 ## Quick Start
 
-After forking this repository on GitHub, get up and running in 4 commands:
+After forking this repository on GitHub, get up and running in a few commands.
+
+Throughout this guide, `conda` is used as a placeholder -- you can substitute `mamba` or `micromamba` in any command. If none are installed, install micromamba:
+
+```bash
+"${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+```
+
+Then:
 
 ```bash
 git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
-mamba env create -f environment.yml
-conda activate CausalPy
-make setup  # Installs package + all dev dependencies + pre-commit hooks
+conda env create -f environment.yml
+conda run -n CausalPy make setup  # Installs package + all dev dependencies + prek hooks
 ```
 
-Verify everything works:
+For interactive development, either activate the environment or drop into a subshell:
+
+```bash
+conda activate CausalPy
+# or
+conda run -n CausalPy bash  # no shell init needed
+```
+
+From there, all commands run inside the `CausalPy` environment without prefixing each one. Verify everything works:
 
 ```bash
 make test
@@ -56,6 +71,8 @@ Items 2-4 require setting up a local development environment, see [Local develop
 ## Opening issues
 
 We appreciate being notified of problems with the existing CausalPy code. We prefer that issues be filed the on [Github Issue Tracker](https://github.com/pymc-labs/CausalPy/issues), rather than on social media or by direct email to the developers.
+
+**Note:** If you have a question about using CausalPy or need help with your analysis, please use [GitHub Discussions](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) instead of opening an issue. The issue tracker is for bug reports and feature requests only.
 
 Please verify that your issue is not being currently addressed by other issues or pull requests by using the GitHub search tool to look for key words in the project issue tracker.
 
@@ -92,36 +109,47 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create the environment from the `environment.yml` file and activate it:
+1. Create the environment from the `environment.yml` file (remember, `conda` can be substituted with `mamba` or `micromamba`):
 
     ```bash
-    mamba env create -f environment.yml
-    conda activate CausalPy
+    conda env create -f environment.yml
     ```
 
-    To update an existing environment after changes to `environment.yml`:
+    **Note:** `environment.yml` is generated from `pyproject.toml` by a prek hook. To change dependencies, edit `pyproject.toml` and run `prek run --all-files` (or regenerate with `pyproject2conda yaml` using the same args as in `.pre-commit-config.yaml`). During iterative work, prefer scoped runs like `prek run --files <file1> <file2>`. Do not edit `environment.yml` by hand—it will be overwritten when `pyproject.toml` is committed.
+
+    To update an existing environment after changes to `environment.yml` (e.g. after pulling or after regenerating it from `pyproject.toml`):
 
     ```bash
     conda env update --file environment.yml --prune
     ```
 
+    For interactive development, either activate the environment or drop into a subshell:
+
+    ```bash
+    conda activate CausalPy
+    # or
+    conda run -n CausalPy bash  # no shell init needed
+    ```
+
+    Either way, subsequent commands run inside the environment without prefixing each one. You can also prefix individual commands with `conda run -n CausalPy` if you prefer.
+
 1. Install the package and all development dependencies using the automated setup:
 
     ```bash
-    make setup
+    conda run -n CausalPy make setup
     ```
 
     This single command:
     - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
     - Installs all development extras (`dev`, `docs`, `test`, `lint`)
-    - Sets up pre-commit hooks
+    - Sets up prek hooks
 
     It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
 	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
 	```bash
-	python -m ipykernel install --user --name CausalPy
+	conda run -n CausalPy python -m ipykernel install --user --name CausalPy
 	```
 
 1. You can then work on your changes locally, in your feature branch. Add changed files using `git add` and then `git commit` files:
@@ -185,7 +213,11 @@ We recommend that your contribution complies with the following guidelines befor
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
 
+- Notebook files are validated by prek using `nbformat` schema checks (`validate-notebooks`). Run `prek run --all-files` before pushing to catch malformed `.ipynb` files early.
+
 - If you have changed the documentation, you should [build the docs locally](#Building-the-documentation-locally) and check that the changes look correct.
+
+- If notebook schema validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `conda run -n CausalPy make html` before pushing.
 
 - Run any of the pre-existing examples in `CausalPy/docs/source/*` that contain analyses that would be affected by your changes to ensure that nothing breaks. This is a useful opportunity to not only check your work for bugs that might not be revealed by unit test, but also to show how your contribution improves CausalPy for end users.
 
