@@ -11,4 +11,7 @@
   pymc_models
   skl_models
   experiments
+  pipeline
+  steps
+  checks
 ```
