@@ -586,6 +586,346 @@ class LinearRegression(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
+class HierarchicalLinearRegression(PyMCModel):
+    r"""Custom PyMC model for Hierarchical linear regression with fixed and group-level random effects.
+
+    Defines the PyMC model (centered parameterization)
+
+    .. math::
+        \beta_{\text{fixed}} &\sim \mathrm{Normal}(0, 10) \\
+        \sigma_{\text{random}} &\sim \mathrm{HalfNormal}(1) \\
+        \beta_{\text{random}, g} &\sim \mathrm{Normal}(0, \sigma_{\text{random}}) \\
+        \mu &= X \cdot \beta_{\text{fixed}}^{\top} + \sum\left(\beta_{\text{random}}[\mathrm{group\_idx}] \odot Z, \mathrm{axis}=2\right) \\
+        \sigma_{\text{fixed}} &\sim \mathrm{HalfNormal}(1) \\
+        y &\sim \mathrm{Normal}(\mu, \sigma_{\text{fixed}})
+
+    Set priors with keys ``beta_fixed``, ``sigma_random``, and ``sigma_fixed``.
+
+    For the non-centered parameterization:
+
+    .. math::
+        \beta_{\text{group}} &\sim \mathrm{Normal}(0, 1) \\
+        \beta_{\text{random}} &= \beta_{\text{group}} \odot \sigma_{\text{random}}
+
+    Set priors with keys ``beta_fixed``, ``sigma_random``, ``sigma_fixed``, and ``beta_group``.
+
+    Example
+    --------
+    >>> import numpy as np
+    >>> import xarray as xr
+    >>> import pymc as pm
+    >>> rng = np.random.default_rng(42)
+    >>> n_groups, n_obs = 4, 40
+    >>> group_idx = np.repeat(np.arange(n_groups), n_obs // n_groups).astype(np.int32)
+    >>> x1 = rng.normal(size=n_obs)
+    >>> X = xr.DataArray(
+    ...     np.column_stack([np.ones(n_obs), x1]),
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": np.arange(n_obs), "coeffs": ["1", "x1"]},
+    ... )
+    >>> Z = xr.DataArray(
+    ...     np.column_stack([np.ones(n_obs), x1]),
+    ...     dims=["obs_ind", "random_coeffs"],
+    ...     coords={
+    ...         "obs_ind": np.arange(n_obs),
+    ...         "random_coeffs": ["1|group", "x1|group"],
+    ...     },
+    ... )
+    >>> y = xr.DataArray(
+    ...     rng.normal(size=(n_obs, 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    ... )
+    >>> coords = {
+    ...     "obs_ind": np.arange(n_obs),
+    ...     "coeffs": ["1", "x1"],
+    ...     "random_coeffs": ["1|group", "x1|group"],
+    ...     "treated_units": ["unit_0"],
+    ...     "groups": np.arange(n_groups),
+    ... }
+    >>> priors = {
+    ...     "beta_fixed": Prior("Normal", mu=0, sigma=10, dims=["treated_units", "coeffs"]),
+    ...     "sigma_fixed": Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+    ...     "sigma_random": Prior("HalfNormal", sigma=1, dims=["treated_units", "random_coeffs"]),
+    ...     "beta_group": Prior("Normal", mu=0, sigma=1, dims=["groups", "treated_units", "random_coeffs"]),
+    ... }
+    >>> model = HierarchicalLinearRegression(
+    ...     sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+    ...     priors=priors,
+    ... )
+    >>> model.build_model(
+    ...     X=X,
+    ...     Z=Z,
+    ...     y=y,
+    ...     group_idx=group_idx,
+    ...     coords=coords,
+    ...     non_centered=True,
+    ... )
+    >>> with model:
+    ...     idata = pm.sample(**model.sample_kwargs)
+    >>> "mu" in idata.posterior
+    True
+    """
+
+    def _build_model_noncentered(
+        self,
+        X: xr.DataArray,
+        Z: xr.DataArray,
+        y: xr.DataArray,
+        group_idx: np.ndarray,
+        coords: dict[str, Any] | None,
+    ) -> None:
+        """Defines the PyMC model (non-centered parametrization).
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design matrix with dims ``[obs_ind, coeffs]``.
+        Z : xr.DataArray
+            Random-effects design matrix with dims ``[obs_ind, random_coeffs]``.
+        y : xr.DataArray
+            Outcome matrix with dims ``[obs_ind, treated_units]``.
+        group_idx : np.ndarray
+            Integer group index per observation.
+        coords : dict[str, Any] | None
+            Coordinates used by PyMC dimensions.
+        """
+        with self:
+            self.add_coords(coords)
+
+            X_data = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
+            Z_data = pm.Data(name="Z", value=Z, dims=["obs_ind", "random_coeffs"])
+            y_data = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
+            group_idx_data = pm.Data(name="group_idx", value=group_idx, dims="obs_ind")
+
+            beta_fixed = self.priors["beta_fixed"].create_variable(name="beta_fixed")
+            sigma_fixed = self.priors["sigma_fixed"].create_variable(name="sigma_fixed")
+            sigma_random = self.priors["sigma_random"].create_variable(
+                name="sigma_random"
+            )
+            beta_group = self.priors["beta_group"].create_variable(name="beta_group")
+
+            beta_random = pm.Deterministic(
+                name="beta_random",
+                var=beta_group * sigma_random,
+                dims=["groups", "treated_units", "random_coeffs"],
+            )
+
+            mu_fixed = pm.Deterministic(
+                name="mu_fixed",
+                var=pt.dot(X_data, beta_fixed.T),
+                dims=["obs_ind", "treated_units"],
+            )
+            mu_random = pm.Deterministic(
+                name="mu_random",
+                var=pt.sum(beta_random[group_idx_data] * Z_data[:, None, :], axis=2),
+                dims=["obs_ind", "treated_units"],
+            )
+            mu = pm.Deterministic(
+                name="mu",
+                var=mu_fixed + mu_random,
+                dims=["obs_ind", "treated_units"],
+            )
+
+            pm.Normal(
+                name="y_hat",
+                mu=mu,
+                sigma=sigma_fixed,
+                observed=y_data,
+                dims=["obs_ind", "treated_units"],
+            )
+
+    def _build_model_centered(
+        self,
+        X: xr.DataArray,
+        Z: xr.DataArray,
+        y: xr.DataArray,
+        group_idx: np.ndarray,
+        coords: dict[str, Any] | None,
+    ) -> None:
+        """Defines the PyMC model (centered parametrization).
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design matrix with dims ``[obs_ind, coeffs]``.
+        Z : xr.DataArray
+            Random-effects design matrix with dims ``[obs_ind, random_coeffs]``.
+        y : xr.DataArray
+            Outcome matrix with dims ``[obs_ind, treated_units]``.
+        group_idx : np.ndarray
+            Integer group index per observation.
+        coords : dict[str, Any] | None
+            Coordinates used by PyMC dimensions.
+        """
+        with self:
+            self.add_coords(coords)
+
+            X_data = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
+            Z_data = pm.Data(name="Z", value=Z, dims=["obs_ind", "random_coeffs"])
+            y_data = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
+            group_idx_data = pm.Data(name="group_idx", value=group_idx, dims="obs_ind")
+
+            beta_fixed = self.priors["beta_fixed"].create_variable(name="beta_fixed")
+            sigma_fixed = self.priors["sigma_fixed"].create_variable(name="sigma_fixed")
+            sigma_random = self.priors["sigma_random"].create_variable(
+                name="sigma_random"
+            )
+
+            beta_random = pm.Normal(
+                name="beta_random",
+                mu=0.0,
+                sigma=sigma_random,
+                dims=["groups", "treated_units", "random_coeffs"],
+            )
+
+            mu_fixed = pm.Deterministic(
+                name="mu_fixed",
+                var=pt.dot(X_data, beta_fixed.T),
+                dims=["obs_ind", "treated_units"],
+            )
+            mu_random = pm.Deterministic(
+                name="mu_random",
+                var=pt.sum(beta_random[group_idx_data] * Z_data[:, None, :], axis=2),
+                dims=["obs_ind", "treated_units"],
+            )
+            mu = pm.Deterministic(
+                name="mu",
+                var=mu_fixed + mu_random,
+                dims=["obs_ind", "treated_units"],
+            )
+
+            pm.Normal(
+                name="y_hat",
+                mu=mu,
+                sigma=sigma_fixed,
+                observed=y_data,
+                dims=["obs_ind", "treated_units"],
+            )
+
+    def build_model(  # type: ignore
+        self,
+        X: xr.DataArray,
+        Z: xr.DataArray,
+        y: xr.DataArray,
+        group_idx: np.ndarray,
+        coords: dict[str, Any] | None,
+        non_centered: bool = True,
+    ) -> None:
+        """Defines the PyMC model.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design matrix with dims ``[obs_ind, coeffs]``.
+        Z : xr.DataArray
+            Random-effects design matrix with dims ``[obs_ind, random_coeffs]``.
+        y : xr.DataArray
+            Outcome matrix with dims ``[obs_ind, treated_units]``.
+        group_idx : np.ndarray
+            Integer group index per observation.
+        coords : dict[str, Any] | None
+            Coordinates used by PyMC dimensions.
+        non_centered : bool, optional
+            If ``True``, use non-centered parameterization for group effects.
+            If ``False``, use centered parameterization.
+
+        Raises
+        ------
+        ValueError
+            If required priors for the selected parameterization are missing.
+        """
+        parameterization = "non-centered" if non_centered else "centered"
+
+        required_models_priors = {
+            "centered": {"beta_fixed", "sigma_fixed", "sigma_random"},
+            "non-centered": {"beta_fixed", "sigma_fixed", "beta_group", "sigma_random"},
+        }
+
+        required_priors = required_models_priors[parameterization]
+
+        missing_priors = sorted(required_priors.difference(self.priors))
+
+        if missing_priors:
+            missing = ", ".join(missing_priors)
+            raise ValueError(
+                f"Missing required priors for {parameterization} parameterization: {missing}."
+            )
+
+        if non_centered:
+            self._build_model_noncentered(
+                X=X,
+                Z=Z,
+                y=y,
+                group_idx=group_idx,
+                coords=coords,
+            )
+        else:
+            self._build_model_centered(
+                X=X,
+                Z=Z,
+                y=y,
+                group_idx=group_idx,
+                coords=coords,
+            )
+
+    def fit(  # type: ignore
+        self,
+        X: xr.DataArray,
+        Z: xr.DataArray,
+        y: xr.DataArray,
+        group_idx: np.ndarray,
+        coords: dict[str, Any] | None = None,
+        non_centered: bool = True,
+    ) -> az.InferenceData:
+        """Draw posterior and predictive samples for hierarchical linear regression.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design matrix with dims ``[obs_ind, coeffs]``.
+        Z : xr.DataArray
+            Random-effects design matrix with dims ``[obs_ind, random_coeffs]``.
+        y : xr.DataArray
+            Outcome matrix with dims ``[obs_ind, treated_units]``.
+        group_idx : np.ndarray
+            Integer group index per observation.
+        coords : dict[str, Any] | None, optional
+            Coordinates used by PyMC dimensions.
+        non_centered : bool, optional
+            If ``True``, use non-centered parameterization for group effects.
+            If ``False``, use centered parameterization.
+
+        Returns
+        -------
+        az.InferenceData
+            Posterior, prior predictive, and posterior predictive samples.
+        """
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        self.build_model(
+            X=X,
+            Z=Z,
+            y=y,
+            group_idx=group_idx,
+            coords=coords,
+            non_centered=non_centered,
+        )
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            if self.idata is None:
+                raise RuntimeError("pm.sample() returned None")
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata,
+                    progressbar=False,
+                    random_seed=random_seed,
+                )
+            )
+        return self.idata
+
+
 class WeightedSumFitter(PyMCModel):
     r"""
     Used for synthetic control experiments.
