@@ -12,10 +12,12 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import causalpy.checks as checks  # noqa: E402
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
 import causalpy.variable_selection_priors as variable_selection_priors
 from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.transforms import ramp, step
 from causalpy.version import __version__
 
 from .data import load_data
@@ -24,11 +26,19 @@ from .experiments.graded_intervention_its import GradedInterventionTimeSeries
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
+from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
+from .steps import (
+    EstimateEffect,
+    GenerateReport,
+    SensitivityAnalysis,
+    SensitivitySummary,
+)
 from .transforms import (
     AdstockTransform,
     DiscreteLag,
@@ -40,15 +50,18 @@ from .transforms import (
     SaturationTransform,
     Treatment,
 )
-from .utils import extract_lift_for_mmm
+from .utils import extract_lift_for_mmm, plot_correlations
 
 __all__ = [
     "__version__",
     "AdstockTransform",
+    "checks",
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
     "DiscreteLag",
+    "EstimateEffect",
     "extract_lift_for_mmm",
+    "GenerateReport",
     "GeometricAdstock",
     "GradedInterventionTimeSeries",
     "HillSaturation",
@@ -59,13 +72,23 @@ __all__ = [
     "load_data",
     "LogisticSaturation",
     "MichaelisMentenSaturation",
+    "PiecewiseITS",
+    "Pipeline",
+    "PipelineContext",
+    "PipelineResult",
+    "plot_correlations",
     "PrePostNEGD",
     "pymc_models",
+    "ramp",
     "RegressionDiscontinuity",
     "RegressionKink",
     "SaturationTransform",
+    "SensitivityAnalysis",
+    "SensitivitySummary",
     "skl_models",
     "StaggeredDifferenceInDifferences",
+    "step",
+    "Step",
     "SyntheticControl",
     "Treatment",
     "variable_selection_priors",

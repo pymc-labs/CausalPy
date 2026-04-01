@@ -741,29 +741,6 @@ class GradedInterventionTimeSeries(BaseExperiment):
         plt.tight_layout()
         return fig, axes
 
-    def plot(self, round_to: int | None = 2, **kwargs) -> tuple[plt.Figure, plt.Axes]:
-        """Plot the model fit and results.
-
-        Creates a 2-panel figure showing:
-        1. Observed vs fitted values
-        2. Residuals over time
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimal places for rounding displayed values.
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-        ax : array of matplotlib.axes.Axes
-        """
-        # Route to appropriate plot method based on model type
-        if isinstance(self.model, PyMCModel):
-            return self._bayesian_plot(round_to=round_to, **kwargs)
-        else:
-            return self._ols_plot(round_to=round_to, **kwargs)
-
     def _ols_plot(
         self, round_to: int | None = 2, **kwargs
     ) -> tuple[plt.Figure, plt.Axes]:

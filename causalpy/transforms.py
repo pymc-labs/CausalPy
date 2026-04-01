@@ -12,22 +12,25 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Transform specifications and utilities for Transfer Function ITS.
+Transform specifications and utilities for graded and piecewise ITS workflows.
 
-This module provides a strategy pattern implementation for saturation, adstock,
-and lag transforms for treatment channels. It leverages pymc-marketing's
-battle-tested transform implementations for consistency with the PyMC ecosystem.
+This module combines two transform families:
 
-The strategy pattern (following pymc-marketing design) provides:
-- Common interface for all transforms via .apply() method
-- Extensibility without modifying existing code
-- Easy parameter retrieval via .get_params() method
+- Transfer-function transforms for graded interventions, including saturation,
+  adstock, and lag components backed by pymc-marketing implementations.
+- Patsy stateful `step` and `ramp` transforms used in Piecewise Interrupted
+  Time Series formulas.
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+import pandas as pd
+import patsy
 from pymc_marketing.mmm.transformers import (
     ConvMode,
     geometric_adstock,
@@ -516,7 +519,7 @@ class Treatment:
 
     Notes
     -----
-    Transforms are applied in the order: Saturation → Adstock → Lag.
+    Transforms are applied in the order: Saturation -> Adstock -> Lag.
     This ordering reflects the typical causal sequence: first, exposure saturates,
     then the saturated effect carries over across time, and finally an optional
     delay can be applied.
@@ -538,3 +541,162 @@ class Treatment:
                 f"coef_constraint must be 'nonnegative' or 'unconstrained', "
                 f"got '{self.coef_constraint}'"
             )
+
+
+class StepTransform:
+    """
+    Stateful transform for a post-threshold level change.
+
+    Creates a binary indicator equal to 1 when `x >= threshold` and 0
+    otherwise. Numeric and datetime-like inputs are both supported.
+    """
+
+    def __init__(self) -> None:
+        self._is_datetime: bool = False
+        self._origin: pd.Timestamp | None = None
+
+    def _is_datetime_like(self, x: Any) -> bool:
+        """Check if x is datetime-like."""
+        return (
+            pd.api.types.is_datetime64_any_dtype(x)
+            or isinstance(x, pd.DatetimeIndex)
+            or (hasattr(x, "dtype") and pd.api.types.is_datetime64_any_dtype(x.dtype))
+        )
+
+    def memorize_chunk(
+        self, x: Any, threshold: int | float | str | pd.Timestamp
+    ) -> None:
+        """Called during the first pass to detect datetime inputs."""
+        if self._is_datetime_like(x):
+            self._is_datetime = True
+            x_dt = pd.to_datetime(x)
+            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())  # type: ignore[assignment]
+            if self._origin is None:
+                self._origin = x_min
+            else:
+                self._origin = min(self._origin, x_min)  # type: ignore[assignment]
+
+    def memorize_finish(self) -> None:
+        """Finalize state after patsy's memorize pass."""
+
+    def transform(
+        self, x: Any, threshold: int | float | str | pd.Timestamp
+    ) -> np.ndarray:
+        """Transform x into step function values."""
+        if self._is_datetime and self._origin is not None:
+            x_dt = pd.to_datetime(x)
+            if isinstance(x_dt, pd.DatetimeIndex):
+                x_numeric: np.ndarray = np.asarray(
+                    (x_dt - self._origin).total_seconds() / (24 * 3600)
+                )
+            else:
+                x_numeric = np.asarray(
+                    (x_dt - self._origin).dt.total_seconds() / (24 * 3600)
+                )
+
+            threshold_dt = self._parse_threshold(threshold)
+            t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
+        else:
+            x_numeric = np.asarray(x, dtype=float)
+            t_numeric = float(threshold)  # type: ignore[arg-type]
+
+        return (x_numeric >= t_numeric).astype(float)
+
+    def _parse_threshold(
+        self, threshold: int | float | str | pd.Timestamp
+    ) -> pd.Timestamp:
+        """Parse threshold into a timestamp."""
+        if isinstance(threshold, pd.Timestamp):
+            return threshold
+        return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+
+
+class RampTransform:
+    """
+    Stateful transform for a post-threshold slope change.
+
+    Creates `max(0, x - threshold)` for numeric inputs and the corresponding
+    number of days since the threshold for datetime inputs.
+    """
+
+    def __init__(self) -> None:
+        self._is_datetime: bool = False
+        self._origin: pd.Timestamp | None = None
+
+    def _is_datetime_like(self, x: Any) -> bool:
+        """Check if x is datetime-like."""
+        return (
+            pd.api.types.is_datetime64_any_dtype(x)
+            or isinstance(x, pd.DatetimeIndex)
+            or (hasattr(x, "dtype") and pd.api.types.is_datetime64_any_dtype(x.dtype))
+        )
+
+    def memorize_chunk(
+        self, x: Any, threshold: int | float | str | pd.Timestamp
+    ) -> None:
+        """Called during the first pass to detect datetime inputs."""
+        if self._is_datetime_like(x):
+            self._is_datetime = True
+            x_dt = pd.to_datetime(x)
+            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())  # type: ignore[assignment]
+            if self._origin is None:
+                self._origin = x_min
+            else:
+                self._origin = min(self._origin, x_min)  # type: ignore[assignment]
+
+    def memorize_finish(self) -> None:
+        """Finalize state after patsy's memorize pass."""
+
+    def transform(
+        self, x: Any, threshold: int | float | str | pd.Timestamp
+    ) -> np.ndarray:
+        """Transform x into ramp function values."""
+        if self._is_datetime and self._origin is not None:
+            x_dt = pd.to_datetime(x)
+            if isinstance(x_dt, pd.DatetimeIndex):
+                x_numeric: np.ndarray = np.asarray(
+                    (x_dt - self._origin).total_seconds() / (24 * 3600)
+                )
+            else:
+                x_numeric = np.asarray(
+                    (x_dt - self._origin).dt.total_seconds() / (24 * 3600)
+                )
+
+            threshold_dt = self._parse_threshold(threshold)
+            t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
+        else:
+            x_numeric = np.asarray(x, dtype=float)
+            t_numeric = float(threshold)  # type: ignore[arg-type]
+
+        return np.maximum(0.0, x_numeric - t_numeric)
+
+    def _parse_threshold(
+        self, threshold: int | float | str | pd.Timestamp
+    ) -> pd.Timestamp:
+        """Parse threshold into a timestamp."""
+        if isinstance(threshold, pd.Timestamp):
+            return threshold
+        return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+
+
+step = patsy.stateful_transform(StepTransform)  # type: ignore[attr-defined]
+ramp = patsy.stateful_transform(RampTransform)  # type: ignore[attr-defined]
+
+
+__all__ = [
+    "AdstockTransform",
+    "DiscreteLag",
+    "GeometricAdstock",
+    "HillSaturation",
+    "LagTransform",
+    "LogisticSaturation",
+    "MichaelisMentenSaturation",
+    "RampTransform",
+    "SATURATION_TYPES",
+    "SaturationTransform",
+    "StepTransform",
+    "Treatment",
+    "create_saturation",
+    "ramp",
+    "step",
+]

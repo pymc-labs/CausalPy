@@ -18,9 +18,13 @@ Functions:
 * rng: random number generator with session level scope
 """
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
+
+# Force a non-interactive backend so plot() calls in tests never open GUI windows.
+matplotlib.use("Agg", force=True)
 
 import causalpy as cp
 
