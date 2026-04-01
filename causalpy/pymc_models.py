@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Custom PyMC models for causal inference"""
 
+import inspect
 import warnings
 from typing import Any, Literal
 
@@ -28,6 +29,44 @@ from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
+
+
+def _as_xtensor_obs_ind(x: Any) -> Any:
+    """Convert a tensor-like input to an obs_ind xtensor."""
+    import pytensor.xtensor as ptx
+
+    return ptx.as_xtensor(x, dims=("obs_ind",))
+
+
+def _uses_xtensor_api(function: Any) -> bool:
+    """Return True when an upstream transform expects xtensor inputs."""
+    try:
+        return "as_xtensor" in inspect.getsource(function)
+    except (OSError, TypeError):
+        code = getattr(function, "__code__", None)
+        return code is not None and "as_xtensor" in code.co_names
+
+
+def _call_time_component_apply(
+    component: Any,
+    t: Any,
+) -> Any:
+    """Call time components across tensor and xtensor variants."""
+    parameters = inspect.signature(component.apply).parameters
+    if _uses_xtensor_api(component.apply) or (
+        "sum" in parameters and "result_callback" not in parameters
+    ):
+        t = _as_xtensor_obs_ind(t)
+    result = component.apply(t)
+    return getattr(result, "values", result)
+
+
+def _call_seasonality_component_apply(
+    seasonality_component: Any,
+    dayofperiod: Any,
+) -> Any:
+    """Call seasonality components across tensor and xtensor variants."""
+    return _call_time_component_apply(seasonality_component, dayofperiod)
 
 
 class PyMCModel(pm.Model):
@@ -188,8 +227,21 @@ class PyMCModel(pm.Model):
         super().__init__()
         self.idata = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
+        self._user_priors = priors
 
         self.priors = {**self.default_priors, **(priors or {})}
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``copy.deepcopy`` of a ``pm.Model`` subclass loses its class
+        identity, so this method constructs a new instance from the
+        stored init parameters instead.
+        """
+        return type(self)(
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
+        )
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
@@ -1428,12 +1480,16 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             # Seasonal component
             season_component = pm.Deterministic(
                 "season_component",
-                seasonality_component_instance.apply(t_season_data),
+                _call_seasonality_component_apply(
+                    seasonality_component_instance, t_season_data
+                ),
                 dims="obs_ind",
             )
 
             # Trend component
-            trend_component_values = trend_component_instance.apply(t_trend_data)
+            trend_component_values = _call_time_component_apply(
+                trend_component_instance, t_trend_data
+            )
             trend_component = pm.Deterministic(
                 "trend_component",
                 trend_component_values,

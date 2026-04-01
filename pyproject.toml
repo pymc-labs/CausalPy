@@ -10,6 +10,7 @@ exclude = ["causalpy.test*", "docs*"]
 
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
+"causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
@@ -39,9 +40,10 @@ classifiers = [
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
-    "arviz>=0.14.0",
+    "arviz>=0.14.0,<1.0",
     "graphviz",
     "ipython!=8.7.0",
+    "jinja2",
     "matplotlib>=3.5.3",
     "numpy",
     "pandas",
