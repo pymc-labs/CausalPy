@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Custom PyMC models for causal inference"""
 
+import inspect
 import warnings
 from typing import Any, Literal
 
@@ -28,6 +29,30 @@ from pymc_extras.prior import Prior
 
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
+
+
+def _call_geometric_adstock(
+    geometric_adstock: Any,
+    x: Any,
+    *,
+    alpha: Any,
+    l_max: int,
+    normalize: bool,
+    mode: Any,
+) -> Any:
+    """Call pymc-marketing geometric_adstock across signature variants."""
+    kwargs: dict[str, Any] = {
+        "alpha": alpha,
+        "l_max": l_max,
+        "normalize": normalize,
+        "mode": mode,
+    }
+    parameters = inspect.signature(geometric_adstock).parameters
+    if "dim" in parameters:
+        kwargs["dim"] = "obs_ind"
+    elif "axis" in parameters:
+        kwargs["axis"] = 0
+    return geometric_adstock(x, **kwargs)
 
 
 class PyMCModel(pm.Model):
@@ -2464,7 +2489,8 @@ class TransferFunctionLinearRegression(PyMCModel):
                 if self.adstock_config is not None:
                     l_max = self.adstock_config.get("l_max", 12)
                     normalize = self.adstock_config.get("normalize", True)
-                    treatment_i = geometric_adstock(
+                    treatment_i = _call_geometric_adstock(
+                        geometric_adstock,
                         treatment_i,
                         alpha=alpha_adstock,
                         l_max=l_max,
@@ -2983,7 +3009,8 @@ class TransferFunctionARRegression(PyMCModel):
                 if self.adstock_config is not None:
                     l_max = self.adstock_config.get("l_max", 12)
                     normalize = self.adstock_config.get("normalize", True)
-                    treatment_i = geometric_adstock(
+                    treatment_i = _call_geometric_adstock(
+                        geometric_adstock,
                         treatment_i,
                         alpha=alpha_adstock,
                         l_max=l_max,
