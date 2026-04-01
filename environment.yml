@@ -17,6 +17,7 @@ dependencies:
   - graphviz
   - interrogate
   - ipython!=8.7.0
+  - jinja2
   - make
   - matplotlib>=3.5.3
   - nbconvert
@@ -24,7 +25,7 @@ dependencies:
   - numpy<2.4
   - pandas
   - patsy
-  - pre-commit
+  - prek
   - pymc-bart
   - pymc-extras>=0.3.0
   - pymc>=5.15.1

@@ -36,7 +36,7 @@ jobs:
 
             Here are a few tips to help your PR get merged smoothly:
             - ✅ Make sure all CI checks pass (tests, linting, type checking)
-            - 📝 Run `pre-commit run --all-files` locally before pushing
+            - 📝 Run `prek run --all-files` locally before pushing
             - 📖 Check our [Contributing Guide](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md) for more details
 
             A maintainer will review your changes soon. Thanks for helping make CausalPy better! 🚀

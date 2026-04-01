@@ -188,8 +188,21 @@ class PyMCModel(pm.Model):
         super().__init__()
         self.idata = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
+        self._user_priors = priors
 
         self.priors = {**self.default_priors, **(priors or {})}
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``copy.deepcopy`` of a ``pm.Model`` subclass loses its class
+        identity, so this method constructs a new instance from the
+        stored init parameters instead.
+        """
+        return type(self)(
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
+        )
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None

@@ -56,7 +56,7 @@ If the user provides a PR number (for example `PR #724`), do this first:
 4. Re-run checks in escalating scope
    - Fast local signal first (targeted tests/lint).
    - Then full gate commands required by project norms.
-   - Always run `pre-commit run --all-files` before final handoff.
+   - Always run `prek run --all-files` before final handoff.
    - If fixes introduced new failures, loop back to step 3 with the new failure set. Do not push until a full local pass is achieved or blockers are identified.
 
 5. Push and verify remote
