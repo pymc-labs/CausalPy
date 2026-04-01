@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Compatibility tests for optional transformer APIs in pymc_models."""
+"""Compatibility tests for optional pymc-marketing components in pymc_models."""
 
 import pytensor.tensor as pt
 
@@ -116,7 +116,7 @@ def test_call_seasonality_component_apply_supports_tensor_input():
     assert calls == {"dayofperiod": signal}
 
 
-def test_call_seasonality_component_apply_retries_with_xtensor():
+def test_call_seasonality_component_apply_supports_xtensor_signature():
     calls: dict[str, object] = {}
 
     class FakeXTensorResult:
@@ -139,6 +139,22 @@ def test_call_seasonality_component_apply_retries_with_xtensor():
         "has_dims": True,
         "sum": True,
     }
+
+
+def test_call_time_component_apply_supports_tensor_input():
+    calls: dict[str, object] = {}
+
+    class FakeTimeComponent:
+        def apply(self, t):  # noqa: ANN001
+            calls["t"] = t
+            return "time-result"
+
+    signal = pt.vector("signal")
+
+    result = _call_time_component_apply(FakeTimeComponent(), signal)
+
+    assert result == "time-result"
+    assert calls == {"t": signal}
 
 
 def test_call_time_component_apply_supports_xtensor_source():
