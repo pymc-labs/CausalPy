@@ -49,7 +49,12 @@ def _call_geometric_adstock(
     }
     parameters = inspect.signature(geometric_adstock).parameters
     if "dim" in parameters:
+        import pytensor.xtensor as ptx
+
         kwargs["dim"] = "obs_ind"
+        x = ptx.as_xtensor(x, dims=("obs_ind",))
+        result = geometric_adstock(x, **kwargs)
+        return getattr(result, "values", result)
     elif "axis" in parameters:
         kwargs["axis"] = 0
     return geometric_adstock(x, **kwargs)

@@ -13,6 +13,8 @@
 #   limitations under the License.
 """Compatibility tests for optional transformer APIs in pymc_models."""
 
+import pytensor.tensor as pt
+
 from causalpy.pymc_models import _call_geometric_adstock
 
 
@@ -55,10 +57,14 @@ def test_call_geometric_adstock_supports_axis_signature():
 def test_call_geometric_adstock_supports_dim_signature():
     calls: dict[str, object] = {}
 
+    class FakeXTensorResult:
+        def __init__(self, values: str) -> None:
+            self.values = values
+
     def fake_geometric_adstock(x, *, alpha, l_max, normalize, dim, mode=None):  # noqa: ANN001
         calls.update(
             {
-                "x": x,
+                "has_type": hasattr(x, "type"),
                 "alpha": alpha,
                 "l_max": l_max,
                 "normalize": normalize,
@@ -66,11 +72,11 @@ def test_call_geometric_adstock_supports_dim_signature():
                 "mode": mode,
             }
         )
-        return "dim-result"
+        return FakeXTensorResult("dim-result")
 
     result = _call_geometric_adstock(
         fake_geometric_adstock,
-        "signal",
+        pt.vector("signal"),
         alpha=0.5,
         l_max=12,
         normalize=True,
@@ -79,7 +85,7 @@ def test_call_geometric_adstock_supports_dim_signature():
 
     assert result == "dim-result"
     assert calls == {
-        "x": "signal",
+        "has_type": True,
         "alpha": 0.5,
         "l_max": 12,
         "normalize": True,
