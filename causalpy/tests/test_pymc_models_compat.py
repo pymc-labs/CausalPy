@@ -15,7 +15,10 @@
 
 import pytensor.tensor as pt
 
-from causalpy.pymc_models import _call_geometric_adstock
+from causalpy.pymc_models import (
+    _call_geometric_adstock,
+    _call_seasonality_component_apply,
+)
 
 
 def test_call_geometric_adstock_supports_axis_signature():
@@ -91,4 +94,50 @@ def test_call_geometric_adstock_supports_dim_signature():
         "normalize": True,
         "dim": "obs_ind",
         "mode": "After",
+    }
+
+
+def test_call_seasonality_component_apply_supports_tensor_input():
+    calls: dict[str, object] = {}
+
+    class FakeSeasonalityComponent:
+        def apply(self, dayofperiod):  # noqa: ANN001
+            calls["dayofperiod"] = dayofperiod
+            return "seasonality-result"
+
+    signal = pt.vector("signal")
+
+    result = _call_seasonality_component_apply(FakeSeasonalityComponent(), signal)
+
+    assert result == "seasonality-result"
+    assert calls == {"dayofperiod": signal}
+
+
+def test_call_seasonality_component_apply_retries_with_xtensor():
+    calls: dict[str, object] = {"attempts": 0}
+
+    class FakeXTensorResult:
+        def __init__(self, values: str) -> None:
+            self.values = values
+
+    class FakeSeasonalityComponent:
+        def apply(self, dayofperiod):  # noqa: ANN001
+            calls["attempts"] += 1
+            calls[f"has_dims_{calls['attempts']}"] = hasattr(dayofperiod.type, "dims")
+            if not hasattr(dayofperiod.type, "dims"):
+                raise TypeError(
+                    "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
+                )
+            return FakeXTensorResult("xtensor-result")
+
+    result = _call_seasonality_component_apply(
+        FakeSeasonalityComponent(),
+        pt.vector("signal"),
+    )
+
+    assert result == "xtensor-result"
+    assert calls == {
+        "attempts": 2,
+        "has_dims_1": False,
+        "has_dims_2": True,
     }

@@ -60,6 +60,26 @@ def _call_geometric_adstock(
     return geometric_adstock(x, **kwargs)
 
 
+def _call_seasonality_component_apply(
+    seasonality_component: Any,
+    dayofperiod: Any,
+) -> Any:
+    """Call seasonality components across tensor and xtensor variants."""
+    try:
+        result = seasonality_component.apply(dayofperiod)
+    except TypeError as error:
+        if "without dims" not in str(error):
+            raise
+
+        import pytensor.xtensor as ptx
+
+        result = seasonality_component.apply(
+            ptx.as_xtensor(dayofperiod, dims=("obs_ind",))
+        )
+
+    return getattr(result, "values", result)
+
+
 class PyMCModel(pm.Model):
     """A wrapper class for PyMC models. This provides a scikit-learn like interface with
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
@@ -1473,7 +1493,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             # Seasonal component
             season_component = pm.Deterministic(
                 "season_component",
-                seasonality_component_instance.apply(t_season_data),
+                _call_seasonality_component_apply(
+                    seasonality_component_instance, t_season_data
+                ),
                 dims="obs_ind",
             )
 
