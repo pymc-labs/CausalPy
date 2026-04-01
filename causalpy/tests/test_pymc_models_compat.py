@@ -19,6 +19,7 @@ from causalpy.pymc_models import (
     _call_geometric_adstock,
     _call_saturation_transform,
     _call_seasonality_component_apply,
+    _call_time_component_apply,
 )
 
 
@@ -137,6 +138,25 @@ def test_call_seasonality_component_apply_retries_with_xtensor():
         "has_dims": True,
         "sum": True,
     }
+
+
+def test_call_time_component_apply_supports_xtensor_source():
+    calls: dict[str, object] = {}
+
+    class FakeXTensorResult:
+        def __init__(self, values: str) -> None:
+            self.values = values
+
+    class FakeTimeComponent:
+        def apply(self, t):  # noqa: ANN001
+            # as_xtensor compatibility path
+            calls["has_dims"] = hasattr(t.type, "dims")
+            return FakeXTensorResult("xtensor-time-result")
+
+    result = _call_time_component_apply(FakeTimeComponent(), pt.vector("signal"))
+
+    assert result == "xtensor-time-result"
+    assert calls == {"has_dims": True}
 
 
 def test_call_saturation_transform_supports_tensor_input():

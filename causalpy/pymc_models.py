@@ -89,16 +89,26 @@ def _call_saturation_transform(
     return saturation_transform(x, **kwargs)
 
 
+def _call_time_component_apply(
+    component: Any,
+    t: Any,
+) -> Any:
+    """Call time components across tensor and xtensor variants."""
+    parameters = inspect.signature(component.apply).parameters
+    if _uses_xtensor_api(component.apply) or (
+        "sum" in parameters and "result_callback" not in parameters
+    ):
+        t = _as_xtensor_obs_ind(t)
+    result = component.apply(t)
+    return getattr(result, "values", result)
+
+
 def _call_seasonality_component_apply(
     seasonality_component: Any,
     dayofperiod: Any,
 ) -> Any:
     """Call seasonality components across tensor and xtensor variants."""
-    parameters = inspect.signature(seasonality_component.apply).parameters
-    if "sum" in parameters and "result_callback" not in parameters:
-        dayofperiod = _as_xtensor_obs_ind(dayofperiod)
-    result = seasonality_component.apply(dayofperiod)
-    return getattr(result, "values", result)
+    return _call_time_component_apply(seasonality_component, dayofperiod)
 
 
 class PyMCModel(pm.Model):
@@ -1521,7 +1531,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             )
 
             # Trend component
-            trend_component_values = trend_component_instance.apply(t_trend_data)
+            trend_component_values = _call_time_component_apply(
+                trend_component_instance, t_trend_data
+            )
             trend_component = pm.Deterministic(
                 "trend_component",
                 trend_component_values,
