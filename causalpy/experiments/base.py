@@ -15,7 +15,11 @@
 Base class for quasi experimental designs.
 """
 
+from __future__ import annotations
+
+import contextlib
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Literal
 
 import arviz as az
@@ -37,6 +41,7 @@ class BaseExperiment(ABC):
     """
 
     labels: list[str]
+    data: pd.DataFrame
 
     supports_bayes: bool
     supports_ols: bool
@@ -83,20 +88,31 @@ class BaseExperiment(ABC):
         """
         self.model.print_coefficients(self.labels, round_to)
 
-    def plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def plot(self, *args: Any, show: bool = True, **kwargs: Any) -> tuple:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
         depending on the model type.
+
+        Parameters
+        ----------
+        show : bool, optional
+            Whether to automatically display the plot. Defaults to True.
+            Set to False if you want to modify the figure before displaying it.
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                return self._bayesian_plot(*args, **kwargs)
+                fig, ax = self._bayesian_plot(*args, **kwargs)
             elif isinstance(self.model, RegressorMixin):
-                return self._ols_plot(*args, **kwargs)
+                fig, ax = self._ols_plot(*args, **kwargs)
             else:
                 raise ValueError("Unsupported model type")
+
+        if show:
+            plt.show()
+
+        return fig, ax
 
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
@@ -180,6 +196,52 @@ class BaseExperiment(ABC):
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         raise NotImplementedError("effect_summary method not yet implemented")
+
+    def generate_report(
+        self,
+        *,
+        include_plots: bool = True,
+        include_effect_summary: bool = True,
+        output_file: str | Path | None = None,
+    ) -> str:
+        """Generate a self-contained HTML report for this experiment.
+
+        This is a convenience wrapper around
+        :class:`~causalpy.steps.report.GenerateReport` that does not require
+        a full pipeline.
+
+        Parameters
+        ----------
+        include_plots : bool, default True
+            Embed diagnostic plots in the report.
+        include_effect_summary : bool, default True
+            Include the effect-summary section.
+        output_file : str or Path, optional
+            If provided, write the HTML report to this path.
+
+        Returns
+        -------
+        str
+            The rendered HTML report.
+        """
+        from causalpy.pipeline import PipelineContext
+        from causalpy.steps.report import GenerateReport
+
+        ctx = PipelineContext(data=self.data)
+        ctx.experiment = self
+        if include_effect_summary:
+            with contextlib.suppress(Exception):
+                ctx.effect_summary = self.effect_summary()
+
+        step = GenerateReport(
+            include_plots=include_plots,
+            include_effect_summary=include_effect_summary,
+            include_sensitivity=False,
+            output_file=output_file,
+        )
+        step.run(ctx)
+        return ctx.report

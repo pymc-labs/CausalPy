@@ -9,6 +9,32 @@ on:
 permissions: {}
 
 jobs:
+
+  prek:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Run prek on changed files in PRs
+        if: github.event_name == 'pull_request'
+        uses: j178/prek-action@79f765515bd648eb4d6bb1b17277b7cb22cb6468 # v2.0.0
+        with:
+          extra-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
+      - name: Run prek on all files on pushes
+        if: github.event_name != 'pull_request'
+        uses: j178/prek-action@79f765515bd648eb4d6bb1b17277b7cb22cb6468 # v2.0.0
+        with:
+          extra-args: --all-files
+
   check-environment-yml:
     runs-on: ubuntu-latest
     permissions:
@@ -24,7 +50,7 @@ jobs:
           python-version: "3.12"
       - name: Install pyproject2conda
         run: pip install pyproject2conda
-      - name: Regenerate environment.yml (same args as pre-commit hook)
+      - name: Regenerate environment.yml (same args as local prek hook config)
         run: |
           pyproject2conda yaml -e dev -o /tmp/environment.generated.yml -n CausalPy \
             -w force --no-header \

@@ -45,6 +45,8 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **API documentation**: Auto-generated from docstrings via Sphinx autodoc, no manual API docs needed
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
+- **Notebook schema validation**: `prek run --all-files` runs `validate-notebooks` to catch `.ipynb` files that are valid JSON but invalid nbformat.
+- **Notebook validation failure recovery**: Re-open and save (or re-run) in a notebook-aware editor; if it still fails, restore from `main` and reapply intended edits with notebook-aware tooling; rerun `prek run --all-files`; for docs notebook changes run `$CONDA_EXE run -n CausalPy make html` before pushing.
 - **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
   - **PR drafts**: Create PR summary markdown files in `.scratch/pr_summaries/` (untracked).
   - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
@@ -63,7 +65,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 
 ## Code quality checks
 
-- **Before committing**: Always run `pre-commit run --all-files` to ensure all checks pass (linting, formatting, type checking)
+- **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards
@@ -73,12 +75,12 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 ## Type Checking
 
 - **Tool**: MyPy
-- **Configuration**: Integrated as a pre-commit hook.
+- **Configuration**: Integrated as a prek hook.
 - **Scope**: Checks Python files within the `causalpy/` directory.
 - **Settings**:
     - `ignore-missing-imports`: Enabled to allow for gradual adoption of type hints without requiring all third-party libraries to have stubs.
     - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
-- **Execution**: Run automatically via `pre-commit run --all-files` or on commit.
+- **Execution**: Run automatically via `prek run --all-files` or on commit.
 - **Style**: Use Python 3.10+ type hint syntax. Specifically: `X | None` not `Optional[X]`, lowercase `dict`, `list`, `tuple` not `Dict`, `List`, `Tuple` from `typing`, and `Literal` for constrained string parameters.
 
 ## GitHub Issue Workflows

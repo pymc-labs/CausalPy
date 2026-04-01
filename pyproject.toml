@@ -10,10 +10,11 @@ exclude = ["causalpy.test*", "docs*"]
 
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
+"causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
-version = "0.7.0"
+version = "0.8.0"
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -39,9 +40,10 @@ classifiers = [
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
-    "arviz>=0.14.0",
+    "arviz>=0.14.0,<1.0",
     "graphviz",
     "ipython!=8.7.0",
+    "jinja2",
     "matplotlib>=3.5.3",
     "numpy<2.4",
     "pandas",
@@ -63,7 +65,7 @@ dependencies = [
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
 dev = [
-    "pre-commit",
+    "prek",
     "twine",
     "interrogate",
     "codespell",
@@ -92,7 +94,7 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "pre-commit", "ruff", "mypy"]
+lint = ["interrogate", "prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
 
 [tool.pyproject2conda]
