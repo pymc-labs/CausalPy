@@ -17,6 +17,7 @@ import pytensor.tensor as pt
 
 from causalpy.pymc_models import (
     _call_geometric_adstock,
+    _call_saturation_transform,
     _call_seasonality_component_apply,
 )
 
@@ -101,7 +102,7 @@ def test_call_seasonality_component_apply_supports_tensor_input():
     calls: dict[str, object] = {}
 
     class FakeSeasonalityComponent:
-        def apply(self, dayofperiod):  # noqa: ANN001
+        def apply(self, dayofperiod, result_callback=None):  # noqa: ANN001, ARG002
             calls["dayofperiod"] = dayofperiod
             return "seasonality-result"
 
@@ -114,20 +115,16 @@ def test_call_seasonality_component_apply_supports_tensor_input():
 
 
 def test_call_seasonality_component_apply_retries_with_xtensor():
-    calls: dict[str, object] = {"attempts": 0}
+    calls: dict[str, object] = {}
 
     class FakeXTensorResult:
         def __init__(self, values: str) -> None:
             self.values = values
 
     class FakeSeasonalityComponent:
-        def apply(self, dayofperiod):  # noqa: ANN001
-            calls["attempts"] += 1
-            calls[f"has_dims_{calls['attempts']}"] = hasattr(dayofperiod.type, "dims")
-            if not hasattr(dayofperiod.type, "dims"):
-                raise TypeError(
-                    "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
-                )
+        def apply(self, dayofperiod, sum=True):  # noqa: ANN001, FBT002
+            calls["has_dims"] = hasattr(dayofperiod.type, "dims")
+            calls["sum"] = sum
             return FakeXTensorResult("xtensor-result")
 
     result = _call_seasonality_component_apply(
@@ -137,7 +134,55 @@ def test_call_seasonality_component_apply_retries_with_xtensor():
 
     assert result == "xtensor-result"
     assert calls == {
-        "attempts": 2,
-        "has_dims_1": False,
-        "has_dims_2": True,
+        "has_dims": True,
+        "sum": True,
+    }
+
+
+def test_call_saturation_transform_supports_tensor_input():
+    calls: dict[str, object] = {}
+
+    def fake_saturation_transform(x, *, slope, kappa):  # noqa: ANN001
+        calls.update({"x": x, "slope": slope, "kappa": kappa})
+        return "saturation-result"
+
+    signal = pt.vector("signal")
+
+    result = _call_saturation_transform(
+        fake_saturation_transform,
+        signal,
+        slope=2.0,
+        kappa=10.0,
+    )
+
+    assert result == "saturation-result"
+    assert calls == {
+        "x": signal,
+        "slope": 2.0,
+        "kappa": 10.0,
+    }
+
+
+def test_call_saturation_transform_supports_xtensor_input():
+    calls: dict[str, object] = {}
+
+    class FakeXTensorResult:
+        def __init__(self, values: str) -> None:
+            self.values = values
+
+    def fake_saturation_transform(x, *, lam):  # noqa: ANN001
+        # as_xtensor compatibility path
+        calls.update({"has_dims": hasattr(x.type, "dims"), "lam": lam})
+        return FakeXTensorResult("xtensor-saturation-result")
+
+    result = _call_saturation_transform(
+        fake_saturation_transform,
+        pt.vector("signal"),
+        lam=0.5,
+    )
+
+    assert result == "xtensor-saturation-result"
+    assert calls == {
+        "has_dims": True,
+        "lam": 0.5,
     }

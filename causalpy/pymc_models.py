@@ -60,23 +60,44 @@ def _call_geometric_adstock(
     return geometric_adstock(x, **kwargs)
 
 
+def _as_xtensor_obs_ind(x: Any) -> Any:
+    """Convert a tensor-like input to an obs_ind xtensor."""
+    import pytensor.xtensor as ptx
+
+    return ptx.as_xtensor(x, dims=("obs_ind",))
+
+
+def _uses_xtensor_api(function: Any) -> bool:
+    """Return True when an upstream transform expects xtensor inputs."""
+    try:
+        return "as_xtensor" in inspect.getsource(function)
+    except (OSError, TypeError):
+        code = getattr(function, "__code__", None)
+        return code is not None and "as_xtensor" in code.co_names
+
+
+def _call_saturation_transform(
+    saturation_transform: Any,
+    x: Any,
+    **kwargs: Any,
+) -> Any:
+    """Call saturation transforms across tensor and xtensor variants."""
+    if _uses_xtensor_api(saturation_transform):
+        x = _as_xtensor_obs_ind(x)
+        result = saturation_transform(x, **kwargs)
+        return getattr(result, "values", result)
+    return saturation_transform(x, **kwargs)
+
+
 def _call_seasonality_component_apply(
     seasonality_component: Any,
     dayofperiod: Any,
 ) -> Any:
     """Call seasonality components across tensor and xtensor variants."""
-    try:
-        result = seasonality_component.apply(dayofperiod)
-    except TypeError as error:
-        if "without dims" not in str(error):
-            raise
-
-        import pytensor.xtensor as ptx
-
-        result = seasonality_component.apply(
-            ptx.as_xtensor(dayofperiod, dims=("obs_ind",))
-        )
-
+    parameters = inspect.signature(seasonality_component.apply).parameters
+    if "sum" in parameters and "result_callback" not in parameters:
+        dayofperiod = _as_xtensor_obs_ind(dayofperiod)
+    result = seasonality_component.apply(dayofperiod)
     return getattr(result, "values", result)
 
 
@@ -2504,12 +2525,24 @@ class TransferFunctionLinearRegression(PyMCModel):
 
                 # Apply saturation
                 if self.saturation_type == "hill":
-                    treatment_i = hill_function(treatment_i, slope=slope, kappa=kappa)
+                    treatment_i = _call_saturation_transform(
+                        hill_function,
+                        treatment_i,
+                        slope=slope,
+                        kappa=kappa,
+                    )
                 elif self.saturation_type == "logistic":
-                    treatment_i = logistic_saturation(treatment_i, lam=lam)
+                    treatment_i = _call_saturation_transform(
+                        logistic_saturation,
+                        treatment_i,
+                        lam=lam,
+                    )
                 elif self.saturation_type == "michaelis_menten":
-                    treatment_i = michaelis_menten(
-                        treatment_i, alpha=alpha_sat, lam=lam
+                    treatment_i = _call_saturation_transform(
+                        michaelis_menten,
+                        treatment_i,
+                        alpha=alpha_sat,
+                        lam=lam,
                     )
 
                 # Apply adstock
@@ -3024,12 +3057,24 @@ class TransferFunctionARRegression(PyMCModel):
 
                 # Apply saturation
                 if self.saturation_type == "hill":
-                    treatment_i = hill_function(treatment_i, slope=slope, kappa=kappa)
+                    treatment_i = _call_saturation_transform(
+                        hill_function,
+                        treatment_i,
+                        slope=slope,
+                        kappa=kappa,
+                    )
                 elif self.saturation_type == "logistic":
-                    treatment_i = logistic_saturation(treatment_i, lam=lam)
+                    treatment_i = _call_saturation_transform(
+                        logistic_saturation,
+                        treatment_i,
+                        lam=lam,
+                    )
                 elif self.saturation_type == "michaelis_menten":
-                    treatment_i = michaelis_menten(
-                        treatment_i, alpha=alpha_sat, lam=lam
+                    treatment_i = _call_saturation_transform(
+                        michaelis_menten,
+                        treatment_i,
+                        alpha=alpha_sat,
+                        lam=lam,
                     )
 
                 # Apply adstock
