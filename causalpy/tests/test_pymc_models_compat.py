@@ -20,6 +20,7 @@ from causalpy.pymc_models import (
     _call_saturation_transform,
     _call_seasonality_component_apply,
     _call_time_component_apply,
+    _uses_xtensor_api,
 )
 
 
@@ -157,6 +158,23 @@ def test_call_time_component_apply_supports_xtensor_source():
 
     assert result == "xtensor-time-result"
     assert calls == {"has_dims": True}
+
+
+def test_uses_xtensor_api_falls_back_to_code_names(monkeypatch):
+    namespace: dict[str, object] = {}
+    exec(  # noqa: S102
+        "def fake_transform(x):\n    return as_xtensor(x)\n",
+        {},
+        namespace,
+    )
+    fake_transform = namespace["fake_transform"]
+
+    def raise_oserror(_function):  # noqa: ANN001
+        raise OSError("source unavailable")
+
+    monkeypatch.setattr("causalpy.pymc_models.inspect.getsource", raise_oserror)
+
+    assert _uses_xtensor_api(fake_transform)
 
 
 def test_call_saturation_transform_supports_tensor_input():
