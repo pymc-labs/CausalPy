@@ -1494,6 +1494,60 @@ def _generate_prose_detailed_ols(
     return "\n\n".join(paragraphs)
 
 
+def _generate_prose(
+    stats,
+    window_coords,
+    alpha=0.05,
+    direction="increase",
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Backward-compatible wrapper for older prose helper name."""
+    text = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=alpha,
+        direction=direction,
+        cumulative=cumulative,
+        relative=relative,
+        prefix=prefix,
+    )
+    if cumulative and "cum" in stats:
+        if direction == "increase":
+            cumulative_prob = stats["cum"].get("p_gt_0")
+        elif direction == "decrease":
+            cumulative_prob = stats["cum"].get("p_lt_0")
+        else:
+            cumulative_prob = stats["cum"].get("prob_of_effect")
+
+        if cumulative_prob is not None:
+            text += (
+                f" The posterior probability of the cumulative effect is "
+                f"{_format_number(cumulative_prob, 3)}."
+            )
+    return text
+
+
+def _generate_prose_ols(
+    stats,
+    window_coords,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Backward-compatible wrapper for older OLS prose helper name."""
+    return _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=alpha,
+        cumulative=cumulative,
+        relative=relative,
+        prefix=prefix,
+    )
+
+
 def _compute_statistics_ols(
     impact,
     counterfactual,
