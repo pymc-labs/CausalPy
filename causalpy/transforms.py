@@ -17,7 +17,7 @@ Transform specifications and utilities for graded and piecewise ITS workflows.
 This module combines two transform families:
 
 - Transfer-function transforms for graded interventions, including saturation,
-  adstock, and lag components backed by pymc-marketing implementations.
+  adstock, and lag components implemented with numpy for OLS-style workflows.
 - Patsy stateful `step` and `ramp` transforms used in Piecewise Interrupted
   Time Series formulas.
 """
@@ -31,13 +31,50 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import patsy
-from pymc_marketing.mmm.transformers import (
-    ConvMode,
-    geometric_adstock,
-    hill_function,
-    logistic_saturation,
-    michaelis_menten,
-)
+
+
+def _hill_saturation(x: np.ndarray, slope: float, kappa: float) -> np.ndarray:
+    """Compute Hill saturation using numpy arrays."""
+    x_arr = np.asarray(x, dtype=float)
+    x_power = np.power(x_arr, slope)
+    denominator = np.power(kappa, slope) + x_power
+    return np.divide(
+        x_power,
+        denominator,
+        out=np.zeros_like(x_arr, dtype=float),
+        where=denominator != 0,
+    )
+
+
+def _logistic_saturation(x: np.ndarray, lam: float) -> np.ndarray:
+    """Compute a zero-anchored logistic saturation curve."""
+    x_arr = np.asarray(x, dtype=float)
+    saturated = 2.0 / (1.0 + np.exp(-lam * x_arr)) - 1.0
+    return np.clip(saturated, 0.0, 1.0)
+
+
+def _michaelis_menten(x: np.ndarray, alpha: float, lam: float) -> np.ndarray:
+    """Compute Michaelis-Menten saturation using numpy arrays."""
+    x_arr = np.asarray(x, dtype=float)
+    denominator = lam + x_arr
+    return np.divide(
+        alpha * x_arr,
+        denominator,
+        out=np.zeros_like(x_arr, dtype=float),
+        where=denominator != 0,
+    )
+
+
+def _geometric_adstock(
+    x: np.ndarray, alpha: float, l_max: int, normalize: bool
+) -> np.ndarray:
+    """Apply causal geometric adstock with optional normalization."""
+    x_arr = np.asarray(x, dtype=float)
+    weights = np.power(alpha, np.arange(l_max + 1, dtype=float))
+    if normalize:
+        weights = weights / weights.sum()
+    return np.convolve(x_arr, weights, mode="full")[: len(x_arr)]
+
 
 # ============================================================================
 # Strategy Pattern Base Classes
@@ -194,11 +231,7 @@ class HillSaturation(SaturationTransform):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         """Apply Hill saturation transform."""
-        result = hill_function(x, slope=self.slope, kappa=self.kappa)
-        # Ensure we return a numpy array, not a PyTensor symbolic tensor
-        if hasattr(result, "eval"):
-            return result.eval()
-        return np.asarray(result)
+        return _hill_saturation(x, slope=self.slope, kappa=self.kappa)
 
     def get_params(self) -> dict:
         """Return Hill saturation parameters."""
@@ -228,11 +261,7 @@ class LogisticSaturation(SaturationTransform):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         """Apply logistic saturation transform."""
-        result = logistic_saturation(x, lam=self.lam)
-        # Ensure we return a numpy array, not a PyTensor symbolic tensor
-        if hasattr(result, "eval"):
-            return result.eval()
-        return np.asarray(result)
+        return _logistic_saturation(x, lam=self.lam)
 
     def get_params(self) -> dict:
         """Return logistic saturation parameters."""
@@ -266,11 +295,7 @@ class MichaelisMentenSaturation(SaturationTransform):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         """Apply Michaelis-Menten saturation transform."""
-        result = michaelis_menten(x, alpha=self.alpha, lam=self.lam)
-        # Ensure we return a numpy array, not a PyTensor symbolic tensor
-        if hasattr(result, "eval"):
-            return result.eval()
-        return np.asarray(result)
+        return _michaelis_menten(x, alpha=self.alpha, lam=self.lam)
 
     def get_params(self) -> dict:
         """Return Michaelis-Menten saturation parameters."""
@@ -397,20 +422,12 @@ class GeometricAdstock(AdstockTransform):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         """Apply geometric adstock transform."""
-        # pymc-marketing geometric_adstock(x, alpha, l_max, normalize, mode)
-        # mode="After" means only past values affect current (causal)
-        result = geometric_adstock(
+        return _geometric_adstock(
             x,
             alpha=self.alpha,
             l_max=self.l_max,
             normalize=self.normalize,
-            mode=ConvMode.After,
         )
-
-        # Ensure we return a numpy array, not a PyTensor symbolic tensor
-        if hasattr(result, "eval"):
-            return result.eval()
-        return np.asarray(result)
 
     def get_params(self) -> dict:
         """Return geometric adstock parameters."""

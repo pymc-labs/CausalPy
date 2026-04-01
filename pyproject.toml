@@ -95,7 +95,15 @@ docs = [
     "sphinx-togglebutton",
 ]
 lint = ["interrogate", "prek", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+    "papermill",
+    "pymc-marketing>=0.13.1",
+]
 
 [tool.pyproject2conda]
 channels = ["conda-forge"]
