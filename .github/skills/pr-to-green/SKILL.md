@@ -106,6 +106,22 @@ Escalation report must include:
 - resolution options (1-2) with trade-offs
 - recommended next step and what decision is needed from maintainer
 
+### Scope drift / upstream compatibility escalation (required)
+
+Do not keep patching silently when greening a PR turns into broader compatibility work outside the PR's feature surface. Stop after root-cause identification and ask the maintainer whether to continue in the PR or split the work into a separate branch/PR from `main`.
+
+Escalate by default when:
+- the failing checks are caused by third-party API or version drift in shared/core code
+- the fix would benefit multiple open PRs or the default branch, not just the current PR
+- the next fix would modify shared integrations beyond the feature the PR is introducing
+- successive CI reruns keep exposing new failure families outside the original PR scope
+
+Scope-drift report must include:
+- the original PR goal and the newly discovered broader issue
+- which files are feature-specific versus shared/core compatibility files
+- options: patch in the PR, split a separate compatibility PR, or pause for maintainer direction
+- the recommended next step and why
+
 ## CausalPy guardrails
 - Never use destructive git commands unless explicitly requested
 - Do not create ad hoc test scripts; use `pytest` tests in `causalpy/tests/`
