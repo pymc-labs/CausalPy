@@ -107,6 +107,13 @@ pipeline_workflow.ipynb
 :::
 
 :::{toctree}
+:caption: Sensitivity Checks
+:maxdepth: 1
+
+sensitivity_checks.md
+:::
+
+:::{toctree}
 :caption: Reporting
 :maxdepth: 1
 
