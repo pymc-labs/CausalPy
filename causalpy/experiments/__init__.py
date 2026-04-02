@@ -21,15 +21,19 @@ from .piecewise_its import PiecewiseITS
 from .prepostnegd import PrePostNEGD
 from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
+from .sc_results import DonorPoolQualityResult, DressRehearsalResult, PowerCurveResult
 from .staggered_did import StaggeredDifferenceInDifferences
 from .synthetic_control import SyntheticControl
 
 __all__ = [
     "DifferenceInDifferences",
+    "DonorPoolQualityResult",
+    "DressRehearsalResult",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "PiecewiseITS",
+    "PowerCurveResult",
     "PrePostNEGD",
     "RegressionDiscontinuity",
     "RegressionKink",

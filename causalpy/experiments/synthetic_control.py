@@ -15,6 +15,7 @@
 Synthetic Control Experiment
 """
 
+import logging
 import warnings
 from typing import Any, Literal
 
@@ -33,6 +34,13 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
+from .sc_results import (
+    DonorPoolQualityResult,
+    DressRehearsalResult,
+    PowerCurveResult,
+)
+
+logger = logging.getLogger(__name__)
 
 LEGEND_FONT_SIZE = 12
 
@@ -97,12 +105,14 @@ class SyntheticControl(BaseExperiment):
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
+        _design_only: bool = False,
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
         # rename the index to "obs_ind"
         data.index.name = "obs_ind"
         self.data = data
+        self._design_only = _design_only
         self.input_validation(data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
@@ -119,6 +129,74 @@ class SyntheticControl(BaseExperiment):
         self._check_donor_correlations()
         self._check_convex_hull()
         self.algorithm()
+
+    @classmethod
+    def from_pre_period(
+        cls,
+        data: pd.DataFrame,
+        control_units: list[str],
+        treated_units: list[str],
+        model: PyMCModel | RegressorMixin | None = None,
+        min_donor_correlation: float = 0.0,
+    ) -> "SyntheticControl":
+        """Create a design-phase SC fitted only on pre-period data.
+
+        Use this **before** running an experiment to assess design
+        feasibility via :meth:`donor_pool_quality`,
+        :meth:`validate_design`, and :meth:`power_analysis`.
+
+        All provided data is treated as pre-period (no post-period
+        observations are required).
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Historical data (pre-period only). All rows are used for
+            model fitting.
+        control_units : list[str]
+            Column names for control units.
+        treated_units : list[str]
+            Column names for treated units.
+        model : PyMCModel or RegressorMixin or None
+            Model to fit. Defaults to ``WeightedSumFitter``.
+        min_donor_correlation : float
+            Minimum acceptable donor correlation (see constructor).
+
+        Returns
+        -------
+        SyntheticControl
+            A fitted instance whose design methods are ready to use.
+            Plotting and effect summary methods are not available
+            (no post-period data).
+
+        Examples
+        --------
+        >>> import causalpy as cp
+        >>> df = cp.load_data("sc")
+        >>> pre_data = df[df.index < 70]  # only historical data
+        >>> design = cp.SyntheticControl.from_pre_period(
+        ...     pre_data,
+        ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
+        ...     treated_units=["actual"],
+        ...     model=cp.pymc_models.WeightedSumFitter(
+        ...         sample_kwargs={"progressbar": False, "random_seed": 42}
+        ...     ),
+        ... )
+        """
+        if isinstance(data.index, pd.DatetimeIndex):
+            treatment_time = data.index.max() + pd.Timedelta(days=1)
+        else:
+            treatment_time = data.index.max() + 1
+
+        return cls(
+            data=data,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+            min_donor_correlation=min_donor_correlation,
+            _design_only=True,
+        )
 
     def _check_convex_hull(self) -> None:
         """Check convex hull assumption and warn if violated."""
@@ -294,12 +372,15 @@ class SyntheticControl(BaseExperiment):
 
         # get the model predictions of the observed (pre-intervention) data
         self.pre_pred = self.model.predict(X=self.datapre_control)
-
-        # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.datapost_control)
         self.pre_impact = self.model.calculate_impact(
             self.datapre_treated, self.pre_pred
         )
+
+        if self._design_only:
+            return
+
+        # calculate the counterfactual
+        self.post_pred = self.model.predict(X=self.datapost_control)
 
         self.post_impact = self.model.calculate_impact(
             self.datapost_treated, self.post_pred
@@ -940,3 +1021,364 @@ class SyntheticControl(BaseExperiment):
             )
 
         return EffectSummary(table=table, text=text)
+
+    # ------------------------------------------------------------------
+    # Experiment design methods
+    # ------------------------------------------------------------------
+
+    def validate_design(
+        self,
+        injected_effect: float,
+        holdout_periods: int | None = None,
+        effect_type: Literal["relative", "absolute"] = "relative",
+        sample_kwargs: dict | None = None,
+    ) -> DressRehearsalResult:
+        """Dress rehearsal: inject a known effect and check if the model recovers it.
+
+        Splits the pre-period, injects an effect into the held-out
+        pseudo-post window, fits a fresh SC on the truncated pre-period,
+        and checks whether the posterior cumulative impact recovers the
+        injected truth.
+
+        Parameters
+        ----------
+        injected_effect : float
+            Effect to inject. Interpretation depends on ``effect_type``.
+        holdout_periods : int or None
+            Number of pre-period rows to hold out as pseudo-post. If
+            ``None``, uses ~25 % of the pre-period (floored, minimum 1).
+        effect_type : {"relative", "absolute"}
+            ``"relative"`` multiplies treated by ``(1 + injected_effect)``;
+            ``"absolute"`` adds ``injected_effect`` to treated values.
+        sample_kwargs : dict or None
+            MCMC sampling arguments for the refitted model. Falls back
+            to the parent experiment's ``sample_kwargs``.
+
+        Returns
+        -------
+        DressRehearsalResult
+
+        Raises
+        ------
+        TypeError
+            If the model is not a ``PyMCModel``.
+        ValueError
+            If the remaining pre-period after holdout would have fewer
+            than 10 time points.
+        """
+        if not isinstance(self.model, PyMCModel):
+            raise TypeError(
+                "validate_design() requires a PyMC model. "
+                f"Got {type(self.model).__name__}."
+            )
+
+        pre = self.datapre
+        n_pre = len(pre)
+
+        if holdout_periods is None:
+            holdout_periods = max(1, n_pre // 4)
+
+        remaining = n_pre - holdout_periods
+        if remaining < 10:
+            raise ValueError(
+                f"Holdout of {holdout_periods} periods leaves only "
+                f"{remaining} pre-period rows (need >= 10)."
+            )
+
+        pseudo_treatment_time = pre.index[remaining]
+
+        pseudo_pre = pre.iloc[:remaining].copy()
+        pseudo_post = pre.iloc[remaining:].copy()
+
+        if effect_type == "relative":
+            injected_truth = float(
+                pseudo_post[self.treated_units].sum().sum() * injected_effect
+            )
+            for col in self.treated_units:
+                pseudo_post[col] = pseudo_post[col] * (1 + injected_effect)
+        else:
+            injected_truth = (
+                injected_effect * len(pseudo_post) * len(self.treated_units)
+            )
+            for col in self.treated_units:
+                pseudo_post[col] = pseudo_post[col] + injected_effect
+
+        modified_data = pd.concat([pseudo_pre, pseudo_post])
+
+        refit_kwargs = dict(self.model.sample_kwargs)
+        if sample_kwargs is not None:
+            refit_kwargs.update(sample_kwargs)
+        if "progressbar" not in refit_kwargs:
+            refit_kwargs["progressbar"] = False
+
+        from causalpy.checks.base import clone_model
+
+        cloned_model = clone_model(self.model)
+        cloned_model.sample_kwargs = refit_kwargs
+
+        refitted = SyntheticControl(
+            data=modified_data,
+            treatment_time=pseudo_treatment_time,
+            control_units=list(self.control_units),
+            treated_units=list(self.treated_units),
+            model=cloned_model,
+        )
+
+        cum_impact = refitted.post_impact_cumulative
+        if "treated_units" in cum_impact.dims:
+            cum_impact = cum_impact.isel(treated_units=0)
+        final_cum = cum_impact.isel(obs_ind=-1)
+        samples = final_cum.stack(sample=("chain", "draw"))
+
+        mean_val = float(samples.mean().values)
+        hdi = az.hdi(samples.values, hdi_prob=0.94)
+        hdi_tuple = (float(hdi[0]), float(hdi[1]))
+        covers = hdi_tuple[0] <= injected_truth <= hdi_tuple[1]
+
+        return DressRehearsalResult(
+            injected_effect=injected_effect,
+            effect_type=effect_type,
+            recovered_effect_mean=mean_val,
+            recovered_effect_hdi=hdi_tuple,
+            hdi_covers_truth=covers,
+            posterior_samples=samples,
+            injected_truth=injected_truth,
+        )
+
+    def power_analysis(
+        self,
+        effect_sizes: list[float],
+        n_simulations: int = 50,
+        criterion: Literal[
+            "hdi_excludes_zero", "prob_gt_zero", "recovery_accuracy"
+        ] = "hdi_excludes_zero",
+        effect_type: Literal["relative", "absolute"] = "relative",
+        holdout_periods: int | None = None,
+        sample_kwargs: dict | None = None,
+        random_seed: int | None = None,
+    ) -> PowerCurveResult:
+        """Simulation-based Bayesian power curve.
+
+        For each candidate effect size, runs :meth:`validate_design`
+        multiple times (with added noise) and records detection rates.
+
+        Parameters
+        ----------
+        effect_sizes : list[float]
+            Candidate effect sizes to evaluate.
+        n_simulations : int
+            Number of simulations per effect size.
+        criterion : str
+            Detection criterion:
+            - ``"hdi_excludes_zero"``: 94 % HDI of cumulative impact
+              excludes zero.
+            - ``"prob_gt_zero"``: P(cumulative impact > 0) > 0.95.
+            - ``"recovery_accuracy"``: posterior mean within 20 % of
+              injected truth.
+        effect_type : {"relative", "absolute"}
+            Passed through to ``validate_design``.
+        holdout_periods : int or None
+            Passed through to ``validate_design``.
+        sample_kwargs : dict or None
+            MCMC sampling arguments for refitted models.
+        random_seed : int or None
+            RNG seed for reproducible noise injection.
+
+        Returns
+        -------
+        PowerCurveResult
+        """
+        if not isinstance(self.model, PyMCModel):
+            raise TypeError(
+                "power_analysis() requires a PyMC model. "
+                f"Got {type(self.model).__name__}."
+            )
+
+        rng = np.random.default_rng(random_seed)
+
+        pre = self.datapre
+        residuals = self.pre_impact
+        if "treated_units" in residuals.dims:
+            residuals = residuals.isel(treated_units=0)
+        residual_std = float(
+            residuals.mean(dim=["chain", "draw"]).std(dim="obs_ind").values
+        )
+
+        all_results: list[list[DressRehearsalResult]] = []
+        detection_rates: list[float] = []
+
+        total_sims = len(effect_sizes) * n_simulations
+        completed = 0
+
+        for es in effect_sizes:
+            sim_results: list[DressRehearsalResult] = []
+            detections = 0
+
+            for _sim_idx in range(n_simulations):
+                noise_data = self.data.copy()
+                noise = rng.normal(0, residual_std, size=len(pre))
+                for col in self.treated_units:
+                    noise_data.loc[noise_data.index < self.treatment_time, col] += noise
+
+                noise_experiment = self._build_noisy_experiment(
+                    noise_data, sample_kwargs
+                )
+
+                result = noise_experiment.validate_design(
+                    injected_effect=es,
+                    holdout_periods=holdout_periods,
+                    effect_type=effect_type,
+                    sample_kwargs=sample_kwargs,
+                )
+                sim_results.append(result)
+
+                detected = self._evaluate_criterion(result, criterion)
+                if detected:
+                    detections += 1
+
+                completed += 1
+                if completed % 5 == 0 or completed == total_sims:
+                    logger.info(
+                        "Power analysis progress: %d/%d simulations complete",
+                        completed,
+                        total_sims,
+                    )
+
+            rate = detections / n_simulations
+            detection_rates.append(rate)
+            all_results.append(sim_results)
+
+        return PowerCurveResult(
+            effect_sizes=list(effect_sizes),
+            detection_rates=detection_rates,
+            criterion=criterion,
+            raw_results=all_results,
+        )
+
+    def _build_noisy_experiment(
+        self,
+        data: pd.DataFrame,
+        sample_kwargs: dict | None,
+    ) -> "SyntheticControl":
+        """Build a design-only SC on noisy pre-period data (for power analysis)."""
+        from causalpy.checks.base import clone_model
+
+        refit_kwargs = dict(self.model.sample_kwargs)
+        if sample_kwargs is not None:
+            refit_kwargs.update(sample_kwargs)
+        if "progressbar" not in refit_kwargs:
+            refit_kwargs["progressbar"] = False
+
+        cloned = clone_model(self.model)
+        cloned.sample_kwargs = refit_kwargs
+
+        pre_data = data[data.index < self.treatment_time]
+
+        return SyntheticControl.from_pre_period(
+            data=pre_data,
+            control_units=list(self.control_units),
+            treated_units=list(self.treated_units),
+            model=cloned,
+        )
+
+    @staticmethod
+    def _evaluate_criterion(
+        result: DressRehearsalResult,
+        criterion: str,
+    ) -> bool:
+        """Evaluate whether a detection criterion is met."""
+        samples = result.posterior_samples.values.flatten()
+        if criterion == "hdi_excludes_zero":
+            hdi = az.hdi(samples, hdi_prob=0.94)
+            return bool(hdi[0] > 0 or hdi[1] < 0)
+        elif criterion == "prob_gt_zero":
+            prob = float((samples > 0).mean())
+            return prob > 0.95
+        elif criterion == "recovery_accuracy":
+            if result.injected_truth == 0:
+                return abs(result.recovered_effect_mean) < 1e-6
+            relative_error = abs(
+                (result.recovered_effect_mean - result.injected_truth)
+                / result.injected_truth
+            )
+            return relative_error < 0.2
+        else:
+            raise ValueError(f"Unknown criterion: {criterion}")
+
+    def donor_pool_quality(self) -> DonorPoolQualityResult:
+        """Assess the quality of the donor pool.
+
+        Aggregates pre-treatment correlations, convex hull coverage,
+        and weight concentration into a composite quality score.
+
+        Returns
+        -------
+        DonorPoolQualityResult
+
+        Raises
+        ------
+        TypeError
+            If the model is not a ``PyMCModel`` (weight concentration
+            requires posterior Dirichlet weights).
+        """
+        if not isinstance(self.model, PyMCModel):
+            raise TypeError(
+                "donor_pool_quality() requires a PyMC model. "
+                f"Got {type(self.model).__name__}."
+            )
+
+        pre = self.datapre
+        correlations: dict[str, float] = {}
+        for control in self.control_units:
+            corrs = []
+            for treated in self.treated_units:
+                r = pre[treated].corr(pre[control])
+                corrs.append(r if not pd.isna(r) else 0.0)
+            correlations[control] = float(np.mean(corrs))
+
+        mean_corr = float(np.mean(list(correlations.values())))
+
+        n_violations_total = 0
+        n_points_total = 0
+        for i in range(len(self.treated_units)):
+            hull = check_convex_hull_violation(
+                self.datapre_treated.isel(treated_units=i).values,
+                self.datapre_control.values,
+            )
+            n_pre = self.datapre_treated.shape[0]
+            n_violations_total += hull["n_violations"]
+            n_points_total += n_pre
+        coverage = (
+            1.0 - (n_violations_total / n_points_total) if n_points_total else 0.0
+        )
+
+        assert self.model.idata is not None  # guaranteed after fit
+        beta_posterior = self.model.idata.posterior["beta"].mean(dim=["chain", "draw"])
+        if "treated_units" in beta_posterior.dims:
+            weights = beta_posterior.isel(treated_units=0).values
+        else:
+            weights = beta_posterior.values
+        weights = np.abs(weights)
+        weight_sum = weights.sum()
+        if weight_sum > 0:
+            w_norm = weights / weight_sum
+        else:
+            w_norm = np.ones_like(weights) / len(weights)
+        hhi = float(np.sum(w_norm**2))
+        eff_donors = 1.0 / hhi if hhi > 0 else float(len(weights))
+
+        per_donor = pd.DataFrame(
+            {
+                "donor": self.control_units,
+                "mean_correlation": [correlations[c] for c in self.control_units],
+                "mean_weight": list(weights),
+                "normalized_weight": list(w_norm),
+            }
+        )
+
+        return DonorPoolQualityResult(
+            correlation_score=mean_corr,
+            convex_hull_coverage=coverage,
+            weight_concentration=eff_donors,
+            per_donor_details=per_donor,
+        )
