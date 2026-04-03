@@ -542,6 +542,53 @@ def test_sc_softmax(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_sdid(mock_pymc_sample):
+    """
+    Test Synthetic Difference-in-Differences experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. SyntheticDifferenceInDifferences returns correct type
+    3. tau_posterior exists with chain/draw dims
+    4. post_impact and post_impact_cumulative exist
+    5. summary runs without error
+    6. plot returns Figure and Axes
+    """
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticDifferenceInDifferences)
+
+    # tau posterior should exist with chain/draw dims
+    assert hasattr(result, "tau_posterior")
+    assert "chain" in result.tau_posterior.dims
+    assert "draw" in result.tau_posterior.dims
+
+    # post_impact should exist
+    assert hasattr(result, "post_impact")
+    assert hasattr(result, "post_impact_cumulative")
+
+    # summary should run without error
+    result.summary()
+
+    # plot should return fig and axes
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.integration
 def test_sc_brexit(mock_pymc_sample):
     """
     Test Synthetic Control experiment on Brexit data.

@@ -42,6 +42,7 @@ DATASETS = {
     "lalonde": {"filename": "lalonde.csv"},
     "zipcodes": {"filename": "zipcodes_data.csv"},
     "nevo": {"filename": "data_nevo.csv"},
+    "california_prop99": {"filename": "california_prop99.csv"},
 }
 
 
@@ -84,6 +85,10 @@ def load_data(dataset: str) -> pd.DataFrame:
         - ``"zipcodes"`` - Geo-experimentation zipcode data for comparative interrupted time
           series analysis. Based on synthetic data from Juan Orduz's blog post on
           `time-based regression for geo-experiments <https://juanitorduz.github.io/time_based_regression_pymc/>`_.
+        - ``"california_prop99"`` - California Proposition 99 cigarette sales data
+          (Abadie, Diamond & Hainmueller, 2010). Wide-format panel of annual per-capita
+          cigarette sales (packs) for 39 US states, 1970--2000. Treatment: California in
+          1989.
 
     Returns
     -------
