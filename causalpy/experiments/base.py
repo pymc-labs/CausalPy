@@ -18,6 +18,7 @@ Base class for quasi experimental designs.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
@@ -25,7 +26,7 @@ from typing import Any, Literal
 import arviz as az
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.base import RegressorMixin
+from sklearn.base import RegressorMixin, clone
 
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
@@ -76,6 +77,33 @@ class BaseExperiment(ABC):
 
         if isinstance(self.model, RegressorMixin) and not self.supports_ols:
             raise ValueError("OLS models not supported.")
+
+    def _ensure_sklearn_fit_intercept_false(self) -> None:
+        """Ensure scikit-learn models use ``fit_intercept=False`` without mutating
+        user-supplied estimators.
+
+        When the formula includes an explicit intercept (e.g. ``~ 1 + ...``), the
+        design matrix already contains an intercept column.  Letting sklearn *also*
+        fit its own intercept would double-count it and hide the intercept from the
+        reported coefficients.  This method detects the mismatch, clones the
+        estimator, and swaps in the corrected copy so the caller's original object
+        is never modified.
+        """
+        if not isinstance(self.model, RegressorMixin):
+            return
+        if not getattr(self.model, "fit_intercept", False):
+            return
+
+        warnings.warn(
+            "fit_intercept=True was set on your estimator, but this experiment "
+            "requires fit_intercept=False (the design matrix already contains an "
+            "intercept column). A cloned copy with fit_intercept=False will be used.",
+            UserWarning,
+            stacklevel=3,
+        )
+        cloned = clone(self.model)
+        cloned.set_params(fit_intercept=False)
+        self.model = create_causalpy_compatible_class(cloned)
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("fit method not implemented")
