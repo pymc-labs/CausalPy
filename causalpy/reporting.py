@@ -294,7 +294,9 @@ def _generate_prose_scalar(
 
 def _detect_experiment_type(result):
     """Detect experiment type from result attributes."""
-    if hasattr(result, "discontinuity_at_threshold"):
+    if hasattr(result, "event_time_coeffs"):
+        return "event_study"  # Event Study / Dynamic DiD
+    elif hasattr(result, "discontinuity_at_threshold"):
         return "rd"  # Regression Discontinuity
     elif hasattr(result, "gradient_change"):
         return "rkink"  # Regression Kink
@@ -340,6 +342,137 @@ def _effect_summary_did(
     text = _generate_prose_scalar(
         stats, "average treatment effect", alpha=alpha, direction=direction
     )
+
+    return EffectSummary(table=table, text=text)
+
+
+def _effect_summary_event_study(
+    result,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: float | None = None,
+    include_pretrend_check: bool = True,
+):
+    """Generate effect summary for Event Study experiments.
+
+    Returns the event-time coefficients table with a prose summary describing
+    the pre-treatment trends (parallel trends check) and post-treatment effects.
+
+    Parameters
+    ----------
+    result : EventStudy
+        The fitted EventStudy experiment object.
+    direction : str, optional
+        Direction for effect interpretation. Defaults to "increase".
+    alpha : float, optional
+        Significance level for HDI intervals. Defaults to 0.05.
+    min_effect : float, optional
+        Minimum effect threshold (not currently used for Event Study).
+    include_pretrend_check : bool, optional
+        Whether to include parallel trends analysis in prose. Defaults to True.
+    """
+    import arviz as az
+
+    hdi_prob = 1 - alpha
+
+    # Get event-time summary table
+    table = result.get_event_time_summary(hdi_prob=hdi_prob)
+
+    # Generate prose summary
+    event_window = result.event_window
+    reference_time = result.reference_event_time
+    n_periods = event_window[1] - event_window[0] + 1
+
+    # Analyze pre-treatment coefficients (parallel trends check)
+    pre_treatment_times = [k for k in result.event_time_coeffs if k < 0]
+    post_treatment_times = [k for k in result.event_time_coeffs if k >= 0]
+
+    hdi_pct = int(hdi_prob * 100)
+
+    if hasattr(result.model, "idata"):  # PyMC model
+        # Check if pre-treatment coefficients are consistent with parallel trends
+        pre_trend_ok = True
+        if include_pretrend_check:
+            for k in pre_treatment_times:
+                if k == reference_time:
+                    continue
+                coeff = result.event_time_coeffs[k]
+                hdi = az.hdi(coeff.values.flatten(), hdi_prob=hdi_prob)
+                if hdi[0] > 0 or hdi[1] < 0:  # HDI doesn't include zero
+                    pre_trend_ok = False
+                    break
+
+        # Get post-treatment effect range
+        post_effects = []
+        for k in post_treatment_times:
+            if k == reference_time:
+                continue
+            coeff = result.event_time_coeffs[k]
+            post_effects.append(float(coeff.mean()))
+
+        if post_effects:
+            min_post = min(post_effects)
+            max_post = max(post_effects)
+            post_range_text = f"ranging from {min_post:.2f} to {max_post:.2f}"
+        else:
+            post_range_text = "no post-treatment effects estimated"
+
+        # Build prose
+        prose_parts = [
+            f"Event study analysis with {n_periods} time periods "
+            f"(k={event_window[0]} to k={event_window[1]}), "
+            f"reference period k={reference_time}."
+        ]
+
+        if include_pretrend_check and pre_treatment_times:
+            if pre_trend_ok:
+                prose_parts.append(
+                    f"Pre-treatment coefficients (k<0) are consistent with the "
+                    f"parallel trends assumption (all {hdi_pct}% HDIs include zero)."
+                )
+            else:
+                prose_parts.append(
+                    f"WARNING: Some pre-treatment coefficients have {hdi_pct}% HDIs "
+                    f"that exclude zero, suggesting potential violation of parallel trends."
+                )
+
+        if post_treatment_times:
+            prose_parts.append(
+                f"Post-treatment effects (k≥0) show treatment impact {post_range_text}."
+            )
+
+        text = " ".join(prose_parts)
+
+    else:
+        # OLS model - simpler summary without uncertainty
+        post_effects = []
+        for k in post_treatment_times:
+            if k == reference_time:
+                continue
+            coeff = result.event_time_coeffs[k]
+            post_effects.append(float(coeff))
+
+        if post_effects:
+            min_post = min(post_effects)
+            max_post = max(post_effects)
+            post_range_text = f"ranging from {min_post:.2f} to {max_post:.2f}"
+        else:
+            post_range_text = "no post-treatment effects estimated"
+
+        prose_parts = [
+            f"Event study analysis with {n_periods} time periods "
+            f"(k={event_window[0]} to k={event_window[1]}), "
+            f"reference period k={reference_time}.",
+            f"Post-treatment effects (k≥0): {post_range_text}.",
+        ]
+
+        if include_pretrend_check:
+            prose_parts.append(
+                "Note: OLS model does not provide uncertainty estimates for "
+                "parallel trends check."
+            )
+
+        text = " ".join(prose_parts)
 
     return EffectSummary(table=table, text=text)
 
@@ -1361,6 +1494,60 @@ def _generate_prose_detailed_ols(
     return "\n\n".join(paragraphs)
 
 
+def _generate_prose(
+    stats,
+    window_coords,
+    alpha=0.05,
+    direction="increase",
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Backward-compatible wrapper for older prose helper name."""
+    text = _generate_prose_detailed(
+        stats,
+        window_coords,
+        alpha=alpha,
+        direction=direction,
+        cumulative=cumulative,
+        relative=relative,
+        prefix=prefix,
+    )
+    if cumulative and "cum" in stats:
+        if direction == "increase":
+            cumulative_prob = stats["cum"].get("p_gt_0")
+        elif direction == "decrease":
+            cumulative_prob = stats["cum"].get("p_lt_0")
+        else:
+            cumulative_prob = stats["cum"].get("prob_of_effect")
+
+        if cumulative_prob is not None:
+            text += (
+                f" The posterior probability of the cumulative effect is "
+                f"{_format_number(cumulative_prob, 3)}."
+            )
+    return text
+
+
+def _generate_prose_ols(
+    stats,
+    window_coords,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+):
+    """Backward-compatible wrapper for older OLS prose helper name."""
+    return _generate_prose_detailed_ols(
+        stats,
+        window_coords,
+        alpha=alpha,
+        cumulative=cumulative,
+        relative=relative,
+        prefix=prefix,
+    )
+
+
 def _compute_statistics_ols(
     impact,
     counterfactual,
@@ -1731,3 +1918,16 @@ def _effect_summary_rkink(
         )
 
     return EffectSummary(table=table, text=text)
+
+
+def _compute_statistics_rkink_ols(result, alpha=0.05):
+    """Compute statistics for Regression Kink scalar effect with OLS model.
+
+    Placeholder: follows the pattern from ``_compute_statistics_rd_ols()``.
+    """
+    raise NotImplementedError(
+        "OLS models are not currently supported for Regression Kink experiments. "
+        "Please use a PyMC model for full statistical inference. "
+        "If OLS support is needed, see _compute_statistics_rd_ols() "
+        "for the implementation pattern."
+    )

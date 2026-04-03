@@ -158,7 +158,11 @@ class InterruptedTimeSeries(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices for pre and post intervention periods using patsy."""
         # set things up with pre-intervention data
-        y, X = dmatrices(self.formula, self.datapre)
+        y, X = dmatrices(self.formula, self.datapre, return_type="dataframe")
+        # Remove pre-intervention rows that patsy dropped (e.g. due to NaN values)
+        dropped_pre = self.datapre.index.difference(X.index)
+        if len(dropped_pre) > 0:
+            self.data = self.data.drop(dropped_pre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

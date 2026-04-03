@@ -126,9 +126,11 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
+        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
+        # Filter data to rows that patsy kept (in case NaN values were dropped)
+        self.data = self.data.loc[X.index]
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
