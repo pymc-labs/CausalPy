@@ -63,6 +63,10 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
 - **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
 
+## Committing and pushing
+
+- **Check for unsaved notebooks**: Before committing, ask the user whether they have any unsaved notebooks or files open in the IDE. Notebooks in particular may contain expensive-to-recompute cell outputs that haven't been written to disk yet. The agent cannot detect unsaved IDE state, so always prompt the user to confirm all files are saved before staging and committing.
+
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
