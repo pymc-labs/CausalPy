@@ -858,6 +858,128 @@ class SoftmaxWeightedSumFitter(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
+class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
+    r"""
+    Bayesian weight fitter for Synthetic Difference-in-Differences.
+
+    Encodes both the unit-weight module and the time-weight module in a single
+    PyMC model. Unit weights balance control units against treated units in the
+    pre-treatment period; time weights balance pre-treatment periods against
+    post-treatment periods for control units. Both use the softmax-over-Normal-logits
+    parameterization with a pinned reference level.
+
+    The treatment effect is **not** estimated inside this model. It is computed
+    analytically from the weight posteriors via the double-difference formula
+    in the experiment class.
+
+    Defines the PyMC model:
+
+    .. math::
+        \omega &= \mathrm{softmax}(0, \tilde{\omega}_2, \ldots, \tilde{\omega}_{N_\text{co}}) \\
+        \bar{Y}_{\text{tr},t} &\sim \mathrm{Normal}(\omega_0 + \boldsymbol{\omega}^\top \mathbf{Y}_{\text{co},t},\; \sigma_\omega) \\
+        \lambda &= \mathrm{softmax}(0, \tilde{\lambda}_2, \ldots, \tilde{\lambda}_{T_\text{pre}}) \\
+        \bar{Y}_{i,\text{post}} &\sim \mathrm{Normal}(\lambda_0 + \boldsymbol{\lambda}^\top \mathbf{Y}_{i,\text{pre}},\; \sigma_\lambda)
+
+    Notes
+    -----
+    This model implements the cut-posterior formulation of Bayesian SDiD.
+    Modules 1 and 2 share no parameters and are
+    conditionally independent given the data. Running them in a single MCMC
+    call is a convenience; the important property is that no treatment-effect
+    likelihood feeds back into the weight posteriors.
+
+    The prior scales on the logits play the role of the regularization
+    parameter in the frequentist SDiD:
+
+    - ``omega_raw`` default ``sigma=1.0`` (``zeta_omega=1.0``): moderate
+      regularization, allowing weights between SC-sparse and DiD-uniform.
+    - ``lam_raw`` default ``sigma=100.0`` (``zeta_lambda=0.01``): essentially
+      flat, letting time weights concentrate on the most informative
+      pre-treatment periods.
+
+    References
+    ----------
+    .. [1] Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
+       Wager, S. (2021). Synthetic Difference-in-Differences. *American
+       Economic Review*, 111(12), 4088-4118.
+    """  # noqa: W605
+
+    default_priors: dict[str, Prior] = {}
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """
+        Set default priors for unit and time weight modules.
+
+        Parameters
+        ----------
+        X : dict
+            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+        y : dict
+            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Priors for omega_raw, lam_raw, omega0, lambda0, sigma_omega,
+            sigma_lambda.
+        """
+        return {
+            "omega_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=1.0,
+                dims=["coeffs_raw"],
+            ),
+            "lam_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=100.0,
+                dims=["obs_ind_raw"],
+            ),
+            "omega0": Prior("Normal", mu=0, sigma=5.0),
+            "lambda0": Prior("Normal", mu=0, sigma=5.0),
+            "sigma_omega": Prior("HalfNormal", sigma=1.0),
+            "sigma_lambda": Prior("HalfNormal", sigma=1.0),
+        }
+
+    def build_model(self, X, y, coords: dict[str, Any] | None) -> None:
+        """
+        Build the PyMC model with both unit-weight and time-weight modules.
+        """
+        with self:
+            self.add_coords(coords)
+
+            # Data
+            X_unit = pm.Data("X_unit", X["unit"], dims=["obs_ind", "coeffs"])
+            y_unit = pm.Data("y_unit", y["unit"], dims=["obs_ind"])
+            X_time = pm.Data("X_time", X["time"], dims=["coeffs", "obs_ind"])
+            y_time = pm.Data("y_time", y["time"], dims=["coeffs"])
+
+            # Module 1: Unit weights
+            omega = _softmax_simplex_weights(
+                name="omega",
+                prior=self.priors["omega_raw"],
+                n_rows=1,
+                dims=["coeffs"],
+            )  # shape (N_co,) — 1D from helper when n_rows=1
+            omega0 = self.priors["omega0"].create_variable("omega0")
+            sigma_omega = self.priors["sigma_omega"].create_variable("sigma_omega")
+            mu_omega = omega0 + pt.dot(X_unit, omega)
+            pm.Normal("omega_match", mu=mu_omega, sigma=sigma_omega, observed=y_unit)
+
+            # Module 2: Time weights
+            lam = _softmax_simplex_weights(
+                name="lam",
+                prior=self.priors["lam_raw"],
+                n_rows=1,
+                dims=["obs_ind"],
+            )  # shape (T_pre,) — 1D from helper when n_rows=1
+            lambda0 = self.priors["lambda0"].create_variable("lambda0")
+            sigma_lambda = self.priors["sigma_lambda"].create_variable("sigma_lambda")
+            mu_lambda = lambda0 + pt.dot(X_time, lam)
+            pm.Normal("lambda_match", mu=mu_lambda, sigma=sigma_lambda, observed=y_time)
+
+
 class InstrumentalVariableRegression(PyMCModel):
     """Custom PyMC model for instrumental linear regression
 
@@ -1313,8 +1435,10 @@ class PropensityScore(PyMCModel):
                 "beta_ps": [0, 1],
             }
         if not hasattr(self, "idata"):
-            raise AttributeError("""Object is missing required attribute 'idata'
-                                 so cannot proceed. Call fit() first""")
+            raise AttributeError(
+                """Object is missing required attribute 'idata'
+                                 so cannot proceed. Call fit() first"""
+            )
         propensity_scores = az.extract(self.idata)["p"]
         random_seed = self.sample_kwargs.get("random_seed", None)
 
