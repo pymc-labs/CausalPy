@@ -113,7 +113,7 @@ def forest_plot(
 
     n = len(labels)
     if figsize is None:
-        figsize = (8, max(3, 0.45 * n + 1.5))
+        figsize = (8, max(3, 0.3 * n + 1.0))
 
     fig, ax = plt.subplots(figsize=figsize)
     y_pos = list(range(n))
