@@ -1,18 +1,22 @@
 # Sensitivity Checks in Pipeline Workflows
 
-Sensitivity checks help you assess whether your causal estimate is robust or fragile. A single point estimate from a causal model is rarely enough --- you need to probe it from multiple angles before drawing conclusions.
+Sensitivity checks help you assess whether a causal estimate is robust or fragile. In quasi-experimental work, they are best treated as design diagnostics that probe assumptions and modelling choices, not as proofs that identification succeeded {cite:p}`reichardt2019quasi,shadish_cook_cambell_2002`.
 
-CausalPy's pipeline API integrates sensitivity analysis as a first-class step, so robustness checks run alongside model fitting and report generation in a single, reproducible workflow.
+CausalPy's pipeline API makes sensitivity analysis a first-class step, so robustness checks can run alongside model fitting and report generation in a single, reproducible workflow.
 
 ## Architecture overview
 
-The sensitivity framework has three key components:
+The sensitivity framework has three main pieces:
 
 1. **`Check`** --- a protocol that individual checks implement. Each check declares which experiment types it applies to (`applicable_methods`), validates preconditions, and returns a structured `CheckResult`.
 2. **`SensitivityAnalysis`** --- a pipeline step that holds a list of `Check` objects and runs them against the fitted experiment.
-3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` for informational checks), a prose summary, an optional diagnostics table, and optional figures.
+3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` for informational checks), a prose summary, an optional diagnostics table, optional figures, and arbitrary metadata.
 
-A typical pipeline looks like this:
+When a `GenerateReport` step follows `SensitivityAnalysis`, those results are included in the generated HTML report automatically.
+
+## Choosing checks
+
+### Start with the default suite
 
 ```python
 import causalpy as cp
@@ -26,29 +30,15 @@ result = cp.Pipeline(
             formula="y ~ 1 + t",
             model=cp.pymc_models.LinearRegression(),
         ),
-        cp.SensitivityAnalysis(
-            checks=[cp.checks.PlaceboInTime(n_folds=3)]
-        ),
+        cp.SensitivityAnalysis.default_for(cp.InterruptedTimeSeries),
         cp.GenerateReport(),
     ],
 ).run()
 ```
 
-## Choosing checks: default vs custom
+`SensitivityAnalysis.default_for(method)` returns a pre-loaded step containing every check currently registered as a default for that experiment type. At present, `PlaceboInTime` is registered as the default check for `InterruptedTimeSeries` and `SyntheticControl`.
 
-### Default checks
-
-`SensitivityAnalysis.default_for(method)` returns a pre-loaded step with all checks that are registered as defaults for a given experiment type:
-
-```python
-cp.SensitivityAnalysis.default_for(cp.InterruptedTimeSeries)
-```
-
-Currently, `PlaceboInTime` is the only registered default check. This means `default_for()` provides a sensible starting point, but you will typically want to add more checks explicitly.
-
-### Custom check lists
-
-You can compose any combination of checks manually:
+### Compose a custom suite
 
 ```python
 cp.SensitivityAnalysis(
@@ -64,67 +54,70 @@ cp.SensitivityAnalysis(
 )
 ```
 
-The `SensitivityAnalysis` step validates that every check in the list is applicable to the fitted experiment type. If you include a check that doesn't support the experiment, validation fails with a clear error before any check runs.
+`SensitivityAnalysis` checks applicability as it runs. If a check does not support the fitted experiment type, CausalPy raises a clear error naming the methods that check supports.
 
-## Check reference
+## Quick reference
 
-CausalPy provides nine sensitivity checks, divided into cross-cutting checks that apply broadly and method-specific checks tied to particular experiment types.
+| Check | Applies to | Registered as default? | Main question |
+|-------|------------|------------------------|---------------|
+| `PlaceboInTime` | ITS, SC (PyMC models) | Yes, for ITS and SC | Do pseudo-interventions in the pre-period also produce "effects"? |
+| `PriorSensitivity` | ITS, DiD, SC, Staggered DiD, RD, RKink, PrePostNEGD, IPW, IV (PyMC models) | No | Do conclusions change materially under reasonable prior alternatives? |
+| `PersistenceCheck` | Three-period ITS designs | No | Does the effect remain after the intervention ends? |
+| `ConvexHullCheck` | SC | No | Is the treated unit supported by the donor pool, or are we extrapolating? |
+| `LeaveOneOut` | SC | No | Does the result depend heavily on one donor unit? |
+| `PlaceboInSpace` | SC | No | Are placebo effects in control units as large as the treated effect? |
+| `BandwidthSensitivity` | RD, RKink | No | Does the estimate depend heavily on bandwidth choice? |
+| `McCraryDensityTest` | RD | No | Is there evidence of manipulation around the cutoff? |
+| `PreTreatmentPlaceboCheck` | Staggered DiD | No | Do pre-treatment event-study effects look close to zero? |
 
-### Cross-cutting checks
+## Where examples already exist
 
-These checks work across multiple experiment families.
+- `PlaceboInTime`: {doc}`pipeline_workflow`, {doc}`report_demo`
+- `BandwidthSensitivity`: {doc}`rkink_pymc`
+- `PreTreatmentPlaceboCheck`: {doc}`staggered_did_pymc`
+- More check-specific walkthroughs are still being added, so some checks currently have API coverage but no dedicated notebook example yet.
 
-| Check | Applicable methods | What it does |
-|-------|-------------------|--------------|
-| {py:class}`~causalpy.checks.PlaceboInTime` | ITS, SC | Shifts the treatment time backward into the pre-intervention period and refits the model. If the model finds "effects" where none should exist, the original estimate may be unreliable. Supports a hierarchical null model and optional Bayesian assurance. |
-| {py:class}`~causalpy.checks.PriorSensitivity` | All 9 experiment types (Bayesian only) | Re-fits the model with alternative prior specifications and compares posterior estimates. Large sensitivity to priors suggests the data are not informative enough to dominate the prior. |
+## Check-by-check guide
 
-### Method-specific checks
+### `PlaceboInTime`
 
-These checks exploit structure unique to a particular experimental design.
+`PlaceboInTime` moves the intervention backward into the pre-treatment period and re-fits the model. If those pseudo-interventions often produce effects comparable to the observed one, the original result looks less credible. In synthetic control settings, placebo and falsification exercises are a standard part of design assessment {cite:p}`abadie2021using`; in interrupted time series settings, the same logic aligns with broader falsification practice in pre/post intervention designs {cite:p}`lopezbernal2017its`.
 
-**Interrupted Time Series (ITS)**
+This check requires a PyMC-backed model because it works with posterior impact draws. In CausalPy it can also fit a hierarchical null model and, optionally, estimate Bayesian assurance for a user-supplied expected effect prior.
 
-| Check | What it does |
-|-------|--------------|
-| {py:class}`~causalpy.checks.PersistenceCheck` | For three-period ITS designs (with `treatment_end_time`), checks whether the causal effect persists, fades, or reverses after the intervention ends. |
+### `PriorSensitivity`
 
-**Synthetic Control (SC)**
+`PriorSensitivity` re-fits the same experiment with alternative prior specifications and compares the resulting effect summaries. Use it when prior choice could matter materially, especially in small samples or weakly identified models. Reporting how posterior conclusions change under reasonable alternatives is good Bayesian practice {cite:p}`liBayesianProp`.
 
-| Check | What it does |
-|-------|--------------|
-| {py:class}`~causalpy.checks.ConvexHullCheck` | Verifies that treated-unit values lie within the convex hull of control units. Violations indicate the synthetic control may be extrapolating beyond the support of the donor pool. |
-| {py:class}`~causalpy.checks.LeaveOneOut` | Drops each control unit one at a time, refits the synthetic control, and compares effect estimates. Large variation suggests the result depends heavily on a single donor. |
-| {py:class}`~causalpy.checks.PlaceboInSpace` | Treats each control unit as if it were the treated unit (excluding the actual treated unit from the donor pool) and checks whether spurious effects appear. If placebo effects are comparable to the real effect, the finding may not be credible. |
+This is the broadest check in the current API, but it is only available for PyMC-backed experiments.
 
-**Regression Discontinuity (RD) and Regression Kink (RKink)**
+### `PersistenceCheck`
 
-| Check | What it does |
-|-------|--------------|
-| {py:class}`~causalpy.checks.BandwidthSensitivity` | Re-fits the model at multiple bandwidths around the threshold and compares effect estimates. A robust effect should be relatively stable across reasonable bandwidth choices. |
-| {py:class}`~causalpy.checks.McCraryDensityTest` | Tests for manipulation of the running variable at the threshold by comparing the density of observations just below and just above the cutoff. A discontinuity in density suggests subjects may have manipulated their assignment. |
+`PersistenceCheck` applies to three-period ITS designs with `treatment_end_time`. It wraps `analyze_persistence()` to ask whether the effect persists, fades, or reverses after the intervention ends. This is especially relevant when policy or campaign effects may decay after treatment is removed {cite:p}`wagner2002segmented`.
 
-**Staggered Difference-in-Differences (Staggered DiD)**
+### `ConvexHullCheck`
 
-| Check | What it does |
-|-------|--------------|
-| {py:class}`~causalpy.checks.PreTreatmentPlaceboCheck` | Examines pre-treatment event-study estimates. If effects at negative event times are far from zero, the parallel trends assumption is violated and the DiD estimate may be biased. |
+`ConvexHullCheck` asks whether the treated unit sits within the support of the donor pool in the pre-treatment period. If not, the synthetic control fit relies on extrapolation rather than interpolation, which weakens design credibility.
 
-## Experiment-to-check matrix
+### `LeaveOneOut`
 
-Use this matrix to identify which checks are available for your experiment type.
+`LeaveOneOut` drops one control unit at a time and re-fits the synthetic control. If the estimated effect changes dramatically when a single donor is removed, the result depends too heavily on that donor rather than on the donor pool as a whole.
 
-| Check | ITS | SC | DiD | Staggered DiD | RD | RKink | PrePostNEGD | IPW | IV |
-|-------|:---:|:--:|:---:|:-------------:|:--:|:-----:|:-----------:|:---:|:--:|
-| PlaceboInTime | ✅ | ✅ | | | | | | | |
-| PriorSensitivity | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| PersistenceCheck | ✅ | | | | | | | | |
-| ConvexHullCheck | | ✅ | | | | | | | |
-| LeaveOneOut | | ✅ | | | | | | | |
-| PlaceboInSpace | | ✅ | | | | | | | |
-| BandwidthSensitivity | | | | | ✅ | ✅ | | | |
-| McCraryDensityTest | | | | | ✅ | | | | |
-| PreTreatmentPlaceboCheck | | | | ✅ | | | | | |
+### `PlaceboInSpace`
+
+`PlaceboInSpace` re-labels each control unit as though it were treated and compares those placebo effects to the observed treated effect. If many placebo units show effects as large as the treated unit, the original estimate looks less distinctive {cite:p}`abadie2010synthetic`.
+
+### `BandwidthSensitivity`
+
+`BandwidthSensitivity` re-fits RD or RKink models across a sequence of bandwidths. Because bandwidth choice drives the bias-variance trade-off in local designs, a result that flips across plausible bandwidths should be treated cautiously {cite:p}`imbens2008regression,lee2010regression`.
+
+### `McCraryDensityTest`
+
+`McCraryDensityTest` checks for a discontinuity in the density of the running variable at the threshold. A sharp jump suggests units may have manipulated their assignment variable, undermining the design's local comparability assumption {cite:p}`mccrary2008manipulation`.
+
+### `PreTreatmentPlaceboCheck`
+
+`PreTreatmentPlaceboCheck` examines pre-treatment event-study effects in staggered DiD. If negative event times are far from zero, the parallel trends story is harder to defend and the treatment effect may be biased {cite:p}`goodman2021difference,borusyak2024revisiting`.
 
 ## Working with check results
 
@@ -140,7 +133,11 @@ You can inspect results programmatically:
 
 ```python
 for cr in result.sensitivity_results:
-    status = "PASS" if cr.passed else ("FAIL" if cr.passed is False else "INFO")
+    status = (
+        "PASS"
+        if cr.passed is True
+        else ("FAIL" if cr.passed is False else "INFO")
+    )
     print(f"[{status}] {cr.check_name}: {cr.text}")
 
     if cr.table is not None:
@@ -155,25 +152,32 @@ When a `GenerateReport` step follows `SensitivityAnalysis` in the pipeline, chec
 Sensitivity checks are **diagnostics**, not definitive verdicts. A passing check does not prove your causal claim is correct, and a failing check does not prove it is wrong. They reveal where your analysis is robust and where it is fragile.
 :::
 
-**What a passing check tells you:** The estimate survived a specific stress test. This increases confidence in the result, especially when multiple independent checks pass.
+**What a passing check tells you:** The estimate survived a specific stress test. This increases confidence in the result, especially when multiple independent checks point in the same direction.
 
-**What a failing check tells you:** The estimate is sensitive to a particular assumption or modelling choice. This does not invalidate the analysis --- it signals where you should investigate further, justify your choices, or present results with appropriate caveats.
+**What a failing check tells you:** The estimate is sensitive to a particular assumption or modelling choice. This does not invalidate the analysis; it tells you where to investigate further, justify your choices, or present stronger caveats.
 
 **General guidance:**
 
-- Run multiple checks. No single check is sufficient.
-- Report all results, including failures. Selective reporting of only passing checks undermines credibility.
-- Use domain knowledge to weigh the results. A failing `BandwidthSensitivity` check at an extreme bandwidth may be less concerning than a failing `PlaceboInTime` check.
-- Consider the checks as part of your argument, not a mechanical accept/reject gate.
+- Start with the defaults, then add method-specific checks that target the most plausible failure modes for your design.
+- Run more than one check. No single diagnostic is sufficient.
+- Report failures as well as passes. Selective reporting of only passing checks undermines credibility.
+- Use domain knowledge to decide which failures are consequential. A bandwidth warning at an extreme specification is different from strong placebo evidence.
+- Treat checks as part of a cumulative argument, not a mechanical accept/reject gate.
 
 ## Next steps
 
-For worked examples showing these checks in action with specific experiment types, see the method-specific walkthroughs in the {doc}`examples index <index>`.
-
-For details on the pipeline API, see {doc}`pipeline_workflow`.
+For the pipeline mechanics, see {doc}`pipeline_workflow`. For HTML reporting of check results, see {doc}`report_demo`. More method-specific sensitivity walkthroughs will be added over time; where they already exist, they are linked above.
 
 :::{seealso}
 - {doc}`pipeline_workflow` --- end-to-end pipeline tutorial
 - {doc}`report_demo` --- HTML report generation
+- {doc}`staggered_did_pymc` --- staggered DiD example with `PreTreatmentPlaceboCheck`
+- {doc}`rkink_pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
+:::
+
+## References
+
+:::{bibliography}
+:filter: docname in docnames
 :::
