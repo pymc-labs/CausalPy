@@ -60,15 +60,15 @@ cp.SensitivityAnalysis(
 
 | Check | Applies to | Registered as default? | Main question |
 |-------|------------|------------------------|---------------|
-| `PlaceboInTime` | ITS, SC (PyMC models) | Yes, for ITS and SC | Do pseudo-interventions in the pre-period also produce "effects"? |
-| `PriorSensitivity` | ITS, DiD, SC, Staggered DiD, RD, RKink, PrePostNEGD, IPW, IV (PyMC models) | No | Do conclusions change materially under reasonable prior alternatives? |
-| `PersistenceCheck` | Three-period ITS designs | No | Does the effect remain after the intervention ends? |
-| `ConvexHullCheck` | SC | No | Is the treated unit supported by the donor pool, or are we extrapolating? |
-| `LeaveOneOut` | SC | No | Does the result depend heavily on one donor unit? |
-| `PlaceboInSpace` | SC | No | Are placebo effects in control units as large as the treated effect? |
-| `BandwidthSensitivity` | RD, RKink | No | Does the estimate depend heavily on bandwidth choice? |
-| `McCraryDensityTest` | RD | No | Is there evidence of manipulation around the cutoff? |
-| `PreTreatmentPlaceboCheck` | Staggered DiD | No | Do pre-treatment event-study effects look close to zero? |
+| {doc}`PlaceboInTime <../api/generated/causalpy.checks.placebo_in_time.PlaceboInTime>` | ITS, SC (PyMC models) | Yes, for ITS and SC | Do pseudo-interventions in the pre-period also produce "effects"? |
+| {doc}`PriorSensitivity <../api/generated/causalpy.checks.prior_sensitivity.PriorSensitivity>` | ITS, DiD, SC, Staggered DiD, RD, RKink, PrePostNEGD, IPW, IV (PyMC models) | No | Do conclusions change materially under reasonable prior alternatives? |
+| {doc}`PersistenceCheck <../api/generated/causalpy.checks.persistence.PersistenceCheck>` | Three-period ITS designs | No | Does the effect remain after the intervention ends? |
+| {doc}`ConvexHullCheck <../api/generated/causalpy.checks.convex_hull.ConvexHullCheck>` | SC | No | Is the treated unit supported by the donor pool, or are we extrapolating? |
+| {doc}`LeaveOneOut <../api/generated/causalpy.checks.leave_one_out.LeaveOneOut>` | SC | No | Does the result depend heavily on one donor unit? |
+| {doc}`PlaceboInSpace <../api/generated/causalpy.checks.placebo_in_space.PlaceboInSpace>` | SC | No | Are placebo effects in control units as large as the treated effect? |
+| {doc}`BandwidthSensitivity <../api/generated/causalpy.checks.bandwidth.BandwidthSensitivity>` | RD, RKink | No | Does the estimate depend heavily on bandwidth choice? |
+| {doc}`McCraryDensityTest <../api/generated/causalpy.checks.mccrary.McCraryDensityTest>` | RD | No | Is there evidence of manipulation around the cutoff? |
+| {doc}`PreTreatmentPlaceboCheck <../api/generated/causalpy.checks.pre_treatment_placebo.PreTreatmentPlaceboCheck>` | Staggered DiD | No | Do pre-treatment event-study effects look close to zero? |
 
 ## Where examples already exist
 
@@ -79,43 +79,43 @@ cp.SensitivityAnalysis(
 
 ## Check-by-check guide
 
-### `PlaceboInTime`
+### {doc}`PlaceboInTime <../api/generated/causalpy.checks.placebo_in_time.PlaceboInTime>`
 
 `PlaceboInTime` moves the intervention backward into the pre-treatment period and re-fits the model. If those pseudo-interventions often produce effects comparable to the observed one, the original result looks less credible. In synthetic control settings, placebo and falsification exercises are a standard part of design assessment {cite:p}`abadie2021using`; in interrupted time series settings, the same logic aligns with broader falsification practice in pre/post intervention designs {cite:p}`lopezbernal2017its`.
 
 This check requires a PyMC-backed model because it works with posterior impact draws. In CausalPy it can also fit a hierarchical null model and, optionally, estimate Bayesian assurance for a user-supplied expected effect prior.
 
-### `PriorSensitivity`
+### {doc}`PriorSensitivity <../api/generated/causalpy.checks.prior_sensitivity.PriorSensitivity>`
 
 `PriorSensitivity` re-fits the same experiment with alternative prior specifications and compares the resulting effect summaries. Use it when prior choice could matter materially, especially in small samples or weakly identified models. Reporting how posterior conclusions change under reasonable alternatives is good Bayesian practice {cite:p}`liBayesianProp`.
 
 This is the broadest check in the current API, but it is only available for PyMC-backed experiments.
 
-### `PersistenceCheck`
+### {doc}`PersistenceCheck <../api/generated/causalpy.checks.persistence.PersistenceCheck>`
 
 `PersistenceCheck` applies to three-period ITS designs with `treatment_end_time`. It wraps `analyze_persistence()` to ask whether the effect persists, fades, or reverses after the intervention ends. This is especially relevant when policy or campaign effects may decay after treatment is removed {cite:p}`wagner2002segmented`.
 
-### `ConvexHullCheck`
+### {doc}`ConvexHullCheck <../api/generated/causalpy.checks.convex_hull.ConvexHullCheck>`
 
 `ConvexHullCheck` asks whether the treated unit sits within the support of the donor pool in the pre-treatment period. If not, the synthetic control fit relies on extrapolation rather than interpolation, which weakens design credibility.
 
-### `LeaveOneOut`
+### {doc}`LeaveOneOut <../api/generated/causalpy.checks.leave_one_out.LeaveOneOut>`
 
 `LeaveOneOut` drops one control unit at a time and re-fits the synthetic control. If the estimated effect changes dramatically when a single donor is removed, the result depends too heavily on that donor rather than on the donor pool as a whole.
 
-### `PlaceboInSpace`
+### {doc}`PlaceboInSpace <../api/generated/causalpy.checks.placebo_in_space.PlaceboInSpace>`
 
 `PlaceboInSpace` re-labels each control unit as though it were treated and compares those placebo effects to the observed treated effect. If many placebo units show effects as large as the treated unit, the original estimate looks less distinctive {cite:p}`abadie2010synthetic`.
 
-### `BandwidthSensitivity`
+### {doc}`BandwidthSensitivity <../api/generated/causalpy.checks.bandwidth.BandwidthSensitivity>`
 
 `BandwidthSensitivity` re-fits RD or RKink models across a sequence of bandwidths. Because bandwidth choice drives the bias-variance trade-off in local designs, a result that flips across plausible bandwidths should be treated cautiously {cite:p}`imbens2008regression,lee2010regression`.
 
-### `McCraryDensityTest`
+### {doc}`McCraryDensityTest <../api/generated/causalpy.checks.mccrary.McCraryDensityTest>`
 
 `McCraryDensityTest` checks for a discontinuity in the density of the running variable at the threshold. A sharp jump suggests units may have manipulated their assignment variable, undermining the design's local comparability assumption {cite:p}`mccrary2008manipulation`.
 
-### `PreTreatmentPlaceboCheck`
+### {doc}`PreTreatmentPlaceboCheck <../api/generated/causalpy.checks.pre_treatment_placebo.PreTreatmentPlaceboCheck>`
 
 `PreTreatmentPlaceboCheck` examines pre-treatment event-study effects in staggered DiD. If negative event times are far from zero, the parallel trends story is harder to defend and the treatment effect may be biased {cite:p}`goodman2021difference,borusyak2024revisiting`.
 
