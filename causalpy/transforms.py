@@ -12,26 +12,20 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Patsy stateful transforms for Piecewise Interrupted Time Series analysis.
+Transform specifications and utilities for graded and piecewise ITS workflows.
 
-This module provides `step` and `ramp` transforms for use in patsy formulas,
-enabling flexible specification of level and slope changes at intervention points.
+This module combines two transform families:
 
-Examples
---------
->>> import causalpy as cp
->>> # Numeric time with level and slope change at t=50
->>> formula = "y ~ 1 + t + step(t, 50) + ramp(t, 50)"
-
->>> # Datetime time with intervention
->>> formula = "y ~ 1 + date + step(date, '2020-06-01') + ramp(date, '2020-06-01')"
-
->>> # Different effects per intervention
->>> formula = "y ~ 1 + t + step(t, 50) + step(t, 100) + ramp(t, 100)"
+- Transfer-function transforms for graded interventions, including saturation,
+  adstock, and lag components implemented with numpy for OLS-style workflows.
+- Patsy stateful `step` and `ramp` transforms used in Piecewise Interrupted
+  Time Series formulas.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -39,38 +33,539 @@ import pandas as pd
 import patsy
 
 
-class StepTransform:
+def _hill_saturation(x: np.ndarray, slope: float, kappa: float) -> np.ndarray:
+    """Compute Hill saturation using numpy arrays."""
+    x_arr = np.asarray(x, dtype=float)
+    x_power = np.power(x_arr, slope)
+    denominator = np.power(kappa, slope) + x_power
+    return np.divide(
+        x_power,
+        denominator,
+        out=np.zeros_like(x_arr, dtype=float),
+        where=denominator != 0,
+    )
+
+
+def _logistic_saturation(x: np.ndarray, lam: float) -> np.ndarray:
+    """Compute a zero-anchored logistic saturation curve."""
+    x_arr = np.asarray(x, dtype=float)
+    saturated = 2.0 / (1.0 + np.exp(-lam * x_arr)) - 1.0
+    return np.clip(saturated, 0.0, 1.0)
+
+
+def _michaelis_menten(x: np.ndarray, alpha: float, lam: float) -> np.ndarray:
+    """Compute Michaelis-Menten saturation using numpy arrays."""
+    x_arr = np.asarray(x, dtype=float)
+    denominator = lam + x_arr
+    return np.divide(
+        alpha * x_arr,
+        denominator,
+        out=np.zeros_like(x_arr, dtype=float),
+        where=denominator != 0,
+    )
+
+
+def _geometric_adstock(
+    x: np.ndarray, alpha: float, l_max: int, normalize: bool
+) -> np.ndarray:
+    """Apply causal geometric adstock with optional normalization."""
+    x_arr = np.asarray(x, dtype=float)
+    weights = np.power(alpha, np.arange(l_max + 1, dtype=float))
+    if normalize:
+        weights = weights / weights.sum()
+    return np.convolve(x_arr, weights, mode="full")[: len(x_arr)]
+
+
+# ============================================================================
+# Strategy Pattern Base Classes
+# ============================================================================
+
+
+class SaturationTransform(ABC):
+    """Base class for saturation transforms.
+
+    Saturation transforms model diminishing returns in the response to increasing
+    exposure levels (e.g., ad spend, policy intensity).
+
+    Following the strategy pattern, all saturation transforms must implement:
+    - apply(x): Transform input array
+    - get_params(): Return dictionary of parameters
     """
-    Stateful transform for step function (level change) at threshold.
 
-    Creates a binary indicator: 1 if time >= threshold, 0 otherwise.
+    @abstractmethod
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply saturation transform to input array.
 
-    Works with both numeric and datetime time columns. For datetime,
-    the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp.
+        Parameters
+        ----------
+        x : np.ndarray
+            Input series (1D array).
 
-    The transform is "stateful" because it remembers the datetime origin
-    from the training data, ensuring consistent behavior when predicting
-    on new data.
+        Returns
+        -------
+        np.ndarray
+            Saturated series.
+        """
+        pass
+
+    @abstractmethod
+    def get_params(self) -> dict:
+        """Return transform parameters as a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary of parameter names and values.
+        """
+        pass
+
+
+class AdstockTransform(ABC):
+    """Base class for adstock (carryover) transforms.
+
+    Adstock transforms model the carryover effect where exposure in one period
+    affects outcomes in subsequent periods (e.g., advertising carryover).
+
+    Following the strategy pattern, all adstock transforms must implement:
+    - apply(x): Transform input array
+    - get_params(): Return dictionary of parameters
+    """
+
+    @abstractmethod
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply adstock transform to input array.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Input series (1D array).
+
+        Returns
+        -------
+        np.ndarray
+            Adstocked series.
+        """
+        pass
+
+    @abstractmethod
+    def get_params(self) -> dict:
+        """Return transform parameters as a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary of parameter names and values.
+        """
+        pass
+
+
+class LagTransform(ABC):
+    """Base class for lag (delay) transforms.
+
+    Lag transforms apply a simple shift that delays the effect by a fixed
+    number of periods.
+
+    Following the strategy pattern, all lag transforms must implement:
+    - apply(x): Transform input array
+    - get_params(): Return dictionary of parameters
+    """
+
+    @abstractmethod
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply lag transform to input array.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Input series (1D array).
+
+        Returns
+        -------
+        np.ndarray
+            Lagged series.
+        """
+        pass
+
+    @abstractmethod
+    def get_params(self) -> dict:
+        """Return transform parameters as a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary of parameter names and values.
+        """
+        pass
+
+
+# ============================================================================
+# Concrete Saturation Implementations
+# ============================================================================
+
+
+class HillSaturation(SaturationTransform):
+    """Hill saturation function.
+
+    Models diminishing returns using the Hill function, commonly used in
+    pharmacology and marketing mix modeling.
 
     Parameters
     ----------
-    x : array-like
-        Time values (numeric or datetime)
-    threshold : numeric, str, or pd.Timestamp
-        The intervention time. For datetime x, can be a string like
-        '2020-01-01' which will be parsed as pd.Timestamp.
+    slope : float
+        Hill function slope parameter (s). Higher values create steeper curves.
+    kappa : float
+        Hill function half-saturation point (k). The exposure level at which
+        the response reaches 50% of maximum.
 
     Examples
     --------
-    >>> # Numeric time
-    >>> formula = "y ~ 1 + t + step(t, 50)"
+    >>> saturation = HillSaturation(slope=2.0, kappa=5000)
+    >>> x = np.array([1000, 5000, 10000])
+    >>> x_saturated = saturation.apply(x)
+    """
 
-    >>> # Datetime time with string threshold
-    >>> formula = "y ~ 1 + date + step(date, '2020-06-01')"
+    def __init__(self, slope: float, kappa: float):
+        """Initialize Hill saturation with parameters."""
+        self.slope = slope
+        self.kappa = kappa
 
-    >>> # Datetime time with Timestamp threshold
-    >>> formula = "y ~ 1 + date + step(date, pd.Timestamp('2020-06-01'))"
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply Hill saturation transform."""
+        return _hill_saturation(x, slope=self.slope, kappa=self.kappa)
+
+    def get_params(self) -> dict:
+        """Return Hill saturation parameters."""
+        return {"slope": self.slope, "kappa": self.kappa}
+
+
+class LogisticSaturation(SaturationTransform):
+    """Logistic saturation function.
+
+    Models diminishing returns using the logistic function.
+
+    Parameters
+    ----------
+    lam : float
+        Lambda parameter controlling the saturation rate.
+
+    Examples
+    --------
+    >>> saturation = LogisticSaturation(lam=0.5)
+    >>> x = np.array([1, 2, 3, 4, 5])
+    >>> x_saturated = saturation.apply(x)
+    """
+
+    def __init__(self, lam: float):
+        """Initialize logistic saturation with parameter."""
+        self.lam = lam
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply logistic saturation transform."""
+        return _logistic_saturation(x, lam=self.lam)
+
+    def get_params(self) -> dict:
+        """Return logistic saturation parameters."""
+        return {"lam": self.lam}
+
+
+class MichaelisMentenSaturation(SaturationTransform):
+    """Michaelis-Menten saturation function.
+
+    Models diminishing returns using the Michaelis-Menten equation from
+    enzyme kinetics.
+
+    Parameters
+    ----------
+    alpha : float
+        Maximum saturation level.
+    lam : float
+        Half-saturation constant.
+
+    Examples
+    --------
+    >>> saturation = MichaelisMentenSaturation(alpha=1.0, lam=100)
+    >>> x = np.array([50, 100, 200, 500])
+    >>> x_saturated = saturation.apply(x)
+    """
+
+    def __init__(self, alpha: float, lam: float):
+        """Initialize Michaelis-Menten saturation with parameters."""
+        self.alpha = alpha
+        self.lam = lam
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply Michaelis-Menten saturation transform."""
+        return _michaelis_menten(x, alpha=self.alpha, lam=self.lam)
+
+    def get_params(self) -> dict:
+        """Return Michaelis-Menten saturation parameters."""
+        return {"alpha": self.alpha, "lam": self.lam}
+
+
+# ============================================================================
+# Saturation Factory
+# ============================================================================
+
+SATURATION_TYPES: dict[str, type[SaturationTransform]] = {
+    "hill": HillSaturation,
+    "logistic": LogisticSaturation,
+    "michaelis_menten": MichaelisMentenSaturation,
+}
+
+
+def create_saturation(saturation_type: str, **kwargs) -> SaturationTransform:
+    """Create a saturation transform from a type string and parameters.
+
+    Parameters
+    ----------
+    saturation_type : str
+        One of ``"hill"``, ``"logistic"``, or ``"michaelis_menten"``.
+    **kwargs
+        Parameters forwarded to the chosen saturation class constructor.
+
+    Returns
+    -------
+    SaturationTransform
+        An instance of the requested saturation transform.
+
+    Raises
+    ------
+    ValueError
+        If ``saturation_type`` is not a recognised type.
+
+    Examples
+    --------
+    >>> sat = create_saturation("hill", slope=2.0, kappa=5.0)
+    >>> isinstance(sat, HillSaturation)
+    True
+    """
+    cls = SATURATION_TYPES.get(saturation_type)
+    if cls is None:
+        raise ValueError(
+            f"Unknown saturation type: {saturation_type!r}. "
+            f"Choose from: {sorted(SATURATION_TYPES.keys())}"
+        )
+    return cls(**kwargs)
+
+
+# ============================================================================
+# Concrete Adstock Implementations
+# ============================================================================
+
+
+class GeometricAdstock(AdstockTransform):
+    """Geometric adstock function.
+
+    Models carryover effects using geometric decay, where past exposures
+    decay exponentially over time.
+
+    Parameters
+    ----------
+    alpha : float, optional
+        Geometric decay rate, must be in (0, 1). Higher values indicate longer
+        carryover. Either alpha or half_life must be provided.
+    half_life : float, optional
+        Half-life of the carryover effect in the same units as the data frequency
+        (e.g., weeks for weekly data). The number of periods until the effect
+        decays to 50% of its original value. Either alpha or half_life must be provided.
+    l_max : int, default=12
+        Maximum lag for the convolution (truncation point). Should be long enough
+        to capture the full carryover effect but not unnecessarily long.
+    normalize : bool, default=True
+        If True, normalize the adstock weights to sum to 1. When normalized,
+        the treatment coefficient represents the long-run cumulative effect per
+        unit of (saturated) exposure.
+
+    Examples
+    --------
+    >>> # Adstock with 3-week half-life, normalized
+    >>> adstock = GeometricAdstock(half_life=3, l_max=12, normalize=True)
+    >>> x = np.array([0, 0, 100, 0, 0])
+    >>> x_adstocked = adstock.apply(x)
+
+    >>> # Adstock with direct alpha specification
+    >>> adstock = GeometricAdstock(alpha=0.8, l_max=10, normalize=False)
+
+    Notes
+    -----
+    The geometric adstock function applies a geometric decay:
+    g_t = x_t + alpha * x_{t-1} + alpha^2 * x_{t-2} + ...
+
+    When normalize=True, the weights sum to 1, so the long-run effect per unit
+    exposure is directly interpretable from the coefficient.
+    """
+
+    def __init__(
+        self,
+        alpha: float | None = None,
+        half_life: float | None = None,
+        l_max: int = 12,
+        normalize: bool = True,
+    ):
+        """Initialize geometric adstock with parameters."""
+        # Convert half_life to alpha if provided
+        if half_life is not None and alpha is None:
+            self.alpha = np.power(0.5, 1 / half_life)
+            self.half_life = half_life
+        elif alpha is not None:
+            self.alpha = alpha
+            # Calculate half_life from alpha for get_params()
+            self.half_life = np.log(0.5) / np.log(alpha)
+        else:
+            raise ValueError("Must provide either 'alpha' or 'half_life'")
+
+        if self.alpha is not None and not (0 < self.alpha < 1):
+            raise ValueError(f"alpha must be in (0, 1), got {self.alpha}")
+
+        self.l_max = l_max
+        self.normalize = normalize
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply geometric adstock transform."""
+        return _geometric_adstock(
+            x,
+            alpha=self.alpha,
+            l_max=self.l_max,
+            normalize=self.normalize,
+        )
+
+    def get_params(self) -> dict:
+        """Return geometric adstock parameters."""
+        return {
+            "alpha": self.alpha,
+            "half_life": self.half_life,
+            "l_max": self.l_max,
+            "normalize": self.normalize,
+        }
+
+
+# ============================================================================
+# Concrete Lag Implementations
+# ============================================================================
+
+
+class DiscreteLag(LagTransform):
+    """Discrete lag (delay) transform.
+
+    A simple shift that delays the effect by a fixed number of periods.
+
+    Parameters
+    ----------
+    k : int, default=0
+        Number of periods to delay. k=0 means no delay (immediate effect).
+        k=1 means the effect appears one period after exposure, etc.
+
+    Examples
+    --------
+    >>> # No delay
+    >>> lag = DiscreteLag(k=0)
+    >>> # 2-period delay
+    >>> lag = DiscreteLag(k=2)
+    >>> x = np.array([1, 2, 3, 4, 5])
+    >>> x_lagged = lag.apply(x)
+    >>> x_lagged
+    array([0, 0, 1, 2, 3])
+    """
+
+    def __init__(self, k: int = 0):
+        """Initialize discrete lag with parameter."""
+        if k < 0:
+            raise ValueError(f"Lag k must be non-negative, got {k}")
+        self.k = k
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply discrete lag transform."""
+        if self.k == 0:
+            return x
+
+        # Shift the array and fill the beginning with zeros
+        lagged = np.zeros_like(x)
+        lagged[self.k :] = x[: -self.k]
+        return lagged
+
+    def get_params(self) -> dict:
+        """Return discrete lag parameters."""
+        return {"k": self.k}
+
+
+# ============================================================================
+# Treatment Class
+# ============================================================================
+
+
+@dataclass
+class Treatment:
+    """Treatment channel specification for Transfer Function ITS.
+
+    A treatment channel represents a time-varying intervention (e.g., media spend,
+    policy intensity) along with its transformation pipeline.
+
+    Parameters
+    ----------
+    name : str
+        Column name in the data DataFrame containing the raw exposure series.
+    saturation : SaturationTransform, optional
+        Saturation transform to apply (e.g., HillSaturation, LogisticSaturation).
+        Default is None (no saturation).
+    adstock : AdstockTransform, optional
+        Adstock transform to apply (e.g., GeometricAdstock).
+        Default is None (no adstock).
+    lag : LagTransform, optional
+        Lag transform to apply (e.g., DiscreteLag).
+        Default is None (no lag).
+    coef_constraint : str, default="nonnegative"
+        Constraint on the treatment coefficient. Options:
+        - "nonnegative": Coefficient must be >= 0 (typical for media effects)
+        - "unconstrained": No constraint on coefficient sign
+
+    Examples
+    --------
+    >>> # Communication intensity with Hill saturation and 4-week adstock
+    >>> comm = Treatment(
+    ...     name="comm_intensity",
+    ...     saturation=HillSaturation(slope=2.0, kappa=5),
+    ...     adstock=GeometricAdstock(half_life=4, normalize=True),
+    ...     coef_constraint="unconstrained",
+    ... )
+
+    >>> # Simple treatment with adstock only
+    >>> promo = Treatment(
+    ...     name="promo_intensity",
+    ...     adstock=GeometricAdstock(half_life=2),
+    ... )
+
+    Notes
+    -----
+    Transforms are applied in the order: Saturation -> Adstock -> Lag.
+    This ordering reflects the typical causal sequence: first, exposure saturates,
+    then the saturated effect carries over across time, and finally an optional
+    delay can be applied.
+
+    The strategy pattern allows easy extension with new transform types without
+    modifying this class or the TransferFunctionITS implementation.
+    """
+
+    name: str
+    saturation: SaturationTransform | None = None
+    adstock: AdstockTransform | None = None
+    lag: LagTransform | None = None
+    coef_constraint: str = "nonnegative"
+
+    def __post_init__(self):
+        """Validate treatment specification."""
+        if self.coef_constraint not in ["nonnegative", "unconstrained"]:
+            raise ValueError(
+                f"coef_constraint must be 'nonnegative' or 'unconstrained', "
+                f"got '{self.coef_constraint}'"
+            )
+
+
+class StepTransform:
+    """
+    Stateful transform for a post-threshold level change.
+
+    Creates a binary indicator equal to 1 when `x >= threshold` and 0
+    otherwise. Numeric and datetime-like inputs are both supported.
     """
 
     def __init__(self) -> None:
@@ -88,7 +583,7 @@ class StepTransform:
     def memorize_chunk(
         self, x: Any, threshold: int | float | str | pd.Timestamp
     ) -> None:
-        """Called during first pass - detect datetime and store origin."""
+        """Called during the first pass to detect datetime inputs."""
         if self._is_datetime_like(x):
             self._is_datetime = True
             x_dt = pd.to_datetime(x)
@@ -96,21 +591,17 @@ class StepTransform:
             if self._origin is None:
                 self._origin = x_min
             else:
-                # Handle chunked data - keep the overall minimum
                 self._origin = min(self._origin, x_min)  # type: ignore[assignment]
 
     def memorize_finish(self) -> None:
-        """Called after all chunks processed - finalize state."""
-        pass
+        """Finalize state after patsy's memorize pass."""
 
     def transform(
         self, x: Any, threshold: int | float | str | pd.Timestamp
     ) -> np.ndarray:
         """Transform x into step function values."""
         if self._is_datetime and self._origin is not None:
-            # Convert x to days from origin
             x_dt = pd.to_datetime(x)
-            # Handle both DatetimeIndex and Series
             if isinstance(x_dt, pd.DatetimeIndex):
                 x_numeric: np.ndarray = np.asarray(
                     (x_dt - self._origin).total_seconds() / (24 * 3600)
@@ -120,7 +611,6 @@ class StepTransform:
                     (x_dt - self._origin).dt.total_seconds() / (24 * 3600)
                 )
 
-            # Convert threshold to days from origin
             threshold_dt = self._parse_threshold(threshold)
             t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
         else:
@@ -132,44 +622,18 @@ class StepTransform:
     def _parse_threshold(
         self, threshold: int | float | str | pd.Timestamp
     ) -> pd.Timestamp:
-        """Parse threshold to pd.Timestamp, handling various input types."""
+        """Parse threshold into a timestamp."""
         if isinstance(threshold, pd.Timestamp):
             return threshold
-        else:
-            # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+        return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
 
 
 class RampTransform:
     """
-    Stateful transform for ramp function (slope change) at threshold.
+    Stateful transform for a post-threshold slope change.
 
-    Creates a ramp: max(0, time - threshold). For datetime, the ramp
-    values are in days.
-
-    Works with both numeric and datetime time columns. For datetime,
-    the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp.
-
-    Parameters
-    ----------
-    x : array-like
-        Time values (numeric or datetime)
-    threshold : numeric, str, or pd.Timestamp
-        The intervention time.
-
-    Examples
-    --------
-    >>> # Numeric time - ramp is in same units as t
-    >>> formula = "y ~ 1 + t + ramp(t, 50)"
-
-    >>> # Datetime time - ramp is in DAYS
-    >>> formula = "y ~ 1 + date + ramp(date, '2020-06-01')"
-
-    Notes
-    -----
-    For datetime inputs, the ramp values represent days since the threshold.
-    This means the slope coefficient will be interpreted as "change per day".
+    Creates `max(0, x - threshold)` for numeric inputs and the corresponding
+    number of days since the threshold for datetime inputs.
     """
 
     def __init__(self) -> None:
@@ -187,7 +651,7 @@ class RampTransform:
     def memorize_chunk(
         self, x: Any, threshold: int | float | str | pd.Timestamp
     ) -> None:
-        """Called during first pass - detect datetime and store origin."""
+        """Called during the first pass to detect datetime inputs."""
         if self._is_datetime_like(x):
             self._is_datetime = True
             x_dt = pd.to_datetime(x)
@@ -198,17 +662,14 @@ class RampTransform:
                 self._origin = min(self._origin, x_min)  # type: ignore[assignment]
 
     def memorize_finish(self) -> None:
-        """Called after all chunks processed."""
-        pass
+        """Finalize state after patsy's memorize pass."""
 
     def transform(
         self, x: Any, threshold: int | float | str | pd.Timestamp
     ) -> np.ndarray:
         """Transform x into ramp function values."""
         if self._is_datetime and self._origin is not None:
-            # Convert x to days from origin
             x_dt = pd.to_datetime(x)
-            # Handle both DatetimeIndex and Series
             if isinstance(x_dt, pd.DatetimeIndex):
                 x_numeric: np.ndarray = np.asarray(
                     (x_dt - self._origin).total_seconds() / (24 * 3600)
@@ -218,7 +679,6 @@ class RampTransform:
                     (x_dt - self._origin).dt.total_seconds() / (24 * 3600)
                 )
 
-            # Convert threshold to days from origin
             threshold_dt = self._parse_threshold(threshold)
             t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
         else:
@@ -230,16 +690,30 @@ class RampTransform:
     def _parse_threshold(
         self, threshold: int | float | str | pd.Timestamp
     ) -> pd.Timestamp:
-        """Parse threshold to pd.Timestamp."""
+        """Parse threshold into a timestamp."""
         if isinstance(threshold, pd.Timestamp):
             return threshold
-        else:
-            # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+        return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
 
 
-# Create callable stateful transforms for use in formulas
 step = patsy.stateful_transform(StepTransform)  # type: ignore[attr-defined]
 ramp = patsy.stateful_transform(RampTransform)  # type: ignore[attr-defined]
 
-__all__ = ["step", "ramp", "StepTransform", "RampTransform"]
+
+__all__ = [
+    "AdstockTransform",
+    "DiscreteLag",
+    "GeometricAdstock",
+    "HillSaturation",
+    "LagTransform",
+    "LogisticSaturation",
+    "MichaelisMentenSaturation",
+    "RampTransform",
+    "SATURATION_TYPES",
+    "SaturationTransform",
+    "StepTransform",
+    "Treatment",
+    "create_saturation",
+    "ramp",
+    "step",
+]

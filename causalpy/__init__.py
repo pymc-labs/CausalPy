@@ -22,6 +22,7 @@ from causalpy.version import __version__
 
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.graded_intervention_its import GradedInterventionTimeSeries
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
@@ -38,20 +39,39 @@ from .steps import (
     SensitivityAnalysis,
     SensitivitySummary,
 )
+from .transforms import (
+    AdstockTransform,
+    DiscreteLag,
+    GeometricAdstock,
+    HillSaturation,
+    LagTransform,
+    LogisticSaturation,
+    MichaelisMentenSaturation,
+    SaturationTransform,
+    Treatment,
+)
 from .utils import extract_lift_for_mmm, plot_correlations
 
 __all__ = [
     "__version__",
+    "AdstockTransform",
     "checks",
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
+    "DiscreteLag",
     "EstimateEffect",
     "extract_lift_for_mmm",
     "GenerateReport",
+    "GeometricAdstock",
+    "GradedInterventionTimeSeries",
+    "HillSaturation",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "LagTransform",
     "load_data",
+    "LogisticSaturation",
+    "MichaelisMentenSaturation",
     "PiecewiseITS",
     "Pipeline",
     "PipelineContext",
@@ -62,6 +82,7 @@ __all__ = [
     "ramp",
     "RegressionDiscontinuity",
     "RegressionKink",
+    "SaturationTransform",
     "SensitivityAnalysis",
     "SensitivitySummary",
     "skl_models",
@@ -69,5 +90,6 @@ __all__ = [
     "step",
     "Step",
     "SyntheticControl",
+    "Treatment",
     "variable_selection_priors",
 ]
