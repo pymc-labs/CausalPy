@@ -89,6 +89,23 @@ class GenerateReport:
             logger.debug("Could not render plot: %s", exc)
         return plots
 
+    @staticmethod
+    def _render_figures(figures: list[Any]) -> list[str]:
+        """Encode a list of matplotlib figures as base64 PNG strings."""
+        import matplotlib.pyplot as plt
+
+        encoded: list[str] = []
+        for fig in figures:
+            try:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+                plt.close(fig)
+                buf.seek(0)
+                encoded.append(base64.b64encode(buf.read()).decode("utf-8"))
+            except Exception as exc:
+                logger.debug("Could not render check figure: %s", exc)
+        return encoded
+
     def run(self, context: PipelineContext) -> PipelineContext:
         """Generate the HTML report and store it in the context."""
         env = Environment(
@@ -118,11 +135,14 @@ class GenerateReport:
                     "passed": cr.passed,
                     "text": cr.text,
                     "table_html": None,
+                    "figure_b64_list": [],
                 }
                 if cr.table is not None:
                     entry["table_html"] = cr.table.to_html(
                         classes="", index=False, border=0
                     )
+                if cr.figures:
+                    entry["figure_b64_list"] = self._render_figures(cr.figures)
                 sensitivity_results.append(entry)
 
         html = template.render(
