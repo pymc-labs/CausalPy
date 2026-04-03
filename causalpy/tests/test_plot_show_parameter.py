@@ -30,16 +30,15 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_plot_show_parameter_default_true_pymc(mock_pymc_sample):
+def test_plot_show_parameter_default_true_pymc(mock_pymc_sample, did_data):
     """
     Test that plot() calls plt.show() by default (show=True) for PyMC models.
 
     This ensures plots auto-display in Jupyter notebooks when using
     the pattern: fig, ax = result.plot()
     """
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
@@ -55,13 +54,12 @@ def test_plot_show_parameter_default_true_pymc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_plot_show_parameter_explicit_true_pymc(mock_pymc_sample):
+def test_plot_show_parameter_explicit_true_pymc(mock_pymc_sample, did_data):
     """
     Test that plot(show=True) calls plt.show() for PyMC models.
     """
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
@@ -77,15 +75,14 @@ def test_plot_show_parameter_explicit_true_pymc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_plot_show_parameter_false_pymc(mock_pymc_sample):
+def test_plot_show_parameter_false_pymc(mock_pymc_sample, did_data):
     """
     Test that plot(show=False) does NOT call plt.show() for PyMC models.
 
     This allows users to modify the figure before displaying it manually.
     """
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
@@ -101,13 +98,12 @@ def test_plot_show_parameter_false_pymc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_plot_show_parameter_default_true_skl():
+def test_plot_show_parameter_default_true_skl(did_data):
     """
     Test that plot() calls plt.show() by default (show=True) for scikit-learn models.
     """
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
@@ -123,13 +119,12 @@ def test_plot_show_parameter_default_true_skl():
 
 
 @pytest.mark.integration
-def test_plot_show_parameter_false_skl():
+def test_plot_show_parameter_false_skl(did_data):
     """
     Test that plot(show=False) does NOT call plt.show() for scikit-learn models.
     """
-    df = cp.load_data("did")
     result = cp.DifferenceInDifferences(
-        df,
+        did_data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",

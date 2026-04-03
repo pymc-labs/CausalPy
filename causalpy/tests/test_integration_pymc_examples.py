@@ -29,7 +29,7 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_did(mock_pymc_sample):
+def test_did(mock_pymc_sample, did_data):
     """
     Test Difference in Differences (DID) PyMC experiment.
 
@@ -39,7 +39,7 @@ def test_did(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group*post_treatment",
@@ -125,7 +125,7 @@ def test_did_banks_multi(mock_pymc_sample, banks_data):
 
 
 @pytest.mark.integration
-def test_rd(mock_pymc_sample):
+def test_rd(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment.
 
@@ -135,7 +135,7 @@ def test_rd(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
@@ -156,7 +156,7 @@ def test_rd(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_rd_bandwidth(mock_pymc_sample):
+def test_rd_bandwidth(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment with bandwidth parameter.
 
@@ -166,7 +166,7 @@ def test_rd_bandwidth(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -320,7 +320,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_its(mock_pymc_sample):
+def test_its(mock_pymc_sample, its_data):
     """
     Test Interrupted Time-Series experiment.
 
@@ -331,11 +331,7 @@ def test_its(mock_pymc_sample):
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -431,7 +427,7 @@ def test_its_covid(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_sc(mock_pymc_sample):
+def test_sc(mock_pymc_sample, sc_data):
     """
     Test Synthetic Control experiment.
 
@@ -443,7 +439,7 @@ def test_sc(mock_pymc_sample):
     5. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -553,7 +549,7 @@ def test_sc_brexit(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_ancova(mock_pymc_sample):
+def test_ancova(mock_pymc_sample, anova1_data):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -563,7 +559,7 @@ def test_ancova(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
@@ -585,7 +581,7 @@ def test_ancova(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_geolift1(mock_pymc_sample):
+def test_geolift1(mock_pymc_sample, geolift1_data):
     """
     Test Synthetic Control experiment on geo lift data.
 
@@ -595,11 +591,7 @@ def test_geolift1(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = (
-        cp.load_data("geolift1")
-        .assign(time=lambda x: pd.to_datetime(x["time"]))
-        .set_index("time")
-    )
+    df = geolift1_data
     treatment_time = pd.to_datetime("2022-01-01")
     result = cp.SyntheticControl(
         df,
