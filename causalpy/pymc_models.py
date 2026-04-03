@@ -677,6 +677,187 @@ class WeightedSumFitter(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
+def _softmax_simplex_weights(
+    name: str,
+    prior: "Prior",
+    n_rows: int,
+    dims: list[str],
+) -> "pt.TensorVariable":
+    """Create simplex weights via softmax-over-Normal-logits with pinned reference.
+
+    Pins the first logit to zero (removing softmax shift invariance), samples
+    ``N - 1`` unconstrained Normal logits, and applies softmax to produce
+    weights on the simplex.
+
+    Parameters
+    ----------
+    name : str
+        Name for the PyMC Deterministic variable (e.g., "beta", "omega").
+    prior : Prior
+        Prior for the raw logits. Must be a Normal prior with appropriate dims.
+    n_rows : int
+        Number of rows in the weight matrix (e.g., n_treated for SC, 1 for SDiD).
+    dims : list[str]
+        Dimension names for the output Deterministic.
+
+    Returns
+    -------
+    pt.TensorVariable
+        Simplex weights as a PyMC Deterministic.
+    """
+    raw = prior.create_variable(f"{name}_raw")
+    if n_rows == 1 and raw.ndim == 1:
+        # 1D case: raw is shape (N-1,), produce 1D simplex of shape (N,)
+        zero_logit = pt.zeros((1,))
+        tilde = pt.concatenate([zero_logit, raw], axis=0)
+        return pm.Deterministic(name, pt.special.softmax(tilde, axis=-1), dims=dims)
+    zero_logit = pt.zeros((n_rows, 1))
+    tilde = pt.concatenate([zero_logit, raw], axis=-1)
+    return pm.Deterministic(name, pt.special.softmax(tilde, axis=-1), dims=dims)
+
+
+class SoftmaxWeightedSumFitter(PyMCModel):
+    r"""
+    Weighted sum model with softmax-over-Normal-logits parameterization.
+
+    An alternative to :class:`WeightedSumFitter` for synthetic control experiments.
+    Instead of a Dirichlet prior on the simplex weights, this model places Normal
+    priors on unconstrained logits and maps them to the simplex via the softmax
+    transform. The first logit is pinned to zero to remove the softmax's shift
+    invariance.
+
+    Defines the PyMC model:
+
+    .. math::
+        \tilde{\beta}_1 &= 0 \\
+        \tilde{\beta}_{j} &\sim \mathrm{Normal}(0, \sigma) \quad j = 2, \ldots, N \\
+        \beta &= \mathrm{softmax}(\tilde{\beta}) \\
+        \mu &= X \cdot \beta \\
+        y &\sim \mathrm{Normal}(\mu, \sigma_y) \\
+
+    Notes
+    -----
+    The softmax-Normal parameterization and the Dirichlet prior used by
+    :class:`WeightedSumFitter` both produce simplex-valued weights, but they
+    encode different prior beliefs and regularization behavior:
+
+    - **Dirichlet** (:class:`WeightedSumFitter`): With concentration ``a=1`` the
+      prior is uniform on the simplex. Setting ``a < 1`` encourages sparsity
+      (weights concentrating on fewer donors), while ``a > 1`` encourages
+      uniformity. Regularization strength is controlled by the concentration
+      parameter.
+
+    - **Softmax-Normal** (this class): The prior scale ``sigma`` on the logits
+      controls regularization. Small ``sigma`` shrinks logits toward zero,
+      producing near-uniform weights (DiD-like behavior). Large ``sigma`` allows
+      the data to concentrate weight on a few well-matching control units
+      (SC-like behavior). The default ``sigma=1.0`` provides moderate
+      regularization.
+
+    This parameterization is motivated by the Bayesian Synthetic
+    Difference-in-Differences (SDiD) formulation, where the prior scale plays
+    the role of the :math:`\ell_2` regularization parameter :math:`\zeta` in the
+    frequentist SDiD of Arkhangelsky et al. (2021).
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> import xarray as xr
+    >>> from causalpy.pymc_models import SoftmaxWeightedSumFitter
+    >>> sc = cp.load_data("sc")
+    >>> control_units = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    >>> X = xr.DataArray(
+    ...     sc[control_units].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": sc.index, "coeffs": control_units},
+    ... )
+    >>> y = xr.DataArray(
+    ...     sc['actual'].values.reshape((sc.shape[0], 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": sc.index, "treated_units": ["actual"]},
+    ... )
+    >>> coords = {
+    ...     "coeffs": control_units,
+    ...     "treated_units": ["actual"],
+    ...     "obs_ind": np.arange(sc.shape[0]),
+    ... }
+    >>> wsf = SoftmaxWeightedSumFitter(sample_kwargs={"progressbar": False})
+    >>> wsf.fit(X, y, coords=coords)
+    Inference data...
+    """  # noqa: W605
+
+    default_priors = {
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+            dims=["obs_ind", "treated_units"],
+        ),
+    }
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """
+        Set Normal prior for logit weights based on number of control units.
+
+        The prior is placed on ``N - 1`` unconstrained logits (the first logit is
+        pinned to zero). The default scale ``sigma=1.0`` provides moderate
+        regularization, equivalent to ``zeta=1.0`` in the frequentist SDiD.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Control unit data with shape (n_obs, n_control_units).
+        y : xarray.DataArray
+            Treated unit outcome data.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Dictionary containing:
+            - "beta_raw": Normal prior with dims ["treated_units", "coeffs_raw"]
+        """
+        return {
+            "beta_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=1.0,
+                dims=["treated_units", "coeffs_raw"],
+            ),
+        }
+
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+    ) -> None:
+        """
+        Build the PyMC model with softmax-parameterized simplex weights.
+        """
+        coeffs_raw = (
+            coords["coeffs"][1:]
+            if coords and "coeffs" in coords
+            else list(range(1, X.shape[1]))
+        )
+
+        with self:
+            coords_with_raw = dict(coords) if coords else {}
+            coords_with_raw["coeffs_raw"] = coeffs_raw
+            self.add_coords(coords_with_raw)
+
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+
+            beta = _softmax_simplex_weights(
+                name="beta",
+                prior=self.priors["beta_raw"],
+                n_rows=y.shape[1],
+                dims=["treated_units", "coeffs"],
+            )
+
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+
+
 class InstrumentalVariableRegression(PyMCModel):
     """Custom PyMC model for instrumental linear regression
 
