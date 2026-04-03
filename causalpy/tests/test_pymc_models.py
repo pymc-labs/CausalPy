@@ -20,7 +20,13 @@ import xarray as xr
 from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import LinearRegression, PyMCModel, WeightedSumFitter
+from causalpy.pymc_models import (
+    LinearRegression,
+    PyMCModel,
+    SoftmaxWeightedSumFitter,
+    WeightedSumFitter,
+    _softmax_simplex_weights,
+)
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -595,6 +601,113 @@ class TestWeightedSumFitterMultiUnit:
         )
 
 
+class TestSoftmaxSimplexWeights:
+    """Tests for the _softmax_simplex_weights helper."""
+
+    def test_produces_simplex_weights(self):
+        """Test that helper produces a Deterministic variable on the simplex."""
+        prior = Prior("Normal", mu=0, sigma=1.0, dims=["treated_units", "coeffs_raw"])
+        with pm.Model() as model:
+            model.add_coords(
+                {
+                    "coeffs": ["a", "b", "c"],
+                    "coeffs_raw": ["b", "c"],
+                    "treated_units": ["unit_0"],
+                }
+            )
+            _softmax_simplex_weights(
+                name="beta",
+                prior=prior,
+                n_rows=1,
+                dims=["treated_units", "coeffs"],
+            )
+        assert "beta" in [v.name for v in model.deterministics]
+
+    def test_pinned_first_logit(self):
+        """Test that the first logit is pinned (3 coeffs -> 2 raw params)."""
+        prior = Prior("Normal", mu=0, sigma=1.0, dims=["treated_units", "coeffs_raw"])
+        with pm.Model() as model:
+            model.add_coords(
+                {
+                    "coeffs": ["a", "b", "c"],
+                    "coeffs_raw": ["b", "c"],
+                    "treated_units": ["unit_0"],
+                }
+            )
+            _softmax_simplex_weights(
+                name="beta",
+                prior=prior,
+                n_rows=1,
+                dims=["treated_units", "coeffs"],
+            )
+        # Should have beta_raw with 2 free parameters (not 3)
+        raw_vars = [v for v in model.free_RVs if v.name == "beta_raw"]
+        assert len(raw_vars) == 1
+        # beta_raw should have shape (1, 2) — N-1 logits, not N
+        assert raw_vars[0].eval().shape == (1, 2)
+
+
+class TestSoftmaxWeightedSumFitterMultiUnit:
+    """Tests for SoftmaxWeightedSumFitter with multiple treated units."""
+
+    def test_multi_unit_fitting(self, synthetic_control_data):
+        """Test that SoftmaxWeightedSumFitter can fit with multiple treated units."""
+        X, y, coords, control_units, treated_units = synthetic_control_data
+
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        result = wsf.fit(X, y, coords=coords)
+
+        assert isinstance(result, az.InferenceData)
+        assert "posterior" in result.groups()
+        assert "posterior_predictive" in result.groups()
+
+    def test_multi_unit_predictions(self, synthetic_control_data):
+        """Test that predictions work correctly with multiple treated units."""
+        X, y, coords, control_units, treated_units = synthetic_control_data
+
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        wsf.fit(X, y, coords=coords)
+
+        pred = wsf.predict(X)
+        assert isinstance(pred, az.InferenceData)
+        assert "posterior_predictive" in pred.groups()
+
+    def test_coefficients_structure(self, synthetic_control_data):
+        """Test that beta weights sum to 1 along coeffs dim (simplex constraint)."""
+        X, y, coords, control_units, treated_units = synthetic_control_data
+
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        wsf.fit(X, y, coords=coords)
+
+        beta = wsf.idata.posterior["beta"]
+        # Weights should sum to 1 along the coeffs dimension
+        beta_sum = beta.sum(dim="coeffs")
+        np.testing.assert_allclose(beta_sum.values, 1.0, atol=1e-5)
+
+    def test_single_treated_backward_compat(self, single_treated_data):
+        """Test that single treated unit still works."""
+        X, y, coords, control_units, treated_units = single_treated_data
+
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        result = wsf.fit(X, y, coords=coords)
+
+        assert isinstance(result, az.InferenceData)
+        assert "posterior" in result.groups()
+        assert "beta" in result.posterior
+
+    def test_scoring(self, synthetic_control_data):
+        """Test that scoring works with multiple treated units."""
+        X, y, coords, control_units, treated_units = synthetic_control_data
+
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        wsf.fit(X, y, coords=coords)
+
+        scores = wsf.score(X, y)
+        assert isinstance(scores, pd.Series)
+        for i, _unit in enumerate(treated_units):
+            assert f"unit_{i}_r2" in scores.index
+
+
 @pytest.fixture(scope="module")
 def prior_test_data():
     """Generate test data for Prior integration tests (shared across all tests)."""
@@ -668,6 +781,25 @@ class TestPriorIntegration:
         # Check shape matches number of predictors
         assert len(beta_prior.parameters["a"]) == X.shape[1]  # 2 predictors
         assert np.allclose(beta_prior.parameters["a"], np.ones(2))
+
+    def test_softmax_weighted_sum_fitter_priors_from_data(self, prior_test_data):
+        """Test SoftmaxWeightedSumFitter data-driven Normal logit prior generation."""
+        X, y, coords = prior_test_data
+        model = SoftmaxWeightedSumFitter()
+        data_priors = model.priors_from_data(X, y)
+
+        # Should return beta_raw prior based on X shape minus 1 (pinned reference)
+        assert "beta_raw" in data_priors
+        beta_raw_prior = data_priors["beta_raw"]
+
+        # Check it's a Normal prior
+        assert isinstance(beta_raw_prior, Prior)
+        assert beta_raw_prior.distribution == "Normal"
+
+        # Check parameters
+        assert beta_raw_prior.parameters["sigma"] == 1.0
+        assert beta_raw_prior.parameters["mu"] == 0
+        assert beta_raw_prior.dims == ("treated_units", "coeffs_raw")
 
     def test_prior_precedence_system(self, prior_test_data):
         """Test that user priors override data-driven priors override defaults."""
