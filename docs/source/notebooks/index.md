@@ -52,6 +52,7 @@ its_lift_test.ipynb
 :maxdepth: 1
 
 its_pymc_comparative.ipynb
+its_causalpy_vs_causalimpact.ipynb
 :::
 
 :::{toctree}
