@@ -1,0 +1,32 @@
+# Bot Blacklist for GitHub Notification Summary
+#
+# Notifications from these usernames are filtered out (ignored).
+# This helps reduce noise from automated bot comments.
+#
+# Format: List of GitHub usernames (case-insensitive matching)
+# Bot accounts typically end with [bot] suffix
+
+# Code coverage bots
+- codecov
+- codecov[bot]
+- codecov-commenter
+
+# CI/CD bots
+- pre-commit-ci
+- pre-commit-ci[bot]
+- github-actions
+- github-actions[bot]
+
+# Dependency update bots
+- dependabot
+- dependabot[bot]
+- renovate
+- renovate[bot]
+
+# Review/notebook bots
+- review-notebook-app
+- review-notebook-app[bot]
+
+# Add your custom bots below:
+# - my-custom-bot
+# - another-bot[bot]
