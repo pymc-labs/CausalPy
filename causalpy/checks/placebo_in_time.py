@@ -31,11 +31,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm
 import xarray as xr
 
+from causalpy.checks._plot_helpers import null_distribution_plot
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
@@ -205,6 +207,45 @@ class PlaceboInTime:
         self.rope_half_width = rope_half_width
         self.n_design_replications = n_design_replications
         self.random_seed = random_seed
+
+    # ------------------------------------------------------------------
+    # Plotting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def plot(
+        result: CheckResult,
+        *,
+        xlabel: str = "Cumulative causal impact",
+        title: str | None = None,
+        figsize: tuple[float, float] = (7, 3.5),
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the null distribution vs the actual cumulative effect.
+
+        Parameters
+        ----------
+        result : CheckResult
+            The ``CheckResult`` returned by :meth:`run`.
+        xlabel : str
+            X-axis label.
+        title : str, optional
+            Plot title. Auto-generated if not provided.
+        figsize : tuple
+            Figure size.
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+        """
+        meta = result.metadata
+        return null_distribution_plot(
+            null_samples=meta["null_samples"],
+            actual_effect=meta["actual_cumulative_mean"],
+            p_outside=meta.get("p_effect_outside_null"),
+            xlabel=xlabel,
+            title=title,
+            figsize=figsize,
+        )
 
     # ------------------------------------------------------------------
     # Validation
@@ -722,12 +763,20 @@ class PlaceboInTime:
                 f"{assurance_result.alt_indeterminate_rate:.3f}"
             )
 
-        return CheckResult(
+        check_result = CheckResult(
             check_name="PlaceboInTime",
             passed=passed,
             text=text,
             metadata=metadata,
         )
+
+        try:
+            fig, _ = self.plot(check_result)
+            check_result.figures = [fig]
+        except Exception:
+            logger.debug("PlaceboInTime: could not generate figure", exc_info=True)
+
+        return check_result
 
     def __repr__(self) -> str:
         """Return a string representation of the check."""
