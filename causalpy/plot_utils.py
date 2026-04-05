@@ -26,7 +26,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
-from causalpy.utils import HDI_PROB
+from causalpy.constants import HDI_PROB
 
 
 def plot_xY(

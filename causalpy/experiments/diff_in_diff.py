@@ -26,11 +26,11 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (

@@ -28,11 +28,10 @@ from matplotlib import pyplot as plt
 from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.utils import HDI_PROB
 
 from .base import BaseExperiment
 

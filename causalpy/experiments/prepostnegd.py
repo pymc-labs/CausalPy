@@ -26,14 +26,14 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
-from causalpy.utils import HDI_PROB, _is_variable_dummy_coded, round_num
+from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
 
@@ -217,7 +217,7 @@ class PrePostNEGD(BaseExperiment):
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
         ci = (
-            r"$CI_{94%}$"
+            rf"$CI_{{{HDI_PROB*100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "

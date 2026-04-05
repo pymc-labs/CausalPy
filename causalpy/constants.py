@@ -12,7 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Shared constants for experiment modules.
+Shared constants for the CausalPy package.
 """
 
+HDI_PROB: float = 0.94
 LEGEND_FONT_SIZE: int = 12

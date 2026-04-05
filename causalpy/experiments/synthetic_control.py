@@ -25,13 +25,13 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.experiments.constants import LEGEND_FONT_SIZE
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import HDI_PROB, check_convex_hull_violation, round_num
+from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
