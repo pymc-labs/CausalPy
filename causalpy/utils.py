@@ -29,6 +29,8 @@ import xarray as xr
 if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
+from causalpy.constants import HDI_PROB
+
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
@@ -106,9 +108,11 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
         # In the case of an xarray object, we return the mean and 94% CI
-        percentiles = x.quantile([0.03, 1 - 0.03]).to_numpy()
+        percentiles = x.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).to_numpy()
         ci = (
-            r"$CI_{94\%}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         return f"{x.mean().to_numpy():.2f}" + ci

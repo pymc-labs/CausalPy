@@ -26,6 +26,7 @@ from matplotlib import pyplot as plt
 from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -34,8 +35,6 @@ from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class PiecewiseITS(BaseExperiment):
@@ -144,7 +143,6 @@ class PiecewiseITS(BaseExperiment):
       the evaluation of public health interventions: a tutorial. Int J Epidemiol.
     """
 
-    expt_type = "Piecewise Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
@@ -154,11 +152,12 @@ class PiecewiseITS(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
 
         # Store configuration
+        self.expt_type = "Piecewise Interrupted Time Series"
         self.formula = formula
         self.data = data.copy()
 
@@ -446,7 +445,7 @@ class PiecewiseITS(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict[str, Any]
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for Bayesian models.
@@ -563,7 +562,7 @@ class PiecewiseITS(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict[str, Any]
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS models.
@@ -626,7 +625,7 @@ class PiecewiseITS(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with prediction and effect information.
 

@@ -25,6 +25,7 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
@@ -33,8 +34,6 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -126,7 +125,6 @@ class InterruptedTimeSeries(BaseExperiment):
     after the intervention ends.
     """
 
-    expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
@@ -138,7 +136,7 @@ class InterruptedTimeSeries(BaseExperiment):
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.pre_y: xr.DataArray
@@ -227,7 +225,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         # get the model predictions of the observed (pre-intervention) data
-        if isinstance(self.model, (PyMCModel, RegressorMixin)):
+        if isinstance(self.model, PyMCModel | RegressorMixin):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
@@ -601,7 +599,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -797,7 +795,7 @@ class InterruptedTimeSeries(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -887,7 +885,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
 

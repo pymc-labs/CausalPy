@@ -27,6 +27,7 @@ from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+from causalpy.constants import HDI_PROB
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -469,7 +470,7 @@ class PyMCModel(pm.Model):
         ) -> None:
             """Print one row of the coefficient table"""
             formatted_name = f"  {name: <{max_label_length}}"
-            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1 - 0.03).data, round_to)}]"  # noqa: E501
+            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
         def print_coefficients_for_unit(
