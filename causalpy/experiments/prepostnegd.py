@@ -217,7 +217,7 @@ class PrePostNEGD(BaseExperiment):
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
         ci = (
-            rf"$CI_{{{HDI_PROB*100:.0f}\%}}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         causal_impact = f"{round_num(self.causal_impact.mean(), round_to)}, "

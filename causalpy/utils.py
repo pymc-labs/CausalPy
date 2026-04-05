@@ -112,7 +112,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).to_numpy()
         ci = (
-            rf"$CI_{{{HDI_PROB*100:.0f}\%}}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         return f"{x.mean().to_numpy():.2f}" + ci

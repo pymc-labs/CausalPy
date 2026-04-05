@@ -276,7 +276,7 @@ class RegressionKink(BaseExperiment):
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
         ci = (
-            rf"$CI_{{{HDI_PROB*100:.0f}\%}}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""
