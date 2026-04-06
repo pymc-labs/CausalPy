@@ -18,6 +18,10 @@ from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.convex_hull import ConvexHullCheck
 from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
+from causalpy.checks.outcome_falsification import (
+    FalsificationResult,
+    OutcomeFalsification,
+)
 from causalpy.checks.persistence import PersistenceCheck
 from causalpy.checks.placebo_in_space import PlaceboInSpace
 from causalpy.checks.placebo_in_time import (
@@ -35,8 +39,10 @@ __all__ = [
     "Check",
     "CheckResult",
     "ConvexHullCheck",
+    "FalsificationResult",
     "LeaveOneOut",
     "McCraryDensityTest",
+    "OutcomeFalsification",
     "PersistenceCheck",
     "PlaceboFoldResult",
     "PlaceboInSpace",
