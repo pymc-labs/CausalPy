@@ -677,6 +677,249 @@ def test_no_assurance_without_prior(mock_pymc_sample):
 # ===========================================================================
 
 
+# ===========================================================================
+# Random selection mode — construction tests (unit — no sampling)
+# ===========================================================================
+
+
+def test_selection_method_default():
+    """Default selection method is sequential."""
+    check = PlaceboInTime()
+    assert check.selection_method == "sequential"
+
+
+def test_selection_method_random():
+    """Random selection mode stores parameters."""
+    check = PlaceboInTime(
+        selection_method="random",
+        min_training_pct=0.40,
+        min_gap=2,
+        exclude_periods={"2020-01"},
+        random_seed=99,
+    )
+    assert check.selection_method == "random"
+    assert check.min_training_pct == 0.40
+    assert check.min_gap == 2
+    assert check.exclude_periods == {"2020-01"}
+
+
+def test_invalid_selection_method():
+    """Invalid selection method raises ValueError."""
+    with pytest.raises(ValueError, match="selection_method"):
+        PlaceboInTime(selection_method="invalid")
+
+
+def test_invalid_min_training_pct():
+    """min_training_pct outside (0, 1) raises ValueError."""
+    with pytest.raises(ValueError, match="min_training_pct"):
+        PlaceboInTime(selection_method="random", min_training_pct=0.0)
+    with pytest.raises(ValueError, match="min_training_pct"):
+        PlaceboInTime(selection_method="random", min_training_pct=1.0)
+
+
+def test_invalid_min_gap():
+    """min_gap < 1 raises ValueError."""
+    with pytest.raises(ValueError, match="min_gap"):
+        PlaceboInTime(selection_method="random", min_gap=0)
+
+
+def test_repr_random_selection():
+    """repr includes selection_method when not sequential."""
+    check = PlaceboInTime(n_folds=4, selection_method="random")
+    r = repr(check)
+    assert "selection_method='random'" in r
+    assert "n_folds=4" in r
+
+
+def test_repr_sequential_omits_selection_method():
+    """repr omits selection_method when sequential (default)."""
+    check = PlaceboInTime(n_folds=3)
+    assert "selection_method" not in repr(check)
+
+
+# ===========================================================================
+# Random fold selection — geometry tests (unit — no sampling)
+# ===========================================================================
+
+
+def test_random_fold_treatment_times_count():
+    """Random selection returns exactly n_folds treatment times."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert len(times) == 3
+    # All must be before treatment_time
+    assert all(t < 150 for t in times)
+    # Sorted
+    assert times == sorted(times)
+
+
+def test_random_fold_treatment_times_reproducible():
+    """Same seed produces same selection."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    kwargs = {
+        "n_folds": 3,
+        "selection_method": "random",
+        "min_training_pct": 0.20,
+        "random_seed": 42,
+    }
+    times1 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    times2 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert times1 == times2
+
+
+def test_random_fold_different_seeds_differ():
+    """Different seeds produce different selections."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    times1 = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+    )._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    times2 = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=99,
+    )._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert times1 != times2
+
+
+def test_random_fold_respects_min_gap():
+    """Selected folds respect the min_gap constraint."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        min_gap=5,
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=10
+    )
+    # Gaps between consecutive selected times should be >= min_gap
+    # (since they were selected from a candidate list with min_gap spacing)
+    for i in range(len(times) - 1):
+        assert times[i + 1] - times[i] >= 5
+
+
+def test_random_fold_respects_exclude_periods():
+    """Excluded periods are not selected."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    # Exclude all candidates by excluding every string representation
+    exclude = {str(i) for i in range(200)}
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        exclude_periods=exclude,
+        random_seed=42,
+    )
+    with pytest.raises(ValueError, match="eligible candidate"):
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=150, intervention_length=10
+        )
+
+
+def test_random_fold_too_few_candidates_raises():
+    """Raises when there aren't enough eligible candidates."""
+    # Very short pre-period
+    data = pd.DataFrame({"y": np.zeros(10)}, index=np.arange(10))
+    check = PlaceboInTime(
+        n_folds=5,
+        selection_method="random",
+        min_training_pct=0.50,
+        random_seed=42,
+    )
+    with pytest.raises(ValueError, match="eligible candidate"):
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=8, intervention_length=2
+        )
+
+
+def test_random_fold_with_datetime_index():
+    """Random selection works with datetime-indexed data."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="MS")
+    data = pd.DataFrame({"y": np.zeros(100)}, index=dates)
+    treatment = pd.Timestamp("2027-01-01")
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        exclude_periods={"2020-06"},
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data,
+        treatment_time=treatment,
+        intervention_length=pd.DateOffset(months=6),
+    )
+    assert len(times) == 3
+    assert all(t < treatment for t in times)
+    # Excluded month should not appear
+    for t in times:
+        assert t.strftime("%Y-%m") != "2020-06"
+
+
+# ===========================================================================
+# Random selection — full run (integration — needs PyMC)
+# ===========================================================================
+
+
+@pytest.mark.integration
+def test_run_random_selection(mock_pymc_sample):
+    """Full run with random selection mode."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    assert isinstance(result, CheckResult)
+    assert result.check_name == "PlaceboInTime"
+    assert result.passed is not None
+    assert len(result.metadata["fold_results"]) == 2
+    for fr in result.metadata["fold_results"]:
+        assert fr.pseudo_treatment_time < experiment.treatment_time
+
+
+# ===========================================================================
+# Default check registration
+# ===========================================================================
+
+
 def test_placebo_in_time_registered_as_default():
     """Test placebo in time registered as default."""
     its_defaults = _DEFAULT_CHECKS.get(InterruptedTimeSeries, [])

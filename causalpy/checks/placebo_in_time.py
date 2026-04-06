@@ -20,6 +20,14 @@ effect against that learned null.  Optionally computes Bayesian
 assurance (operating characteristics) against a user-supplied
 expected-effect prior.
 
+Supports two fold-selection strategies:
+
+* **sequential** (default) — evenly-spaced sliding windows stepping
+  backward from the actual treatment time.
+* **random** — randomly sampled eligible windows from the
+  pre-intervention period, with constraints on minimum training
+  fraction, minimum gap between folds, and optional period exclusion.
+
 Supports experiments with a ``treatment_time`` parameter
 (InterruptedTimeSeries, SyntheticControl).  Requires a PyMC model
 for posterior extraction.
@@ -134,6 +142,26 @@ class PlaceboInTime:
     ----------
     n_folds : int, default 3
         Number of placebo folds to create.  Must be >= 1.
+    selection_method : {"sequential", "random"}, default "sequential"
+        How to choose placebo windows.
+
+        * ``"sequential"`` — evenly-spaced sliding windows stepping
+          backward from the treatment time (original behaviour).
+        * ``"random"`` — randomly sample eligible windows from the
+          pre-intervention period, subject to ``min_training_pct``,
+          ``min_gap``, and ``exclude_periods`` constraints.
+    min_training_pct : float, default 0.30
+        *(random mode only)* Minimum fraction of total pre-period
+        observations that must precede each candidate placebo window.
+    min_gap : int, default 1
+        *(random mode only)* Minimum index distance between any two
+        selected candidate positions in the sorted candidate list,
+        preventing near-duplicate folds.
+    exclude_periods : set[str] | None, default None
+        *(random mode only)* Set of period labels to exclude from
+        candidate selection. For datetime-indexed data, use
+        ``"YYYY-MM"`` strings; for numeric indices, use string
+        representations of the index values.
     experiment_factory : callable, optional
         Custom factory ``(data, treatment_time) -> BaseExperiment``.
         If ``None`` (default), the factory is derived from the pipeline's
@@ -163,12 +191,22 @@ class PlaceboInTime:
         Number of simulation replications for assurance.  Defaults to
         ``min(theta_new.size, expected_effect_samples.size)``.
     random_seed : int, optional
-        RNG seed for the assurance simulation.
+        RNG seed for the assurance simulation and random fold selection.
 
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
     >>> check = cp.checks.PlaceboInTime(n_folds=3)  # doctest: +SKIP
+
+    Random selection with constraints:
+
+    >>> check = cp.checks.PlaceboInTime(  # doctest: +SKIP
+    ...     n_folds=4,
+    ...     selection_method="random",
+    ...     min_training_pct=0.30,
+    ...     min_gap=2,
+    ...     random_seed=42,
+    ... )
     """
 
     applicable_methods: set[type[BaseExperiment]] = {
@@ -179,6 +217,10 @@ class PlaceboInTime:
     def __init__(
         self,
         n_folds: int = 3,
+        selection_method: str = "sequential",
+        min_training_pct: float = 0.30,
+        min_gap: int = 1,
+        exclude_periods: set[str] | None = None,
         experiment_factory: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         threshold: float = 0.95,
@@ -190,6 +232,17 @@ class PlaceboInTime:
     ) -> None:
         if n_folds < 1:
             raise ValueError("n_folds must be >= 1")
+        if selection_method not in ("sequential", "random"):
+            raise ValueError(
+                f"selection_method must be 'sequential' or 'random', "
+                f"got {selection_method!r}"
+            )
+        if not 0 < min_training_pct < 1:
+            raise ValueError(
+                f"min_training_pct must be in (0, 1), got {min_training_pct}"
+            )
+        if min_gap < 1:
+            raise ValueError(f"min_gap must be >= 1, got {min_gap}")
         if expected_effect_prior is not None and rope_half_width is None:
             raise ValueError(
                 "rope_half_width is required when expected_effect_prior is "
@@ -197,6 +250,10 @@ class PlaceboInTime:
                 "practical significance."
             )
         self.n_folds = n_folds
+        self.selection_method = selection_method
+        self.min_training_pct = min_training_pct
+        self.min_gap = min_gap
+        self.exclude_periods = exclude_periods
         self.experiment_factory = experiment_factory
         self.sample_kwargs = {**_DEFAULT_SAMPLE_KWARGS, **(sample_kwargs or {})}
         self.threshold = threshold
@@ -283,11 +340,100 @@ class PlaceboInTime:
     def _compute_fold_treatment_times(
         self, treatment_time: Any, intervention_length: Any
     ) -> list[Any]:
-        """Compute pseudo-treatment times for each fold."""
+        """Compute pseudo-treatment times for each fold (sequential mode)."""
         return [
             treatment_time - (self.n_folds - fold) * intervention_length
             for fold in range(self.n_folds)
         ]
+
+    def _compute_random_fold_treatment_times(
+        self,
+        data: pd.DataFrame,
+        treatment_time: Any,
+        intervention_length: Any,
+    ) -> list[Any]:
+        """Randomly select pseudo-treatment times from the pre-period.
+
+        Builds a list of eligible candidate dates/indices from the
+        pre-intervention data, then randomly selects ``n_folds``
+        candidates subject to ``min_training_pct``, ``min_gap``, and
+        ``exclude_periods`` constraints.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Full dataset (must have a sorted index).
+        treatment_time : Any
+            The actual treatment time.
+        intervention_length : Any
+            Length of the intervention window.
+
+        Returns
+        -------
+        list[Any]
+            Sorted list of pseudo-treatment times.
+
+        Raises
+        ------
+        ValueError
+            If not enough eligible candidates exist.
+        """
+        pre_data = data.loc[data.index < treatment_time]
+        if pre_data.empty:
+            raise ValueError("No observations before treatment_time.")
+
+        all_indices = pre_data.index.sort_values()
+        n_total = len(all_indices)
+        min_training = int(np.ceil(self.min_training_pct * n_total))
+        exclude = self.exclude_periods or set()
+
+        candidates: list[Any] = []
+        for idx_val in all_indices:
+            # Check exclusion
+            if hasattr(idx_val, "strftime"):
+                label = idx_val.strftime("%Y-%m")
+            else:
+                label = str(idx_val)
+            if label in exclude:
+                continue
+
+            # Enough training data before this point?
+            n_pre = int((all_indices < idx_val).sum())
+            if n_pre < min_training:
+                continue
+
+            # Pseudo-intervention must end before true treatment
+            pseudo_end = idx_val + intervention_length
+            if pseudo_end > treatment_time:
+                continue
+
+            candidates.append(idx_val)
+
+        if len(candidates) < self.n_folds:
+            raise ValueError(
+                f"Only {len(candidates)} eligible candidate periods found, "
+                f"but {self.n_folds} folds requested.  Reduce n_folds, "
+                f"lower min_training_pct, or relax exclude_periods."
+            )
+
+        rng = np.random.default_rng(self.random_seed)
+        pool = list(range(len(candidates)))
+        selected_idx: list[int] = []
+
+        for _ in range(self.n_folds):
+            valid = [
+                i for i in pool if all(abs(i - s) >= self.min_gap for s in selected_idx)
+            ]
+            if not valid:
+                raise ValueError(
+                    f"Cannot select {self.n_folds} folds with min_gap="
+                    f"{self.min_gap}.  Reduce min_gap or n_folds."
+                )
+            pick = rng.choice(valid)
+            selected_idx.append(pick)
+            pool.remove(pick)
+
+        return sorted(candidates[i] for i in selected_idx)
 
     def _get_fold_data(
         self,
@@ -507,7 +653,12 @@ class PlaceboInTime:
 
         alt_decisions: list[str] = []
         for i in range(n_reps):
-            true_effect = float(expected_samples[i % len(expected_samples)])
+            # Under the alternative, the observed effect is the expected
+            # treatment effect added on top of the null baseline noise,
+            # matching the paper's formulation: theta_new + expected_effect.
+            null_component = float(theta_new_samples[i % len(theta_new_samples)])
+            treatment_component = float(expected_samples[i % len(expected_samples)])
+            true_effect = null_component + treatment_component
             sigma = float(rng.choice(fold_sds))
             simulated_posterior = rng.normal(
                 loc=true_effect, scale=sigma, size=n_posterior_samples
@@ -569,9 +720,14 @@ class PlaceboInTime:
         actual_cumulative = self._extract_cumulative_impact(experiment)
         actual_cumulative_mean = float(actual_cumulative.mean().values)
 
-        fold_treatment_times = self._compute_fold_treatment_times(
-            treatment_time, intervention_length
-        )
+        if self.selection_method == "random":
+            fold_treatment_times = self._compute_random_fold_treatment_times(
+                data, treatment_time, intervention_length
+            )
+        else:
+            fold_treatment_times = self._compute_fold_treatment_times(
+                treatment_time, intervention_length
+            )
 
         fold_results: list[PlaceboFoldResult] = []
         fold_summaries: list[str] = []
@@ -732,6 +888,8 @@ class PlaceboInTime:
     def __repr__(self) -> str:
         """Return a string representation of the check."""
         parts = [f"n_folds={self.n_folds}"]
+        if self.selection_method != "sequential":
+            parts.append(f"selection_method={self.selection_method!r}")
         if self.expected_effect_prior is not None:
             parts.append("assurance=True")
         return f"PlaceboInTime({', '.join(parts)})"
