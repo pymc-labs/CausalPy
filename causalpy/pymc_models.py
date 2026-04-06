@@ -1267,6 +1267,17 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._seasonality_component = None
         self._validate_and_initialize_components()
 
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            n_order=self.n_order,
+            n_changepoints_trend=self.n_changepoints_trend,
+            prior_sigma=self.prior_sigma,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+        )
+
     def _validate_and_initialize_components(self):
         """
         Validate custom components only. Optional dependencies are imported lazily
@@ -1734,6 +1745,17 @@ class StateSpaceTimeSeries(PyMCModel):
         self.ss_mod: Any = None
         self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            level_order=self.level_order,
+            seasonal_length=self.seasonal_length,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+            mode=self.mode,
+        )
 
     def _validate_and_initialize_components(self):
         """
