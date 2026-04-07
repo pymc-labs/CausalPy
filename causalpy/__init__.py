@@ -22,6 +22,7 @@ from causalpy.version import __version__
 
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.event_study import EventStudy
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
@@ -46,6 +47,7 @@ __all__ = [
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
     "EstimateEffect",
+    "EventStudy",
     "extract_lift_for_mmm",
     "GenerateReport",
     "InstrumentalVariable",
