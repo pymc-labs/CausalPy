@@ -46,7 +46,7 @@ class InversePropensityWeighting(BaseExperiment):
         A string denoting the outcome variable in data to be reweighted.
     weighting_scheme : str
         A string denoting which weighting scheme to use among: 'raw',
-        'robust', 'doubly robust' or 'overlap'. See Aronow and Miller
+        'robust', 'doubly_robust' or 'overlap'. See Aronow and Miller
         "Foundations of Agnostic Statistics" for discussion and computation
         of these weighting schemes.
     model : PropensityScore, optional
