@@ -130,7 +130,7 @@ class InversePropensityWeighting(BaseExperiment):
 
         Checks that both the treatment variable (left-hand side of the formula)
         and the ``outcome_variable`` exist in ``self.data``, and that the
-        treatment variable is binary (exactly two unique values).
+        treatment variable is binary (at most two unique values).
 
         Raises
         ------
@@ -827,7 +827,7 @@ class InversePropensityWeighting(BaseExperiment):
 
         Parameters
         ----------
-        window : str | tuple | slice, optional
+        window : Literal["post"] | tuple | slice, optional
             Time window for analysis.  Defaults to ``"post"``.
         direction : ``"increase"`` | ``"decrease"`` | ``"two-sided"``, optional
             Direction for tail probability calculation.  Defaults to
