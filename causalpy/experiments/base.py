@@ -157,7 +157,13 @@ class BaseExperiment(ABC):
         """Optional maketables plugin hook for default statistic rows."""
         return get_maketables_adapter(self.model).default_stat_keys(self)
 
-    def plot(self, *args: Any, show: bool = True, **kwargs: Any) -> tuple:
+    def plot(
+        self,
+        *args: Any,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> tuple:
         """Plot the model.
 
         Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
@@ -168,6 +174,10 @@ class BaseExperiment(ABC):
         show : bool, optional
             Whether to automatically display the plot. Defaults to True.
             Set to False if you want to modify the figure before displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments passed to ``ax.legend()`` to control legend
+            placement. For example, ``legend_kwargs={"loc": "upper left",
+            "bbox_to_anchor": (1.04, 1)}`` moves the legend outside the axes.
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
@@ -177,6 +187,18 @@ class BaseExperiment(ABC):
                 fig, ax = self._ols_plot(*args, **kwargs)
             else:
                 raise ValueError("Unsupported model type")
+
+        # Apply legend customization if requested
+        if legend_kwargs is not None:
+            axes = ax if isinstance(ax, list) else [ax]
+            try:
+                # Handle numpy arrays of axes (e.g., from plt.subplots(nrows=2))
+                axes = list(ax.flat) if hasattr(ax, "flat") else axes
+            except (TypeError, AttributeError):
+                pass
+            for a in axes:
+                if a.get_legend() is not None:
+                    a.legend(**legend_kwargs)
 
         if show:
             plt.show()
