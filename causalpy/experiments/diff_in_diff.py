@@ -329,7 +329,7 @@ class DifferenceInDifferences(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
-        """Computes the mean and 94% credible interval bounds for the causal impact."""
+        """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
     def _bayesian_plot(

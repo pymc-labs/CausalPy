@@ -96,7 +96,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
     -------
     str
         Formatted string representation. For floats, returns rounded
-        decimal. For DataArrays, returns mean with 94% credible interval.
+        decimal. For DataArrays, returns mean with credible interval.
 
     Raises
     ------
@@ -107,7 +107,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
-        # In the case of an xarray object, we return the mean and 94% CI
+        # In the case of an xarray object, we return the mean and CI
         percentiles = x.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).to_numpy()

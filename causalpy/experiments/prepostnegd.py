@@ -212,7 +212,7 @@ class PrePostNEGD(BaseExperiment):
         raise NameError("Unable to find coefficient name for the treatment effect")
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
-        """Computes the mean and 94% credible interval bounds for the causal impact."""
+        """Computes the mean and credible interval bounds for the causal impact."""
         percentiles = self.causal_impact.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
