@@ -107,6 +107,11 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     seasonality : dict, optional
         Shared Fourier seasonality spec, e.g. ``{"period": 52, "K": 2}``.
         If ``None`` (default), no seasonality term is included.
+    ar_residuals : bool, default=False
+        If ``True``, add hierarchical AR(1) residuals per unit via
+        ``pytensor.scan``. Requires a balanced panel (all units observed at
+        the same time steps). The AR coefficient is partially pooled:
+        ``rho[unit] ~ tanh(Normal(mu_rho, sigma_rho))``.
     model : HierarchicalLaunchITS, optional
         A custom model instance. If ``None``, a default is constructed.
     """
@@ -128,6 +133,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         bin_edges: Sequence[float] | None = None,
         placebo_edges: Sequence[float] | None = None,
         seasonality: dict | None = None,
+        ar_residuals: bool = False,
         model: PyMCModel | None = None,
         **kwargs: Any,
     ) -> None:
@@ -147,6 +153,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         self.bin_edges = list(bin_edges) if bin_edges is not None else None
         self.placebo_edges = list(placebo_edges) if placebo_edges is not None else None
         self.seasonality = seasonality
+        self.ar_residuals = ar_residuals
 
         self._validate_inputs()
         self._prepare_data()
@@ -224,6 +231,22 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         self._unit_categories = list(units.categories)
         unit_idx = np.asarray(units.codes, dtype=np.int64)
         n_units = len(self._unit_categories)
+
+        # Within-unit time index for AR residuals (rectangular panel required)
+        self._within_unit_tidx: np.ndarray | None = None
+        self._n_time_steps: int | None = None
+        if self.ar_residuals:
+            counts = np.bincount(unit_idx)
+            if counts.min() != counts.max():
+                raise ValueError(
+                    "ar_residuals=True requires a balanced panel "
+                    "(all units must have the same number of time steps)."
+                )
+            self._n_time_steps = int(counts[0])
+            # Compute within-unit sequential index (assumes data sorted by unit)
+            self._within_unit_tidx = np.concatenate(
+                [np.arange(self._n_time_steps) for _ in range(n_units)]
+            )
 
         # Event time
         tau = (df[self.time_col] - df[self.treatment_time_col]).to_numpy()
@@ -315,6 +338,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             coords["fourier"] = fourier_labels
         if event_bin_labels is not None:
             coords["event_bin"] = event_bin_labels
+        if self._n_time_steps is not None:
+            coords["time_step"] = np.arange(self._n_time_steps)
         self._coords = coords
 
     def _aux(self, *, effect_on: bool = True) -> dict[str, Any]:
@@ -329,6 +354,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         }
         if self._time is not None:
             aux["time"] = self._time
+        if self._within_unit_tidx is not None:
+            aux["within_unit_tidx"] = self._within_unit_tidx
+            aux["n_time_steps"] = self._n_time_steps
         if self._F is not None:
             aux["F"] = self._F
         if self.effect_type == "instant":

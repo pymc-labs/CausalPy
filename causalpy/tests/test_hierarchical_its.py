@@ -231,6 +231,25 @@ class TestEdgeCases:
         assert "sigma_gamma" in post
         assert post["gamma"].dims == ("chain", "draw", "unit")
 
+    def test_ar_residuals(self, panel, mock_pymc_sample):
+        """AR(1) residuals add rho and z_ar to the posterior."""
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=panel,
+            formula="sales ~ 0 + emails + price",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            ar_residuals=True,
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        post = result.model.idata.posterior
+        assert "rho" in post
+        assert "z_ar" in post
+        assert "sigma_ar" in post
+        assert post["rho"].dims == ("chain", "draw", "unit")
+        assert "time_step" in post["z_ar"].dims
+
     def test_predictive_unfitted_model(self, panel):
         """Raise RuntimeError when calling predictive on an unfitted model."""
         # Build experiment object without fitting by manually constructing

@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pytensor
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
@@ -2165,6 +2166,9 @@ class HierarchicalLaunchITS(PyMCModel):
             "sigma_lift": Prior("HalfNormal", sigma=y_std),
             "mu_delta": Prior("Normal", mu=0.0, sigma=2 * y_std, dims="event_bin"),
             "sigma_delta": Prior("HalfNormal", sigma=y_std, dims="event_bin"),
+            "mu_rho": Prior("Normal", mu=0.0, sigma=0.5),
+            "sigma_rho": Prior("HalfNormal", sigma=0.25),
+            "sigma_ar": Prior("HalfNormal", sigma=y_std),
             "sigma": Prior("HalfNormal", sigma=y_std),
         }
 
@@ -2309,12 +2313,53 @@ class HierarchicalLaunchITS(PyMCModel):
                     "'instant', 'event_study' or 'placebo'"
                 )
 
+            # Optional hierarchical AR(1) residuals via scan
+            within_unit_tidx_np = aux.get("within_unit_tidx")
+            n_time_steps = aux.get("n_time_steps")
+            if within_unit_tidx_np is not None and n_time_steps is not None:
+                within_unit_tidx_ = pm.Data(
+                    "within_unit_tidx",
+                    np.asarray(within_unit_tidx_np, dtype=np.int64),
+                    dims="obs_ind",
+                )
+                n_units = len(coords.get("unit", []))
+
+                # Hierarchical AR coefficient (non-centered, tanh → stationarity)
+                mu_rho = self.priors["mu_rho"].create_variable("mu_rho")
+                sigma_rho = self.priors["sigma_rho"].create_variable("sigma_rho")
+                z_rho = pm.Normal("z_rho", 0.0, 1.0, dims="unit")
+                rho_raw = mu_rho + z_rho * sigma_rho
+                rho = pm.Deterministic("rho", pt.tanh(rho_raw), dims="unit")
+
+                # Pre-drawn innovations: (unit, time_step)
+                z_ar = pm.Normal("z_ar", 0.0, 1.0, dims=["unit", "time_step"])
+                sigma_ar = self.priors["sigma_ar"].create_variable("sigma_ar")
+
+                def ar_step(z_t, prev, rho_vec):
+                    """One AR(1) step: prev * rho + innovation."""
+                    return rho_vec * prev + z_t
+
+                # Scan along time axis, vectorised across units
+                # z_ar.T is (time_step, unit); scan iterates over axis 0
+                ar_resid_matrix, _ = pytensor.scan(
+                    fn=ar_step,
+                    sequences=[z_ar.T],
+                    outputs_info=[pt.zeros(n_units)],
+                    non_sequences=[rho],
+                    n_steps=n_time_steps,
+                )
+                # ar_resid_matrix: (time_step, unit)
+                ar_contrib = sigma_ar * ar_resid_matrix[within_unit_tidx_, unit_idx_]
+            else:
+                ar_contrib = pt.zeros(n_obs)
+
             mu_row = (
                 alpha[unit_idx_]
                 + trend_contrib
                 + cov_contrib
                 + season_contrib
                 + effect_contrib
+                + ar_contrib
             )
             mu = pm.Deterministic(
                 "mu", mu_row[:, None], dims=["obs_ind", "treated_units"]
@@ -2361,6 +2406,11 @@ class HierarchicalLaunchITS(PyMCModel):
             if D_val is None:
                 raise ValueError("Model has D data but aux['D'] is missing")
             data_to_set["D"] = np.asarray(D_val, dtype=np.float64)
+        if "within_unit_tidx" in named:
+            tidx_val = aux.get("within_unit_tidx")
+            if tidx_val is None:
+                raise ValueError("Model has within_unit_tidx but aux is missing it")
+            data_to_set["within_unit_tidx"] = np.asarray(tidx_val, dtype=np.int64)
 
         with self:
             pm.set_data(data_to_set, coords={"obs_ind": obs_coords})
