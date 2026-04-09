@@ -229,6 +229,14 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         tau = (df[self.time_col] - df[self.treatment_time_col]).to_numpy()
         self._tau = tau
 
+        # Standardised time index for hierarchical time trends
+        t_raw = df[self.time_col].to_numpy(dtype=float)
+        self._time_mean = float(t_raw.mean())
+        self._time_std = float(t_raw.std())
+        if self._time_std == 0:
+            self._time_std = 1.0
+        self._time = (t_raw - self._time_mean) / self._time_std
+
         # Fourier seasonality
         if self.seasonality is not None:
             period = float(self.seasonality["period"])
@@ -319,6 +327,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             "effect_type": self.effect_type,
             "unit_idx": self._unit_idx,
         }
+        if self._time is not None:
+            aux["time"] = self._time
         if self._F is not None:
             aux["F"] = self._F
         if self.effect_type == "instant":

@@ -2159,6 +2159,8 @@ class HierarchicalLaunchITS(PyMCModel):
         return {
             "mu_alpha": Prior("Normal", mu=y_mean, sigma=2 * y_std),
             "sigma_alpha": Prior("HalfNormal", sigma=y_std),
+            "mu_gamma": Prior("Normal", mu=0.0, sigma=2 * y_std),
+            "sigma_gamma": Prior("HalfNormal", sigma=y_std),
             "mu_lift": Prior("Normal", mu=0.0, sigma=2 * y_std),
             "sigma_lift": Prior("HalfNormal", sigma=y_std),
             "mu_delta": Prior("Normal", mu=0.0, sigma=2 * y_std, dims="event_bin"),
@@ -2230,6 +2232,24 @@ class HierarchicalLaunchITS(PyMCModel):
                 "alpha", mu_alpha + z_alpha * sigma_alpha, dims="unit"
             )
 
+            # Hierarchical per-unit time trend (non-centered)
+            time_np = aux.get("time")
+            if time_np is not None:
+                time_ = pm.Data(
+                    "time",
+                    np.asarray(time_np, dtype=np.float64),
+                    dims="obs_ind",
+                )
+                mu_gamma = self.priors["mu_gamma"].create_variable("mu_gamma")
+                sigma_gamma = self.priors["sigma_gamma"].create_variable("sigma_gamma")
+                z_gamma = pm.Normal("z_gamma", 0.0, 1.0, dims="unit")
+                gamma = pm.Deterministic(
+                    "gamma", mu_gamma + z_gamma * sigma_gamma, dims="unit"
+                )
+                trend_contrib = gamma[unit_idx_] * time_
+            else:
+                trend_contrib = pt.zeros(n_obs)
+
             # Hierarchical per-unit covariate effects (non-centered)
             if n_coeffs > 0:
                 mu_beta = pm.Normal("mu_beta", 0.0, 2.0, dims="coeffs")
@@ -2289,7 +2309,13 @@ class HierarchicalLaunchITS(PyMCModel):
                     "'instant', 'event_study' or 'placebo'"
                 )
 
-            mu_row = alpha[unit_idx_] + cov_contrib + season_contrib + effect_contrib
+            mu_row = (
+                alpha[unit_idx_]
+                + trend_contrib
+                + cov_contrib
+                + season_contrib
+                + effect_contrib
+            )
             mu = pm.Deterministic(
                 "mu", mu_row[:, None], dims=["obs_ind", "treated_units"]
             )
@@ -2315,6 +2341,11 @@ class HierarchicalLaunchITS(PyMCModel):
             "y": np.zeros((n, 1)),
             "unit_idx": np.asarray(aux["unit_idx"], dtype=np.int64),
         }
+        if "time" in named:
+            time_val = aux.get("time")
+            if time_val is None:
+                raise ValueError("Model has time data but aux['time'] is missing")
+            data_to_set["time"] = np.asarray(time_val, dtype=np.float64)
         if "F" in named:
             F_val = aux.get("F")
             if F_val is None:

@@ -222,6 +222,15 @@ class TestEdgeCases:
         result = _fit(panel, "instant", seasonality={"period": 20, "K": 2})
         assert "beta_season" in result.model.idata.posterior
 
+    def test_time_trend_in_posterior(self, panel, mock_pymc_sample):
+        """Time trend random effects appear in the posterior by default."""
+        result = _fit(panel, "instant")
+        post = result.model.idata.posterior
+        assert "gamma" in post
+        assert "mu_gamma" in post
+        assert "sigma_gamma" in post
+        assert post["gamma"].dims == ("chain", "draw", "unit")
+
     def test_predictive_unfitted_model(self, panel):
         """Raise RuntimeError when calling predictive on an unfitted model."""
         # Build experiment object without fitting by manually constructing
