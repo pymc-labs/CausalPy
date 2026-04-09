@@ -101,6 +101,14 @@ class TestInstant:
         es = result.effect_summary()
         assert "mu_lift" in es.table.index
 
+    def test_summary(self, panel, mock_pymc_sample, capsys):
+        """Summary prints experiment info and mu_lift for instant model."""
+        result = _fit(panel, "instant")
+        result.summary()
+        out = capsys.readouterr().out
+        assert "instant" in out
+        assert "mu_lift" in out.lower() or "E[mu_lift]" in out
+
 
 class TestEventStudy:
     """Tests for the event-study (binned post-launch) effect type."""
@@ -122,6 +130,14 @@ class TestEventStudy:
         es = result.effect_summary()
         assert any("mu_delta" in name for name in es.table.index)
 
+    def test_summary(self, panel, mock_pymc_sample, capsys):
+        """Summary prints bin-level mu_delta for event-study model."""
+        result = _fit(panel, "event_study", bin_edges=[0, 4, 8, 12, 30])
+        result.summary()
+        out = capsys.readouterr().out
+        assert "mu_delta" in out
+        assert "Placebo check" not in out  # only placebo gets the check
+
 
 class TestPlacebo:
     """Tests for the placebo (pre-launch lead) effect type."""
@@ -140,6 +156,85 @@ class TestPlacebo:
         text = result._placebo_check_text()
         assert "Placebo check" in text
 
+    def test_summary(self, panel, mock_pymc_sample, capsys):
+        """Summary prints bin-level mu_delta and placebo check for placebo model."""
+        result = _fit(
+            panel,
+            "placebo",
+            bin_edges=[0, 4, 8, 30],
+            placebo_edges=[-8, -4, 0],
+        )
+        result.summary()
+        out = capsys.readouterr().out
+        assert "mu_delta" in out
+        assert "Placebo check" in out
+
+    def test_plot(self, panel, mock_pymc_sample):
+        """Plot placebo model exercises the placebo branch of _plot_event_study."""
+        result = _fit(
+            panel,
+            "placebo",
+            bin_edges=[0, 4, 8, 30],
+            placebo_edges=[-8, -4, 0],
+        )
+        fig, _ = result.plot(show=False)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_effect_summary(self, panel, mock_pymc_sample):
+        """Effect summary for placebo model includes per-bin mu_delta rows."""
+        result = _fit(
+            panel,
+            "placebo",
+            bin_edges=[0, 4, 8, 30],
+            placebo_edges=[-8, -4, 0],
+        )
+        es = result.effect_summary()
+        assert any("mu_delta" in name for name in es.table.index)
+        # Should have rows for pre + post bins
+        assert len(es.table) == result._n_pre_bins + result._n_post_bins
+
+
+class TestEdgeCases:
+    """Tests for edge-case branches."""
+
+    def test_placebo_check_no_pre_bins(self, panel, mock_pymc_sample):
+        """_placebo_check_text returns early message when no pre-launch bins."""
+        result = _fit(panel, "event_study", bin_edges=[0, 4, 8, 12, 30])
+        text = result._placebo_check_text()
+        assert "no pre-launch bins" in text
+
+    def test_no_covariates(self, panel, mock_pymc_sample):
+        """Fit with a formula that has no covariates (empty X)."""
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=panel,
+            formula="sales ~ 0",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        assert result.X.sizes["coeffs"] == 0
+
+    def test_with_seasonality(self, panel, mock_pymc_sample):
+        """Fit with Fourier seasonality enabled."""
+        result = _fit(panel, "instant", seasonality={"period": 20, "K": 2})
+        assert "beta_season" in result.model.idata.posterior
+
+    def test_predictive_unfitted_model(self, panel):
+        """Raise RuntimeError when calling predictive on an unfitted model."""
+        # Build experiment object without fitting by manually constructing
+        model = HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS)
+        with pytest.raises(RuntimeError, match="not fitted"):
+            # Manually create the experiment skeleton and call predictive
+            result = cp.HierarchicalInterruptedTimeSeries.__new__(
+                cp.HierarchicalInterruptedTimeSeries
+            )
+            result.model = model
+            result.effect_type = "instant"
+            result.predictive_for_new_unit()
+
 
 class TestValidation:
     """Tests for input validation and error messages."""
@@ -148,6 +243,20 @@ class TestValidation:
         """Raise ValueError when time column is not numeric."""
         bad = panel.copy()
         bad["week_idx"] = bad["week_idx"].astype(str)
+        with pytest.raises(ValueError, match="must be numeric"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=bad,
+                formula="sales ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
+    def test_non_numeric_treatment_time_column(self, panel):
+        """Raise ValueError when treatment_time column is not numeric."""
+        bad = panel.copy()
+        bad["launch_week"] = bad["launch_week"].astype(str)
         with pytest.raises(ValueError, match="must be numeric"):
             cp.HierarchicalInterruptedTimeSeries(
                 data=bad,
