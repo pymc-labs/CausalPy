@@ -130,13 +130,15 @@ class InversePropensityWeighting(BaseExperiment):
 
         Checks that both the treatment variable (left-hand side of the formula)
         and the ``outcome_variable`` exist in ``self.data``, and that the
-        treatment variable is binary (at most two unique values).
+        treatment variable has at most two unique values.  Note that a
+        constant (single-value) treatment passes this check without error;
+        downstream estimators will simply return zero treatment effect.
 
         Raises
         ------
         DataException
             If the treatment or outcome variable is missing from the data,
-            or if the treatment variable is not binary.
+            or if the treatment variable has more than two unique values.
         """
         treatment = self.formula.split("~")[0]
         test = treatment.strip() in self.data.columns
@@ -513,7 +515,10 @@ class InversePropensityWeighting(BaseExperiment):
 
         * **Top panel** -- Weighted and unweighted histograms of posterior
           propensity scores for treated and control groups, drawn from
-          ``prop_draws`` posterior samples.
+          ``prop_draws`` posterior samples.  The ``"raw"`` method shows
+          unweighted counts; ``"overlap"`` uses overlap weights; all other
+          methods (``"robust"``, ``"doubly_robust"``) share a common
+          IPW-weighted histogram branch.
         * **Bottom-left panel** -- Histograms of the reweighted potential
           outcomes E[Y(1)] and E[Y(0)].
         * **Bottom-right panel** -- Histogram of the ATE distribution with a
