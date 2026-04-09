@@ -45,6 +45,7 @@ its_pymc.ipynb
 its_post_intervention_analysis.ipynb
 its_covid.ipynb
 its_lift_test.ipynb
+hierarchical_its_launch.ipynb
 :::
 
 :::{toctree}
