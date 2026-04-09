@@ -643,6 +643,33 @@ class TestSoftmaxSimplexWeights:
         # beta_raw should have shape (1, 2) — N-1 logits, not N
         assert raw_vars[0].eval().shape == (1, 2)
 
+    def test_1d_branch(self):
+        """Test the 1D path when prior has no treated_units dim."""
+        prior = Prior("Normal", mu=0, sigma=1.0, dims=["coeffs_raw"])
+        with pm.Model() as model:
+            model.add_coords({"coeffs": ["a", "b", "c"], "coeffs_raw": ["b", "c"]})
+            result = _softmax_simplex_weights(
+                name="omega",
+                prior=prior,
+                n_rows=1,
+                dims=["coeffs"],
+            )
+        # 1D prior should produce a 1D simplex of shape (3,)
+        assert result.eval().shape == (3,)
+        np.testing.assert_allclose(result.eval().sum(), 1.0)
+
+    def test_rejects_non_normal_prior(self):
+        """Test that a non-Normal prior raises ValueError."""
+        prior = Prior("Dirichlet", a=[1, 1, 1], dims=["coeffs"])
+        with pm.Model():  # noqa: SIM117
+            with pytest.raises(ValueError, match="expects a Normal prior"):
+                _softmax_simplex_weights(
+                    name="beta",
+                    prior=prior,
+                    n_rows=1,
+                    dims=["coeffs"],
+                )
+
 
 class TestSoftmaxWeightedSumFitterMultiUnit:
     """Tests for SoftmaxWeightedSumFitter with multiple treated units."""
@@ -703,6 +730,13 @@ class TestSoftmaxWeightedSumFitterMultiUnit:
         assert isinstance(scores, pd.Series)
         for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in scores.index
+
+    def test_build_model_raises_without_coeffs_coord(self, synthetic_control_data):
+        """Test that build_model raises ValueError when coords lacks 'coeffs'."""
+        X, y, _coords, _control_units, _treated_units = synthetic_control_data
+        wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
+        with pytest.raises(ValueError, match="coords must include 'coeffs'"):
+            wsf.fit(X, y, coords={"treated_units": ["unit_0"], "obs_ind": [0]})
 
 
 @pytest.fixture(scope="module")
