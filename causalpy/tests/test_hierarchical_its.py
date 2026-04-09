@@ -144,6 +144,60 @@ class TestPlacebo:
 class TestValidation:
     """Tests for input validation and error messages."""
 
+    def test_non_numeric_time_column(self, panel):
+        """Raise ValueError when time column is not numeric."""
+        bad = panel.copy()
+        bad["week_idx"] = bad["week_idx"].astype(str)
+        with pytest.raises(ValueError, match="must be numeric"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=bad,
+                formula="sales ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
+    def test_invalid_effect_type(self, panel):
+        """Raise ValueError for an unrecognised effect_type."""
+        with pytest.raises(ValueError, match="effect_type must be"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=panel,
+                formula="sales ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                effect_type="bogus",
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
+    def test_unsorted_placebo_edges(self, panel):
+        """Raise ValueError when placebo_edges are not sorted."""
+        with pytest.raises(ValueError, match="sorted"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=panel,
+                formula="sales ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                effect_type="placebo",
+                bin_edges=[0, 4, 8],
+                placebo_edges=[0, -4, -8],
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
+    def test_outcome_not_in_data(self, panel):
+        """Raise ValueError when formula outcome column is missing."""
+        with pytest.raises(ValueError, match="Outcome variable"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=panel,
+                formula="nonexistent ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
     def test_missing_column(self, panel):
         """Raise ValueError when a required column is absent."""
         with pytest.raises(ValueError, match="Missing required columns"):
