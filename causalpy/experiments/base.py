@@ -33,6 +33,57 @@ from causalpy.reporting import EffectSummary
 from causalpy.skl_models import create_causalpy_compatible_class
 
 
+def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
+    """Mutate an existing Legend in place without recreating it.
+
+    This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
+    built by :func:`~causalpy.plot_utils.plot_xY`) that would be lost if the
+    legend were rebuilt with ``ax.legend()``.
+
+    Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
+    with ``bbox_to_anchor``), ``fontsize``, ``frameon``, ``title``.
+
+    Raises
+    ------
+    TypeError
+        If *kwargs* contains keys that cannot be applied in place.
+    """
+    _SUPPORTED = {"loc", "bbox_to_anchor", "bbox_transform", "fontsize", "frameon", "title"}
+    unsupported = set(kwargs) - _SUPPORTED
+    if unsupported:
+        raise TypeError(
+            f"legend_kwargs keys not supported for in-place mutation: "
+            f"{sorted(unsupported)}. Supported keys: {sorted(_SUPPORTED)}"
+        )
+    if "bbox_transform" in kwargs and "bbox_to_anchor" not in kwargs:
+        raise TypeError(
+            "bbox_transform requires bbox_to_anchor to be specified as well"
+        )
+
+    if "loc" in kwargs:
+        loc = kwargs["loc"]
+        # set_loc is public in matplotlib >= 3.8; fall back to the stable
+        # private helper for older versions, converting string names to
+        # numeric codes since _set_loc may not accept strings.
+        if hasattr(legend, "set_loc"):
+            legend.set_loc(loc)
+        else:
+            if isinstance(loc, str):  # pragma: no cover
+                loc = legend.codes.get(loc, loc)
+            legend._set_loc(loc)  # pragma: no cover
+    if "bbox_to_anchor" in kwargs:
+        legend.set_bbox_to_anchor(
+            kwargs["bbox_to_anchor"], kwargs.get("bbox_transform")
+        )
+    if "fontsize" in kwargs:
+        for text in legend.get_texts():
+            text.set_fontsize(kwargs["fontsize"])
+    if "frameon" in kwargs:
+        legend.set_frame_on(kwargs["frameon"])
+    if "title" in kwargs:
+        legend.set_title(kwargs["title"])
+
+
 class BaseExperiment(ABC):
     """Base class for quasi experimental designs.
 
@@ -175,9 +226,22 @@ class BaseExperiment(ABC):
             Whether to automatically display the plot. Defaults to True.
             Set to False if you want to modify the figure before displaying it.
         legend_kwargs : dict, optional
-            Keyword arguments passed to ``ax.legend()`` to control legend
-            placement. For example, ``legend_kwargs={"loc": "upper left",
-            "bbox_to_anchor": (1.04, 1)}`` moves the legend outside the axes.
+            Keyword arguments to adjust legend placement and styling.  The
+            existing legend is modified **in place** so that custom handles
+            (e.g. ``(Line2D, PolyCollection)`` tuples) are fully preserved.
+
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title``.  ``bbox_transform`` is accepted
+            alongside ``bbox_to_anchor``.
+
+        Examples
+        --------
+        Move the legend outside the plot area to avoid overlap:
+
+        >>> fig, ax = result.plot(  # doctest: +SKIP
+        ...     show=False,
+        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+        ... )
         """
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
@@ -188,17 +252,24 @@ class BaseExperiment(ABC):
             else:
                 raise ValueError("Unsupported model type")
 
-        # Apply legend customization if requested
+        # Apply legend customization if requested.  We mutate the existing
+        # Legend object in place so that custom handles — especially the
+        # (Line2D, PolyCollection) tuples built by plot_xY — are preserved
+        # exactly as the subclass created them.
         if legend_kwargs is not None:
             axes = ax if isinstance(ax, list) else [ax]
-            try:
+            with contextlib.suppress(TypeError, AttributeError):
                 # Handle numpy arrays of axes (e.g., from plt.subplots(nrows=2))
                 axes = list(ax.flat) if hasattr(ax, "flat") else axes
-            except (TypeError, AttributeError):
-                pass
             for a in axes:
-                if a.get_legend() is not None:
-                    a.legend(**legend_kwargs)
+                legend = a.get_legend()
+                if legend is not None:
+                    _apply_legend_kwargs(legend, legend_kwargs)
+            # Recompute layout when the legend is placed outside the axes
+            # so it is not clipped (some subclass plots already call
+            # tight_layout before we get here).
+            if "bbox_to_anchor" in legend_kwargs:
+                fig.tight_layout()
 
         if show:
             plt.show()
