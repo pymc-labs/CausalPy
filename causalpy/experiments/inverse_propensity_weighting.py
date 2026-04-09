@@ -131,8 +131,9 @@ class InversePropensityWeighting(BaseExperiment):
         Checks that both the treatment variable (left-hand side of the formula)
         and the ``outcome_variable`` exist in ``self.data``, and that the
         treatment variable has at most two unique values.  Note that a
-        constant (single-value) treatment passes this check without error;
-        downstream estimators will simply return zero treatment effect.
+        constant (single-value) treatment passes this check without error
+        but may cause downstream estimators to fail or produce undefined
+        results.
 
         Raises
         ------
