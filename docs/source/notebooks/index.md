@@ -16,6 +16,7 @@ ancova_pymc.ipynb
 sc_skl.ipynb
 sc_pymc.ipynb
 sc_pymc_brexit.ipynb
+sc_pymc_weight_comparison.ipynb
 sdid_pymc.ipynb
 :::
 
