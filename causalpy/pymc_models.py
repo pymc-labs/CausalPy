@@ -706,9 +706,15 @@ def _softmax_simplex_weights(
     pt.TensorVariable
         Simplex weights as a PyMC Deterministic.
     """
+    if prior.distribution != "Normal":
+        raise ValueError(
+            f"_softmax_simplex_weights expects a Normal prior, got {prior.distribution}"
+        )
     raw = prior.create_variable(f"{name}_raw")
     if n_rows == 1 and raw.ndim == 1:
-        # 1D case: raw is shape (N-1,), produce 1D simplex of shape (N,)
+        # When the prior has no "treated_units" dim (e.g. SDiD's omega_raw with
+        # dims=["coeffs_raw"]), PyMC creates a 1D tensor.  Concatenate along
+        # axis 0 to produce a 1D simplex of shape (N,).
         zero_logit = pt.zeros((1,))
         tilde = pt.concatenate([zero_logit, raw], axis=0)
         return pm.Deterministic(name, pt.special.softmax(tilde, axis=-1), dims=dims)
@@ -804,6 +810,31 @@ class SoftmaxWeightedSumFitter(PyMCModel):
         pinned to zero). The default scale ``sigma=1.0`` provides moderate
         regularization, equivalent to ``zeta=1.0`` in the frequentist SDiD.
 
+        Unlike :meth:`WeightedSumFitter.priors_from_data`, which must read
+        ``X.shape[1]`` to size the Dirichlet concentration vector, the Normal
+        prior here broadcasts automatically via its ``dims``, so the data shape
+        is not needed.
+
+        To control regularization strength, pass a custom ``beta_raw`` prior::
+
+            # Tighter regularization (more DiD-like, near-uniform weights):
+            model = SoftmaxWeightedSumFitter(
+                priors={
+                    "beta_raw": Prior(
+                        "Normal", mu=0, sigma=0.1, dims=["treated_units", "coeffs_raw"]
+                    )
+                }
+            )
+
+            # Looser regularization (more SC-like, data-driven sparse weights):
+            model = SoftmaxWeightedSumFitter(
+                priors={
+                    "beta_raw": Prior(
+                        "Normal", mu=0, sigma=10, dims=["treated_units", "coeffs_raw"]
+                    )
+                }
+            )
+
         Parameters
         ----------
         X : xarray.DataArray
@@ -832,11 +863,11 @@ class SoftmaxWeightedSumFitter(PyMCModel):
         """
         Build the PyMC model with softmax-parameterized simplex weights.
         """
-        coeffs_raw = (
-            coords["coeffs"][1:]
-            if coords and "coeffs" in coords
-            else list(range(1, X.shape[1]))
-        )
+        if not coords or "coeffs" not in coords:
+            raise ValueError(
+                "coords must include 'coeffs' for SoftmaxWeightedSumFitter"
+            )
+        coeffs_raw = coords["coeffs"][1:]
 
         with self:
             coords_with_raw = dict(coords) if coords else {}
