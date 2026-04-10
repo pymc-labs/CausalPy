@@ -876,3 +876,101 @@ def generate_piecewise_its_data(
     }
 
     return df, params
+
+
+def generate_hlr_data(
+    seed: int = 42,
+    n_groups: int = 12,
+    n_obs_per_group: int = 40,
+    beta_fixed_true: tuple[float, float] = (2.0, 1.4),
+    sigma_random_true: tuple[float, float] = (0.7, 0.5),
+    sigma_noise: float = 0.8,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, np.ndarray]]:
+    r"""Generate grouped synthetic data for hierarchical linear regression.
+
+    Simulates outcomes from a hierarchical data-generating process with fixed and
+    group-level random effects:
+
+    .. math::
+
+        \mu_i = x_i^\top\beta_{\text{fixed}} + z_i^\top\beta_{\text{random}, g(i)}
+
+    .. math::
+
+        y_i = \mu_i + \epsilon_i, \quad \epsilon_i \sim \mathcal{N}(0, \sigma_{\text{noise}})
+
+    Parameters
+    ----------
+    seed : int, optional
+        Seed used to initialize the NumPy random number generator.
+    n_groups : int, optional
+        Number of groups in the grouped structure.
+    n_obs_per_group : int, optional
+        Number of observations generated per group.
+    beta_fixed_true : tuple[float, float], optional
+        True fixed-effect coefficients used in the simulation.
+    sigma_random_true : tuple[float, float], optional
+        Group-level standard deviations for the random intercept and slope.
+    sigma_noise : float, optional
+        Observation-level noise scale.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame, dict[str, np.ndarray]]
+        ``XY`` contains the fixed-effect inputs, group index, and observed
+        outcome. ``Z`` contains the random-effect design matrix. ``params``
+        contains the true simulation values.
+    """
+    rng = np.random.default_rng(seed=seed)
+
+    n_obs_total = n_groups * n_obs_per_group
+
+    group_idx = np.repeat(np.arange(n_groups), n_obs_per_group)
+    x1 = rng.normal(loc=0.0, scale=1.0, size=n_obs_total)
+
+    _X = np.column_stack([np.ones(n_obs_total), x1])
+    _Z = np.column_stack([np.ones(n_obs_total), x1])
+
+    _beta_fixed_true = np.asarray(beta_fixed_true)
+    _sigma_random_true = np.asarray(sigma_random_true)
+
+    beta_random_true = rng.normal(
+        loc=0.0,
+        scale=_sigma_random_true,
+        size=(n_groups, 2),
+    )
+
+    mu_fixed_true = _X @ _beta_fixed_true
+    mu_random_true = np.sum(_Z * beta_random_true[group_idx], axis=1)
+    mu = mu_fixed_true + mu_random_true
+
+    _y = mu + rng.normal(loc=0.0, scale=sigma_noise, size=n_obs_total)
+
+    obs_ind = np.arange(n_obs_total)
+
+    XY = pd.DataFrame(
+        {
+            "1": _X[:, 0],
+            "x1": _X[:, 1],
+            "group_idx": group_idx,
+            "y": _y,
+        },
+        index=obs_ind,
+    )
+    Z = pd.DataFrame(
+        {
+            "1|group": _Z[:, 0],
+            "x1|group": _Z[:, 1],
+        },
+        index=obs_ind,
+    )
+    params = {
+        "mu": mu,
+        "mu_fixed_true": mu_fixed_true,
+        "mu_random_true": mu_random_true,
+        "beta_fixed_true": _beta_fixed_true,
+        "beta_random_true": beta_random_true,
+        "sigma_random_true": _sigma_random_true,
+    }
+
+    return XY, Z, params
