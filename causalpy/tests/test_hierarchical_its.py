@@ -88,6 +88,21 @@ class TestInstant:
         assert fig is not None
         plt.close(fig)
 
+    def test_plot_unit(self, panel, mock_pymc_sample):
+        """plot_unit returns a figure for a valid unit."""
+        result = _fit(panel, "instant")
+        fig, (ax1, ax2) = result.plot_unit(unit_id=0)
+        assert fig is not None
+        assert ax1.get_title().startswith("Unit 0")
+        assert ax2.get_title().startswith("Unit 0")
+        plt.close(fig)
+
+    def test_plot_unit_invalid(self, panel, mock_pymc_sample):
+        """plot_unit raises ValueError for a missing unit."""
+        result = _fit(panel, "instant")
+        with pytest.raises(ValueError, match="not found"):
+            result.plot_unit(unit_id=9999)
+
     def test_predictive_new_unit(self, panel, mock_pymc_sample):
         """Draw from predictive distribution for a new unit (instant)."""
         result = _fit(panel, "instant")
@@ -387,6 +402,45 @@ class TestValidation:
                 bin_edges=[4, 0, 8],
                 model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
             )
+
+    def test_ar_residuals_unbalanced_panel(self, panel):
+        """Raise ValueError when ar_residuals=True on an unbalanced panel."""
+        # Drop some rows from one unit to make it unbalanced
+        bad = panel[~((panel["product"] == 0) & (panel["week_idx"] > 35))].copy()
+        with pytest.raises(ValueError, match="balanced panel"):
+            cp.HierarchicalInterruptedTimeSeries(
+                data=bad,
+                formula="sales ~ 0 + emails",
+                unit_col="product",
+                time_col="week_idx",
+                treatment_time_col="launch_week",
+                effect_type="instant",
+                ar_residuals=True,
+                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            )
+
+    def test_constant_time_column(self, mock_pymc_sample):
+        """Time std == 0 falls back to 1.0 without error."""
+        # All rows have the same time value → std == 0
+        df = pd.DataFrame(
+            {
+                "product": [0, 1],
+                "week_idx": [5, 5],
+                "launch_week": [10, 10],
+                "sales": [50.0, 55.0],
+                "emails": [100.0, 110.0],
+            }
+        )
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=df,
+            formula="sales ~ 0 + emails",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        assert result._time_std == 1.0
 
     def test_rejects_non_hierarchical_model(self, panel):
         """Raise TypeError when model is not HierarchicalLaunchITS."""

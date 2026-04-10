@@ -542,6 +542,79 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         fig.tight_layout()
         return fig, ax
 
+    def plot_unit(self, unit_id: int = 0):
+        """Plot observed vs counterfactual and causal impact for a single unit.
+
+        Parameters
+        ----------
+        unit_id : int
+            The unit identifier (as it appears in the ``unit_col`` column of the
+            input data) to plot.
+
+        Returns
+        -------
+        fig, (ax1, ax2)
+            Matplotlib figure and axes. Top panel shows observed data, fitted
+            mean (with effect) and counterfactual mean (without effect). Bottom
+            panel shows the posterior causal impact with HDI.
+        """
+        df = self.data
+        mask = df[self.unit_col] == unit_id
+        if not mask.any():
+            raise ValueError(
+                f"unit_id={unit_id!r} not found in column {self.unit_col!r}"
+            )
+        t = df.loc[mask, self.time_col].values
+        y_obs = df.loc[mask, self.outcome_variable_name].values
+        launch = int(df.loc[mask, self.treatment_time_col].iloc[0])
+
+        obs_mu = (
+            self.observed_pred.posterior_predictive["mu"]
+            .mean(("chain", "draw"))
+            .values.flatten()[mask]
+        )
+        cf_mu = (
+            self.counterfactual_pred.posterior_predictive["mu"]
+            .mean(("chain", "draw"))
+            .values.flatten()[mask]
+        )
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+
+        # Top panel: observed data + model fits
+        ax1.scatter(t, y_obs, s=8, alpha=0.4, color="black", label="observed")
+        ax1.plot(t, obs_mu, color="C0", label="fitted (with effect)")
+        ax1.plot(t, cf_mu, color="C1", ls="--", label="counterfactual (no effect)")
+        ax1.axvline(launch, color="red", ls=":", label=f"launch ({launch})")
+        ax1.legend(fontsize=9)
+        ax1.set_ylabel(self.outcome_variable_name)
+        ax1.set_title(f"Unit {unit_id}: observed vs counterfactual")
+
+        # Bottom panel: causal impact (posterior mean + HDI)
+        impact_unit = self.impact.isel(obs_ind=np.where(mask)[0])
+        impact_mean = impact_unit.mean(("chain", "draw")).values.flatten()
+        lo_q = (1 - HDI_PROB) / 2
+        hi_q = 1 - lo_q
+        impact_lo = impact_unit.quantile(lo_q, ("chain", "draw")).values.flatten()
+        impact_hi = impact_unit.quantile(hi_q, ("chain", "draw")).values.flatten()
+        ax2.plot(t, impact_mean, color="C2")
+        ax2.fill_between(
+            t,
+            impact_lo,
+            impact_hi,
+            color="C2",
+            alpha=0.2,
+            label=f"{int(HDI_PROB * 100)}% HDI",
+        )
+        ax2.axhline(0, color="grey", lw=0.5)
+        ax2.axvline(launch, color="red", ls=":")
+        ax2.set_xlabel(self.time_col)
+        ax2.set_ylabel("causal impact")
+        ax2.set_title(f"Unit {unit_id}: posterior causal impact")
+        ax2.legend()
+        fig.tight_layout()
+        return fig, (ax1, ax2)
+
     # ------------------------------------------------------------ reporting
 
     def effect_summary(
