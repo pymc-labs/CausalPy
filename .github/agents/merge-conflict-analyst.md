@@ -1,7 +1,6 @@
 ---
 name: merge-conflict-analyst
 description: Conflict-resolution specialist. Use when rebases/merges produce non-trivial conflicts or when intent differs across branches.
-model: fast
 ---
 
 You are a cautious merge conflict analyst for the CausalPy repository.
