@@ -1,6 +1,6 @@
 ---
 name: python-environment
-description: Detect and configure a conda-compatible tool, reuse an existing CausalPy environment when possible, create it only when needed, and run commands inside it. Use before tasks that need the project environment, such as importing project code, running tests, building docs, or invoking repo tooling.
+description: Detect, configure, and use a conda-compatible tool. Use before tasks that need the project environment, such as importing project code, running tests, building docs, or invoking repo tooling.
 ---
 
 # Python Environment
@@ -62,7 +62,7 @@ $CONDA_EXE run -n CausalPy make setup
 
 ## Run commands
 
-Prefer `run -n` instead of `activate`:
+Never use `$CONDA_EXE activate`, instead use `$CONDA_EXE run -n CausalPy <command>`.
 
 ```bash
 $CONDA_EXE run -n CausalPy <command>
@@ -88,8 +88,6 @@ $CONDA_EXE run -p "/full/path/to/CausalPy" <command>
 ```
 
 Keep using `run -p` with that full prefix for the rest of the session.
-
-Note: a shell `conda` function may still resolve through the same libmamba installation as `mamba`, so switching from `mamba` to `conda` does not necessarily change which env store is searched.
 
 ### Git worktrees and remote machines
 
