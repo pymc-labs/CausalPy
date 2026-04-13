@@ -102,7 +102,7 @@ class InversePropensityWeighting(BaseExperiment):
         self.labels = list(dm.rhs.columns)
         self.t, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
         self.rhs_matrix_spec = dm.rhs.model_spec
-        self.outcome_variable_name = dm.lhs.columns[0]
+        self.treatment_variable_name = dm.lhs.columns[0]
         self.y = self.data[self.outcome_variable]
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}

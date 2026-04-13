@@ -277,12 +277,15 @@ class PyMCModel(pm.Model):
             )
             n_treated_units = len(treated_units_coord)
 
+            # Match the dtype of the existing y data node so pm.set_data
+            # doesn't reject the placeholder for integer-valued outcomes.
+            y_dtype = self["y"].type.dtype
             # Always use 2D format for consistency
             pm.set_data(
                 {
-                    "X": X.data,
+                    "X": X,
                     "y": np.zeros(
-                        (new_no_of_observations, n_treated_units), dtype=np.int32
+                        (new_no_of_observations, n_treated_units), dtype=y_dtype
                     ),
                 },
                 coords={"obs_ind": obs_coords},
