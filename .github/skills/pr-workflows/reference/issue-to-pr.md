@@ -5,6 +5,12 @@ description: Transform a GitHub issue into a complete pull request through a str
 
 # Issue → PR Workflow
 
+## Branch preflight (required before any code edits)
+1. Check current branch and working tree state.
+2. Switch to `main` and update it from remote.
+3. Create the issue branch from `main`: `git checkout -b issue-<issue_number>-<short-description>`
+4. Only start implementation after confirming the new branch is based on `main`.
+
 ## Discovery
 1. Fetch issue details:
    ```bash
@@ -14,12 +20,11 @@ description: Transform a GitHub issue into a complete pull request through a str
 3. Estimate complexity and share approach before implementation.
 
 ## Implementation
-1. Create a branch: `git checkout -b issue-<number>-<short-description>`
-2. Implement the fix, following `AGENTS.md` policies.
-3. Run pre-commit and tests until green (see `pre-commit.md`).
+1. Implement the fix, following `AGENTS.md` policies.
+2. Run prek and tests until green (see `pre-commit.md`). Use scoped prek runs during iteration and `--all-files` before handoff.
 
 ## Prepare PR
-1. Create `.github/pr_summaries/<issue_number> - <short-description>.md` with:
+1. Create `.scratch/pr_summaries/<issue_number> - <short-description>.md` with:
    - Summary
    - Fixes #<issue_number>
    - Changes
@@ -30,6 +35,6 @@ description: Transform a GitHub issue into a complete pull request through a str
 
 ## Create PR
 ```bash
-git push -u origin issue-<number>-<short-description>
-gh pr create --title "<PR title>" --body-file .github/pr_summaries/<issue_number> - <short-description>.md --base main
+git push -u origin issue-<issue_number>-<short-description>
+gh pr create --title "<PR title>" --body-file .scratch/pr_summaries/<issue_number> - <short-description>.md --base main
 ```

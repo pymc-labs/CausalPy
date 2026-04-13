@@ -16,7 +16,7 @@ Regression discontinuity design
 """
 
 import warnings  # noqa: I001
-
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -29,15 +29,17 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
-from causalpy.utils import _is_variable_dummy_coded, convert_to_string, round_num
+from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_rd
+from causalpy.utils import (
+    _is_variable_dummy_coded,
+    convert_to_string,
+    round_num,
+)
 
 from .base import BaseExperiment
-from causalpy.reporting import EffectSummary, _effect_summary_rd
-from typing import Any, Literal
-
-LEGEND_FONT_SIZE = 12
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -51,7 +53,7 @@ class RegressionDiscontinuity(BaseExperiment):
     :param treatment_threshold:
         A scalar threshold value at which the treatment is applied
     :param model:
-        A PyMC model
+        A PyMC or sklearn model. Defaults to LinearRegression.
     :param running_variable_name:
         The name of the predictor variable that the treatment threshold is based upon
     :param epsilon:
@@ -60,6 +62,12 @@ class RegressionDiscontinuity(BaseExperiment):
     :param bandwidth:
         Data outside of the bandwidth (relative to the discontinuity) is not used to fit
         the model.
+    :param donut_hole:
+        Observations within this distance from the treatment threshold are excluded from
+        model fitting. Used as a robustness check when observations closest to the
+        threshold may be problematic (e.g., due to manipulation or heaping). Defaults
+        to 0.0 (no exclusion). Must be non-negative and less than bandwidth if bandwidth
+        is finite.
 
     Example
     --------
@@ -83,6 +91,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -93,7 +102,8 @@ class RegressionDiscontinuity(BaseExperiment):
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs: dict,
+        donut_hole: float = 0.0,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
@@ -103,28 +113,43 @@ class RegressionDiscontinuity(BaseExperiment):
         self.treatment_threshold = treatment_threshold
         self.epsilon = epsilon
         self.bandwidth = bandwidth
+        self.donut_hole = donut_hole
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data, applying bandwidth filtering."""
+        """Build design matrices from formula and data, applying bandwidth and donut hole filtering."""
+        x_vals = self.data[self.running_variable_name]
+        c = self.treatment_threshold
+        mask = pd.Series(True, index=self.data.index)
+
         if self.bandwidth is not np.inf:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            filtered_data = self.data.query(
-                f"{fmin} <= {self.running_variable_name} <= {fmax}"
-            )
-            if len(filtered_data) <= 10:
-                warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
-                    UserWarning,
-                    stacklevel=2,
+            mask &= np.abs(x_vals - c) <= self.bandwidth
+
+        if self.donut_hole > 0:
+            mask &= np.abs(x_vals - c) >= self.donut_hole
+
+        self.fit_data = self.data.loc[mask]
+
+        if len(self.fit_data) <= 10:
+            filter_desc = []
+            if self.bandwidth is not np.inf:
+                filter_desc.append(f"bandwidth={self.bandwidth}")
+            if self.donut_hole > 0:
+                filter_desc.append(f"donut_hole={self.donut_hole}")
+            if filter_desc:
+                msg = (
+                    f"Choice of {' and '.join(filter_desc)} parameters has led to only "
+                    f"{len(self.fit_data)} remaining datapoints. "
+                    f"Consider adjusting these parameters."
                 )
-            dm = model_matrix(self.formula, filtered_data)
-        else:
-            dm = model_matrix(self.formula, self.data)
+            else:
+                msg = f"Only {len(self.fit_data)} datapoints in the dataset."
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        dm = model_matrix(self.formula, self.fit_data)
 
         self.labels = list(dm.rhs.columns)
         self.y, self.X = (dm.lhs.to_numpy(), dm.rhs.to_numpy())
@@ -220,9 +245,19 @@ class RegressionDiscontinuity(BaseExperiment):
                 "A predictor called `treated` should be in the formula"
             )
 
-        if _is_variable_dummy_coded(self.data["treated"]) is False:
+        if not _is_variable_dummy_coded(self.data["treated"]):
             raise DataException(
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
+            )
+
+        # Validate donut_hole parameter
+        if self.donut_hole < 0:
+            raise ValueError("donut_hole must be non-negative.")
+
+        if self.bandwidth is not np.inf and self.donut_hole >= self.bandwidth:
+            raise ValueError(
+                f"donut_hole ({self.donut_hole}) must be less than bandwidth "
+                f"({self.bandwidth}) when bandwidth is finite."
             )
 
         # Convert integer treated variable to boolean if needed
@@ -247,10 +282,13 @@ class RegressionDiscontinuity(BaseExperiment):
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
         """
-        print("Difference in Differences experiment")
+        print("Regression Discontinuity experiment")
         print(f"Formula: {self.formula}")
         print(f"Running variable: {self.running_variable_name}")
         print(f"Threshold on running variable: {self.treatment_threshold}")
+        print(f"Bandwidth: {self.bandwidth}")
+        print(f"Donut hole: {self.donut_hole}")
+        print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
         print(
             f"Discontinuity at threshold = {convert_to_string(self.discontinuity_at_threshold)}"
@@ -259,42 +297,56 @@ class RegressionDiscontinuity(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
-        # Plot raw data
+
+        # Plot data: use two layers only when there are excluded observations
+        has_exclusion = len(self.fit_data) < len(self.data)
+        if has_exclusion:
+            sns.scatterplot(
+                self.data,
+                x=self.running_variable_name,
+                y=self.outcome_variable_name,
+                color="lightgray",
+                ax=ax,
+                label="excluded data",
+            )
         sns.scatterplot(
-            self.data,
+            self.fit_data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
-            c="k",
+            color="k",
             ax=ax,
+            label="fit data" if has_exclusion else "data",
         )
 
         # Plot model fit to data
-        h_line, h_patch = plot_xY(
+        plot_xY(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             plot_hdi_kwargs={"color": "C1"},
+            label="Posterior mean",
         )
-        handles = [(h_line, h_patch)]
-        labels = ["Posterior mean"]
 
         # create strings to compose title
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile([0.03, 1 - 0.03]).values
+        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+        percentiles = self.discontinuity_at_threshold.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).values
         ci = (
-            r"$CI_{94\%}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         discon = f"""
             Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
             """
         ax.set(title=r2 + "\n" + discon + ci)
-        # Intervention line
+
+        # Treatment threshold line
         ax.axvline(
             x=self.treatment_threshold,
             ls="-",
@@ -302,26 +354,52 @@ class RegressionDiscontinuity(BaseExperiment):
             color="r",
             label="treatment threshold",
         )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+
+        # Add donut hole boundary lines if donut_hole > 0
+        if self.donut_hole > 0:
+            ax.axvline(
+                x=self.treatment_threshold - self.donut_hole,
+                ls="--",
+                lw=2,
+                color="orange",
+                label="donut boundary",
+            )
+            ax.axvline(
+                x=self.treatment_threshold + self.donut_hole,
+                ls="--",
+                lw=2,
+                color="orange",
+            )
+
+        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
     def _ols_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs."""
         fig, ax = plt.subplots()
-        # Plot raw data
+
+        # Plot data: use two layers only when there are excluded observations
+        has_exclusion = len(self.fit_data) < len(self.data)
+        if has_exclusion:
+            sns.scatterplot(
+                self.data,
+                x=self.running_variable_name,
+                y=self.outcome_variable_name,
+                color="lightgray",
+                ax=ax,
+                label="excluded data",
+            )
         sns.scatterplot(
-            self.data,
+            self.fit_data,
             x=self.running_variable_name,
             y=self.outcome_variable_name,
-            c="k",  # hue="treated",
+            color="k",
             ax=ax,
+            label="fit data" if has_exclusion else "data",
         )
+
         # Plot model fit to data
         ax.plot(
             self.x_pred[self.running_variable_name],
@@ -330,11 +408,13 @@ class RegressionDiscontinuity(BaseExperiment):
             markersize=10,
             label="model fit",
         )
+
         # create strings to compose title
-        r2 = f"$R^2$ on all data = {round_num(float(self.score), round_to)}"
+        r2 = f"$R^2$ on fit data = {round_num(float(self.score), round_to)}"
         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
-        # Intervention line
+
+        # Treatment threshold line
         ax.axvline(
             x=self.treatment_threshold,
             ls="-",
@@ -342,8 +422,24 @@ class RegressionDiscontinuity(BaseExperiment):
             color="r",
             label="treatment threshold",
         )
+
+        # Add donut hole boundary lines if donut_hole > 0
+        if self.donut_hole > 0:
+            ax.axvline(
+                x=self.treatment_threshold - self.donut_hole,
+                ls="--",
+                lw=2,
+                color="orange",
+                label="donut boundary",
+            )
+            ax.axvline(
+                x=self.treatment_threshold + self.donut_hole,
+                ls="--",
+                lw=2,
+                color="orange",
+            )
+
         ax.legend(fontsize=LEGEND_FONT_SIZE)
-        # TODO: have to convert ax into list because it is somehow a numpy.ndarray
         return (fig, ax)
 
     def effect_summary(

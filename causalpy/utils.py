@@ -18,14 +18,18 @@ Utility functions
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import xarray as xr
 
 if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
+
+from causalpy.constants import HDI_PROB
 
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
@@ -92,7 +96,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
     -------
     str
         Formatted string representation. For floats, returns rounded
-        decimal. For DataArrays, returns mean with 94% credible interval.
+        decimal. For DataArrays, returns mean with credible interval.
 
     Raises
     ------
@@ -103,10 +107,12 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
-        # In the case of an xarray object, we return the mean and 94% CI
-        percentiles = x.quantile([0.03, 1 - 0.03]).to_numpy()
+        # In the case of an xarray object, we return the mean and CI
+        percentiles = x.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).to_numpy()
         ci = (
-            r"$CI_{94\%}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         return f"{x.mean().to_numpy():.2f}" + ci
@@ -218,6 +224,84 @@ def check_convex_hull_violation(
         "pct_above": float(100 * above.sum() / n_points),
         "pct_below": float(100 * below.sum() / n_points),
     }
+
+
+def plot_correlations(
+    data: pd.DataFrame,
+    columns: list[str] | None = None,
+    method: Literal["pearson", "kendall", "spearman"] = "pearson",
+    figsize: tuple[float, float] | None = None,
+    ax: plt.Axes | None = None,
+    **kwargs: Any,
+) -> tuple[pd.DataFrame, plt.Axes]:
+    """Plot a pairwise correlation heatmap for panel data columns.
+
+    Computes the pairwise correlation matrix between the specified columns
+    (typically geographic units or time series) and displays it as a
+    lower-triangle heatmap. This is a pre-experiment diagnostic for
+    synthetic control analyses: markets that are highly correlated in the
+    pre-treatment period are more likely to produce reliable counterfactuals.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Wide-format panel data with time as the index and locations/units
+        as columns.
+    columns : list[str], optional
+        Subset of columns to include. If ``None``, all numeric columns
+        are used.
+    method : {"pearson", "kendall", "spearman"}, default "pearson"
+        Correlation method passed to :meth:`pandas.DataFrame.corr`.
+    figsize : tuple[float, float], optional
+        Width and height in inches for the figure. Only used when ``ax``
+        is not provided. If ``None``, matplotlib's default is used.
+    ax : matplotlib.axes.Axes, optional
+        Axes on which to draw the heatmap. If ``None``, a new figure and
+        axes are created (sized according to ``figsize``).
+    **kwargs
+        Additional keyword arguments forwarded to :func:`seaborn.heatmap`
+        (e.g., ``vmin``, ``vmax``, ``annot``, ``annot_kws``).
+
+    Returns
+    -------
+    tuple[pd.DataFrame, matplotlib.axes.Axes]
+        The correlation matrix and the axes containing the heatmap.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import causalpy as cp
+
+        df = cp.load_data("geolift1")
+        corr, ax = cp.plot_correlations(df)
+
+        # Larger figure with smaller annotation text
+        corr, ax = cp.plot_correlations(df, figsize=(10, 8), annot_kws={"size": 7})
+    """
+    subset = data[columns] if columns is not None else data.select_dtypes("number")
+    corr = subset.corr(method=method)
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+
+    defaults: dict[str, Any] = {
+        "mask": mask,
+        "cmap": sns.diverging_palette(230, 20, as_cmap=True),
+        "vmin": -1,
+        "vmax": 1,
+        "center": 0,
+        "square": True,
+        "linewidths": 0.5,
+        "cbar_kws": {"shrink": 0.8},
+        "annot": True,
+        "fmt": ".2f",
+    }
+    defaults.update(kwargs)
+
+    sns.heatmap(corr, ax=ax, **defaults)
+    return corr, ax
 
 
 def extract_lift_for_mmm(

@@ -44,7 +44,7 @@ Always use `run -n` instead of `activate`:
 $CONDA_EXE run -n CausalPy <command>
 ```
 
-For example: `$CONDA_EXE run -n CausalPy pytest`, `$CONDA_EXE run -n CausalPy pre-commit run --all-files`.
+For example: `$CONDA_EXE run -n CausalPy pytest`, `$CONDA_EXE run -n CausalPy prek run --all-files`.
 
 ## Update an existing environment
 

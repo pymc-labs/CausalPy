@@ -28,23 +28,36 @@ from formulaic import model_matrix
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class StaggeredDifferenceInDifferences(BaseExperiment):
     """A class to analyse data from staggered adoption Difference-in-Differences settings.
 
-    This estimator uses an imputation-based approach: it fits a model on untreated
-    observations only (pre-treatment periods for eventually-treated units plus all
-    periods for never-treated units), then predicts counterfactual outcomes for all
-    observations. Treatment effects are computed as the difference between observed
-    and predicted outcomes for treated observations.
+    This class implements the Borusyak, Jaravel, and Spiess (BJS, 2024)
+    imputation estimator for staggered adoption settings. It fits a model on
+    untreated observations only (pre-treatment periods for eventually-treated
+    units plus all periods for never-treated units), then predicts
+    counterfactual outcomes for all observations. Treatment effects are computed
+    as the difference between observed and predicted outcomes for treated
+    observations.
+
+    Assumptions
+    -----------
+    This estimator requires the following identifying assumptions:
+
+    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
+       treated in all subsequent periods. Treatment cannot be reversed or
+       temporarily suspended. This is validated at runtime.
+    2. **Parallel trends**: In the absence of treatment, treated and control
+       units would have followed parallel outcome trajectories.
+    3. **No anticipation**: Units do not change their behavior in anticipation
+       of future treatment.
 
     Parameters
     ----------
@@ -66,7 +79,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Value indicating never-treated units in treatment_time column.
         Defaults to np.inf.
     model : PyMCModel or RegressorMixin, optional
-        A model for the untreated outcome. Defaults to None.
+        A model for the untreated outcome. Defaults to LinearRegression.
     event_window : tuple[int, int], optional
         Tuple (min_event_time, max_event_time) to restrict event-time aggregation.
         If None, uses all available event-times.
@@ -124,6 +137,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -137,7 +151,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         model: PyMCModel | RegressorMixin | None = None,
         event_window: tuple[int, int] | None = None,
         reference_event_time: int = -1,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         # NOTE: kwargs is accepted for API compatibility with other experiment classes
         # and is intentionally not used inside this constructor.
@@ -429,7 +443,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self,
         treated_data: pd.DataFrame,
         pretreatment_data: pd.DataFrame,
-        hdi_prob: float = 0.94,
+        hdi_prob: float = HDI_PROB,
     ) -> None:
         """Aggregate effects for Bayesian model with posterior uncertainty.
 
@@ -630,7 +644,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for Bayesian model.
 
         Returns
@@ -708,7 +722,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def _ols_plot(self, **kwargs: dict) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for OLS model.
 
         Returns
@@ -801,7 +815,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """Get plotting data for Bayesian model.
 
         Parameters
@@ -817,7 +831,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """
         # If the requested hdi_prob matches what was used during aggregation,
         # return the pre-computed results
-        stored_hdi_prob = getattr(self, "hdi_prob_", 0.94)
+        stored_hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         if np.isclose(hdi_prob, stored_hdi_prob):
             return self.att_event_time_.copy()
 

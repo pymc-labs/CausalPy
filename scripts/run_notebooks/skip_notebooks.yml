@@ -1,0 +1,7 @@
+# Notebooks that are incompatible with the CI test environment.
+#
+# These notebooks are skipped for various reasons documented below.
+
+# Requires JAX which is not installed in the test environment.
+- iv_pymc.ipynb
+- iv_weak_instruments.ipynb

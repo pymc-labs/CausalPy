@@ -26,12 +26,13 @@ from formulaic import model_matrix
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
 from causalpy.plot_utils import plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _compute_statistics_did_ols,
@@ -47,8 +48,6 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class DifferenceInDifferences(BaseExperiment):
@@ -73,7 +72,7 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column indicating post-treatment period.
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
-        A PyMC model for difference in differences. Defaults to None.
+        A PyMC model for difference in differences. Defaults to LinearRegression.
 
     Example
     --------
@@ -97,6 +96,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -106,7 +106,7 @@ class DifferenceInDifferences(BaseExperiment):
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
@@ -158,10 +158,9 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, automatically set fit_intercept=False
-            # This ensures the intercept is included in the coefficients array rather than being a separate intercept_ attribute
-            # without this, the intercept is not included in the coefficients array hence would be displayed as 0 in the model summary
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
+            # Ensure the intercept is part of the coefficients array rather than
+            # a separate intercept_ attribute.  See #664 / PR #693 for
+            # centralising this in BaseExperiment.
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
@@ -264,10 +263,9 @@ class DifferenceInDifferences(BaseExperiment):
             raise ValueError("Model type not recognized")
 
     def input_validation(self) -> None:
+        """Validate the input data and model formula for correctness"""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-
-        """Validate the input data and model formula for correctness"""
         # Check if post_treatment_variable_name is in formula
         if self.post_treatment_variable_name not in self.formula:
             raise FormulaException(
@@ -285,7 +283,7 @@ class DifferenceInDifferences(BaseExperiment):
                 "Require a `unit` column to label unique units. This is used for plotting purposes"  # noqa: E501
             )
 
-        if _is_variable_dummy_coded(self.data[self.group_variable_name]) is False:
+        if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""The grouping variable {self.group_variable_name} should be dummy
                 coded. Consisting of 0's and 1's only."""
@@ -334,11 +332,11 @@ class DifferenceInDifferences(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
-        """Computes the mean and 94% credible interval bounds for the causal impact."""
+        """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
@@ -488,7 +486,7 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
         fig, ax = plt.subplots()
@@ -520,7 +518,7 @@ class DifferenceInDifferences(BaseExperiment):
             "o",
             c="C1",
             markersize=10,
-            label="model fit (treament group)",
+            label="model fit (treatment group)",
         )
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.

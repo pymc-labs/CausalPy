@@ -25,16 +25,15 @@ from formulaic import model_matrix
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -126,9 +125,9 @@ class InterruptedTimeSeries(BaseExperiment):
     after the intervention ends.
     """
 
-    expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -137,7 +136,7 @@ class InterruptedTimeSeries(BaseExperiment):
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.pre_y: xr.DataArray
@@ -223,7 +222,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         # get the model predictions of the observed (pre-intervention) data
-        if isinstance(self.model, (PyMCModel, RegressorMixin)):
+        if isinstance(self.model, PyMCModel | RegressorMixin):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
@@ -597,7 +596,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -793,7 +792,7 @@ class InterruptedTimeSeries(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -883,7 +882,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
 
@@ -1246,15 +1245,16 @@ class InterruptedTimeSeries(BaseExperiment):
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes
+            Object with .table (DataFrame) and .text (str) attributes.
+            The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
             _compute_statistics,
             _compute_statistics_ols,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose,
-            _generate_prose_ols,
+            _generate_prose_detailed,
+            _generate_prose_detailed_ols,
             _generate_table,
             _generate_table_ols,
         )
@@ -1335,11 +1335,18 @@ class InterruptedTimeSeries(BaseExperiment):
                 min_effect=min_effect,
             )
 
-            # Generate table
             table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose(
+            # Compute observed/counterfactual averages for prose
+            time_dim = "obs_ind"
+            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(
+                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
+            )
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed(
                 stats,
                 window_coords,
                 alpha=alpha,
@@ -1347,10 +1354,14 @@ class InterruptedTimeSeries(BaseExperiment):
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="its",
             )
         else:
             # OLS model: use point estimates and CIs
-            # Convert to numpy arrays if needed
             if hasattr(windowed_impact, "values"):
                 impact_array = windowed_impact.values
             else:
@@ -1368,17 +1379,25 @@ class InterruptedTimeSeries(BaseExperiment):
                 relative=relative,
             )
 
-            # Generate table
             table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
-            # Generate prose
-            text = _generate_prose_ols(
+            cf_avg = float(np.mean(counterfactual_array))
+            obs_avg = cf_avg + stats["avg"]["mean"]
+            cf_cum = float(np.sum(counterfactual_array))
+            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+            text = _generate_prose_detailed_ols(
                 stats,
                 window_coords,
                 alpha=alpha,
                 cumulative=cumulative,
                 relative=relative,
                 prefix=prefix,
+                observed_avg=obs_avg,
+                counterfactual_avg=cf_avg,
+                observed_cum=obs_cum,
+                counterfactual_cum=cf_cum if cumulative else None,
+                experiment_type="its",
             )
 
         return EffectSummary(table=table, text=text)
