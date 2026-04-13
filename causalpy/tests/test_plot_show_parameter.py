@@ -148,9 +148,7 @@ def test_plot_show_parameter_false_skl(did_data):
 
 def _legend_handle_count(legend):
     """Return the number of handles in a legend (cross-version)."""
-    handles = getattr(
-        legend, "legend_handles", getattr(legend, "legendHandles", None)
-    )
+    handles = getattr(legend, "legend_handles", getattr(legend, "legendHandles", None))
     return len(handles) if handles is not None else 0
 
 
@@ -319,7 +317,10 @@ def test_legend_kwargs_unsupported_key_raises(mock_pymc_sample, did_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    with pytest.raises(TypeError, match="not supported"), patch("matplotlib.pyplot.show"):
+    with (
+        pytest.raises(TypeError, match="not supported"),
+        patch("matplotlib.pyplot.show"),
+    ):
         result.plot(legend_kwargs={"ncol": 2})
     plt.close("all")
 

@@ -48,7 +48,14 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     TypeError
         If *kwargs* contains keys that cannot be applied in place.
     """
-    _SUPPORTED = {"loc", "bbox_to_anchor", "bbox_transform", "fontsize", "frameon", "title"}
+    _SUPPORTED = {
+        "loc",
+        "bbox_to_anchor",
+        "bbox_transform",
+        "fontsize",
+        "frameon",
+        "title",
+    }
     unsupported = set(kwargs) - _SUPPORTED
     if unsupported:
         raise TypeError(
@@ -257,10 +264,13 @@ class BaseExperiment(ABC):
         # (Line2D, PolyCollection) tuples built by plot_xY — are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
-            axes = ax if isinstance(ax, list) else [ax]
-            with contextlib.suppress(TypeError, AttributeError):
-                # Handle numpy arrays of axes (e.g., from plt.subplots(nrows=2))
-                axes = list(ax.flat) if hasattr(ax, "flat") else axes
+            # Normalise ax to a flat list so we can iterate uniformly.
+            if hasattr(ax, "flat"):
+                axes = list(ax.flat)
+            elif isinstance(ax, list):
+                axes = ax
+            else:
+                axes = [ax]
             for a in axes:
                 legend = a.get_legend()
                 if legend is not None:
