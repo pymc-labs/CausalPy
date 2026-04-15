@@ -15,14 +15,12 @@
 Panel Regression with Fixed Effects
 """
 
-import warnings
 from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from scipy import stats
@@ -179,6 +177,7 @@ class PanelRegression(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -283,37 +282,13 @@ class PanelRegression(BaseExperiment):
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
         n = self._X_raw.shape[0]
-        self.design = xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    self._X_raw,
-                    dims=["obs_ind", "coeffs"],
-                    coords={"obs_ind": np.arange(n), "coeffs": self.labels},
-                ),
-                "y": xr.DataArray(
-                    self._y_raw,
-                    dims=["obs_ind", "treated_units"],
-                    coords={"obs_ind": np.arange(n), "treated_units": ["unit_0"]},
-                ),
-            }
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
         del self._X_raw, self._y_raw
-
-    @property
-    def X(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['X']`` instead."""
-        warnings.warn(
-            "X is deprecated, use design['X']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["X"]
-
-    @property
-    def y(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['y']`` instead."""
-        warnings.warn(
-            "y is deprecated, use design['y']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["y"]
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit the model."""

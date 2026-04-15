@@ -87,6 +87,12 @@ class SyntheticControl(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = WeightedSumFitter
+    _deprecated_design_aliases = {
+        "datapre_control": ("pre_design", "control"),
+        "datapre_treated": ("pre_design", "treated"),
+        "datapost_control": ("post_design", "control"),
+        "datapost_treated": ("post_design", "treated"),
+    }
 
     def __init__(
         self,
@@ -220,46 +226,6 @@ class SyntheticControl(BaseExperiment):
         Post-period: index >= treatment_time
         """
         return self.data[self.data.index >= self.treatment_time]
-
-    @property
-    def datapre_control(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.pre_design['control']`` instead."""
-        warnings.warn(
-            "datapre_control is deprecated, use pre_design['control']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.pre_design["control"]
-
-    @property
-    def datapre_treated(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.pre_design['treated']`` instead."""
-        warnings.warn(
-            "datapre_treated is deprecated, use pre_design['treated']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.pre_design["treated"]
-
-    @property
-    def datapost_control(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.post_design['control']`` instead."""
-        warnings.warn(
-            "datapost_control is deprecated, use post_design['control']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.post_design["control"]
-
-    @property
-    def datapost_treated(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.post_design['treated']`` instead."""
-        warnings.warn(
-            "datapost_treated is deprecated, use post_design['treated']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.post_design["treated"]
 
     def _prepare_data(self) -> None:
         """Bundle control and treated data into ``xr.Dataset`` objects per period."""

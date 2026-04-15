@@ -50,8 +50,8 @@ class ConvexHullCheck:
     ) -> CheckResult:
         """Run the convex hull violation check on pre-treatment data."""
         sc = experiment
-        datapre_control = sc.datapre_control  # type: ignore[attr-defined]
-        datapre_treated = sc.datapre_treated  # type: ignore[attr-defined]
+        datapre_control = sc.pre_design["control"]  # type: ignore[attr-defined]
+        datapre_treated = sc.pre_design["treated"]  # type: ignore[attr-defined]
 
         all_results = []
         total_violations = 0

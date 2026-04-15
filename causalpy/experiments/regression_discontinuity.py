@@ -24,7 +24,6 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
-import xarray as xr
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -92,6 +91,7 @@ class RegressionDiscontinuity(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -160,37 +160,13 @@ class RegressionDiscontinuity(BaseExperiment):
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
         n = self._X_raw.shape[0]
-        self.design = xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    self._X_raw,
-                    dims=["obs_ind", "coeffs"],
-                    coords={"obs_ind": np.arange(n), "coeffs": self.labels},
-                ),
-                "y": xr.DataArray(
-                    self._y_raw,
-                    dims=["obs_ind", "treated_units"],
-                    coords={"obs_ind": np.arange(n), "treated_units": ["unit_0"]},
-                ),
-            }
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
         del self._X_raw, self._y_raw
-
-    @property
-    def X(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['X']`` instead."""
-        warnings.warn(
-            "X is deprecated, use design['X']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["X"]
-
-    @property
-    def y(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['y']`` instead."""
-        warnings.warn(
-            "y is deprecated, use design['y']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["y"]
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""

@@ -16,7 +16,6 @@ Piecewise Interrupted Time Series Analysis (Segmented Regression)
 """
 
 import re
-import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -147,6 +146,7 @@ class PiecewiseITS(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -189,22 +189,11 @@ class PiecewiseITS(BaseExperiment):
         n_obs = X_array.shape[0]
 
         # Bundle into xr.Dataset
-        self.design = xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    X_array,
-                    dims=["obs_ind", "coeffs"],
-                    coords={"obs_ind": np.arange(n_obs), "coeffs": self.labels},
-                ),
-                "y": xr.DataArray(
-                    y_array,
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": np.arange(n_obs),
-                        "treated_units": ["unit_0"],
-                    },
-                ),
-            }
+        self.design = self._build_design_dataset(
+            X_array,
+            y_array,
+            obs_ind=np.arange(n_obs),
+            coeffs=self.labels,
         )
 
         # Track which columns are interruption-related (for counterfactual)
@@ -236,22 +225,6 @@ class PiecewiseITS(BaseExperiment):
 
         # Compute counterfactual and effects
         self._compute_counterfactual_and_effects()
-
-    @property
-    def X(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['X']`` instead."""
-        warnings.warn(
-            "X is deprecated, use design['X']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["X"]
-
-    @property
-    def y(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.design['y']`` instead."""
-        warnings.warn(
-            "y is deprecated, use design['y']", DeprecationWarning, stacklevel=2
-        )
-        return self.design["y"]
 
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""

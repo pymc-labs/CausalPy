@@ -15,7 +15,6 @@
 Interrupted Time Series Analysis
 """
 
-import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -129,6 +128,12 @@ class InterruptedTimeSeries(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {
+        "pre_X": ("pre_design", "X"),
+        "pre_y": ("pre_design", "y"),
+        "post_X": ("post_design", "X"),
+        "post_y": ("post_design", "y"),
+    }
 
     def __init__(
         self,
@@ -169,39 +174,17 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into ``xr.Dataset`` objects for pre and post periods."""
-        self.pre_design = xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    self._pre_X_raw,
-                    dims=["obs_ind", "coeffs"],
-                    coords={"obs_ind": self.datapre.index, "coeffs": self.labels},
-                ),
-                "y": xr.DataArray(
-                    self._pre_y_raw,
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapre.index,
-                        "treated_units": ["unit_0"],
-                    },
-                ),
-            }
+        self.pre_design = self._build_design_dataset(
+            self._pre_X_raw,
+            self._pre_y_raw,
+            obs_ind=self.datapre.index,
+            coeffs=self.labels,
         )
-        self.post_design = xr.Dataset(
-            {
-                "X": xr.DataArray(
-                    self._post_X_raw,
-                    dims=["obs_ind", "coeffs"],
-                    coords={"obs_ind": self.datapost.index, "coeffs": self.labels},
-                ),
-                "y": xr.DataArray(
-                    self._post_y_raw,
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapost.index,
-                        "treated_units": ["unit_0"],
-                    },
-                ),
-            }
+        self.post_design = self._build_design_dataset(
+            self._post_X_raw,
+            self._post_y_raw,
+            obs_ind=self.datapost.index,
+            coeffs=self.labels,
         )
         del self._pre_X_raw, self._pre_y_raw, self._post_X_raw, self._post_y_raw
 
@@ -319,46 +302,6 @@ class InterruptedTimeSeries(BaseExperiment):
         Post-period: index >= treatment_time
         """
         return self.data[self.data.index >= self.treatment_time]
-
-    @property
-    def pre_X(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.pre_design['X']`` instead."""
-        warnings.warn(
-            "pre_X is deprecated, use pre_design['X']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.pre_design["X"]
-
-    @property
-    def pre_y(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.pre_design['y']`` instead."""
-        warnings.warn(
-            "pre_y is deprecated, use pre_design['y']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.pre_design["y"]
-
-    @property
-    def post_X(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.post_design['X']`` instead."""
-        warnings.warn(
-            "post_X is deprecated, use post_design['X']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.post_design["X"]
-
-    @property
-    def post_y(self) -> xr.DataArray:
-        """.. deprecated:: Use ``self.post_design['y']`` instead."""
-        warnings.warn(
-            "post_y is deprecated, use post_design['y']",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.post_design["y"]
 
     def _split_post_period(self) -> None:
         """Split post period into intervention and post-intervention periods.
