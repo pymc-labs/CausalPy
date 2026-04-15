@@ -55,6 +55,11 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
   - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
 - **Markdown formatting**: Do not hard-wrap lines in markdown files; rely on editor auto-wrapping.
 
+## Architecture documentation
+
+- **Reference**: [`ARCHITECTURE.md`](./ARCHITECTURE.md) documents the layered design, module responsibilities, and extension points.
+- **Update policy**: When a PR introduces a new experiment class, model, check, pipeline step, or structural reorganization, update `ARCHITECTURE.md` to reflect the change. Minor bug fixes, documentation edits, and test additions do not require updates.
+
 ## Code structure and style
 
 - **Experiment classes**: All experiment classes inherit from `BaseExperiment` in `causalpy/experiments/`. Must declare `supports_ols` and `supports_bayes` class attributes. Only implement abstract methods for supported model types (e.g., if only Bayesian is supported, implement `_bayesian_plot()` and `get_plot_data_bayesian()`; if only OLS is supported, implement `_ols_plot()` and `get_plot_data_ols()`)

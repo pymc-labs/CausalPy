@@ -219,6 +219,8 @@ We recommend that your contribution complies with the following guidelines befor
 
 - If notebook schema validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `conda run -n CausalPy make html` before pushing.
 
+- If your PR introduces a new experiment class, model, check, pipeline step, or other structural change, update [`ARCHITECTURE.md`](./ARCHITECTURE.md) to reflect the change.
+
 - Run any of the pre-existing examples in `CausalPy/docs/source/*` that contain analyses that would be affected by your changes to ensure that nothing breaks. This is a useful opportunity to not only check your work for bugs that might not be revealed by unit test, but also to show how your contribution improves CausalPy for end users.
 
 - Your code passes linting tests. Run the line below to check linting errors:
