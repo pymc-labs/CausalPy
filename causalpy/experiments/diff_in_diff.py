@@ -15,6 +15,7 @@
 Difference in differences
 """
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -129,42 +130,60 @@ class DifferenceInDifferences(BaseExperiment):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    self._X_raw,
+                    dims=["obs_ind", "coeffs"],
+                    coords={"obs_ind": np.arange(n), "coeffs": self.labels},
+                ),
+                "y": xr.DataArray(
+                    self._y_raw,
+                    dims=["obs_ind", "treated_units"],
+                    coords={"obs_ind": np.arange(n), "treated_units": ["unit_0"]},
+                ),
+            }
         )
-        self.y = xr.DataArray(
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
+        del self._X_raw, self._y_raw
+
+    @property
+    def X(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.design['X']`` instead."""
+        warnings.warn(
+            "X is deprecated, use design['X']", DeprecationWarning, stacklevel=2
         )
+        return self.design["X"]
+
+    @property
+    def y(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.design['y']`` instead."""
+        warnings.warn(
+            "y is deprecated, use design['y']", DeprecationWarning, stacklevel=2
+        )
+        return self.design["y"]
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        # fit model
+        X = self.design["X"]
+        y = self.design["y"]
+
         if isinstance(self.model, PyMCModel):
             COORDS = {
                 "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
+                "obs_ind": np.arange(X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
+            self.model.fit(X=X, y=y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # Ensure the intercept is part of the coefficients array rather than
-            # a separate intercept_ attribute.  See #664 / PR #693 for
-            # centralising this in BaseExperiment.
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
-            self.model.fit(X=self.X, y=self.y)
+            self.model.fit(X=X, y=y)
         else:
             raise ValueError("Model type not recognized")
 

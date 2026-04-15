@@ -16,6 +16,7 @@ Piecewise Interrupted Time Series Analysis (Segmented Regression)
 """
 
 import re
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -187,54 +188,70 @@ class PiecewiseITS(BaseExperiment):
 
         n_obs = X_array.shape[0]
 
-        # Convert to xarray DataArrays
-        self.X = xr.DataArray(
-            X_array,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(n_obs),
-                "coeffs": self.labels,
-            },
-        )
-
-        self.y = xr.DataArray(
-            y_array,
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": np.arange(n_obs),
-                "treated_units": ["unit_0"],
-            },
+        # Bundle into xr.Dataset
+        self.design = xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    X_array,
+                    dims=["obs_ind", "coeffs"],
+                    coords={"obs_ind": np.arange(n_obs), "coeffs": self.labels},
+                ),
+                "y": xr.DataArray(
+                    y_array,
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": np.arange(n_obs),
+                        "treated_units": ["unit_0"],
+                    },
+                ),
+            }
         )
 
         # Track which columns are interruption-related (for counterfactual)
         self._interruption_cols = self._get_interruption_column_indices()
 
-        # Fit the model to the full time series
+        X = self.design["X"]
+        y = self.design["y"]
+
         if isinstance(self.model, PyMCModel):
             COORDS: dict[str, Any] = {
                 "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
+                "obs_ind": np.arange(X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
+            self.model.fit(X=X, y=y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
             if hasattr(self.model, "fit_intercept"):
                 self.model.fit_intercept = False
-            self.model.fit(X=self.X, y=self.y.isel(treated_units=0))
+            self.model.fit(X=X, y=y.isel(treated_units=0))
         else:
             raise ValueError("Model type not recognized")
 
-        # Compute predictions (fitted values)
-        self.y_pred = self.model.predict(X=self.X)
+        self.y_pred = self.model.predict(X=X)
 
-        # Score the model fit
         if isinstance(self.model, PyMCModel):
-            self.score = self.model.score(X=self.X, y=self.y)
+            self.score = self.model.score(X=X, y=y)
         elif isinstance(self.model, RegressorMixin):
-            self.score = self.model.score(X=self.X, y=self.y.isel(treated_units=0))
+            self.score = self.model.score(X=X, y=y.isel(treated_units=0))
 
         # Compute counterfactual and effects
         self._compute_counterfactual_and_effects()
+
+    @property
+    def X(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.design['X']`` instead."""
+        warnings.warn(
+            "X is deprecated, use design['X']", DeprecationWarning, stacklevel=2
+        )
+        return self.design["X"]
+
+    @property
+    def y(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.design['y']`` instead."""
+        warnings.warn(
+            "y is deprecated, use design['y']", DeprecationWarning, stacklevel=2
+        )
+        return self.design["y"]
 
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
@@ -333,7 +350,7 @@ class PiecewiseITS(BaseExperiment):
         compatibility with effect_summary() from BaseExperiment.
         """
         # Create design matrix for counterfactual (zero out interruption columns)
-        X_cf = self.X.copy()
+        X_cf = self.design["X"].copy()
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
 
@@ -470,7 +487,7 @@ class PiecewiseITS(BaseExperiment):
         # Observed data
         (h_obs,) = ax[0].plot(
             time_values,
-            self.y.isel(treated_units=0),
+            self.design["y"].isel(treated_units=0),
             "k.",
             label="Observations",
         )
@@ -584,7 +601,7 @@ class PiecewiseITS(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 10))
 
         # TOP PLOT: Observed, Fitted, and Counterfactual
-        ax[0].plot(time_values, self.y.values, "k.", label="Observations")
+        ax[0].plot(time_values, self.design["y"].values, "k.", label="Observations")
         ax[0].plot(time_values, self.y_pred, "C0-", label="Fitted", linewidth=2)
         ax[0].plot(
             time_values,
@@ -685,7 +702,9 @@ class PiecewiseITS(BaseExperiment):
         result = pd.DataFrame(
             {
                 self.time_col: time_values,
-                self.outcome_variable_name: self.y.isel(treated_units=0).values,
+                self.outcome_variable_name: self.design["y"]
+                .isel(treated_units=0)
+                .values,
                 "fitted": fitted_mean,
                 f"fitted_hdi_lower_{hdi_pct}": fitted_lower,
                 f"fitted_hdi_upper_{hdi_pct}": fitted_upper,
@@ -718,7 +737,7 @@ class PiecewiseITS(BaseExperiment):
         result = pd.DataFrame(
             {
                 self.time_col: time_values,
-                self.outcome_variable_name: self.y.values.flatten(),
+                self.outcome_variable_name: self.design["y"].values.flatten(),
                 "fitted": np.squeeze(self.y_pred),
                 "counterfactual": np.squeeze(self.y_counterfactual),
                 "effect": self.effect,

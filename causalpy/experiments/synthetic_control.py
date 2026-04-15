@@ -126,12 +126,12 @@ class SyntheticControl(BaseExperiment):
         total_above = 0
         total_below = 0
         n_units = len(self.treated_units)
-        n_pre_points = self.datapre_treated.shape[0]
+        n_pre_points = self.pre_design["treated"].shape[0]
 
         for i in range(n_units):
             unit_check = check_convex_hull_violation(
-                self.datapre_treated.isel(treated_units=i).values,
-                self.datapre_control.values,
+                self.pre_design["treated"].isel(treated_units=i).values,
+                self.pre_design["control"].values,
             )
             total_violations += unit_check["n_violations"]
             total_above += unit_check["pct_above"] * n_pre_points / 100
@@ -221,43 +221,87 @@ class SyntheticControl(BaseExperiment):
         """
         return self.data[self.data.index >= self.treatment_time]
 
+    @property
+    def datapre_control(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.pre_design['control']`` instead."""
+        warnings.warn(
+            "datapre_control is deprecated, use pre_design['control']",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.pre_design["control"]
+
+    @property
+    def datapre_treated(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.pre_design['treated']`` instead."""
+        warnings.warn(
+            "datapre_treated is deprecated, use pre_design['treated']",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.pre_design["treated"]
+
+    @property
+    def datapost_control(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.post_design['control']`` instead."""
+        warnings.warn(
+            "datapost_control is deprecated, use post_design['control']",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.post_design["control"]
+
+    @property
+    def datapost_treated(self) -> xr.DataArray:
+        """.. deprecated:: Use ``self.post_design['treated']`` instead."""
+        warnings.warn(
+            "datapost_treated is deprecated, use post_design['treated']",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.post_design["treated"]
+
     def _prepare_data(self) -> None:
-        """Prepare xarray DataArrays for control and treated units in pre/post periods."""
-        # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray.DataArray objects.
-        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
-        # make constructing the xarray DataArray objects easier.
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
+        """Bundle control and treated data into ``xr.Dataset`` objects per period."""
+        self.pre_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapre[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapre[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapre[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapre[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
+        self.post_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapost[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapost[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapost[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapost[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
 
     def algorithm(self) -> None:
@@ -273,35 +317,35 @@ class SyntheticControl(BaseExperiment):
                 "obs_ind": np.arange(self.datapre.shape[0]),
             }
             self.model.fit(
-                X=self.datapre_control,
-                y=self.datapre_treated,
+                X=self.pre_design["control"],
+                y=self.pre_design["treated"],
                 coords=COORDS,
             )
         elif isinstance(self.model, RegressorMixin):
             self.model.fit(
-                X=self.datapre_control.data,
-                y=self.datapre_treated.isel(treated_units=0).data,
+                X=self.pre_design["control"].data,
+                y=self.pre_design["treated"].isel(treated_units=0).data,
             )
         else:
             raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
         self.score = self.model.score(
-            X=self.datapre_control,
-            y=self.datapre_treated,
+            X=self.pre_design["control"],
+            y=self.pre_design["treated"],
         )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.datapre_control)
+        self.pre_pred = self.model.predict(X=self.pre_design["control"])
 
         # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.datapost_control)
+        self.post_pred = self.model.predict(X=self.post_design["control"])
         self.pre_impact = self.model.calculate_impact(
-            self.datapre_treated, self.pre_pred
+            self.pre_design["treated"], self.pre_pred
         )
 
         self.post_impact = self.model.calculate_impact(
-            self.datapost_treated, self.post_pred
+            self.post_design["treated"], self.post_pred
         )
 
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
@@ -336,7 +380,9 @@ class SyntheticControl(BaseExperiment):
         """
         correlations: dict[str, float] = {}
         for unit in self.treated_units:
-            observed = self.datapre_treated.sel(treated_units=unit).values.flatten()
+            observed = (
+                self.pre_design["treated"].sel(treated_units=unit).values.flatten()
+            )
             if isinstance(self.model, PyMCModel):
                 predicted = (
                     self.pre_pred["posterior_predictive"]["mu"]
@@ -428,7 +474,7 @@ class SyntheticControl(BaseExperiment):
         # Plot observations for primary treated unit
         (h,) = ax[0].plot(
             self.datapre.index,
-            self.datapre_treated.sel(treated_units=treated_unit),
+            self.pre_design["treated"].sel(treated_units=treated_unit),
             "k.",
             label="Observations",
         )
@@ -447,14 +493,14 @@ class SyntheticControl(BaseExperiment):
 
         ax[0].plot(
             self.datapost.index,
-            self.datapost_treated.sel(treated_units=treated_unit),
+            self.post_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
         # Shaded causal effect for primary treated unit
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost_treated.sel(treated_units=treated_unit).values,
+            y2=self.post_design["treated"].sel(treated_units=treated_unit).values,
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -520,14 +566,14 @@ class SyntheticControl(BaseExperiment):
             # plot control units as well
             ax[0].plot(
                 self.datapre.index,
-                self.datapre_control,
+                self.pre_design["control"],
                 "-",
                 c=[0.8, 0.8, 0.8],
                 zorder=1,
             )
             ax[0].plot(
                 self.datapost.index,
-                self.datapost_control,
+                self.post_design["control"],
                 "-",
                 c=[0.8, 0.8, 0.8],
                 zorder=1,
@@ -574,13 +620,13 @@ class SyntheticControl(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         ax[0].plot(
-            self.datapre_treated["obs_ind"],
-            self.datapre_treated.sel(treated_units=treated_unit),
+            self.pre_design["treated"]["obs_ind"],
+            self.pre_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
         ax[0].plot(
-            self.datapost_treated["obs_ind"],
-            self.datapost_treated.sel(treated_units=treated_unit),
+            self.post_design["treated"]["obs_ind"],
+            self.post_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
 
@@ -599,7 +645,9 @@ class SyntheticControl(BaseExperiment):
         ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_values,
-            y2=np.squeeze(self.datapost_treated.sel(treated_units=treated_unit).data),
+            y2=np.squeeze(
+                self.post_design["treated"].sel(treated_units=treated_unit).data
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
