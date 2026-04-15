@@ -10,10 +10,26 @@ description: Analyze an issue, check current relevance, and propose next steps o
 gh issue view <issue_number> --json number,title,body,state,labels,comments,assignees
 ```
 
+## Check for sub-issues (native hierarchy)
+
+Always check whether an issue has native sub-issues. The `trackedIssues` / `trackedInIssues` GraphQL fields only cover older markdown task-list tracking and will miss native sub-issues.
+
+```bash
+gh api graphql -f query='query {
+  repository(owner:"<owner>", name:"<repo>") {
+    issue(number: <issue_number>) {
+      subIssues(first: 50) { nodes { number title state url } }
+      parent { number title state url }
+    }
+  }
+}'
+```
+
 ## Analyze context
 - Extract the problem statement and acceptance criteria
 - Summarize discussion history and blockers
 - Identify affected files/modules
+- Review sub-issues (if any) for work breakdown and progress
 
 ## Assess relevance
 - Search codebase for mentioned APIs or modules

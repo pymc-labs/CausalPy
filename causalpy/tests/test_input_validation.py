@@ -274,14 +274,13 @@ def test_did_validation_group_dummy_coded():
 # Synthetic Control
 
 
-def test_sc_input_error():
+def test_sc_input_error(sc_data):
     """Confirm that a BadIndexException is raised treatment_time is pd.Timestamp
     and df.index is not pd.DatetimeIndex."""
     with pytest.raises(BadIndexException):
-        df = cp.load_data("sc")
         treatment_time = pd.to_datetime("2016 June 24")
         _ = cp.SyntheticControl(
-            df,
+            sc_data,
             treatment_time,
             control_units=["a", "b", "c", "d", "e", "f", "g"],
             treated_units=["actual"],
@@ -289,10 +288,9 @@ def test_sc_input_error():
         )
 
     with pytest.raises(BadIndexException):
-        df = cp.load_data("sc")
         treatment_time = pd.to_datetime("2016 June 24")
         _ = cp.SyntheticControl(
-            df,
+            sc_data,
             treatment_time,
             control_units=["a", "b", "c", "d", "e", "f", "g"],
             treated_units=["actual"],

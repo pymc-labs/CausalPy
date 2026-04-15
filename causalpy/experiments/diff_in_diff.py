@@ -26,6 +26,7 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -48,8 +49,6 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class DifferenceInDifferences(BaseExperiment):
@@ -108,7 +107,7 @@ class DifferenceInDifferences(BaseExperiment):
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
@@ -262,10 +261,9 @@ class DifferenceInDifferences(BaseExperiment):
             raise ValueError("Model type not recognized")
 
     def input_validation(self) -> None:
+        """Validate the input data and model formula for correctness"""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-
-        """Validate the input data and model formula for correctness"""
         # Check if post_treatment_variable_name is in formula
         if self.post_treatment_variable_name not in self.formula:
             raise FormulaException(
@@ -283,7 +281,7 @@ class DifferenceInDifferences(BaseExperiment):
                 "Require a `unit` column to label unique units. This is used for plotting purposes"  # noqa: E501
             )
 
-        if _is_variable_dummy_coded(self.data[self.group_variable_name]) is False:
+        if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""The grouping variable {self.group_variable_name} should be dummy
                 coded. Consisting of 0's and 1's only."""
@@ -332,11 +330,11 @@ class DifferenceInDifferences(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
-        """Computes the mean and 94% credible interval bounds for the causal impact."""
+        """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: dict
+        self, round_to: int | None = None, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """
         Plot the results
@@ -491,7 +489,7 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for difference-in-differences"""
         fig, ax = plt.subplots()
@@ -523,7 +521,7 @@ class DifferenceInDifferences(BaseExperiment):
             "o",
             c="C1",
             markersize=10,
-            label="model fit (treament group)",
+            label="model fit (treatment group)",
         )
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
