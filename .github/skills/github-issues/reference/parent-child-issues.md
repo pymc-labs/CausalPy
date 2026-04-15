@@ -91,7 +91,24 @@ gh api graphql \
   -f sub='<CHILD_NODE_ID>'
 ```
 
-## 6) Verify links rendered correctly
+## 6) Discover existing sub-issues
+
+When evaluating an issue that may already have sub-issues, always use the `subIssues` GraphQL field. Do **not** use `trackedIssues` / `trackedInIssues` -- those only cover older markdown task-list tracking and will miss native sub-issues.
+
+```bash
+gh api graphql -f query='query {
+  repository(owner:"<owner>", name:"<repo>") {
+    issue(number: <issue_number>) {
+      subIssues(first: 50) {
+        nodes { number title state url }
+      }
+      parent { number title state url }
+    }
+  }
+}'
+```
+
+## 7) Verify links rendered correctly
 
 ```bash
 gh api graphql -f query='query {

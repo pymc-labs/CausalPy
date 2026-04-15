@@ -92,8 +92,3 @@ From an analysis perspective, regression discontinuity designs are very similar 
 
 ## Summary
 This page has offered a brief overview of the tabular notation used to describe quasi-experimental designs. The notation is a useful tool for summarizing the design of a study, and can be used to help identify the strengths and limitations of a study design. But readers are strongly encouraged to consult the original sources when assessing the relative strengths and limitations of making causal claims under different quasi-experimental designs.
-
-## References
-:::{bibliography}
-:filter: docname in docnames
-:::

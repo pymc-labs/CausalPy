@@ -1337,13 +1337,13 @@ class PropensityScore(PyMCModel):
         Notes
         -----
         - This model uses a sampled version of the propensity score (`p`) from the
-        posterior of the treatment model, randomly selecting one posterior draw
-        per call. This term is estimated initially in the InversePropensity
-        class initialisation.
+          posterior of the treatment model, randomly selecting one posterior draw
+          per call. This term is estimated initially in the InversePropensity
+          class initialisation.
         - The term `beta_ps[0] * p` captures both
-        main effects of the propensity score.
+          main effects of the propensity score.
         - Including spline adjustment enables modeling nonlinear relationships
-        between the propensity score and the outcome.
+          between the propensity score and the outcome.
 
         """
         if priors is None:
