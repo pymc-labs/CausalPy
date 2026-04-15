@@ -8,13 +8,16 @@ requires = ["setuptools>=61.0"]
 [tool.setuptools.packages.find]
 exclude = ["causalpy.test*", "docs*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "causalpy.version.__version__"}
+
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
 "causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
-version = "0.8.0"
+dynamic = ["version"]
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
