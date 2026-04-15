@@ -75,6 +75,12 @@ class PyMCModel(pm.Model):
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
     useful for causal inference.
 
+    The base implementation assumes the model graph contains mutable data nodes
+    named ``"X"`` (predictors) and ``"y"`` (target).  Subclasses that use
+    different names should set :attr:`_predictor_data_name` and
+    :attr:`_target_data_name`, or override :meth:`_data_setter` entirely for
+    models with non-standard data nodes.
+
     Example
     -------
     >>> import causalpy as cp
@@ -134,6 +140,8 @@ class PyMCModel(pm.Model):
     """
 
     default_priors: dict[str, Prior] = {}
+    _predictor_data_name: str = "X"
+    _target_data_name: str = "y"
 
     def priors_from_data(self, X, y) -> dict[str, Any]:
         """
@@ -253,18 +261,37 @@ class PyMCModel(pm.Model):
 
     def _data_setter(self, X: xr.DataArray) -> None:
         """
-        Set data for the model.
+        Set data for the model for prediction.
 
-        This method is used internally to register new data for the model for
-        prediction.
+        This method is called by :meth:`predict` to register new predictor data
+        and reshape the target placeholder so that ``pm.sample_posterior_predictive``
+        can run with the new observation count.
 
-        NOTE: We are actively changing the `X`. Often, this matrix will have a different
-        number of rows than the original data. So to make the shapes work, we need to
-        update all data nodes in the model to have the correct shape. The values are not
-        used, so we set them to 0. In our case, we just have data nodes X and y, but if
-        in the future we get more complex models with more data nodes, then we'll need
-        to update all of them - ideally programmatically.
+        By default the method assumes the model contains mutable data nodes whose
+        names match :attr:`_predictor_data_name` (default ``"X"``) and
+        :attr:`_target_data_name` (default ``"y"``).  Subclasses that use
+        different names can simply override those class attributes::
+
+            class MyModel(PyMCModel):
+                _predictor_data_name = "X_design"
+                _target_data_name = "y_obs"
+
+        For models that need entirely different data-setting logic (e.g. multiple
+        non-standard data nodes), override this method directly.  See
+        :class:`BayesianBasisExpansionTimeSeries` for an example.
         """
+        x_name = self._predictor_data_name
+        y_name = self._target_data_name
+
+        for name in (x_name, y_name):
+            if name not in self.named_vars:
+                raise ValueError(
+                    f"Data node '{name}' not found in model. "
+                    f"If your model uses different data node names, "
+                    f"set _predictor_data_name / _target_data_name class "
+                    f"attributes or override _data_setter()."
+                )
+
         new_no_of_observations = X.shape[0]
 
         # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
@@ -277,9 +304,14 @@ class PyMCModel(pm.Model):
             )
             n_treated_units = len(treated_units_coord)
 
-            # Always use 2D format for consistency
+            y_dtype = self[y_name].type.dtype
             pm.set_data(
-                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                {
+                    x_name: X,
+                    y_name: np.zeros(
+                        (new_no_of_observations, n_treated_units), dtype=y_dtype
+                    ),
+                },
                 coords={"obs_ind": obs_coords},
             )
 

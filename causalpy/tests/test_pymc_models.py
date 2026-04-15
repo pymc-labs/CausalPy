@@ -186,6 +186,112 @@ class TestPyMCModel:
         assert isinstance(predictions, az.InferenceData)
 
 
+class RenamedDataModel(PyMCModel):
+    """Subclass that uses non-default data node names via class attributes."""
+
+    _predictor_data_name = "X_design"
+    _target_data_name = "y_obs"
+
+    def build_model(self, X, y, coords):
+        with self:
+            if "treated_units" not in coords:
+                coords = coords.copy() if coords else {}
+                coords["treated_units"] = ["unit_0"]
+            self.add_coords(coords)
+            X_ = pm.Data(name="X_design", value=X, dims=["obs_ind", "coeffs"])
+            y_ = pm.Data(name="y_obs", value=y, dims=["obs_ind", "treated_units"])
+            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
+            sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_,
+                dims=["obs_ind", "treated_units"],
+            )
+
+
+class MismatchedDataModel(PyMCModel):
+    """Subclass using non-default names WITHOUT setting the class attributes."""
+
+    def build_model(self, X, y, coords):
+        with self:
+            if "treated_units" not in coords:
+                coords = coords.copy() if coords else {}
+                coords["treated_units"] = ["unit_0"]
+            self.add_coords(coords)
+            X_ = pm.Data(name="X_design", value=X, dims=["obs_ind", "coeffs"])
+            y_ = pm.Data(name="y_obs", value=y, dims=["obs_ind", "treated_units"])
+            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
+            sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_,
+                dims=["obs_ind", "treated_units"],
+            )
+
+
+class TestDataNodeCustomization:
+    """Tests for _predictor_data_name / _target_data_name customization."""
+
+    def test_renamed_data_nodes_fit_predict(self, rng, mock_pymc_sample):
+        """Subclass with overridden class attributes can fit and predict."""
+        X = xr.DataArray(
+            rng.normal(size=(20, 2)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(20), "coeffs": ["x1", "x2"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(20, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+        )
+        coords = {
+            "obs_ind": np.arange(20),
+            "coeffs": ["x1", "x2"],
+            "treated_units": ["unit_0"],
+        }
+        model = RenamedDataModel(sample_kwargs={"chains": 2, "draws": 2})
+        model.fit(X, y, coords=coords)
+        predictions = model.predict(X=X)
+        assert isinstance(predictions, az.InferenceData)
+
+    def test_mismatched_data_nodes_raises(self, rng, mock_pymc_sample):
+        """Subclass with non-default names but no attribute override raises ValueError."""
+        X = xr.DataArray(
+            rng.normal(size=(20, 2)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(20), "coeffs": ["x1", "x2"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(20, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+        )
+        coords = {
+            "obs_ind": np.arange(20),
+            "coeffs": ["x1", "x2"],
+            "treated_units": ["unit_0"],
+        }
+        model = MismatchedDataModel(sample_kwargs={"chains": 2, "draws": 2})
+        model.fit(X, y, coords=coords)
+        with pytest.raises(ValueError, match="Data node 'X' not found in model"):
+            model.predict(X=X)
+
+    def test_default_class_attributes(self):
+        """Default attribute values match the historical convention."""
+        assert PyMCModel._predictor_data_name == "X"
+        assert PyMCModel._target_data_name == "y"
+
+
 def test_idata_property(mock_pymc_sample, did_data):
     """Test that we can access the idata property of the model"""
     result = cp.DifferenceInDifferences(

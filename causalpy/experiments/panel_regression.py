@@ -557,7 +557,7 @@ class PanelRegression(BaseExperiment):
         """
         # Get posterior predictions
         if isinstance(self.model, PyMCModel):
-            mu = self.model.idata.posterior["mu"]  # type: ignore[attr-defined]
+            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
             pred_upper = mu.quantile(0.975, dim=["chain", "draw"]).values.flatten()
@@ -673,7 +673,7 @@ class PanelRegression(BaseExperiment):
 
         if isinstance(self.model, PyMCModel):
             # Bayesian: get posterior means
-            beta = self.model.idata.posterior["beta"]  # type: ignore[attr-defined]
+            beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
 
             # Get mean and std for each unit FE
