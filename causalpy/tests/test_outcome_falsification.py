@@ -173,112 +173,12 @@ def test_validate_rejects_no_formula():
 # ===========================================================================
 
 
-@pytest.mark.integration
-def test_validate_accepts_pymc_its(mock_pymc_sample):
-    """Test validate accepts PyMC ITS experiment."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    OutcomeFalsification(formulas=["z ~ 1 + t"]).validate(experiment)
+@pytest.fixture
+def its_context():
+    """Fitted ITS experiment + PipelineContext, shared across integration tests.
 
-
-@pytest.mark.integration
-def test_run_produces_check_result(mock_pymc_sample):
-    """Test run produces a CheckResult with correct structure."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    context = PipelineContext(data=df)
-    context.experiment = experiment
-    context.experiment_config = {
-        "method": InterruptedTimeSeries,
-        "treatment_time": 150,
-        "formula": "y ~ 1 + t",
-        "model": _make_pymc_model(),
-    }
-
-    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
-    result = check.run(experiment, context)
-
-    assert isinstance(result, CheckResult)
-    assert result.check_name == "OutcomeFalsification"
-    assert result.passed is None  # informational, no pass/fail
-    assert result.table is not None
-    assert len(result.table) == 1
-    assert "formula" in result.table.columns
-    assert "effect_mean" in result.table.columns
-
-
-@pytest.mark.integration
-def test_run_table_has_hdi_columns(mock_pymc_sample):
-    """Test the table includes HDI interval columns."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    context = PipelineContext(data=df)
-    context.experiment = experiment
-    context.experiment_config = {
-        "method": InterruptedTimeSeries,
-        "treatment_time": 150,
-        "formula": "y ~ 1 + t",
-        "model": _make_pymc_model(),
-    }
-
-    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
-    result = check.run(experiment, context)
-
-    table = result.table
-    assert "hdi_95%_lower" in table.columns
-    assert "hdi_95%_upper" in table.columns
-    assert not pd.isna(table["effect_mean"].iloc[0])
-
-
-@pytest.mark.integration
-def test_run_with_multiple_formulas(mock_pymc_sample):
-    """Test run with multiple falsification formulas produces multi-row table."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    context = PipelineContext(data=df)
-    context.experiment = experiment
-    context.experiment_config = {
-        "method": InterruptedTimeSeries,
-        "treatment_time": 150,
-        "formula": "y ~ 1 + t",
-        "model": _make_pymc_model(),
-    }
-
-    check = OutcomeFalsification(formulas=["z ~ 1 + t", "w ~ 1 + t"])
-    result = check.run(experiment, context)
-
-    assert result.table is not None
-    assert len(result.table) == 2
-    assert result.table["formula"].tolist() == ["z ~ 1 + t", "w ~ 1 + t"]
-
-
-@pytest.mark.integration
-def test_run_handles_failed_formula(mock_pymc_sample):
-    """Test that a mix of valid and invalid formulas is handled gracefully.
-
-    Note: formulas referencing nonexistent columns trigger a patsy/Python 3.13
-    traceback formatting bug (KeyError in patsy.eval), so we test with a
-    syntactically invalid formula instead.
+    Returns (df, experiment, context) so tests can use whichever pieces
+    they need without rebuilding the fixture.
     """
     df = _make_its_data()
     experiment = InterruptedTimeSeries(
@@ -295,6 +195,69 @@ def test_run_handles_failed_formula(mock_pymc_sample):
         "formula": "y ~ 1 + t",
         "model": _make_pymc_model(),
     }
+    return df, experiment, context
+
+
+@pytest.mark.integration
+def test_validate_accepts_pymc_its(mock_pymc_sample, its_context):
+    """Test validate accepts PyMC ITS experiment."""
+    _, experiment, _ = its_context
+    OutcomeFalsification(formulas=["z ~ 1 + t"]).validate(experiment)
+
+
+@pytest.mark.integration
+def test_run_produces_check_result(mock_pymc_sample, its_context):
+    """Test run produces a CheckResult with correct structure."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
+    result = check.run(experiment, context)
+
+    assert isinstance(result, CheckResult)
+    assert result.check_name == "OutcomeFalsification"
+    assert result.passed is None  # informational, no pass/fail
+    assert result.table is not None
+    assert len(result.table) == 1
+    assert "formula" in result.table.columns
+    assert "effect_mean" in result.table.columns
+
+
+@pytest.mark.integration
+def test_run_table_has_hdi_columns(mock_pymc_sample, its_context):
+    """Test the table includes HDI interval columns."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
+    result = check.run(experiment, context)
+
+    table = result.table
+    assert "hdi_95%_lower" in table.columns
+    assert "hdi_95%_upper" in table.columns
+    assert not pd.isna(table["effect_mean"].iloc[0])
+
+
+@pytest.mark.integration
+def test_run_with_multiple_formulas(mock_pymc_sample, its_context):
+    """Test run with multiple falsification formulas produces multi-row table."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(formulas=["z ~ 1 + t", "w ~ 1 + t"])
+    result = check.run(experiment, context)
+
+    assert result.table is not None
+    assert len(result.table) == 2
+    assert result.table["formula"].tolist() == ["z ~ 1 + t", "w ~ 1 + t"]
+
+
+@pytest.mark.integration
+def test_run_handles_failed_formula(mock_pymc_sample, its_context):
+    """Test that a mix of valid and invalid formulas is handled gracefully.
+
+    Note: formulas referencing nonexistent columns trigger a patsy/Python 3.13
+    traceback formatting bug (KeyError in patsy.eval), so we test with a
+    syntactically invalid formula instead.
+    """
+    _, experiment, context = its_context
 
     # Mix one good formula with one that has bad syntax
     check = OutcomeFalsification(formulas=["z ~ 1 + t", "~ bad syntax ~"])
@@ -307,23 +270,9 @@ def test_run_handles_failed_formula(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_metadata_contains_results(mock_pymc_sample):
+def test_metadata_contains_results(mock_pymc_sample, its_context):
     """Test metadata contains falsification_results and alpha."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    context = PipelineContext(data=df)
-    context.experiment = experiment
-    context.experiment_config = {
-        "method": InterruptedTimeSeries,
-        "treatment_time": 150,
-        "formula": "y ~ 1 + t",
-        "model": _make_pymc_model(),
-    }
+    _, experiment, context = its_context
 
     check = OutcomeFalsification(formulas=["z ~ 1 + t"])
     result = check.run(experiment, context)
@@ -342,23 +291,23 @@ def test_metadata_contains_results(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_text_contains_formula_and_effect(mock_pymc_sample):
+def test_store_experiments_false_drops_fitted_experiment(mock_pymc_sample, its_context):
+    """With store_experiments=False, FalsificationResult.experiment is None."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"], store_experiments=False)
+    result = check.run(experiment, context)
+
+    frs = result.metadata["falsification_results"]
+    assert frs[0].experiment is None
+    # Summary stats are still populated
+    assert isinstance(frs[0].effect_mean, float)
+
+
+@pytest.mark.integration
+def test_text_contains_formula_and_effect(mock_pymc_sample, its_context):
     """Test text output contains formula and effect size."""
-    df = _make_its_data()
-    experiment = InterruptedTimeSeries(
-        df,
-        treatment_time=150,
-        formula="y ~ 1 + t",
-        model=_make_pymc_model(),
-    )
-    context = PipelineContext(data=df)
-    context.experiment = experiment
-    context.experiment_config = {
-        "method": InterruptedTimeSeries,
-        "treatment_time": 150,
-        "formula": "y ~ 1 + t",
-        "model": _make_pymc_model(),
-    }
+    _, experiment, context = its_context
 
     check = OutcomeFalsification(formulas=["z ~ 1 + t"])
     result = check.run(experiment, context)

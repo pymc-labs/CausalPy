@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -154,9 +154,14 @@ class PlaceboInTime:
         *(random mode only)* Minimum fraction of total pre-period
         observations that must precede each candidate placebo window.
     min_gap : int, default 1
-        *(random mode only)* Minimum index distance between any two
-        selected candidate positions in the sorted candidate list,
-        preventing near-duplicate folds.
+        *(random mode only)* Minimum number of pre-intervention
+        observations between any two selected folds, measured as
+        positions in the sorted pre-period index.  Prevents
+        near-duplicate folds.  Note: selection is greedy without
+        backtracking, so very large ``min_gap`` values relative to
+        the candidate pool can raise ``ValueError`` even when a
+        valid configuration exists.  Rerun with a different
+        ``random_seed`` or reduce ``min_gap`` if this happens.
     exclude_periods : set[str] | None, default None
         *(random mode only)* Set of period labels to exclude from
         candidate selection. For datetime-indexed data, use
@@ -217,7 +222,7 @@ class PlaceboInTime:
     def __init__(
         self,
         n_folds: int = 3,
-        selection_method: str = "sequential",
+        selection_method: Literal["sequential", "random"] = "sequential",
         min_training_pct: float = 0.30,
         min_gap: int = 1,
         exclude_periods: set[str] | None = None,
@@ -387,8 +392,11 @@ class PlaceboInTime:
         min_training = int(np.ceil(self.min_training_pct * n_total))
         exclude = self.exclude_periods or set()
 
-        candidates: list[Any] = []
-        for idx_val in all_indices:
+        # Each candidate carries its position in ``all_indices`` so
+        # ``min_gap`` can be enforced as an observation-count distance
+        # between selected folds, not a candidate-list distance.
+        candidates: list[tuple[int, Any]] = []
+        for pos, idx_val in enumerate(all_indices):
             # Check exclusion
             if hasattr(idx_val, "strftime"):
                 label = idx_val.strftime("%Y-%m")
@@ -398,8 +406,7 @@ class PlaceboInTime:
                 continue
 
             # Enough training data before this point?
-            n_pre = int((all_indices < idx_val).sum())
-            if n_pre < min_training:
+            if pos < min_training:
                 continue
 
             # Pseudo-intervention must end before true treatment
@@ -407,7 +414,7 @@ class PlaceboInTime:
             if pseudo_end > treatment_time:
                 continue
 
-            candidates.append(idx_val)
+            candidates.append((pos, idx_val))
 
         if len(candidates) < self.n_folds:
             raise ValueError(
@@ -418,22 +425,30 @@ class PlaceboInTime:
 
         rng = np.random.default_rng(self.random_seed)
         pool = list(range(len(candidates)))
-        selected_idx: list[int] = []
+        selected: list[int] = []
 
         for _ in range(self.n_folds):
             valid = [
-                i for i in pool if all(abs(i - s) >= self.min_gap for s in selected_idx)
+                i
+                for i in pool
+                if all(
+                    abs(candidates[i][0] - candidates[s][0]) >= self.min_gap
+                    for s in selected
+                )
             ]
             if not valid:
                 raise ValueError(
                     f"Cannot select {self.n_folds} folds with min_gap="
-                    f"{self.min_gap}.  Reduce min_gap or n_folds."
+                    f"{self.min_gap}.  Greedy selection without backtracking "
+                    f"can fail even when a valid configuration exists; "
+                    f"retry with a different random_seed, or reduce "
+                    f"min_gap or n_folds."
                 )
-            pick = rng.choice(valid)
-            selected_idx.append(pick)
+            pick = int(rng.choice(valid))
+            selected.append(pick)
             pool.remove(pick)
 
-        return sorted(candidates[i] for i in selected_idx)
+        return sorted(candidates[i][1] for i in selected)
 
     def _get_fold_data(
         self,

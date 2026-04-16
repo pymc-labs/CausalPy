@@ -1240,8 +1240,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         trend_component: Any | None = None,
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -1276,6 +1277,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
         )
 
     def _validate_and_initialize_components(self):
@@ -1726,8 +1728,9 @@ class StateSpaceTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -1755,6 +1758,7 @@ class StateSpaceTimeSeries(PyMCModel):
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
+            priors=self._user_priors,
         )
 
     def _validate_and_initialize_components(self):

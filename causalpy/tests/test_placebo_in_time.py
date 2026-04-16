@@ -275,6 +275,79 @@ def test_rope_decision_barely_below_threshold():
 
 
 # ===========================================================================
+# Assurance formula validation (unit — no sampling)
+# ===========================================================================
+#
+# These tests pin the assurance-simulation formula
+# ``true_effect = theta_new + expected_effect`` (the corrected version).
+# The old formula ``true_effect = expected_effect`` ignored the status-quo
+# baseline, which understated the noise floor under the alternative and
+# inflated assurance.  The invariants below would fail under that old
+# formula.
+
+
+def test_assurance_formula_zero_expected_matches_null():
+    """When expected_effect == 0, alt and null decision rates should match.
+
+    Under the corrected formula ``true_effect = theta_new + expected_effect``,
+    expected_effect=0 makes the alternative distribution identical to the
+    null distribution, so TP rate must approximately equal FP rate.
+
+    Under the OLD (buggy) formula ``true_effect = expected_effect``,
+    true_effect would collapse to 0 under the alternative and TP rate
+    would be ~0 regardless of theta_new — which is what the fix corrects.
+    """
+    rng = np.random.default_rng(0)
+    theta_new_samples = rng.normal(loc=0.0, scale=5.0, size=2000)
+    fold_sds = np.array([1.0, 1.0, 1.0])
+
+    check = PlaceboInTime(
+        n_folds=2,
+        expected_effect_prior=np.zeros(2000),
+        rope_half_width=1.0,
+        random_seed=123,
+    )
+    ar = check._compute_assurance(
+        theta_new_samples=theta_new_samples,
+        fold_sds=fold_sds,
+        n_posterior_samples=500,
+    )
+
+    # With expected_effect identically zero the alt and null scenarios
+    # share the same true-effect distribution.
+    assert abs(ar.true_positive_rate - ar.false_positive_rate) < 0.05
+    assert abs(ar.true_negative_rate - ar.false_negative_rate) < 0.05
+
+
+def test_assurance_formula_large_expected_effect_dominates_baseline():
+    """Large expected_effect should push true positives well above false positives.
+
+    This pins the sign and direction of the fix: adding ``expected_effect``
+    on top of ``theta_new`` (rather than replacing it) means that when
+    expected_effect is large and positive the alternative scenario
+    detects the intervention much more often than the null does.
+    """
+    theta_new_samples = np.zeros(1000)  # null baseline tightly around 0
+    fold_sds = np.array([0.5])
+
+    check = PlaceboInTime(
+        n_folds=2,
+        expected_effect_prior=np.full(1000, 10.0),  # large effect
+        rope_half_width=1.0,
+        random_seed=123,
+    )
+    ar = check._compute_assurance(
+        theta_new_samples=theta_new_samples,
+        fold_sds=fold_sds,
+        n_posterior_samples=500,
+    )
+
+    assert ar.true_positive_rate > 0.9
+    assert ar.false_positive_rate < 0.1
+    assert ar.true_positive_rate > ar.false_positive_rate
+
+
+# ===========================================================================
 # Cumulative impact extraction (integration — needs PyMC)
 # ===========================================================================
 

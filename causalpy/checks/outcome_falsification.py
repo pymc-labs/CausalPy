@@ -31,12 +31,16 @@ DifferenceInDifferences, PiecewiseITS.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pandas as pd
+from patsy import PatsyError
 
 from causalpy.checks.base import CheckResult, clone_model
+from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.diff_in_diff import DifferenceInDifferences
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
@@ -55,21 +59,23 @@ class FalsificationResult:
     ----------
     formula : str
         The falsification formula used.
-    experiment : BaseExperiment
-        The fitted experiment for this formula.
     effect_mean : float
         Posterior mean of the estimated effect.
     hdi_lower : float
         Lower bound of the HDI for the effect.
     hdi_upper : float
         Upper bound of the HDI for the effect.
+    experiment : BaseExperiment | None
+        The fitted experiment for this formula.  ``None`` when
+        ``OutcomeFalsification`` was run with ``store_experiments=False``;
+        in that case only the summary statistics above are retained.
     """
 
     formula: str
-    experiment: BaseExperiment
     effect_mean: float
     hdi_lower: float
     hdi_upper: float
+    experiment: BaseExperiment | None = None
 
 
 class OutcomeFalsification:
@@ -89,6 +95,13 @@ class OutcomeFalsification:
         exist in the data.
     alpha : float, default 0.05
         Significance level.  The HDI probability is ``1 - alpha``.
+    store_experiments : bool, default True
+        If ``True`` (default), each ``FalsificationResult`` retains a
+        reference to the fitted experiment (including its
+        ``InferenceData``), which lets users inspect posteriors but
+        can be memory-heavy for many formulas.  Set to ``False`` to
+        keep only the summary statistics (``effect_mean``,
+        ``hdi_lower``, ``hdi_upper``).
 
     Examples
     --------
@@ -108,6 +121,7 @@ class OutcomeFalsification:
         self,
         formulas: list[str],
         alpha: float = 0.05,
+        store_experiments: bool = True,
     ) -> None:
         if not formulas:
             raise ValueError("formulas must be a non-empty list of formula strings.")
@@ -117,6 +131,7 @@ class OutcomeFalsification:
             raise ValueError(f"alpha must be in (0, 1), got {alpha}")
         self.formulas = list(formulas)
         self.alpha = alpha
+        self.store_experiments = store_experiments
 
     # ------------------------------------------------------------------
     # Validation
@@ -248,10 +263,10 @@ class OutcomeFalsification:
 
                 fr = FalsificationResult(
                     formula=formula,
-                    experiment=alt_experiment,
                     effect_mean=stats["mean"],
                     hdi_lower=stats["hdi_lower"],
                     hdi_upper=stats["hdi_upper"],
+                    experiment=alt_experiment if self.store_experiments else None,
                 )
                 results.append(fr)
                 rows.append(
@@ -263,11 +278,24 @@ class OutcomeFalsification:
                     }
                 )
 
-            except Exception:
+            except (
+                PatsyError,
+                FormulaException,
+                DataException,
+                ValueError,
+                KeyError,
+                RuntimeError,
+                np.linalg.LinAlgError,
+            ) as exc:
                 logger.warning(
                     "OutcomeFalsification: failed for formula '%s'",
                     formula,
                     exc_info=True,
+                )
+                warnings.warn(
+                    f"OutcomeFalsification: formula {formula!r} failed to fit "
+                    f"({type(exc).__name__}: {exc}); skipping.",
+                    stacklevel=2,
                 )
                 failed_formulas.append(formula)
                 rows.append(
@@ -308,4 +336,7 @@ class OutcomeFalsification:
         )
 
     def __repr__(self) -> str:
-        return f"OutcomeFalsification(formulas={self.formulas!r}, alpha={self.alpha})"
+        return (
+            f"OutcomeFalsification(formulas={self.formulas!r}, "
+            f"alpha={self.alpha}, store_experiments={self.store_experiments})"
+        )

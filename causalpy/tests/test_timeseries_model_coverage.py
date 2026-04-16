@@ -444,3 +444,39 @@ class TestStateSpaceTimeSeriesCoverage:
         # So it raises AttributeError when trying to call y.sel()
         with pytest.raises(AttributeError, match="'NoneType' object has no attribute"):
             model.score(X=dummy_X, y=None)
+
+
+class TestTimeSeriesModelClonePreservesPriors:
+    """Regression tests: _clone() must forward user-supplied priors."""
+
+    def test_bayesian_basis_expansion_clone_forwards_priors(self):
+        """BayesianBasisExpansionTimeSeries._clone() keeps user priors."""
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
+        custom_priors = {"sentinel": "value"}
+        original = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors=custom_priors,
+        )
+        cloned = original._clone()
+        assert cloned._user_priors == custom_priors
+        assert cloned._user_priors is not None
+
+    def test_state_space_clone_forwards_priors(self):
+        """StateSpaceTimeSeries._clone() keeps user priors."""
+        pytest.importorskip(
+            "pymc_extras",
+            reason="pymc-extras optional for state-space model",
+        )
+        custom_priors = {"sentinel": "value"}
+        original = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+            priors=custom_priors,
+        )
+        cloned = original._clone()
+        assert cloned._user_priors == custom_priors
+        assert cloned._user_priors is not None
