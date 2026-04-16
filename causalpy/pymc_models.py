@@ -27,6 +27,7 @@ from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+from causalpy.constants import HDI_PROB
 from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -469,7 +470,7 @@ class PyMCModel(pm.Model):
         ) -> None:
             """Print one row of the coefficient table"""
             formatted_name = f"  {name: <{max_label_length}}"
-            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, 94% HDI [{round_num(coeff_samples.quantile(0.03).data, round_to)}, {round_num(coeff_samples.quantile(1 - 0.03).data, round_to)}]"  # noqa: E501
+            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
         def print_coefficients_for_unit(
@@ -671,6 +672,218 @@ class WeightedSumFitter(PyMCModel):
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
             y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             beta = self.priors["beta"].create_variable("beta")
+            mu = pm.Deterministic(
+                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+
+
+def _softmax_simplex_weights(
+    name: str,
+    prior: "Prior",
+    n_rows: int,
+    dims: list[str],
+) -> "pt.TensorVariable":
+    """Create simplex weights via softmax-over-Normal-logits with pinned reference.
+
+    Pins the first logit to zero (removing softmax shift invariance), samples
+    ``N - 1`` unconstrained Normal logits, and applies softmax to produce
+    weights on the simplex.
+
+    Parameters
+    ----------
+    name : str
+        Name for the PyMC Deterministic variable (e.g., "beta", "omega").
+    prior : Prior
+        Prior for the raw logits. Must be a Normal prior with appropriate dims.
+    n_rows : int
+        Number of rows in the weight matrix (e.g., n_treated for SC, 1 for SDiD).
+    dims : list[str]
+        Dimension names for the output Deterministic.
+
+    Returns
+    -------
+    pt.TensorVariable
+        Simplex weights as a PyMC Deterministic.
+    """
+    if prior.distribution != "Normal":
+        raise ValueError(
+            f"_softmax_simplex_weights expects a Normal prior, got {prior.distribution}"
+        )
+    raw = prior.create_variable(f"{name}_raw")
+    if n_rows == 1 and raw.ndim == 1:
+        # When the prior has no "treated_units" dim (e.g. SDiD's omega_raw with
+        # dims=["coeffs_raw"]), PyMC creates a 1D tensor.  Concatenate along
+        # axis 0 to produce a 1D simplex of shape (N,).
+        zero_logit = pt.zeros((1,))
+        tilde = pt.concatenate([zero_logit, raw], axis=0)
+        return pm.Deterministic(name, pt.special.softmax(tilde, axis=-1), dims=dims)
+    zero_logit = pt.zeros((n_rows, 1))
+    tilde = pt.concatenate([zero_logit, raw], axis=-1)
+    return pm.Deterministic(name, pt.special.softmax(tilde, axis=-1), dims=dims)
+
+
+class SoftmaxWeightedSumFitter(PyMCModel):
+    r"""
+    Weighted sum model with softmax-over-Normal-logits parameterization.
+
+    An alternative to :class:`WeightedSumFitter` for synthetic control experiments.
+    Instead of a Dirichlet prior on the simplex weights, this model places Normal
+    priors on unconstrained logits and maps them to the simplex via the softmax
+    transform. The first logit is pinned to zero to remove the softmax's shift
+    invariance.
+
+    Defines the PyMC model:
+
+    .. math::
+        \tilde{\beta}_1 &= 0 \\
+        \tilde{\beta}_{j} &\sim \mathrm{Normal}(0, \sigma) \quad j = 2, \ldots, N \\
+        \beta &= \mathrm{softmax}(\tilde{\beta}) \\
+        \mu &= X \cdot \beta \\
+        y &\sim \mathrm{Normal}(\mu, \sigma_y) \\
+
+    Notes
+    -----
+    The softmax-Normal parameterization and the Dirichlet prior used by
+    :class:`WeightedSumFitter` both produce simplex-valued weights, but they
+    encode different prior beliefs and regularization behavior:
+
+    - **Dirichlet** (:class:`WeightedSumFitter`): With concentration ``a=1`` the
+      prior is uniform on the simplex. Setting ``a < 1`` encourages sparsity
+      (weights concentrating on fewer donors), while ``a > 1`` encourages
+      uniformity. Regularization strength is controlled by the concentration
+      parameter.
+
+    - **Softmax-Normal** (this class): The prior scale ``sigma`` on the logits
+      controls regularization. Small ``sigma`` shrinks logits toward zero,
+      producing near-uniform weights (DiD-like behavior). Large ``sigma`` allows
+      the data to concentrate weight on a few well-matching control units
+      (SC-like behavior). The default ``sigma=1.0`` provides moderate
+      regularization.
+
+    This parameterization is motivated by the Bayesian Synthetic
+    Difference-in-Differences (SDiD) formulation, where the prior scale plays
+    the role of the :math:`\ell_2` regularization parameter :math:`\zeta` in the
+    frequentist SDiD of Arkhangelsky et al. (2021).
+
+    Example
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> import xarray as xr
+    >>> from causalpy.pymc_models import SoftmaxWeightedSumFitter
+    >>> sc = cp.load_data("sc")
+    >>> control_units = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    >>> X = xr.DataArray(
+    ...     sc[control_units].values,
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": sc.index, "coeffs": control_units},
+    ... )
+    >>> y = xr.DataArray(
+    ...     sc['actual'].values.reshape((sc.shape[0], 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": sc.index, "treated_units": ["actual"]},
+    ... )
+    >>> coords = {
+    ...     "coeffs": control_units,
+    ...     "treated_units": ["actual"],
+    ...     "obs_ind": np.arange(sc.shape[0]),
+    ... }
+    >>> wsf = SoftmaxWeightedSumFitter(sample_kwargs={"progressbar": False})
+    >>> wsf.fit(X, y, coords=coords)
+    Inference data...
+    """  # noqa: W605
+
+    default_priors = {
+        "y_hat": Prior(
+            "Normal",
+            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+            dims=["obs_ind", "treated_units"],
+        ),
+    }
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """
+        Set Normal prior for logit weights based on number of control units.
+
+        The prior is placed on ``N - 1`` unconstrained logits (the first logit is
+        pinned to zero). The default scale ``sigma=1.0`` provides moderate
+        regularization, equivalent to ``zeta=1.0`` in the frequentist SDiD.
+
+        Unlike :meth:`WeightedSumFitter.priors_from_data`, which must read
+        ``X.shape[1]`` to size the Dirichlet concentration vector, the Normal
+        prior here broadcasts automatically via its ``dims``, so the data shape
+        is not needed.
+
+        To control regularization strength, pass a custom ``beta_raw`` prior::
+
+            # Tighter regularization (more DiD-like, near-uniform weights):
+            model = SoftmaxWeightedSumFitter(
+                priors={
+                    "beta_raw": Prior(
+                        "Normal", mu=0, sigma=0.1, dims=["treated_units", "coeffs_raw"]
+                    )
+                }
+            )
+
+            # Looser regularization (more SC-like, data-driven sparse weights):
+            model = SoftmaxWeightedSumFitter(
+                priors={
+                    "beta_raw": Prior(
+                        "Normal", mu=0, sigma=10, dims=["treated_units", "coeffs_raw"]
+                    )
+                }
+            )
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Control unit data with shape (n_obs, n_control_units).
+        y : xarray.DataArray
+            Treated unit outcome data.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Dictionary containing:
+            - "beta_raw": Normal prior with dims ["treated_units", "coeffs_raw"]
+        """
+        return {
+            "beta_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=1.0,
+                dims=["treated_units", "coeffs_raw"],
+            ),
+        }
+
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+    ) -> None:
+        """
+        Build the PyMC model with softmax-parameterized simplex weights.
+        """
+        if not coords or "coeffs" not in coords:
+            raise ValueError(
+                "coords must include 'coeffs' for SoftmaxWeightedSumFitter"
+            )
+        coeffs_raw = coords["coeffs"][1:]
+
+        with self:
+            coords_with_raw = dict(coords) if coords else {}
+            coords_with_raw["coeffs_raw"] = coeffs_raw
+            self.add_coords(coords_with_raw)
+
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+
+            beta = _softmax_simplex_weights(
+                name="beta",
+                prior=self.priors["beta_raw"],
+                n_rows=y.shape[1],
+                dims=["treated_units", "coeffs"],
+            )
+
             mu = pm.Deterministic(
                 "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
             )
@@ -1116,13 +1329,13 @@ class PropensityScore(PyMCModel):
         Notes
         -----
         - This model uses a sampled version of the propensity score (`p`) from the
-        posterior of the treatment model, randomly selecting one posterior draw
-        per call. This term is estimated initially in the InversePropensity
-        class initialisation.
+          posterior of the treatment model, randomly selecting one posterior draw
+          per call. This term is estimated initially in the InversePropensity
+          class initialisation.
         - The term `beta_ps[0] * p` captures both
-        main effects of the propensity score.
+          main effects of the propensity score.
         - Including spline adjustment enables modeling nonlinear relationships
-        between the propensity score and the outcome.
+          between the propensity score and the outcome.
 
         """
         if priors is None:

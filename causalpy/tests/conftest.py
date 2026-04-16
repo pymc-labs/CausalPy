@@ -27,6 +27,17 @@ import pytest
 matplotlib.use("Agg", force=True)
 
 import causalpy as cp
+from causalpy.data.simulate_data import (
+    RANDOM_SEED,
+    generate_ancova_data,
+    generate_did,
+    generate_geolift_data,
+    generate_multicell_geolift_data,
+    generate_regression_discontinuity_data,
+    generate_synthetic_control_data,
+    generate_time_series_data_seasonal,
+    generate_time_series_data_simple,
+)
 
 # Try to use PyMC's testing helpers if available; otherwise, fall back to no-op fixtures
 try:  # pragma: no cover - conditional import for compatibility across PyMC versions
@@ -66,6 +77,60 @@ def mock_sample_for_doctest(request):
     import pymc as pm
 
     pm.sample = mock_sample
+
+
+@pytest.fixture(scope="session")
+def did_data():
+    """Synthetic difference-in-differences data."""
+    return generate_did(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def its_data():
+    """Synthetic interrupted time series data (seasonal, date as datetime index)."""
+    return generate_time_series_data_seasonal(
+        treatment_time=pd.to_datetime("2017-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def its_simple_data():
+    """Synthetic simple ITS data (date as datetime index)."""
+    return generate_time_series_data_simple(
+        treatment_time=pd.to_datetime("2015-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def rd_data():
+    """Synthetic regression discontinuity data."""
+    return generate_regression_discontinuity_data(
+        true_treatment_threshold=0.5, seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def sc_data():
+    """Synthetic control data (DataFrame only, no weightings)."""
+    return generate_synthetic_control_data(seed=RANDOM_SEED)[0]
+
+
+@pytest.fixture(scope="session")
+def anova1_data():
+    """Synthetic ANCOVA / pre-post NEGD data."""
+    return generate_ancova_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift1_data():
+    """Synthetic geolift data (time as datetime index)."""
+    return generate_geolift_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift_multi_cell_data():
+    """Synthetic multi-cell geolift data (time as datetime index)."""
+    return generate_multicell_geolift_data(seed=RANDOM_SEED)
 
 
 def reg_kink_function(x, beta, kink):

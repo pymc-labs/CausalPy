@@ -15,6 +15,7 @@ import sys
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
@@ -74,6 +75,7 @@ extensions = [
     "sphinx_design",
     "sphinx_sitemap",
     "sphinx_togglebutton",
+    "strip_citation_labels",
 ]
 
 nb_execution_mode = "off"
@@ -94,7 +96,7 @@ master_doc = "index"
 
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
-bibtex_default_style = "unsrt"
+bibtex_default_style = "alpha"
 bibtex_reference_style = "author_year"
 
 
@@ -136,6 +138,7 @@ intersphinx_mapping = {
 
 # MyST options for working with markdown files.
 # Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives # noqa: E501
+myst_heading_anchors = 3  # auto-generate anchors for H1–H3, enabling #slug cross-refs
 myst_enable_extensions = [
     "dollarmath",
     "amsmath",
@@ -153,6 +156,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme

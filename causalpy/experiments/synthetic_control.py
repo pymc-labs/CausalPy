@@ -25,6 +25,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
@@ -33,8 +34,6 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class SyntheticControl(BaseExperiment):
@@ -97,7 +96,7 @@ class SyntheticControl(BaseExperiment):
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         # rename the index to "obs_ind"
@@ -383,7 +382,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for a specific treated unit
@@ -549,7 +548,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS model for a specific treated unit
@@ -670,7 +669,7 @@ class SyntheticControl(BaseExperiment):
         return self.plot_data
 
     def get_plot_data_bayesian(
-        self, hdi_prob: float = 0.94, treated_unit: str | None = None
+        self, hdi_prob: float = HDI_PROB, treated_unit: str | None = None
     ) -> pd.DataFrame:
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.

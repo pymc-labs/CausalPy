@@ -25,16 +25,15 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.utils import round_num
+from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -126,7 +125,6 @@ class InterruptedTimeSeries(BaseExperiment):
     after the intervention ends.
     """
 
-    expt_type = "Interrupted Time Series"
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
@@ -138,7 +136,7 @@ class InterruptedTimeSeries(BaseExperiment):
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.pre_y: xr.DataArray
@@ -227,7 +225,7 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         # get the model predictions of the observed (pre-intervention) data
-        if isinstance(self.model, (PyMCModel, RegressorMixin)):
+        if isinstance(self.model, PyMCModel | RegressorMixin):
             self.pre_pred = self.model.predict(X=self.pre_X)
 
         # calculate the counterfactual (post period)
@@ -464,16 +462,14 @@ class InterruptedTimeSeries(BaseExperiment):
         if is_pymc:
             # PyMC: Compute statistics for both periods
             intervention_avg = self.intervention_impact.mean(dim=time_dim)
-            intervention_mean = float(
-                intervention_avg.mean(dim=["chain", "draw"]).values
-            )
+            intervention_mean = _as_scalar(intervention_avg.mean(dim=["chain", "draw"]))
             intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
             intervention_lower, intervention_upper = _extract_hdi_bounds(
                 intervention_hdi, hdi_prob
             )
 
             post_avg = self.post_intervention_impact.mean(dim=time_dim)
-            post_mean = float(post_avg.mean(dim=["chain", "draw"]).values)
+            post_mean = _as_scalar(post_avg.mean(dim=["chain", "draw"]))
             post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
             post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
 
@@ -482,7 +478,7 @@ class InterruptedTimeSeries(BaseExperiment):
             persistence_ratio_pct = (post_mean / (intervention_mean + epsilon)) * 100
 
             # Probability that some effect persisted (P(post_mean > 0))
-            prob_persisted = float((post_avg > 0).mean().values)
+            prob_persisted = _as_scalar((post_avg > 0).mean())
 
             # Build simple table
             table = pd.DataFrame(
@@ -601,7 +597,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -797,7 +793,7 @@ class InterruptedTimeSeries(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+        self, round_to: int | None = 2, **kwargs: Any
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
@@ -887,7 +883,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return (fig, ax)
 
-    def get_plot_data_bayesian(self, hdi_prob: float = 0.94) -> pd.DataFrame:
+    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
 
@@ -1092,9 +1088,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Intervention period
             intervention_avg = self.intervention_impact.mean(dim=time_dim)
-            intervention_mean = float(
-                intervention_avg.mean(dim=["chain", "draw"]).values
-            )
+            intervention_mean = _as_scalar(intervention_avg.mean(dim=["chain", "draw"]))
             intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
             intervention_lower, intervention_upper = _extract_hdi_bounds(
                 intervention_hdi, hdi_prob
@@ -1102,18 +1096,18 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Post-intervention period
             post_avg = self.post_intervention_impact.mean(dim=time_dim)
-            post_mean = float(post_avg.mean(dim=["chain", "draw"]).values)
+            post_mean = _as_scalar(post_avg.mean(dim=["chain", "draw"]))
             post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
             post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
 
             # Cumulative (total) impacts
             intervention_cum = self.intervention_impact_cumulative.isel({time_dim: -1})
-            intervention_cum_mean = float(
-                intervention_cum.mean(dim=["chain", "draw"]).values
+            intervention_cum_mean = _as_scalar(
+                intervention_cum.mean(dim=["chain", "draw"])
             )
 
             post_cum = self.post_intervention_impact_cumulative.isel({time_dim: -1})
-            post_cum_mean = float(post_cum.mean(dim=["chain", "draw"]).values)
+            post_cum_mean = _as_scalar(post_cum.mean(dim=["chain", "draw"]))
 
             # Persistence ratio: post_mean / intervention_mean (as decimal, not percentage)
             epsilon = 1e-8
@@ -1344,10 +1338,10 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Compute observed/counterfactual averages for prose
             time_dim = "obs_ind"
-            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
+            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
             obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
+            cf_cum = _as_scalar(
+                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
             )
             obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
 

@@ -29,6 +29,27 @@ import xarray as xr
 if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
+from causalpy.constants import HDI_PROB
+
+
+def _as_scalar(value: Any) -> float:
+    """Convert scalar-like values (including singleton arrays) to Python float.
+
+    Handles plain floats, 0-d and 1-element numpy arrays, and singleton
+    xarray DataArrays that arise when NumPy >= 2.4 enforces stricter
+    scalar-conversion rules.
+
+    Examples
+    --------
+    >>> _as_scalar(3.14)
+    3.14
+    >>> _as_scalar(np.array(2.5))
+    2.5
+    >>> _as_scalar(np.array([2.5]))
+    2.5
+    """
+    return float(np.asarray(value).reshape(()))
+
 
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
@@ -94,7 +115,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
     -------
     str
         Formatted string representation. For floats, returns rounded
-        decimal. For DataArrays, returns mean with 94% credible interval.
+        decimal. For DataArrays, returns mean with credible interval.
 
     Raises
     ------
@@ -105,10 +126,12 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
         # In the case of a float, we return the number rounded to 2 decimal places
         return f"{x:.2f}"
     elif isinstance(x, xr.DataArray):
-        # In the case of an xarray object, we return the mean and 94% CI
-        percentiles = x.quantile([0.03, 1 - 0.03]).to_numpy()
+        # In the case of an xarray object, we return the mean and CI
+        percentiles = x.quantile(
+            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+        ).to_numpy()
         ci = (
-            r"$CI_{94\%}$"
+            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         return f"{x.mean().to_numpy():.2f}" + ci
