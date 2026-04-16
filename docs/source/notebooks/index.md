@@ -16,6 +16,7 @@ ancova_pymc.ipynb
 sc_skl.ipynb
 sc_pymc.ipynb
 sc_pymc_brexit.ipynb
+its_causalpy_vs_causalimpact.ipynb
 :::
 
 :::{toctree}
@@ -52,7 +53,6 @@ its_lift_test.ipynb
 :maxdepth: 1
 
 its_pymc_comparative.ipynb
-its_causalpy_vs_causalimpact.ipynb
 :::
 
 ## Cross-sectional methods
