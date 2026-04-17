@@ -47,9 +47,26 @@ jobs:
             const REQUEST_TIMEOUT_MS = 15000;
             const MAX_REDIRECTS = 3;
             const FETCH_CONCURRENCY = 8;
+            // Defence-in-depth: even though the URLs originate from the
+            // authenticated GitHub API, pin the host and content-type so a
+            // spoofed/compromised response can't redirect this fetch off-net
+            // or sneak non-image bytes into the SVG.
+            const ALLOWED_AVATAR_HOSTS = new Set(['avatars.githubusercontent.com']);
+            const ALLOWED_IMAGE_TYPES = new Set([
+              'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
+            ]);
 
             function fetchDataUri(url, redirectsLeft = MAX_REDIRECTS) {
               return new Promise((resolve, reject) => {
+                let parsed;
+                try {
+                  parsed = new URL(url);
+                } catch (e) {
+                  return reject(new Error(`invalid url: ${url}`));
+                }
+                if (!ALLOWED_AVATAR_HOSTS.has(parsed.host)) {
+                  return reject(new Error(`unexpected avatar host: ${parsed.host}`));
+                }
                 const req = https.get(
                   url,
                   { headers: { 'User-Agent': 'causalpy-contributors-workflow' } },
@@ -66,12 +83,16 @@ jobs:
                       res.resume();
                       return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
                     }
-                    const contentType = res.headers['content-type'] || 'image/png';
+                    const rawType = (res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+                    if (!ALLOWED_IMAGE_TYPES.has(rawType)) {
+                      res.resume();
+                      return reject(new Error(`unexpected content-type ${rawType || '(none)'} for ${url}`));
+                    }
                     const chunks = [];
                     res.on('data', (c) => chunks.push(c));
                     res.on('end', () => {
                       const b64 = Buffer.concat(chunks).toString('base64');
-                      resolve(`data:${contentType};base64,${b64}`);
+                      resolve(`data:${rawType};base64,${b64}`);
                     });
                   },
                 );
