@@ -141,6 +141,33 @@ jobs:
             const people = contributors.filter(
               (c) => c && c.type === 'User' && c.login && !BOT_PATTERN.test(c.login)
             );
+            core.info(`Found ${people.length} human contributors`);
+
+            // Short-circuit: if the login set hasn't changed since the last
+            // run, skip regenerating the SVG entirely. Avatars are base64
+            // embedded, so a fresh re-encode of the same avatar can produce
+            // byte-level diffs even when no contributor actually joined or
+            // left. The sidecar manifest records the canonical login list.
+            const svgPath = path.join('docs', 'source', '_static', 'contributors.svg');
+            const manifestPath = path.join('docs', 'source', '_static', 'contributors.json');
+            const currentLogins = people.map((c) => c.login).sort((a, b) => a.localeCompare(b));
+            let previousLogins = null;
+            if (fs.existsSync(manifestPath)) {
+              try {
+                const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                if (Array.isArray(parsed.logins)) previousLogins = parsed.logins;
+              } catch (err) {
+                core.warning(`Could not parse ${manifestPath}: ${err.message}`);
+              }
+            }
+            const loginsUnchanged =
+              previousLogins !== null &&
+              previousLogins.length === currentLogins.length &&
+              previousLogins.every((l, i) => l === currentLogins[i]);
+            if (loginsUnchanged && fs.existsSync(svgPath)) {
+              core.info('Contributor login set unchanged; skipping SVG regeneration');
+              return;
+            }
             core.info(`Rendering ${people.length} human contributors`);
 
             const rows = Math.max(1, Math.ceil(people.length / COLS));
@@ -189,10 +216,14 @@ jobs:
               '',
             ].join('\n');
 
-            const outPath = path.join('docs', 'source', '_static', 'contributors.svg');
-            fs.mkdirSync(path.dirname(outPath), { recursive: true });
-            fs.writeFileSync(outPath, svg);
-            core.info(`Wrote ${outPath} (${(svg.length / 1024).toFixed(1)} KB)`);
+            fs.mkdirSync(path.dirname(svgPath), { recursive: true });
+            fs.writeFileSync(svgPath, svg);
+            fs.writeFileSync(
+              manifestPath,
+              JSON.stringify({ logins: currentLogins }, null, 2) + '\n',
+            );
+            core.info(`Wrote ${svgPath} (${(svg.length / 1024).toFixed(1)} KB)`);
+            core.info(`Wrote ${manifestPath} (${currentLogins.length} logins)`);
 
       - name: Create pull request if changed
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -211,5 +242,7 @@ jobs:
             Safe to merge once the preview looks right.
           branch: bot/update-contributors
           delete-branch: true
-          add-paths: docs/source/_static/contributors.svg
+          add-paths: |
+            docs/source/_static/contributors.svg
+            docs/source/_static/contributors.json
           labels: documentation
