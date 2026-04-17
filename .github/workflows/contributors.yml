@@ -44,12 +44,24 @@ jobs:
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
               })[c]);
 
-            function fetchDataUri(url) {
+            const REQUEST_TIMEOUT_MS = 15000;
+            const MAX_REDIRECTS = 3;
+            const FETCH_CONCURRENCY = 8;
+
+            function fetchDataUri(url, redirectsLeft = MAX_REDIRECTS) {
               return new Promise((resolve, reject) => {
                 const req = https.get(
                   url,
                   { headers: { 'User-Agent': 'causalpy-contributors-workflow' } },
                   (res) => {
+                    if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+                      res.resume();
+                      if (redirectsLeft <= 0) {
+                        return reject(new Error(`too many redirects for ${url}`));
+                      }
+                      const next = new URL(res.headers.location, url).toString();
+                      return resolve(fetchDataUri(next, redirectsLeft - 1));
+                    }
                     if (res.statusCode !== 200) {
                       res.resume();
                       return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
@@ -63,9 +75,39 @@ jobs:
                     });
                   },
                 );
+                req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+                  req.destroy(new Error(`timeout after ${REQUEST_TIMEOUT_MS}ms for ${url}`));
+                });
                 req.on('error', reject);
                 req.end();
               });
+            }
+
+            // Neutral placeholder used when an avatar fetch fails. Keeps the
+            // layout stable and lets the workflow still open a PR instead of
+            // failing the whole run on a single flaky request.
+            const PLACEHOLDER_DATA_URI =
+              'data:image/svg+xml;base64,' +
+              Buffer.from(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+                '<rect width="64" height="64" fill="#d0d7de"/>' +
+                '</svg>',
+              ).toString('base64');
+
+            async function mapWithConcurrency(items, limit, worker) {
+              const results = new Array(items.length);
+              let next = 0;
+              async function run() {
+                while (true) {
+                  const i = next++;
+                  if (i >= items.length) return;
+                  results[i] = await worker(items[i], i);
+                }
+              }
+              await Promise.all(
+                Array.from({ length: Math.min(limit, items.length) }, run),
+              );
+              return results;
             }
 
             core.info(`Fetching contributors for ${context.repo.owner}/${context.repo.repo}`);
@@ -82,9 +124,8 @@ jobs:
             const width = PAD * 2 + COLS * AVATAR + (COLS - 1) * GAP;
             const height = PAD * 2 + rows * AVATAR + (rows - 1) * GAP;
 
-            const cells = [];
-            for (let i = 0; i < people.length; i++) {
-              const c = people[i];
+            let failures = 0;
+            const cells = await mapWithConcurrency(people, FETCH_CONCURRENCY, async (c, i) => {
               const col = i % COLS;
               const row = Math.floor(i / COLS);
               const x = PAD + col * (AVATAR + GAP);
@@ -97,14 +138,24 @@ jobs:
               const title = xmlEscape(c.login);
               const base = (c.avatar_url || '').split('?')[0];
               const sized = `${base}?s=${AVATAR * 2}`;
-              const dataUri = await fetchDataUri(sized);
-              cells.push([
+              let dataUri;
+              try {
+                dataUri = await fetchDataUri(sized);
+              } catch (err) {
+                failures += 1;
+                core.warning(`Avatar fetch failed for ${c.login}: ${err.message}; using placeholder`);
+                dataUri = PLACEHOLDER_DATA_URI;
+              }
+              return [
                 `  <a href="${href}" target="_blank" rel="noopener">`,
                 `    <title>${title}</title>`,
                 `    <clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}" /></clipPath>`,
                 `    <image href="${dataUri}" x="${x}" y="${y}" width="${AVATAR}" height="${AVATAR}" clip-path="url(#${clipId})" preserveAspectRatio="xMidYMid slice" />`,
                 `  </a>`,
-              ].join('\n'));
+              ].join('\n');
+            });
+            if (failures > 0) {
+              core.warning(`${failures}/${people.length} avatars used the placeholder`);
             }
 
             const svg = [
