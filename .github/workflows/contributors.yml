@@ -26,8 +26,10 @@ jobs:
         with:
           # Render human contributors as circular avatars in a grid.
           # Each avatar is fetched and base64-embedded so the resulting
-          # SVG is fully self-contained (GitHub strips <image href="https://...">
-          # references for CSP, so inline data URIs are required).
+          # SVG is fully self-contained. GitHub's SVG renderer blocks
+          # external-origin <image> references via Content Security
+          # Policy, so inline data URIs are required for the avatars to
+          # render when the SVG is embedded in README.md on github.com.
           script: |
             const fs = require('fs');
             const https = require('https');
@@ -168,7 +170,7 @@ jobs:
                 dataUri = PLACEHOLDER_DATA_URI;
               }
               return [
-                `  <a href="${href}" target="_blank" rel="noopener">`,
+                `  <a href="${href}" target="_blank" rel="noopener noreferrer">`,
                 `    <title>${title}</title>`,
                 `    <clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}" /></clipPath>`,
                 `    <image href="${dataUri}" x="${x}" y="${y}" width="${AVATAR}" height="${AVATAR}" clip-path="url(#${clipId})" preserveAspectRatio="xMidYMid slice" />`,
@@ -180,7 +182,7 @@ jobs:
             }
 
             const svg = [
-              `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="CausalPy contributors">`,
+              `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="CausalPy contributors">`,
               `  <title>CausalPy contributors (${people.length})</title>`,
               cells.join('\n'),
               `</svg>`,
