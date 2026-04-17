@@ -167,3 +167,7 @@ Plans for the repository can be seen in the [Issues](https://github.com/pymc-lab
 ## License
 
 [Apache License 2.0](https://github.com/pymc-labs/CausalPy/blob/main/LICENSE)
+
+## Thanks to our contributors
+
+[![Contributors](https://contrib.rocks/image?repo=pymc-labs/CausalPy)](https://github.com/pymc-labs/CausalPy/graphs/contributors)
