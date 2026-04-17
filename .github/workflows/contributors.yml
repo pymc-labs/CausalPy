@@ -134,10 +134,17 @@ jobs:
             }
 
             core.info(`Fetching contributors for ${context.repo.owner}/${context.repo.repo}`);
+            // listContributors returns at most the top 500 contributors and
+            // excludes anonymous ones by default. Fine for CausalPy today;
+            // revisit if the community grows past that scale.
             const contributors = await github.paginate(
               github.rest.repos.listContributors,
               { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
             );
+            // c.type === 'User' already excludes GitHub App bot accounts
+            // (which show up as type 'Bot'). The regex is belt-and-braces
+            // for legacy "[bot]"-suffixed display names and a couple of
+            // well-known automation accounts.
             const people = contributors.filter(
               (c) => c && c.type === 'User' && c.login && !BOT_PATTERN.test(c.login)
             );
@@ -173,6 +180,10 @@ jobs:
             const rows = Math.max(1, Math.ceil(people.length / COLS));
             const width = PAD * 2 + COLS * AVATAR + (COLS - 1) * GAP;
             const height = PAD * 2 + rows * AVATAR + (rows - 1) * GAP;
+            // SVG size scales linearly with the number of contributors
+            // (each 128px avatar is ~5-15 KB base64). ~12 KB at 33
+            // contributors, ~2-6 MB at 500. Comfortable for the
+            // foreseeable future.
 
             let failures = 0;
             const cells = await mapWithConcurrency(people, FETCH_CONCURRENCY, async (c, i) => {
