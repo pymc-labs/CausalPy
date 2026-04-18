@@ -33,8 +33,6 @@ from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
 
-LEGEND_FONT_SIZE = 12
-
 
 class SyntheticDifferenceInDifferences(BaseExperiment):
     """Bayesian Synthetic Difference-in-Differences experiment.
@@ -45,19 +43,22 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     double-difference formula, rather than being estimated inside the MCMC
     model (cut-posterior formulation).
 
-    :param data:
-        A pandas dataframe in wide format (columns = units, rows = time periods).
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index.
-    :param control_units:
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        A dataframe in wide format (columns = units, rows = time periods).
+    treatment_time : int, float or pandas.Timestamp
+        The time when treatment occurred, should be in reference to the data
+        index.
+    control_units : list of str
         A list of control unit column names.
-    :param treated_units:
+    treated_units : list of str
         A list of treated unit column names.
-    :param model:
-        A SyntheticDifferenceInDifferencesWeightFitter instance.
-        Defaults to SyntheticDifferenceInDifferencesWeightFitter.
+    model : PyMCModel or sklearn.base.RegressorMixin, optional
+        A ``SyntheticDifferenceInDifferencesWeightFitter`` instance. Defaults
+        to ``SyntheticDifferenceInDifferencesWeightFitter``.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("sc")
@@ -206,14 +207,21 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def algorithm(self) -> None:
         """Run the SDiD algorithm: fit weight modules, compute tau analytically.
 
-        Steps:
-        1. Prepare dict-based X/y inputs for the weight fitter.
-        2. Fit the model (both omega and lambda modules via MCMC).
-        3. Extract weight posteriors.
-        4. Compute the synthetic control for all time points.
-        5. Compute gaps (treated - synthetic control).
-        6. Compute tau via the double-difference formula.
-        7. Construct xarray objects for reporting compatibility.
+        The method is a thin orchestrator that delegates each step to a
+        private helper so that the individual pieces can be unit tested in
+        isolation:
+
+        1. :meth:`_build_weight_fitter_inputs` prepares the dict-based ``X``,
+           ``y`` and ``coords`` inputs for the weight fitter.
+        2. :meth:`PyMCModel.fit` fits both the omega and lambda modules via
+           MCMC.
+        3. :meth:`_extract_weight_posteriors` pulls the posterior weight
+           arrays out of the fitted model.
+        4. :meth:`_compute_synthetic_and_gaps` builds the synthetic control
+           trajectory and the gap between treated and synthetic.
+        5. :meth:`_compute_tau` evaluates the double-difference ATT.
+        6. :meth:`_build_reporting_objects` constructs the xarray objects
+           required by the reporting helpers.
         """
         if isinstance(self.model, RegressorMixin):
             raise NotImplementedError(
@@ -221,19 +229,55 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "implemented. Please use a PyMC model."
             )
 
-        # Full panel data as numpy
-        Y_co = self.data[self.control_units].values.T  # (N_co, T)
-        y_tr = self.data[self.treated_units].values.mean(
-            axis=1
-        )  # (T,) mean across treated units
-
+        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
+        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
         T_pre = self.datapre.shape[0]
 
-        # ---- Prepare inputs for SyntheticDifferenceInDifferencesWeightFitter ----
+        X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
+        self.model.fit(X=X, y=y, coords=coords)
+        if self.model.idata is None:
+            raise AttributeError("Model fitting failed to produce idata")
+
+        omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors()
+        sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
+        self.tau_posterior = self._compute_tau(gaps, lam, T_pre, n_chains, n_draws)
+        self._build_reporting_objects(sc_all, T_pre, n_chains, n_draws)
+
+    def _build_weight_fitter_inputs(
+        self,
+        Y_co: np.ndarray,
+        y_tr: np.ndarray,
+        T_pre: int,
+    ) -> tuple[dict[str, xr.DataArray], dict[str, xr.DataArray], dict[str, Any]]:
+        """Construct the dict-based inputs consumed by the weight fitter.
+
+        The weight fitter expects two modules: a *unit* module that regresses
+        the pre-period treated outcome on the pre-period control panel, and a
+        *time* module that regresses the post-period control mean on the
+        pre-period control panel.
+
+        Parameters
+        ----------
+        Y_co : np.ndarray
+            Control outcomes with shape ``(N_co, T)``.
+        y_tr : np.ndarray
+            Mean treated outcomes with shape ``(T,)``.
+        T_pre : int
+            Number of pre-treatment time periods.
+
+        Returns
+        -------
+        X : dict of str to xr.DataArray
+            ``{"unit": X_unit, "time": X_time}`` design matrices.
+        y : dict of str to xr.DataArray
+            ``{"unit": y_unit, "time": y_time}`` response arrays.
+        coords : dict
+            Coordinates passed to PyMC during model construction.
+        """
         # Module 1 (unit weights): X_unit = Y_co_pre.T (T_pre x N_co),
         #                          y_unit = y_tr_pre (T_pre,)
         X_unit = xr.DataArray(
-            Y_co[:, :T_pre].T,  # (T_pre, N_co)
+            Y_co[:, :T_pre].T,
             dims=["obs_ind", "coeffs"],
             coords={
                 "obs_ind": np.arange(T_pre),
@@ -248,9 +292,9 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         # Module 2 (time weights): X_time = Y_co_pre (N_co x T_pre),
         #                          y_time = Y_co_post_mean (N_co,)
-        Y_co_post_mean = Y_co[:, T_pre:].mean(axis=1)  # (N_co,)
+        Y_co_post_mean = Y_co[:, T_pre:].mean(axis=1)
         X_time = xr.DataArray(
-            Y_co[:, :T_pre],  # (N_co, T_pre)
+            Y_co[:, :T_pre],
             dims=["coeffs", "obs_ind"],
             coords={
                 "coeffs": self.control_units,
@@ -265,41 +309,113 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         X = {"unit": X_unit, "time": X_time}
         y = {"unit": y_unit, "time": y_time}
-
-        COORDS = {
+        coords = {
             "coeffs": self.control_units,
             "obs_ind": np.arange(T_pre),
             "coeffs_raw": self.control_units[1:],
             "obs_ind_raw": list(range(1, T_pre)),
         }
+        return X, y, coords
 
-        self.model.fit(X=X, y=y, coords=COORDS)
-        assert self.model.idata is not None, "Model fitting failed to produce idata"
+    def _extract_weight_posteriors(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        """Pull posterior samples of the weight parameters from the model.
 
-        # ---- Extract weight posteriors ----
-        omega = self.model.idata.posterior["omega"].values  # (chain, draw, N_co)
-        lam = self.model.idata.posterior["lam"].values  # (chain, draw, T_pre)
-        omega0 = self.model.idata.posterior["omega0"].values  # (chain, draw)
-
+        Returns
+        -------
+        omega : np.ndarray
+            Unit-weight posterior with shape ``(chain, draw, N_co)``.
+        omega0 : np.ndarray
+            Unit intercept posterior with shape ``(chain, draw)``.
+        lam : np.ndarray
+            Time-weight posterior with shape ``(chain, draw, T_pre)``.
+        n_chains : int
+            Number of MCMC chains.
+        n_draws : int
+            Number of draws per chain.
+        """
+        if self.model.idata is None:
+            raise RuntimeError("Model has not been fit")
+        posterior = self.model.idata.posterior
+        omega = posterior["omega"].to_numpy()
+        lam = posterior["lam"].to_numpy()
+        omega0 = posterior["omega0"].to_numpy()
         n_chains, n_draws = omega.shape[0], omega.shape[1]
+        return omega, omega0, lam, n_chains, n_draws
 
-        # ---- Compute synthetic control for ALL time points ----
-        # sc_t = omega0 + omega @ Y_co_t for each time t
-        sc_all = omega0[..., np.newaxis] + np.einsum(
-            "cdn,nt->cdt", omega, Y_co
-        )  # (chain, draw, T)
+    @staticmethod
+    def _compute_synthetic_and_gaps(
+        omega: np.ndarray,
+        omega0: np.ndarray,
+        Y_co: np.ndarray,
+        y_tr: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute the synthetic control trajectory and the treatment gap.
 
-        # ---- Compute gaps ----
-        gaps = y_tr[np.newaxis, np.newaxis, :] - sc_all  # (chain, draw, T)
+        For each posterior draw :math:`(c, d)` and time :math:`t` the
+        synthetic control is
+        :math:`\\mathrm{sc}_t = \\omega_0 + \\boldsymbol{\\omega}^\\top
+        \\mathbf{Y}_{\\text{co}, t}`, and the gap is
+        :math:`\\Delta_t = y_{\\text{tr}, t} - \\mathrm{sc}_t`.
 
-        # ---- Tau via double-difference ----
-        # tau = mean(gaps_post) - lam^T @ gaps_pre
-        gaps_post_mean = gaps[..., T_pre:].mean(axis=-1)  # (chain, draw)
-        lam_gaps_pre = (lam * gaps[..., :T_pre]).sum(axis=-1)  # (chain, draw)
-        tau = gaps_post_mean - lam_gaps_pre  # (chain, draw)
+        Parameters
+        ----------
+        omega : np.ndarray
+            Unit-weight posterior with shape ``(chain, draw, N_co)``.
+        omega0 : np.ndarray
+            Unit intercept posterior with shape ``(chain, draw)``.
+        Y_co : np.ndarray
+            Control outcomes with shape ``(N_co, T)``.
+        y_tr : np.ndarray
+            Mean treated outcomes with shape ``(T,)``.
 
-        # Store tau posterior as xarray
-        self.tau_posterior = xr.DataArray(
+        Returns
+        -------
+        sc_all : np.ndarray
+            Synthetic control with shape ``(chain, draw, T)``.
+        gaps : np.ndarray
+            Treated minus synthetic, shape ``(chain, draw, T)``.
+        """
+        sc_all = omega0[..., np.newaxis] + np.einsum("cdn,nt->cdt", omega, Y_co)
+        gaps = y_tr[np.newaxis, np.newaxis, :] - sc_all
+        return sc_all, gaps
+
+    @staticmethod
+    def _compute_tau(
+        gaps: np.ndarray,
+        lam: np.ndarray,
+        T_pre: int,
+        n_chains: int,
+        n_draws: int,
+    ) -> xr.DataArray:
+        """Compute the ATT posterior via the SDiD double-difference formula.
+
+        :math:`\\tau = \\bar{\\Delta}_{\\text{post}} -
+        \\boldsymbol{\\lambda}^\\top \\boldsymbol{\\Delta}_{\\text{pre}}`.
+
+        Parameters
+        ----------
+        gaps : np.ndarray
+            Treated-minus-synthetic gaps with shape ``(chain, draw, T)``.
+        lam : np.ndarray
+            Time-weight posterior with shape ``(chain, draw, T_pre)``.
+        T_pre : int
+            Number of pre-treatment time periods.
+        n_chains : int
+            Number of MCMC chains.
+        n_draws : int
+            Number of draws per chain.
+
+        Returns
+        -------
+        xr.DataArray
+            Posterior samples of tau with dims ``(chain, draw)``.
+        """
+        gaps_post_mean = gaps[..., T_pre:].mean(axis=-1)
+        lam_gaps_pre = (lam * gaps[..., :T_pre]).sum(axis=-1)
+        tau = gaps_post_mean - lam_gaps_pre
+        return xr.DataArray(
             tau,
             dims=["chain", "draw"],
             coords={
@@ -308,47 +424,54 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             },
         )
 
-        # ---- Build xarray objects for reporting compatibility ----
-        # The reporting helpers expect:
-        # - self.post_pred with .posterior_predictive["mu"] having dims
-        #   (chain, draw, obs_ind) and optionally treated_units
-        # - self.post_impact as xr.DataArray with dims (chain, draw, obs_ind)
-        #   and optionally treated_units
-        # - self.pre_pred, self.pre_impact similarly for pre-period
+    def _build_reporting_objects(
+        self,
+        sc_all: np.ndarray,
+        T_pre: int,
+        n_chains: int,
+        n_draws: int,
+    ) -> None:
+        """Build the xarray objects consumed by the reporting helpers.
 
-        # Synthetic control predictions for pre and post periods
-        sc_pre = sc_all[..., :T_pre]  # (chain, draw, T_pre)
-        sc_post = sc_all[..., T_pre:]  # (chain, draw, T_post)
+        Sets the following attributes on ``self``:
 
-        # Pre-period predictions (synthetic control, no treatment effect)
+        - ``pre_pred`` / ``post_pred``: ``az.InferenceData`` objects holding
+          the synthetic-control predictions in a ``posterior_predictive``
+          group.
+        - ``pre_impact`` / ``post_impact``: ``xr.DataArray`` of observed
+          minus counterfactual with dims ``(chain, draw, obs_ind,
+          treated_units)``.
+        - ``post_impact_cumulative``: cumulative sum of ``post_impact`` along
+          the time axis.
+
+        Parameters
+        ----------
+        sc_all : np.ndarray
+            Synthetic control predictions for every time point, shape
+            ``(chain, draw, T)``.
+        T_pre : int
+            Number of pre-treatment time periods.
+        n_chains : int
+            Number of MCMC chains.
+        n_draws : int
+            Number of draws per chain.
+        """
+        sc_pre = sc_all[..., :T_pre]
+        sc_post = sc_all[..., T_pre:]
+
         self.pre_pred = self._build_inference_data(
-            sc_pre,
-            self.datapre.index,
-            n_chains,
-            n_draws,
+            sc_pre, self.datapre.index, n_chains, n_draws
         )
-
-        # Post-period counterfactual (what would have happened without treatment)
         self.post_pred = self._build_inference_data(
-            sc_post,
-            self.datapost.index,
-            n_chains,
-            n_draws,
+            sc_post, self.datapost.index, n_chains, n_draws
         )
 
-        # Impact: observed - counterfactual
-        # For pre-period, the "treated" is the actual observed treated outcome
-        y_tr_pre = self.datapre[self.treated_units].values.mean(axis=1)  # (T_pre,)
-        y_tr_post = self.datapost[self.treated_units].values.mean(axis=1)  # (T_post,)
+        y_tr_pre = self.datapre[self.treated_units].values.mean(axis=1)
+        y_tr_post = self.datapost[self.treated_units].values.mean(axis=1)
 
-        pre_impact_vals = (
-            y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
-        )  # (chain, draw, T_pre)
-        post_impact_vals = (
-            y_tr_post[np.newaxis, np.newaxis, :] - sc_post
-        )  # (chain, draw, T_post)
+        pre_impact_vals = y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
+        post_impact_vals = y_tr_post[np.newaxis, np.newaxis, :] - sc_post
 
-        # Add a singleton treated_units dim for compatibility with reporting helpers
         self.pre_impact = xr.DataArray(
             pre_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
@@ -359,7 +482,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-
         self.post_impact = xr.DataArray(
             post_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
@@ -370,7 +492,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def _build_inference_data(
@@ -421,9 +542,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2.
-            Use ``None`` to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         round_to = round_to if round_to is not None else 2
 
@@ -462,9 +585,20 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2.
-            Use ``None`` to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The matplotlib figure containing the plots.
+        ax : list of matplotlib.axes.Axes
+            The three axes (counterfactual, impact, cumulative impact).
         """
         treated_unit = self.treated_units[0]
 
@@ -580,7 +714,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax[0].legend(
             handles=(h_tuple for h_tuple in handles),
             labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
         )
 
         # Apply intelligent date formatting if data has datetime index
