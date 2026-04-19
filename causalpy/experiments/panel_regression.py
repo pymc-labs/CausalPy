@@ -679,9 +679,9 @@ class PanelRegression(BaseExperiment):
             # Get mean and std for each unit FE
             fe_means = []
             for idx in unit_fe_indices:
-                fe_means.append(
-                    float(beta.sel(coeffs=self.labels[idx]).mean(dim=["chain", "draw"]))
-                )
+                m = beta.sel(coeffs=self.labels[idx]).mean(dim=["chain", "draw"])
+                # May still have coords (e.g. treated_units); reduce to a scalar for float().
+                fe_means.append(float(np.asarray(m.values).mean()))
 
             ax.hist(
                 fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
