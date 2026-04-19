@@ -54,7 +54,8 @@ def plot_xY(
     ax : plt.Axes
         Matplotlib axes object.
     plot_hdi_kwargs : dict, optional
-        Dictionary of keyword arguments passed to ax.plot().
+        Keyword arguments for line, band, heatmap, or sample styling (passed through
+        to matplotlib / ArviZ helpers depending on ``kind`` and ``ci_kind``).
     ci_prob : float, optional
         The size of the credible interval. Default is :data:`~causalpy.constants.HDI_PROB`.
     label : str, optional
@@ -92,7 +93,9 @@ def plot_xY(
         )
 
 
-def _equal_tailed_interval(Y: xr.DataArray, prob: float) -> tuple[xr.DataArray, xr.DataArray]:
+def _equal_tailed_interval(
+    Y: xr.DataArray, prob: float
+) -> tuple[xr.DataArray, xr.DataArray]:
     """Equal-tailed interval using posterior quantiles (no arviz_stats dependency)."""
     q_lo = (1.0 - prob) / 2.0
     q_hi = 1.0 - q_lo
@@ -199,7 +202,7 @@ def _x_as_numeric_mesh(
     if x_arr.dtype == object:
         try:
             dt = pd.to_datetime(x_arr)
-            if np.issubdtype(dt.dtype, np.datetime64):
+            if pd.api.types.is_datetime64_any_dtype(dt):
                 return mdates.date2num(dt), True
         except (ValueError, TypeError):
             pass
