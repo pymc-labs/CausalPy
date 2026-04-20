@@ -99,6 +99,7 @@ docs = [
     "nbconvert",
     "Pillow",
     "PyYAML",
+    "sphinxext-rediraffe",
 ]
 lint = ["prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill"]
