@@ -68,14 +68,23 @@ def plot_xY(
         Number of posterior samples to plot for spaghetti visualization.
         Default is 50.
     hdi_prob : float, optional
-        Backward compatibility alias for `ci_prob`. If provided, overrides `ci_prob`.
-        This parameter existed in the original API.
+        Backward-compatibility alias for ``ci_prob`` (same meaning as in earlier
+        releases). There is no deprecation schedule; it may remain indefinitely.
 
     Returns
     -------
     tuple
-        Tuple of (Line2D or list[Line2D], PolyCollection or None) handles
-        for the plot line(s) and interval patch (if applicable).
+        Depends on ``kind``:
+
+        - ``kind="ribbon"``: ``(Line2D, PolyCollection)`` — mean line and
+          interval band (HDI or ETI).
+        - ``kind="histogram"`` or ``"spaghetti"``: ``(list[Line2D], None)`` —
+          sample/mean lines and no single band patch.
+
+        Experiment :meth:`~causalpy.experiments.base.BaseExperiment.plot` code
+        that builds legends from ``plot_xY`` return values should only assume
+        the ribbon shape when it passes ``kind="ribbon"`` (the default) through
+        to :func:`plot_xY`.
     """
     # Handle backward compatibility: hdi_prob was in original API
     if hdi_prob is not None:
