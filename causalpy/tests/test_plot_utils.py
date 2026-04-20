@@ -447,3 +447,88 @@ def test_plot_xY_histogram_custom_colormap(synthetic_posterior_data):
     assert patch is None, "Histogram should not return PolyCollection"
 
     plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_histogram_requires_single_time_dim():
+    """Histogram rejects Y with more than one non-chain/draw dimension."""
+    rng = np.random.default_rng(0)
+    Y = xr.DataArray(
+        rng.standard_normal((2, 30, 4, 5)),
+        dims=["chain", "draw", "a", "b"],
+        coords={
+            "chain": [0, 1],
+            "draw": np.arange(30),
+            "a": np.arange(4),
+            "b": np.arange(5),
+        },
+    )
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="exactly one non-chain/draw"):
+        plot_xY(np.arange(4), Y, ax=ax, kind="histogram")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_histogram_x_length_mismatch_raises(synthetic_posterior_data):
+    """Histogram rejects x length differing from the posterior time dimension."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="Length of x"):
+        plot_xY(x[:3], Y, ax=ax, kind="histogram")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_histogram_single_time_point():
+    """Histogram with one time point exercises single-edge x bin construction."""
+    rng = np.random.default_rng(2)
+    x = pd.date_range("2020-01-01", periods=1, freq="D")
+    Y = xr.DataArray(
+        rng.standard_normal((2, 40, 1)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={
+            "chain": [0, 1],
+            "draw": np.arange(40),
+            "obs_ind": x,
+        },
+    )
+    fig, ax = plt.subplots()
+    handles, patch = plot_xY(x, Y, ax=ax, kind="histogram")
+    assert isinstance(handles, list)
+    assert patch is None
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_histogram_object_dtype_datetime_strings(synthetic_posterior_data):
+    """Object-dtype x of ISO strings hits datetime parsing in _x_as_numeric_mesh."""
+    x, Y = synthetic_posterior_data
+    x_obj = np.array([str(t) for t in x], dtype=object)
+    fig, ax = plt.subplots()
+    handles, patch = plot_xY(x_obj, Y, ax=ax, kind="histogram")
+    assert isinstance(handles, list)
+    assert patch is None
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_ribbon_fill_kwargs_eti(synthetic_posterior_data):
+    """Ribbon ETI path uses fill_kwargs and default label when label is None."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    h_line, h_patch = plot_xY(
+        x,
+        Y,
+        ax=ax,
+        kind="ribbon",
+        ci_kind="eti",
+        plot_hdi_kwargs={
+            "color": "C2",
+            "fill_kwargs": {"color": "C2", "alpha": 0.4},
+        },
+        label=None,
+    )
+    assert isinstance(h_line, plt.Line2D)
+    assert h_patch is not None
+    plt.close(fig)
