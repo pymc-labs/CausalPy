@@ -15,75 +15,75 @@ groups:
           Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a categorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
         cards:
           - title: ANCOVA for pre/post treatment nonequivalent group designs
-            notebook: ancova_pymc
+            notebook: ancova-pymc
       - title: Panel Fixed Effects
         intro: |
           Panel data tracks the same units over multiple time periods. Fixed effects exploit this structure to control for unobserved confounders that are stable within units or common across time.
         cards:
           - title: Panel Fixed Effects for Causal Inference
-            notebook: panel_fixed_effects
+            notebook: panel-fixed-effects
       - title: Synthetic Control
         intro: |
           The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
         cards:
           - title: Synthetic control with scikit-learn models
-            notebook: sc_skl
+            notebook: synthetic-control-sklearn
           - title: Synthetic control with `pymc` models
-            notebook: sc_pymc
+            notebook: synthetic-control-pymc
           - title: The effects of Brexit
-            notebook: sc_pymc_brexit
+            notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models
-            notebook: sdid_pymc
+            notebook: synthetic-difference-in-differences-pymc
           - title: "Choosing the right counterfactual: ITS vs. synthetic control"
-            notebook: its_causalpy_vs_causalimpact
+            notebook: interrupted-time-series-causalpy-vs-causalimpact
       - title: Geographical lift testing
         intro: |
           Geolift (geographical lift testing) is a method for measuring the causal impact of interventions in geographic regions. It combines synthetic control methods with difference-in-differences approaches to estimate treatment effects when interventions are applied to specific geographic areas.
         cards:
           - title: Bayesian geolift with CausalPy
-            notebook: geolift1
+            notebook: geolift-single-cell
           - title: Multi-cell geolift analysis
-            notebook: multi_cell_geolift
+            notebook: multi-cell-geolift
       - title: Difference in Differences
         intro: |
           Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
         cards:
           - title: Difference in Differences with scikit-learn models
-            notebook: did_skl
+            notebook: difference-in-differences-sklearn
           - title: Difference in Differences with `pymc` models
-            notebook: did_pymc
+            notebook: difference-in-differences-pymc
           - title: Banking dataset with a `pymc` model
-            notebook: did_pymc_banks
+            notebook: difference-in-differences-banks-pymc
           - title: Staggered Difference-in-Differences
-            notebook: staggered_did_pymc
+            notebook: staggered-difference-in-differences-pymc
       - title: Interrupted Time Series
         intro: |
           A quasi-experimental design that uses time series methods to generate counterfactuals and estimate treatment effects. A series of observations are collected before and after a treatment, and the pre-treatment trend (or any time-series model) is used to predict what would have happened in the absence of treatment.
         cards:
           - title: Interrupted Time Series (ITS) with scikit-learn models
-            notebook: its_skl
+            notebook: interrupted-time-series-sklearn
           - title: Bayesian Interrupted Time Series
-            notebook: its_pymc
+            notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
-            notebook: its_post_intervention_analysis
+            notebook: interrupted-time-series-post-intervention-analysis
           - title: Excess deaths due to COVID-19
-            notebook: its_covid
+            notebook: interrupted-time-series-covid
           - title: Lift Testing with Interrupted Time Series
-            notebook: its_lift_test
+            notebook: interrupted-time-series-lift-test
           - title: "Placebo-in-time and falsification: a UK CO₂ case study"
-            notebook: its_placebo_in_time_analysis
+            notebook: interrupted-time-series-placebo-in-time-analysis
       - title: Comparative Interrupted Time Series
         intro: |
           Comparative interrupted time series extends standard ITS by incorporating control units as predictors, helping disentangle treatment effects from coincidental changes that affect both treated and control units.
         cards:
           - title: "Comparative Interrupted Time Series: a geo-experimentation example"
-            notebook: its_pymc_comparative
+            notebook: interrupted-time-series-comparative-pymc
       - title: Piecewise Interrupted Time Series
         intro: |
           Piecewise interrupted time series (segmented regression) models the outcome with separate slopes before and after the intervention, allowing the level and trend to change at the treatment point.
         cards:
           - title: Piecewise Interrupted Time Series (Segmented Regression)
-            notebook: piecewise_its_pymc
+            notebook: piecewise-interrupted-time-series-pymc
 
   - title: Cross-sectional methods
     intro: |
@@ -94,39 +94,39 @@ groups:
           A quasi-experimental design where treatment assignment is determined by a cutoff point along a running variable (e.g., test score, age, income). The treatment effect is estimated by comparing outcomes just above and below the cutoff, assuming units near the cutoff are similar except for treatment status.
         cards:
           - title: Sharp regression discontinuity with scikit-learn models
-            notebook: rd_skl
+            notebook: regression-discontinuity-sklearn
           - title: Sharp regression discontinuity with `pymc` models
-            notebook: rd_pymc
+            notebook: regression-discontinuity-pymc
           - title: Drinking age with a scikit-learn model
-            notebook: rd_skl_drinking
+            notebook: regression-discontinuity-drinking-sklearn
           - title: Drinking age - Bayesian analysis
-            notebook: rd_pymc_drinking
+            notebook: regression-discontinuity-drinking-pymc
           - title: Donut Regression Discontinuity
-            notebook: rd_donut_pymc
+            notebook: regression-discontinuity-donut-pymc
       - title: Regression Kink Design
         intro: |
           A variation of regression discontinuity where treatment affects the slope (rate of change) of the outcome with respect to the running variable, rather than causing a discrete jump. The treatment effect is identified by a change in the slope at the cutoff point.
         cards:
           - title: Regression kink design with `pymc` models
-            notebook: rkink_pymc
+            notebook: regression-kink-pymc
       - title: Instrumental Variables Regression
         intro: |
           A quasi-experimental design to estimate a treatment effect where there is a risk of confounding between the treatment and the outcome due to endogeneity. Instrumental variables help identify causal effects by using variables that affect treatment assignment but not the outcome directly.
         cards:
           - title: Instrumental Variable Modelling (IV) with `pymc` models
-            notebook: iv_pymc
+            notebook: instrumental-variables-pymc
           - title: Instrumental Regression and Justifying Instruments with `pymc`
-            notebook: iv_weak_instruments
+            notebook: instrumental-variables-weak-instruments
           - title: Variable Selection Priors and Instrumental Variable Designs
-            notebook: iv_vs_priors
+            notebook: instrumental-variables-variable-selection-priors
       - title: Inverse Propensity Score Weighting
         intro: |
           A method for estimating causal effects by weighting observations by the inverse of their probability of receiving treatment (propensity score). This helps adjust for confounding by creating a pseudo-population where treatment assignment is independent of observed covariates.
         cards:
           - title: Inverse Propensity Score Weighting with `pymc`
-            notebook: inv_prop_pymc
+            notebook: inverse-propensity-pymc
           - title: The Paradox of Propensity Scores in Bayesian Inference
-            notebook: inv_prop_latent
+            notebook: inverse-propensity-latent
 
   - title: Workflow
     intro: |
@@ -137,7 +137,7 @@ groups:
           CausalPy's pipeline API chains causal inference steps into a single, reproducible workflow.
         cards:
           - title: Pipeline Workflow
-            notebook: pipeline_workflow
+            notebook: pipeline-workflow
       - title: Sensitivity Checks
         intro: |
           Sensitivity checks help assess whether a causal estimate is robust or fragile. CausalPy's pipeline API makes sensitivity analysis a first-class step in reproducible workflows.
@@ -150,4 +150,4 @@ groups:
           Every CausalPy experiment can produce a self-contained HTML report summarising the analysis.
         cards:
           - title: HTML Report Generation
-            notebook: report_demo
+            notebook: reporting-demo
