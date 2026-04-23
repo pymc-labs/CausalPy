@@ -56,6 +56,7 @@ dependencies = [
     "statsmodels",
     "xarray>=v2022.11.0",
     "pymc-extras>=0.3.0",
+    "formulaic",
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users

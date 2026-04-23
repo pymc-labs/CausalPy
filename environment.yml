@@ -14,6 +14,7 @@ dependencies:
   - python>=3.12
   - arviz<1.0,>=0.14.0
   - codespell
+  - formulaic
   - graphviz
   - interrogate
   - ipython!=8.7.0
