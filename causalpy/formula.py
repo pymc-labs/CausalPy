@@ -258,7 +258,7 @@ class MixedModelFormula:
             "labels": [],
             "n_groups": 0,
             "idx": np.asarray([], dtype=np.int32),
-            "terms": [],
+            "components": [],
         }
 
         if self.has_random_effects:
@@ -300,7 +300,7 @@ class MixedModelFormula:
                 "labels": group_labels_list,
                 "n_groups": int(group_labels.shape[0]),
                 "idx": group_idx,
-                "terms": [str(random_component)],
+                "components": [str(random_component)],
             }
 
         metadata = {
@@ -364,7 +364,7 @@ class Parser:
             )
         if len(random_components) > 1:
             raise ValueError(
-                "Multiple random terms are not supported in current version. "
+                "Multiple random components are not supported in current version. "
                 f"Found: {[str(t) for t in random_components]}"
             )
 
