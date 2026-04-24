@@ -11,6 +11,13 @@ import nbformat
 from nbformat import NotebookNode
 from nbformat.validator import NotebookValidationError
 
+# Notebooks under this directory are rendered into the Sphinx docs index. Each
+# top-level (`#`) markdown heading inside such a notebook becomes a separate
+# `toctree` entry, so we enforce exactly one per notebook to keep the sidebar
+# clean. The check is intentionally not applied to scratch / dev notebooks
+# elsewhere in the repo.
+DOCS_NOTEBOOKS_DIR = Path("docs/source/notebooks")
+
 
 def _extract_path_index(path_segments: list[Any], segment_name: str) -> int | None:
     """Return the integer index that follows a path segment name."""
@@ -69,6 +76,69 @@ def _format_validation_error(
     return "\n".join(details)
 
 
+def _count_h1_headings(notebook: NotebookNode) -> list[tuple[int, str]]:
+    """Return ``(cell_index, heading_text)`` for every level-1 markdown heading.
+
+    Only markdown cells are inspected. Within markdown cells, lines inside
+    fenced code blocks (``` ``` ``` or ``` ~~~ ```) are skipped so that Python
+    comments embedded in code samples do not register as headings.
+    """
+    h1s: list[tuple[int, str]] = []
+    for cell_index, cell in enumerate(notebook.get("cells", [])):
+        if cell.get("cell_type") != "markdown":
+            continue
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+        in_fence = False
+        for line in source.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("```", "~~~")):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if line.startswith("# ") and not line.startswith("## "):
+                h1s.append((cell_index, line[2:].strip()))
+    return h1s
+
+
+def _is_docs_notebook(notebook_path: Path) -> bool:
+    """Return True if the notebook lives under ``docs/source/notebooks/``."""
+    try:
+        resolved = notebook_path.resolve()
+    except OSError:
+        resolved = notebook_path
+    parts = resolved.parts
+    target = DOCS_NOTEBOOKS_DIR.parts
+    if len(parts) < len(target):
+        return False
+    for window_start in range(len(parts) - len(target) + 1):
+        if parts[window_start : window_start + len(target)] == target:
+            return True
+    return False
+
+
+def _format_h1_violation(
+    notebook_path: Path,
+    h1s: list[tuple[int, str]],
+) -> str:
+    """Format a human-readable error for a single-H1 violation."""
+    if h1s:
+        locations = "\n".join(
+            f"  cell {cell_index}: {text}" for cell_index, text in h1s
+        )
+    else:
+        locations = "  (no top-level # headings found)"
+    return (
+        f"{notebook_path}: expected exactly one top-level (#) markdown "
+        f"heading, found {len(h1s)}.\n"
+        f"{locations}\n"
+        f"  Each docs notebook must have exactly one top-level (#) heading. "
+        f"Demote the others to ## (or below) so the docs sidebar stays clean."
+    )
+
+
 def validate_notebook(notebook_path: Path) -> tuple[bool, str | None]:
     """Validate a single notebook and return (is_valid, error_message)."""
     try:
@@ -81,6 +151,11 @@ def validate_notebook(notebook_path: Path) -> tuple[bool, str | None]:
         nbformat.validate(notebook)
     except NotebookValidationError as error:
         return False, _format_validation_error(notebook_path, notebook, error)
+
+    if _is_docs_notebook(notebook_path):
+        h1s = _count_h1_headings(notebook)
+        if len(h1s) != 1:
+            return False, _format_h1_violation(notebook_path, h1s)
 
     return True, None
 
