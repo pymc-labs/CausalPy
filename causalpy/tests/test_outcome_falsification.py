@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -132,12 +134,30 @@ def test_applicable_methods():
 
 
 def test_repr():
-    """Test __repr__ output."""
+    """Test __repr__ output surfaces non-default alpha."""
     check = OutcomeFalsification(formulas=["z ~ 1 + t"], alpha=0.10)
     r = repr(check)
     assert "OutcomeFalsification" in r
     assert "z ~ 1 + t" in r
     assert "0.1" in r
+
+
+def test_repr_hides_default_alpha():
+    """Default alpha=0.05 is not surfaced in the repr."""
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
+    assert "alpha" not in repr(check)
+
+
+def test_repr_hides_default_store_experiments():
+    """Default store_experiments=True is not surfaced in the repr."""
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"])
+    assert "store_experiments" not in repr(check)
+
+
+def test_repr_shows_non_default_store_experiments():
+    """store_experiments=False is shown in the repr."""
+    check = OutcomeFalsification(formulas=["z ~ 1 + t"], store_experiments=False)
+    assert "store_experiments=False" in repr(check)
 
 
 # ===========================================================================
@@ -253,9 +273,16 @@ def test_run_with_multiple_formulas(mock_pymc_sample, its_context):
 def test_run_handles_failed_formula(mock_pymc_sample, its_context):
     """Test that a mix of valid and invalid formulas is handled gracefully.
 
-    Note: formulas referencing nonexistent columns trigger a patsy/Python 3.13
-    traceback formatting bug (KeyError in patsy.eval), so we test with a
-    syntactically invalid formula instead.
+    Note: the more natural failure mode (a formula referencing a
+    missing column, e.g. ``"missing_col ~ 1 + t"``) would be preferable
+    here, but under Python 3.13 it exposes a patsy tracebak/pytest
+    interaction bug (``INTERNALERROR`` from ``KeyError`` in
+    ``patsy.eval``).  See also the skipped tests in
+    ``test_piecewise_its.py`` (``test_transforms_with_patsy_dmatrix``
+    and ``test_transforms_with_patsy_datetime``) that hit the same
+    upstream bug.  Upstream fix is partially in patsy 1.0.1+; once the
+    remaining 3.13 issues land, swap this test to use a
+    missing-column formula which is the commoner real-world mistake.
     """
     _, experiment, context = its_context
 
@@ -302,6 +329,62 @@ def test_store_experiments_false_drops_fitted_experiment(mock_pymc_sample, its_c
     assert frs[0].experiment is None
     # Summary stats are still populated
     assert isinstance(frs[0].effect_mean, float)
+
+
+@pytest.mark.integration
+def test_run_warns_when_many_formulas_with_store_experiments(
+    mock_pymc_sample, its_context
+):
+    """Many formulas + default store_experiments=True emits a memory warning."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(
+        formulas=["z ~ 1 + t", "w ~ 1 + t", "z ~ 1"],
+    )
+    with pytest.warns(UserWarning, match="store_experiments=False"):
+        check.run(experiment, context)
+
+
+@pytest.mark.integration
+def test_run_does_not_warn_when_store_experiments_false(mock_pymc_sample, its_context):
+    """Opt-out path (store_experiments=False) does not emit the memory warning."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(
+        formulas=["z ~ 1 + t", "w ~ 1 + t", "z ~ 1"],
+        store_experiments=False,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        # PyMC sampling may raise unrelated UserWarnings; capture only
+        # the OutcomeFalsification-specific message by filtering first.
+        warnings.filterwarnings(
+            "default",
+            message=r"^(?!OutcomeFalsification).*",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "error",
+            message=r"^OutcomeFalsification",
+            category=UserWarning,
+        )
+        check.run(experiment, context)
+
+
+@pytest.mark.integration
+def test_run_does_not_warn_for_few_formulas(mock_pymc_sample, its_context):
+    """Fewer than 3 formulas does not trigger the memory warning."""
+    _, experiment, context = its_context
+
+    check = OutcomeFalsification(formulas=["z ~ 1 + t", "w ~ 1 + t"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("default")
+        warnings.filterwarnings(
+            "error",
+            message=r"^OutcomeFalsification",
+            category=UserWarning,
+        )
+        check.run(experiment, context)
 
 
 @pytest.mark.integration

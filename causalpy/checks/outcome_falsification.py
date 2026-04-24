@@ -35,7 +35,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from patsy import PatsyError
 
@@ -49,6 +48,8 @@ from causalpy.pipeline import PipelineContext
 from causalpy.pymc_models import PyMCModel
 
 logger = logging.getLogger(__name__)
+
+_STORE_EXPERIMENTS_WARN_THRESHOLD = 3
 
 
 @dataclass
@@ -101,7 +102,12 @@ class OutcomeFalsification:
         ``InferenceData``), which lets users inspect posteriors but
         can be memory-heavy for many formulas.  Set to ``False`` to
         keep only the summary statistics (``effect_mean``,
-        ``hdi_lower``, ``hdi_upper``).
+        ``hdi_lower``, ``hdi_upper``).  A one-off warning is emitted at
+        :meth:`run` when ``store_experiments=True`` and at least
+        ``3`` formulas are supplied, because the combined
+        ``InferenceData`` footprint of several fitted experiments can
+        easily reach hundreds of MB on larger datasets
+        (e.g. :class:`PiecewiseITS`).
 
     Examples
     --------
@@ -246,6 +252,20 @@ class OutcomeFalsification:
         """
         self.validate(experiment)
 
+        if (
+            self.store_experiments
+            and len(self.formulas) >= _STORE_EXPERIMENTS_WARN_THRESHOLD
+        ):
+            warnings.warn(
+                f"OutcomeFalsification will store {len(self.formulas)} fitted "
+                f"experiments (each with its own InferenceData).  The combined "
+                f"footprint can reach hundreds of MB on large datasets or "
+                f"models with many posterior samples.  Pass "
+                f"store_experiments=False if you only need the summary "
+                f"statistics (effect_mean, hdi_lower, hdi_upper).",
+                stacklevel=2,
+            )
+
         results: list[FalsificationResult] = []
         rows: list[dict[str, Any]] = []
         failed_formulas: list[str] = []
@@ -285,7 +305,6 @@ class OutcomeFalsification:
                 ValueError,
                 KeyError,
                 RuntimeError,
-                np.linalg.LinAlgError,
             ) as exc:
                 logger.warning(
                     "OutcomeFalsification: failed for formula '%s'",
@@ -336,7 +355,10 @@ class OutcomeFalsification:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"OutcomeFalsification(formulas={self.formulas!r}, "
-            f"alpha={self.alpha}, store_experiments={self.store_experiments})"
-        )
+        """Return a string representation, showing only non-default flags."""
+        parts = [f"formulas={self.formulas!r}"]
+        if self.alpha != 0.05:
+            parts.append(f"alpha={self.alpha}")
+        if not self.store_experiments:
+            parts.append("store_experiments=False")
+        return f"OutcomeFalsification({', '.join(parts)})"

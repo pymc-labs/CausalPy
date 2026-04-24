@@ -72,7 +72,7 @@ cp.SensitivityAnalysis(
 
 ## Where examples already exist
 
-- `PlaceboInTime`: {doc}`pipeline_workflow`, {doc}`report_demo`
+- `PlaceboInTime`: {doc}`pipeline_workflow`, {doc}`report_demo`, {doc}`its_place_in_time_analysis`
 - `BandwidthSensitivity`: {doc}`rkink_pymc`
 - `PreTreatmentPlaceboCheck`: {doc}`staggered_did_pymc`
 - More check-specific walkthroughs are still being added, so some checks currently have API coverage but no dedicated notebook example yet.

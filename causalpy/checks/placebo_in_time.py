@@ -36,6 +36,7 @@ for posterior extraction.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -54,6 +55,7 @@ from causalpy.pymc_models import PyMCModel
 logger = logging.getLogger(__name__)
 
 MIN_FOLD_OBSERVATIONS = 3
+MAX_RANDOM_SELECTION_RETRIES = 16
 
 _DEFAULT_SAMPLE_KWARGS: dict[str, Any] = {
     "draws": 1000,
@@ -153,15 +155,32 @@ class PlaceboInTime:
     min_training_pct : float, default 0.30
         *(random mode only)* Minimum fraction of total pre-period
         observations that must precede each candidate placebo window.
+
+        Note: the eligible pre-period is further shortened because a
+        candidate's pseudo-intervention window must also end before the
+        actual treatment.  When ``treatment_end_time`` is not set on
+        the experiment, ``intervention_length`` defaults to
+        ``data.index.max() - treatment_time`` (roughly the post-period
+        length), which can make the effective eligible window much
+        smaller than ``(1 - min_training_pct)`` suggests.
     min_gap : int, default 1
         *(random mode only)* Minimum number of pre-intervention
         observations between any two selected folds, measured as
-        positions in the sorted pre-period index.  Prevents
-        near-duplicate folds.  Note: selection is greedy without
-        backtracking, so very large ``min_gap`` values relative to
-        the candidate pool can raise ``ValueError`` even when a
-        valid configuration exists.  Rerun with a different
-        ``random_seed`` or reduce ``min_gap`` if this happens.
+        positions in the sorted pre-period index.  The default of ``1``
+        only forbids picking the same candidate twice; use a larger
+        value to spread folds further apart.  When ``allow_overlap``
+        is ``False`` (the default) non-overlap of pseudo-intervention
+        windows is enforced independently of ``min_gap``.
+    allow_overlap : bool, default False
+        *(random mode only)* If ``False`` (the default), selected
+        pseudo-intervention windows are required to be non-overlapping
+        in index/time units.  Two folds at times ``t_a`` and ``t_b``
+        are considered non-overlapping when
+        ``abs(t_a - t_b) >= intervention_length``.  Set to ``True`` to
+        allow overlapping windows, which relaxes the constraint at the
+        cost of violating the exchangeability assumption of the
+        hierarchical status-quo model (each fold mean is treated as an
+        independent draw from a common ``mu_status_quo``).
     exclude_periods : set[str] | None, default None
         *(random mode only)* Set of period labels to exclude from
         candidate selection. For datetime-indexed data, use
@@ -225,6 +244,7 @@ class PlaceboInTime:
         selection_method: Literal["sequential", "random"] = "sequential",
         min_training_pct: float = 0.30,
         min_gap: int = 1,
+        allow_overlap: bool = False,
         exclude_periods: set[str] | None = None,
         experiment_factory: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
@@ -258,6 +278,7 @@ class PlaceboInTime:
         self.selection_method = selection_method
         self.min_training_pct = min_training_pct
         self.min_gap = min_gap
+        self.allow_overlap = allow_overlap
         self.exclude_periods = exclude_periods
         self.experiment_factory = experiment_factory
         self.sample_kwargs = {**_DEFAULT_SAMPLE_KWARGS, **(sample_kwargs or {})}
@@ -361,8 +382,15 @@ class PlaceboInTime:
 
         Builds a list of eligible candidate dates/indices from the
         pre-intervention data, then randomly selects ``n_folds``
-        candidates subject to ``min_training_pct``, ``min_gap``, and
-        ``exclude_periods`` constraints.
+        candidates subject to ``min_training_pct``, ``min_gap``,
+        ``allow_overlap``, and ``exclude_periods`` constraints.
+
+        Selection is greedy without backtracking and can fail to pick
+        a valid combination on the first try when constraints are
+        tight.  To preserve reproducibility when a ``random_seed`` is
+        supplied, the method retries up to
+        :data:`MAX_RANDOM_SELECTION_RETRIES` times using deterministic
+        sub-seeds derived from ``random_seed`` before giving up.
 
         Parameters
         ----------
@@ -381,7 +409,9 @@ class PlaceboInTime:
         Raises
         ------
         ValueError
-            If not enough eligible candidates exist.
+            If not enough eligible candidates exist, or if no feasible
+            selection is found after ``MAX_RANDOM_SELECTION_RETRIES``
+            greedy attempts.
         """
         pre_data = data.loc[data.index < treatment_time]
         if pre_data.empty:
@@ -397,7 +427,6 @@ class PlaceboInTime:
         # between selected folds, not a candidate-list distance.
         candidates: list[tuple[int, Any]] = []
         for pos, idx_val in enumerate(all_indices):
-            # Check exclusion
             if hasattr(idx_val, "strftime"):
                 label = idx_val.strftime("%Y-%m")
             else:
@@ -405,11 +434,9 @@ class PlaceboInTime:
             if label in exclude:
                 continue
 
-            # Enough training data before this point?
             if pos < min_training:
                 continue
 
-            # Pseudo-intervention must end before true treatment
             pseudo_end = idx_val + intervention_length
             if pseudo_end > treatment_time:
                 continue
@@ -423,32 +450,95 @@ class PlaceboInTime:
                 f"lower min_training_pct, or relax exclude_periods."
             )
 
-        rng = np.random.default_rng(self.random_seed)
+        last_err: ValueError | None = None
+        for attempt in range(MAX_RANDOM_SELECTION_RETRIES):
+            # Deterministic sub-seeds: successive attempts reshuffle
+            # choices in a reproducible way when ``random_seed`` is set
+            # and remain non-deterministic (as expected) when it isn't.
+            sub_seed: int | None
+            if self.random_seed is None:
+                sub_seed = None
+            else:
+                sub_seed = int(self.random_seed) + attempt
+            rng = np.random.default_rng(sub_seed)
+            try:
+                selected = self._try_greedy_selection(
+                    candidates, intervention_length, rng
+                )
+                return sorted(candidates[i][1] for i in selected)
+            except ValueError as err:
+                last_err = err
+                continue
+
+        raise ValueError(
+            f"Cannot select {self.n_folds} folds with min_gap="
+            f"{self.min_gap} and allow_overlap={self.allow_overlap} "
+            f"after {MAX_RANDOM_SELECTION_RETRIES} greedy attempts with "
+            f"deterministic sub-seeds.  Relax constraints "
+            f"(smaller min_gap, set allow_overlap=True, or reduce "
+            f"n_folds).  Last underlying error: {last_err}"
+        )
+
+    def _try_greedy_selection(
+        self,
+        candidates: list[tuple[int, Any]],
+        intervention_length: Any,
+        rng: np.random.Generator,
+    ) -> list[int]:
+        """Single greedy pass over candidates; raises on infeasibility.
+
+        Enforces two constraints between any pair of selected folds:
+
+        * ``min_gap`` positional distance in the candidate index.
+        * When ``allow_overlap`` is ``False``, non-overlap of the
+          pseudo-intervention windows, expressed in the same units as
+          ``intervention_length``.  Two windows ``[t_a, t_a + L)`` and
+          ``[t_b, t_b + L)`` are non-overlapping iff
+          ``abs(t_a - t_b) >= L``.
+        """
         pool = list(range(len(candidates)))
         selected: list[int] = []
 
         for _ in range(self.n_folds):
-            valid = [
-                i
-                for i in pool
-                if all(
-                    abs(candidates[i][0] - candidates[s][0]) >= self.min_gap
-                    for s in selected
-                )
-            ]
+            valid: list[int] = []
+            for i in pool:
+                pos_i, idx_val_i = candidates[i]
+                ok = True
+                for s in selected:
+                    pos_s, idx_val_s = candidates[s]
+                    if abs(pos_i - pos_s) < self.min_gap:
+                        ok = False
+                        break
+                    if not self.allow_overlap and self._windows_overlap(
+                        idx_val_i, idx_val_s, intervention_length
+                    ):
+                        ok = False
+                        break
+                if ok:
+                    valid.append(i)
             if not valid:
                 raise ValueError(
-                    f"Cannot select {self.n_folds} folds with min_gap="
-                    f"{self.min_gap}.  Greedy selection without backtracking "
-                    f"can fail even when a valid configuration exists; "
-                    f"retry with a different random_seed, or reduce "
-                    f"min_gap or n_folds."
+                    "No candidate remaining satisfies min_gap and "
+                    "non-overlap constraints; greedy selection stuck."
                 )
             pick = int(rng.choice(valid))
             selected.append(pick)
             pool.remove(pick)
+        return selected
 
-        return sorted(candidates[i][1] for i in selected)
+    @staticmethod
+    def _windows_overlap(idx_a: Any, idx_b: Any, intervention_length: Any) -> bool:
+        """Return True if two intervention windows overlap.
+
+        A window starting at ``idx`` spans ``[idx, idx + intervention_length)``.
+        Two windows overlap iff their absolute separation is strictly
+        less than ``intervention_length``.  The comparison uses
+        ``idx + intervention_length`` rather than computing a Timedelta
+        directly so that it works uniformly for numeric indices and
+        for datetime indices combined with ``pd.DateOffset``.
+        """
+        earlier, later = (idx_a, idx_b) if idx_a <= idx_b else (idx_b, idx_a)
+        return later < earlier + intervention_length
 
     def _get_fold_data(
         self,
@@ -609,11 +699,38 @@ class PlaceboInTime:
     # ------------------------------------------------------------------
 
     def _draw_expected_effect_samples(self, n: int) -> np.ndarray:
-        """Draw samples from the expected-effect prior."""
+        """Draw samples from the expected-effect prior.
+
+        Parameters
+        ----------
+        n : int
+            Desired number of samples.  Objects with an ``.rvs(n)``
+            method receive ``n`` directly.  Pre-drawn numpy arrays are
+            returned as-is, and :meth:`_compute_assurance` cycles
+            through them via ``i % len(prior)`` when the array is
+            shorter than the number of replications.  A warning is
+            emitted in this case because short arrays can introduce
+            spurious structure in the simulated decisions.
+
+        Returns
+        -------
+        np.ndarray
+            Samples from the expected-effect prior.
+        """
         prior = self.expected_effect_prior
         if prior is None:
             raise ValueError("expected_effect_prior is not set.")
         if isinstance(prior, np.ndarray):
+            if len(prior) < n:
+                warnings.warn(
+                    f"expected_effect_prior has {len(prior)} samples, fewer "
+                    f"than the {n} replications requested by the assurance "
+                    f"simulation; the array will be cycled through via "
+                    f"index % len(prior).  Pass a longer array or an object "
+                    f"with an .rvs(n) method (e.g. a PreliZ/scipy "
+                    f"distribution) to avoid cycling.",
+                    stacklevel=2,
+                )
             return prior
         if hasattr(prior, "rvs"):
             return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
@@ -905,6 +1022,8 @@ class PlaceboInTime:
         parts = [f"n_folds={self.n_folds}"]
         if self.selection_method != "sequential":
             parts.append(f"selection_method={self.selection_method!r}")
+        if self.allow_overlap:
+            parts.append("allow_overlap=True")
         if self.expected_effect_prior is not None:
             parts.append("assurance=True")
         return f"PlaceboInTime({', '.join(parts)})"
