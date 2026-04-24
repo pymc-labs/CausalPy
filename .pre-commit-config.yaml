@@ -96,7 +96,7 @@ repos:
   - repo: local
     hooks:
       - id: validate-notebooks
-        name: Validate notebook schema
+        name: Validate notebooks
         entry: python scripts/validate_notebooks.py
         language: python
         files: \.ipynb$

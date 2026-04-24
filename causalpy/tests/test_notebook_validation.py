@@ -137,6 +137,14 @@ def test_docs_notebook_with_single_h1_passes(tmp_path: Path) -> None:
             ],
             3,
         ),
+        (
+            "indented_h1",
+            [
+                new_markdown_cell(source="# First"),
+                new_markdown_cell(source="   # Second"),
+            ],
+            2,
+        ),
     ],
 )
 def test_docs_notebook_with_wrong_h1_count_fails(
@@ -212,6 +220,41 @@ def test_tilde_fenced_block_in_markdown_does_not_count_as_h1(
         cells=[
             new_markdown_cell(source="# Real Title"),
             new_markdown_cell(source=markdown_with_tilde_fence),
+        ],
+    )
+
+    result = _run_validator(notebook_path)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_longer_fenced_block_can_contain_shorter_fence_and_h1_like_comment(
+    tmp_path: Path,
+) -> None:
+    markdown_with_nested_fence = (
+        "````markdown\n```python\n# Not a heading\nx = 1\n```\n````\n"
+    )
+    notebook_path = _write_docs_notebook(
+        tmp_path,
+        "nested_fence.ipynb",
+        cells=[
+            new_markdown_cell(source="# Real Title"),
+            new_markdown_cell(source=markdown_with_nested_fence),
+        ],
+    )
+
+    result = _run_validator(notebook_path)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_four_space_indented_hash_does_not_count_as_h1(tmp_path: Path) -> None:
+    notebook_path = _write_docs_notebook(
+        tmp_path,
+        "indented_code.ipynb",
+        cells=[
+            new_markdown_cell(source="# Real Title"),
+            new_markdown_cell(source="    # This is an indented code block"),
         ],
     )
 

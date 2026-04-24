@@ -1,4 +1,4 @@
-"""Validate Jupyter notebooks against the nbformat schema."""
+"""Validate Jupyter notebooks against schema and docs conventions."""
 
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from nbformat.validator import NotebookValidationError
 # clean. The check is intentionally not applied to scratch / dev notebooks
 # elsewhere in the repo.
 DOCS_NOTEBOOKS_DIR = Path("docs/source/notebooks")
+
+
+def _leading_space_count(line: str) -> int:
+    """Return the number of leading literal spaces in a line."""
+    return len(line) - len(line.lstrip(" "))
 
 
 def _extract_path_index(path_segments: list[Any], segment_name: str) -> int | None:
@@ -80,7 +85,7 @@ def _count_h1_headings(notebook: NotebookNode) -> list[tuple[int, str]]:
     """Return ``(cell_index, heading_text)`` for every level-1 markdown heading.
 
     Only markdown cells are inspected. Within markdown cells, lines inside
-    fenced code blocks (``` ``` ``` or ``` ~~~ ```) are skipped so that Python
+    CommonMark fenced code blocks (``` or ~~~) are skipped so that Python
     comments embedded in code samples do not register as headings.
     """
     h1s: list[tuple[int, str]] = []
@@ -90,16 +95,33 @@ def _count_h1_headings(notebook: NotebookNode) -> list[tuple[int, str]]:
         source = cell.get("source", "")
         if isinstance(source, list):
             source = "".join(source)
-        in_fence = False
+        fence_marker: str | None = None
+        fence_length = 0
         for line in source.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith(("```", "~~~")):
-                in_fence = not in_fence
+            leading_spaces = _leading_space_count(line)
+            content = line[leading_spaces:]
+            if leading_spaces <= 3 and content.startswith(("```", "~~~")):
+                marker = content[0]
+                marker_count = len(content) - len(content.lstrip(marker))
+                if marker_count >= 3:
+                    if fence_marker is None:
+                        fence_marker = marker
+                        fence_length = marker_count
+                    elif (
+                        marker == fence_marker
+                        and marker_count >= fence_length
+                        and not content[marker_count:].strip()
+                    ):
+                        fence_marker = None
+                        fence_length = 0
                 continue
-            if in_fence:
+            if fence_marker is not None:
                 continue
-            if line.startswith("# ") and not line.startswith("## "):
-                h1s.append((cell_index, line[2:].strip()))
+            if leading_spaces <= 3 and content.startswith("#"):
+                marker_count = len(content) - len(content.lstrip("#"))
+                rest = content[marker_count:]
+                if marker_count == 1 and (not rest or rest[0].isspace()):
+                    h1s.append((cell_index, rest.strip()))
     return h1s
 
 
@@ -163,7 +185,7 @@ def validate_notebook(notebook_path: Path) -> tuple[bool, str | None]:
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Validate Jupyter notebooks against nbformat schema.",
+        description="Validate Jupyter notebooks against schema and docs conventions.",
     )
     parser.add_argument(
         "notebooks",
