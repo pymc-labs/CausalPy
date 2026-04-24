@@ -1,15 +1,8 @@
 # CausalPy Docs Patterns
 
-Repo-specific conventions for notebooks (`docs/source/notebooks/`) and knowledgebase pages (`docs/source/knowledgebase/`). The mechanical rules (single H1, schema validation) are enforced by hooks; this file is for the judgement-heavy patterns a hook can't catch.
+Repo-specific conventions for notebooks (`docs/source/notebooks/`) and knowledgebase pages (`docs/source/knowledgebase/`). Mechanical rules are enforced by `prek` / CI hooks; this file is for the judgement-heavy patterns a hook can't catch.
 
 ## Notebook structure
-
-### Single H1 — title only
-
-Every notebook must have exactly one `# ` markdown heading (the page title). All other section headings are `##` or below. (Mechanical check planned, see issue #863.) During review:
-
-- If you see multiple `#` headings, that's a hook job — but flag it on the PR if the hook hasn't landed yet.
-- If you see no `#` heading at all, the notebook will render with the filename as title, which is usually wrong.
 
 ### `toctree` placement
 

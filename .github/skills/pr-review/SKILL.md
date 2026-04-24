@@ -22,7 +22,7 @@ Do **not** use this skill for:
 
 ## Division of labour with automation
 
-A pre-commit hook never misses; an agent review is judgement-heavy. Don't duplicate the hook's job. Mechanical checks already enforced by `prek` / CI (lint, format, mypy, schema validation, single-H1-per-notebook, etc.) are not part of this skill — assume they pass and focus the human-equivalent attention on what they can't catch.
+A pre-commit hook never misses; an agent review is judgement-heavy. Don't duplicate the hook's job. Mechanical checks already enforced by `prek` / CI (lint, format, mypy, schema validation, etc.) are not part of this skill — assume they pass and focus the human-equivalent attention on what they can't catch.
 
 If during review you notice a *class* of issue that automation could catch but doesn't, file it as a follow-up issue via [`github-issues`](../github-issues/SKILL.md) rather than only flagging the one instance.
 

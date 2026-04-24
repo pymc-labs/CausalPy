@@ -62,7 +62,7 @@ If a pattern in `what-to-look-for.md` has a **mechanical answer** — same input
 
 Mechanical patterns from past reviews that were (or should be) formalised:
 
-- **Single H1 per notebook** → issue #863 (pre-commit hook).
+- **Single H1 per notebook** → issue #863, formalised in #866 (`validate-notebooks` pre-commit hook); pattern pruned from `docs-patterns.md` at the same time.
 - **Notebook orphaned from `toctree`** → under discussion.
 - **Constrained string param not `Literal`** → potential Ruff/mypy rule (deferred).
 
