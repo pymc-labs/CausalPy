@@ -240,11 +240,14 @@ def test_h1_check_only_applies_to_docs_notebooks(tmp_path: Path) -> None:
 
 def test_all_docs_notebooks_pass_h1_check() -> None:
     """Regression test: every checked-in docs notebook must satisfy the rule."""
-    if not DOCS_NOTEBOOKS_DIR.is_dir():
+    # pragma directives below exclude defensive guards from coverage: in a
+    # normal checkout the docs notebooks directory exists and is non-empty, so
+    # these branches never execute under CI / codecov.
+    if not DOCS_NOTEBOOKS_DIR.is_dir():  # pragma: no cover
         pytest.skip("docs/source/notebooks directory not present in this checkout")
 
     notebooks = sorted(DOCS_NOTEBOOKS_DIR.glob("*.ipynb"))
-    if not notebooks:
+    if not notebooks:  # pragma: no cover
         pytest.skip("no notebooks found under docs/source/notebooks")
 
     result = subprocess.run(
