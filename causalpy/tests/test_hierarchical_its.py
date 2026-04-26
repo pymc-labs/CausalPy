@@ -131,6 +131,24 @@ class TestInstant:
         out = capsys.readouterr().out
         assert "mu_lift" in out
 
+    def test_effect_summary_direction_decrease(self, panel, mock_pymc_sample):
+        """effect_summary with direction='decrease' emits prob_negative column."""
+        result = _fit(panel, "instant")
+        es = result.effect_summary(direction="decrease")
+        assert "prob_negative" in es.table.columns
+
+    def test_effect_summary_direction_two_sided(self, panel, mock_pymc_sample):
+        """effect_summary with direction='two-sided' emits prob_nonzero column."""
+        result = _fit(panel, "instant")
+        es = result.effect_summary(direction="two-sided")
+        assert "prob_nonzero" in es.table.columns
+
+    def test_effect_summary_unsupported_param_warns(self, panel, mock_pymc_sample):
+        """effect_summary warns when an unsupported parameter is non-default."""
+        result = _fit(panel, "instant")
+        with pytest.warns(UserWarning, match="not yet supported"):
+            result.effect_summary(min_effect=0.5)
+
 
 class TestEventStudy:
     """Tests for the event-study (binned post-launch) effect type."""
@@ -159,6 +177,14 @@ class TestEventStudy:
         out = capsys.readouterr().out
         assert "mu_delta" in out
         assert "Placebo check" not in out  # only placebo gets the check
+
+    def test_print_coefficients_event_study(self, panel, mock_pymc_sample, capsys):
+        """print_coefficients on an event-study model prints mu_delta, not mu_lift."""
+        result = _fit(panel, "event_study", bin_edges=[0, 4, 8, 12, 30])
+        result.print_coefficients()
+        out = capsys.readouterr().out
+        assert "mu_delta" in out
+        assert "mu_lift" not in out
 
 
 class TestPlacebo:
@@ -251,6 +277,35 @@ class TestEdgeCases:
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
         )
         assert result.X.sizes["coeffs"] == 0
+
+    def test_formula_with_intercept_dropped(self, panel, mock_pymc_sample):
+        """Formula with an explicit intercept is silently dropped."""
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=panel,
+            formula="sales ~ emails",  # patsy adds Intercept; we drop it
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        assert "Intercept" not in result.labels
+
+    def test_print_coefficients_no_covariates(self, panel, mock_pymc_sample, capsys):
+        """print_coefficients on a no-covariates model skips mu_beta/sigma_beta."""
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=panel,
+            formula="sales ~ 0",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        result.print_coefficients()
+        out = capsys.readouterr().out
+        assert "mu_lift" in out
+        assert "mu_beta" not in out
 
     def test_with_seasonality(self, panel, mock_pymc_sample):
         """Fit with Fourier seasonality enabled."""
