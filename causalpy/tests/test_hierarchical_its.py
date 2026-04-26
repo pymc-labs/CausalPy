@@ -124,6 +124,13 @@ class TestInstant:
         assert "instant" in out
         assert "mu_lift" in out.lower() or "E[mu_lift]" in out
 
+    def test_print_coefficients_does_not_crash(self, panel, mock_pymc_sample, capsys):
+        """print_coefficients outputs population-level summaries without error."""
+        result = _fit(panel, "instant")
+        result.print_coefficients()
+        out = capsys.readouterr().out
+        assert "mu_lift" in out
+
 
 class TestEventStudy:
     """Tests for the event-study (binned post-launch) effect type."""
@@ -208,6 +215,19 @@ class TestPlacebo:
         assert any("mu_delta" in name for name in es.table.index)
         # Should have rows for pre + post bins
         assert len(es.table) == result._n_pre_bins + result._n_post_bins
+
+    def test_placebo_counterfactual_keeps_pre_bins(self, panel, mock_pymc_sample):
+        """Counterfactual aux keeps pre-launch D columns active, zeros post columns."""
+        result = _fit(
+            panel,
+            "placebo",
+            bin_edges=[0, 5, 10],
+            placebo_edges=[-5, -2, 0],
+        )
+        aux_cf = result._aux(effect_on=False)
+        n_pre = result._n_pre_bins
+        np.testing.assert_array_equal(aux_cf["D"][:, :n_pre], result._D[:, :n_pre])
+        assert (aux_cf["D"][:, n_pre:] == 0).all()
 
 
 class TestEdgeCases:
@@ -453,3 +473,28 @@ class TestValidation:
                 treatment_time_col="launch_week",
                 model=cp.pymc_models.LinearRegression(sample_kwargs=SAMPLE_KWARGS),
             )
+
+    def test_inconsistent_treatment_time_per_unit(self, panel):
+        """Raise ValueError when one unit has two different launch_week values."""
+        df = panel.copy()
+        mask = df["product"] == 0
+        last_idx = df[mask].index[-1]
+        df.loc[last_idx, "launch_week"] = df.loc[last_idx, "launch_week"] + 99
+        with pytest.raises(ValueError, match="not constant within units"):
+            _fit(df, "instant")
+
+    def test_ar_residuals_unsorted_panel(self, mock_pymc_sample):
+        """within_unit_tidx must be identical regardless of input row order."""
+        panel = _make_panel()
+        shuffled = panel.sample(frac=1, random_state=99).reset_index(drop=True)
+        result_sorted = _fit(panel, "instant", ar_residuals=True)
+        result_shuffled = _fit(shuffled, "instant", ar_residuals=True)
+        np.testing.assert_array_equal(
+            result_sorted._within_unit_tidx,
+            result_shuffled._within_unit_tidx,
+        )
+
+    def test_unknown_kwargs_raises(self, panel):
+        """Raise TypeError when unexpected keyword arguments are passed."""
+        with pytest.raises(TypeError, match="unexpected keyword arguments"):
+            _fit(panel, "instant", seasonalty=2)  # typo: missing 'i'

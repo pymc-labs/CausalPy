@@ -2341,12 +2341,13 @@ class HierarchicalLaunchITS(PyMCModel):
 
                 # Scan along time axis, vectorised across units
                 # z_ar.T is (time_step, unit); scan iterates over axis 0
-                ar_resid_matrix, _ = pytensor.scan(
+                ar_resid_matrix = pytensor.scan(
                     fn=ar_step,
                     sequences=[z_ar.T],
                     outputs_info=[pt.zeros(n_units)],
                     non_sequences=[rho],
                     n_steps=n_time_steps,
+                    return_updates=False,
                 )
                 # ar_resid_matrix: (time_step, unit)
                 ar_contrib = sigma_ar * ar_resid_matrix[within_unit_tidx_, unit_idx_]

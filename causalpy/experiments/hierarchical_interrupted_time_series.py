@@ -18,6 +18,7 @@ launch times (event-study-style).
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -138,6 +139,11 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
+        if kwargs:
+            raise TypeError(
+                f"HierarchicalInterruptedTimeSeries got unexpected keyword "
+                f"arguments: {sorted(kwargs)}"
+            )
         if not isinstance(self.model, HierarchicalLaunchITS):
             raise TypeError(
                 "HierarchicalInterruptedTimeSeries requires a "
@@ -157,7 +163,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
 
         self._validate_inputs()
         self._prepare_data()
-        self._algorithm()
+        self.algorithm()
 
     # ------------------------------------------------------------------ setup
 
@@ -198,9 +204,23 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         ):
             raise ValueError("placebo_edges must be sorted in ascending order")
 
+        inconsistent = (
+            self.data.groupby(self.unit_col)[self.treatment_time_col].nunique() > 1
+        )
+        if inconsistent.any():
+            bad_units = sorted(inconsistent[inconsistent].index.tolist())
+            raise ValueError(
+                f"treatment_time_col {self.treatment_time_col!r} is not constant "
+                f"within units: {bad_units}. Each unit must have a single launch time."
+            )
+
     def _prepare_data(self) -> None:
         """Build design matrices, unit indices, and effect indicators from data."""
-        df = self.data.copy()
+        df = (
+            self.data.copy()
+            .sort_values([self.unit_col, self.time_col])
+            .reset_index(drop=True)
+        )
 
         # outcome
         outcome = self.formula.split("~")[0].strip()
@@ -243,9 +263,11 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
                     "(all units must have the same number of time steps)."
                 )
             self._n_time_steps = int(counts[0])
-            # Compute within-unit sequential index (assumes data sorted by unit)
-            self._within_unit_tidx = np.concatenate(
-                [np.arange(self._n_time_steps) for _ in range(n_units)]
+            # Derive within-unit sequential time index from groupby ordering
+            self._within_unit_tidx = (
+                df.groupby(self.unit_col, sort=False)
+                .cumcount()
+                .to_numpy(dtype=np.int64)
             )
 
         # Event time
@@ -367,13 +389,18 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         else:
             D = self._D
             if not effect_on and D is not None:
-                D = np.zeros_like(D)
+                if self.effect_type == "placebo":
+                    # Keep pre-launch lead columns active; zero only post-launch bins
+                    D = D.copy()
+                    D[:, self._n_pre_bins :] = 0.0
+                else:
+                    D = np.zeros_like(D)
             aux["D"] = D
         return aux
 
     # ------------------------------------------------------------------ fit
 
-    def _algorithm(self) -> None:
+    def algorithm(self) -> None:
         """Fit model, compute observed/counterfactual predictions and impact."""
         model: HierarchicalLaunchITS = self.model  # type: ignore[assignment]
         model.fit(
@@ -617,6 +644,23 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
 
     # ------------------------------------------------------------ reporting
 
+    def print_coefficients(self, round_to: int | None = None) -> None:
+        """Print population-level coefficient summaries for the hierarchical model."""
+        post = self.model.idata.posterior  # type: ignore[union-attr]
+        print("Model coefficients (population level):")
+        for name in ("mu_beta", "sigma_beta"):
+            if name in post:
+                vals = post[name].mean(("chain", "draw")).values
+                print(f"  {name}: {vals}")
+        if "mu_lift" in post:
+            print(f"  mu_lift: {float(post['mu_lift'].mean()):.4g}")
+        if "sigma_lift" in post:
+            print(f"  sigma_lift: {float(post['sigma_lift'].mean()):.4g}")
+        if "mu_delta" in post:
+            for i, label in enumerate(self._event_bin_labels or []):
+                val = float(post["mu_delta"].isel(event_bin=i).mean())
+                print(f"  mu_delta[{label}]: {val:.4g}")
+
     def effect_summary(
         self,
         *,
@@ -636,6 +680,23 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         Reports posterior mean and HDI for ``mu_lift`` (instant) or each
         ``mu_delta`` bin (event-study / placebo).
         """
+        _unsupported = {
+            "window": (window, "post"),
+            "cumulative": (cumulative, True),
+            "relative": (relative, True),
+            "period": (period, None),
+            "min_effect": (min_effect, None),
+            "treated_unit": (treated_unit, None),
+        }
+        for param_name, (val, default) in _unsupported.items():
+            if val != default:
+                warnings.warn(
+                    f"effect_summary() parameter {param_name!r} is not yet supported "
+                    "by HierarchicalInterruptedTimeSeries and will be ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         post = self.model.idata.posterior  # type: ignore[union-attr]
         rows = []
         hdi_prob = 1 - alpha
@@ -645,13 +706,21 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             mean = float(samples.mean())
             lo = float(samples.quantile((1 - hdi_prob) / 2))
             hi = float(samples.quantile(1 - (1 - hdi_prob) / 2))
-            p_gt = float((samples > 0).mean())
+            if direction == "increase":
+                prob_directional = float((samples > 0).mean())
+                prob_col = "prob_positive"
+            elif direction == "decrease":
+                prob_directional = float((samples < 0).mean())
+                prob_col = "prob_negative"
+            else:  # two-sided
+                prob_directional = float((samples != 0).mean())
+                prob_col = "prob_nonzero"
             return {
                 "parameter": name,
                 "mean": mean,
                 f"hdi_{int(hdi_prob * 100)}_low": lo,
                 f"hdi_{int(hdi_prob * 100)}_high": hi,
-                "prob_positive": p_gt,
+                prob_col: prob_directional,
             }
 
         if self.effect_type == "instant":
