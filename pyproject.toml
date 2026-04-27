@@ -162,7 +162,7 @@ extend-select = [
 
 [tool.codespell]
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
-skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
+skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
 source = ["causalpy"]

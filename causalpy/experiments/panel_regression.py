@@ -557,7 +557,7 @@ class PanelRegression(BaseExperiment):
         """
         # Get posterior predictions
         if isinstance(self.model, PyMCModel):
-            mu = self.model.idata.posterior["mu"]  # type: ignore[attr-defined, union-attr]
+            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
             pred_upper = mu.quantile(0.975, dim=["chain", "draw"]).values.flatten()
@@ -673,15 +673,18 @@ class PanelRegression(BaseExperiment):
 
         if isinstance(self.model, PyMCModel):
             # Bayesian: get posterior means
-            beta = self.model.idata.posterior["beta"]  # type: ignore[attr-defined, union-attr]
+            beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
 
             # Get mean and std for each unit FE
             fe_means = []
             for idx in unit_fe_indices:
-                m = beta.sel(coeffs=self.labels[idx]).mean(dim=["chain", "draw"])
-                # May still have coords (e.g. treated_units); reduce to a scalar for float().
-                fe_means.append(float(np.asarray(m.values).mean()))
+                fe_means.append(
+                    beta.sel(coeffs=self.labels[idx])
+                    .mean(dim=["chain", "draw"])
+                    .squeeze("treated_units", drop=True)
+                    .item()
+                )
 
             ax.hist(
                 fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"

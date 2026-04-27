@@ -290,6 +290,9 @@ def test_panel_regression_plot_coefficients(mock_pymc_sample, small_panel_data):
 
 
 @pytest.mark.integration
+@pytest.mark.filterwarnings(
+    "error:Conversion of an array with ndim > 0 to a scalar:DeprecationWarning"
+)
 def test_panel_regression_plot_unit_effects(mock_pymc_sample, small_panel_data):
     """Test plot_unit_effects method."""
     result = cp.PanelRegression(
