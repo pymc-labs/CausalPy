@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -217,6 +218,10 @@ class BaseExperiment(ABC):
 
     def plot(
         self,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        ci_prob: float = HDI_PROB,
+        num_samples: int = 50,
         *args: Any,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -224,11 +229,17 @@ class BaseExperiment(ABC):
     ) -> tuple:
         """Plot the model.
 
-        Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
-        depending on the model type.
-
         Parameters
         ----------
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            Type of visualization. Default is "ribbon".
+        ci_kind : {"hdi", "eti"}, optional
+            Type of interval for ribbon plots. Default is "hdi".
+        ci_prob : float, optional
+            The size of the credible interval. Default is :data:`~causalpy.constants.HDI_PROB`.
+        num_samples : int, optional
+            Number of posterior samples to plot for spaghetti visualization.
+            Default is 50.
         show : bool, optional
             Whether to automatically display the plot. Defaults to True.
             Set to False if you want to modify the figure before displaying it.
@@ -240,6 +251,36 @@ class BaseExperiment(ABC):
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``.  ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
+        *args : Any
+            Additional positional arguments passed to `_bayesian_plot` or `_ols_plot`.
+        **kwargs : Any
+            Additional keyword arguments passed to `_bayesian_plot` or `_ols_plot`.
+            Can include deprecated `interval` and `hdi_prob` for backward compatibility.
+
+        Returns
+        -------
+        tuple
+            Tuple of figure and axes objects (format depends on experiment type).
+
+        Notes
+        -----
+        Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
+        depending on the model type. The ``kind``, ``ci_kind``, ``ci_prob``, and
+        ``num_samples`` parameters are passed through to the underlying plotting methods
+        (e.g. for :func:`~causalpy.plot_utils.plot_xY`).
+
+        **Legend handling and ``plot_xY`` return types:** :func:`~causalpy.plot_utils.plot_xY`
+        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
+        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
+        Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
+        matplotlib legends from those return values should only pack
+        ``(line, patch)`` tuples when calling ``plot_xY`` with ``kind="ribbon"``
+        (the default). Many current experiment plots always use the ribbon
+        default and never forward ``kind``; if a subclass forwards non-ribbon
+        kinds, it must build legend handles accordingly. The base class applies
+        ``legend_kwargs`` by mutating an existing legend in place, which preserves
+        whatever handle objects the subclass attached (including tuple handles
+        used for ribbon mean+band).
 
         Examples
         --------
@@ -253,9 +294,23 @@ class BaseExperiment(ABC):
         # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                fig, ax = self._bayesian_plot(*args, **kwargs)
+                fig, ax = self._bayesian_plot(
+                    *args,
+                    kind=kind,
+                    ci_kind=ci_kind,
+                    ci_prob=ci_prob,
+                    num_samples=num_samples,
+                    **kwargs,
+                )
             elif isinstance(self.model, RegressorMixin):
-                fig, ax = self._ols_plot(*args, **kwargs)
+                fig, ax = self._ols_plot(
+                    *args,
+                    kind=kind,
+                    ci_kind=ci_kind,
+                    ci_prob=ci_prob,
+                    num_samples=num_samples,
+                    **kwargs,
+                )
             else:
                 raise ValueError("Unsupported model type")
 
