@@ -1039,6 +1039,46 @@ class TestHierarchicalLinearRegression:
             "Missing required priors for non-centered parameterization: beta_group.",
         )
 
+    def test_centered_build_model_uses_centered_random_effects(self) -> None:
+        priors = {
+            key: self.model.priors[key]
+            for key in ["beta_fixed", "sigma_fixed", "sigma_random"]
+        }
+        model = HierarchicalLinearRegression(priors=priors)
+
+        model.build_model(
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            group_idx=self.group_idx,
+            coords=self.coords,
+            non_centered=False,
+        )
+
+        assert "beta_random" in model.named_vars
+        assert "beta_group" not in model.named_vars
+
+    def test_fit_extends_prior_and_posterior_predictive(self, mock_pymc_sample) -> None:
+        model = HierarchicalLinearRegression(
+            sample_kwargs={
+                "draws": 2,
+                "chains": 1,
+                "progressbar": False,
+                "random_seed": self.sample_kwargs["random_seed"],
+            },
+            priors=self.priors,
+        )
+        result = model.fit(**self.data["model_kwargs"])
+
+        assert result is model.idata
+        assert isinstance(result, az.InferenceData)
+        assert {
+            "posterior",
+            "prior",
+            "prior_predictive",
+            "posterior_predictive",
+        } <= set(result.groups())
+
     def test_fixed_effect_parameter_recovery(self) -> None:
         beta_fixed_mean = (
             self.idata.posterior["beta_fixed"].mean(dim=("chain", "draw")).to_numpy()[0]
