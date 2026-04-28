@@ -912,9 +912,7 @@ class HierarchicalLinearRegression(PyMCModel):
             non_centered=non_centered,
         )
         with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is None:
-                raise RuntimeError("pm.sample() returned None")
+            self.idata: az.InferenceData = pm.sample(**self.sample_kwargs)
             self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
             self.idata.extend(
                 pm.sample_posterior_predictive(
