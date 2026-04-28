@@ -11,16 +11,15 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Optional
-
-from collections import OrderedDict
-from dataclasses import dataclass
-from formulaic import Formula
-
-import pandas as pd
-import numpy as np
 import re
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from formulaic import Formula
 
 _RE_RANDOM_COMPONENT = re.compile(r"\(\s*([^|()]+?)\s*\|\s*([^|()]+?)\s*\)")
 
@@ -77,11 +76,13 @@ class RandomComponent:
 
     @property
     def has_intercept(self) -> bool:
+        """Whether this component includes a random intercept."""
         elements = set(self._elements)
         return "0" not in elements and "-1" not in elements
 
     @property
     def slopes(self) -> list[str]:
+        """Return non-intercept random-slope elements."""
         return [
             element for element in self._elements if element not in ("0", "-1", "1")
         ]
@@ -109,6 +110,13 @@ class MixedModelMatrices:
 
     Examples
     --------
+    >>> data = pd.DataFrame(
+    ...     {
+    ...         "y": [0.1, -0.2, 0.3, 0.0],
+    ...         "x1": [1.0, 0.0, 1.0, 0.5],
+    ...         "store_id": ["s1", "s1", "s2", "s2"],
+    ...     }
+    ... )
     >>> mm = parse_formula("y ~ 1 + x1 + (1 + x1 | store_id)", data)
     >>> mm.lhs.shape[0] == mm.rhs.shape[0] == mm.Z.shape[0]
     True
@@ -123,22 +131,27 @@ class MixedModelMatrices:
 
     @property
     def y(self) -> pd.DataFrame:
+        """Alias for ``lhs`` outcome matrix."""
         return self.lhs
 
     @property
     def X(self) -> pd.DataFrame:
+        """Alias for ``rhs`` fixed-effects design matrix."""
         return self.rhs
 
     @property
     def model_spec(self):
+        """Fixed-effects Formulaic model specification used for ``rhs``."""
         return self.metadata["model_spec"]
 
     @property
     def fixed_model_spec(self):
+        """Explicit fixed-effects model specification alias."""
         return self.metadata["fixed_model_spec"]
 
     @property
     def random_model_spec(self):
+        """Random-effects model specification used for ``Z``."""
         return self.metadata["random_model_spec"]
 
 
@@ -175,10 +188,12 @@ class MixedModelFormula:
 
     @property
     def has_random_effects(self) -> bool:
+        """Whether the parsed formula contains random components."""
         return len(self.random_components) > 0
 
     @property
     def grouping_variables(self) -> list[str]:
+        """Unique grouping-variable names in declaration order."""
         return list(
             OrderedDict.fromkeys(
                 component.grouping for component in self.random_components
@@ -187,10 +202,12 @@ class MixedModelFormula:
 
     @property
     def fixed_formula(self) -> str:
+        """Fixed-effects formula string built from ``lhs`` and ``rhs``."""
         return f"{self.lhs} ~ {self.rhs}"
 
     @property
     def formula(self) -> Formula:
+        """Formulaic ``Formula`` instance for fixed-effects materialization."""
         return Formula(self.fixed_formula)
 
     def __str__(self) -> str:
@@ -202,8 +219,8 @@ class MixedModelFormula:
     def get_model_matrix(
         self,
         data: Any,
-        context: Optional[Mapping[str, Any]] = None,
-        drop_rows: Optional[set[int]] = None,
+        context: Mapping[str, Any] | None = None,
+        drop_rows: set[int] | None = None,
         **attr_overrides: Any,
     ) -> MixedModelMatrices:
         """
@@ -253,7 +270,7 @@ class MixedModelFormula:
         Z = pd.DataFrame(index=rhs.index)
         random_model_spec = None
         random_effect_names: list[str] = []
-        group = {
+        group: dict[str, np.ndarray | int | list[Any] | str | None] = {
             "variable": None,
             "labels": [],
             "n_groups": 0,
