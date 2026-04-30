@@ -126,7 +126,7 @@ class InstrumentalVariable(BaseExperiment):
         vs_prior_type=None,
         vs_hyperparams=None,
         binary_treatment=False,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"

@@ -236,9 +236,11 @@ def test_missing_default_model_class_raises_valueerror():
 
 
 @pytest.mark.integration
-def test_explicit_model_takes_precedence_over_default(mock_pymc_sample, sample_kwargs):
+def test_explicit_model_takes_precedence_over_default(
+    mock_pymc_sample, sample_kwargs, did_data
+):
     """Explicitly passed model is used instead of default."""
-    df = cp.load_data("did")
+    df = did_data
     explicit_model = cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs)
 
     result = cp.DifferenceInDifferences(

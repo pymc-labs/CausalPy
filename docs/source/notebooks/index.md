@@ -10,6 +10,13 @@ ancova_pymc.ipynb
 :::
 
 :::{toctree}
+:caption: Panel Fixed Effects
+:maxdepth: 1
+
+panel_fixed_effects.ipynb
+:::
+
+:::{toctree}
 :caption: Synthetic Control
 :maxdepth: 1
 
@@ -70,6 +77,7 @@ piecewise_its_pymc.ipynb
 rd_skl.ipynb
 rd_pymc.ipynb
 rd_pymc_drinking.ipynb
+rd_skl_drinking.ipynb
 rd_donut_pymc.ipynb
 :::
 

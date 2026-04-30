@@ -45,10 +45,11 @@ dependencies = [
     "ipython!=8.7.0",
     "jinja2",
     "matplotlib>=3.5.3",
-    "numpy<2.4",
+    "numpy",
     "pandas",
     "patsy",
     "pymc>=5.15.1",
+    "pytensor>=2.38.1",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
@@ -161,7 +162,7 @@ extend-select = [
 
 [tool.codespell]
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
-skip = "*.ipynb,*.csv,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
+skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
 [tool.coverage.run]
 source = ["causalpy"]

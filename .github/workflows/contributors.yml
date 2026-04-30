@@ -1,0 +1,259 @@
+name: Update contributors image
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  update:
+    name: Regenerate contributors.svg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Generate contributors SVG
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          # Render human contributors as circular avatars in a grid.
+          # Each avatar is fetched and base64-embedded so the resulting
+          # SVG is fully self-contained. GitHub's SVG renderer blocks
+          # external-origin <image> references via Content Security
+          # Policy, so inline data URIs are required for the avatars to
+          # render when the SVG is embedded in README.md on github.com.
+          script: |
+            const fs = require('fs');
+            const https = require('https');
+            const path = require('path');
+
+            const AVATAR = 64;
+            const GAP = 8;
+            const COLS = 12;
+            const PAD = 4;
+            const BOT_PATTERN = /\[bot\]$|^dependabot$|^renovate$|^renovate-bot$/i;
+
+            const xmlEscape = (s) =>
+              String(s).replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+              })[c]);
+
+            const REQUEST_TIMEOUT_MS = 15000;
+            const MAX_REDIRECTS = 3;
+            const FETCH_CONCURRENCY = 8;
+            // Defence-in-depth: even though the URLs originate from the
+            // authenticated GitHub API, pin the host and content-type so a
+            // spoofed/compromised response can't redirect this fetch off-net
+            // or sneak non-image bytes into the SVG.
+            const ALLOWED_AVATAR_HOSTS = new Set(['avatars.githubusercontent.com']);
+            const ALLOWED_IMAGE_TYPES = new Set([
+              'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
+            ]);
+
+            function fetchDataUri(url, redirectsLeft = MAX_REDIRECTS) {
+              return new Promise((resolve, reject) => {
+                let parsed;
+                try {
+                  parsed = new URL(url);
+                } catch (e) {
+                  return reject(new Error(`invalid url: ${url}`));
+                }
+                if (!ALLOWED_AVATAR_HOSTS.has(parsed.host)) {
+                  return reject(new Error(`unexpected avatar host: ${parsed.host}`));
+                }
+                const req = https.get(
+                  url,
+                  { headers: { 'User-Agent': 'causalpy-contributors-workflow' } },
+                  (res) => {
+                    if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+                      res.resume();
+                      if (redirectsLeft <= 0) {
+                        return reject(new Error(`too many redirects for ${url}`));
+                      }
+                      const next = new URL(res.headers.location, url).toString();
+                      return resolve(fetchDataUri(next, redirectsLeft - 1));
+                    }
+                    if (res.statusCode !== 200) {
+                      res.resume();
+                      return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+                    }
+                    const rawType = (res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+                    if (!ALLOWED_IMAGE_TYPES.has(rawType)) {
+                      res.resume();
+                      return reject(new Error(`unexpected content-type ${rawType || '(none)'} for ${url}`));
+                    }
+                    const chunks = [];
+                    res.on('data', (c) => chunks.push(c));
+                    res.on('end', () => {
+                      const b64 = Buffer.concat(chunks).toString('base64');
+                      resolve(`data:${rawType};base64,${b64}`);
+                    });
+                  },
+                );
+                req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+                  req.destroy(new Error(`timeout after ${REQUEST_TIMEOUT_MS}ms for ${url}`));
+                });
+                req.on('error', reject);
+                req.end();
+              });
+            }
+
+            // Neutral placeholder used when an avatar fetch fails. Keeps the
+            // layout stable and lets the workflow still open a PR instead of
+            // failing the whole run on a single flaky request.
+            const PLACEHOLDER_DATA_URI =
+              'data:image/svg+xml;base64,' +
+              Buffer.from(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+                '<rect width="64" height="64" fill="#d0d7de"/>' +
+                '</svg>',
+              ).toString('base64');
+
+            async function mapWithConcurrency(items, limit, worker) {
+              const results = new Array(items.length);
+              let next = 0;
+              async function run() {
+                while (true) {
+                  const i = next++;
+                  if (i >= items.length) return;
+                  results[i] = await worker(items[i], i);
+                }
+              }
+              await Promise.all(
+                Array.from({ length: Math.min(limit, items.length) }, run),
+              );
+              return results;
+            }
+
+            core.info(`Fetching contributors for ${context.repo.owner}/${context.repo.repo}`);
+            // listContributors returns at most the top 500 contributors and
+            // excludes anonymous ones by default. Fine for CausalPy today;
+            // revisit if the community grows past that scale.
+            const contributors = await github.paginate(
+              github.rest.repos.listContributors,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            // c.type === 'User' already excludes GitHub App bot accounts
+            // (which show up as type 'Bot'). The regex is belt-and-braces
+            // for legacy "[bot]"-suffixed display names and a couple of
+            // well-known automation accounts.
+            const people = contributors.filter(
+              (c) => c && c.type === 'User' && c.login && !BOT_PATTERN.test(c.login)
+            );
+            core.info(`Found ${people.length} human contributors`);
+
+            // Short-circuit: if the login set hasn't changed since the last
+            // run, skip regenerating the SVG entirely. Avatars are base64
+            // embedded, so a fresh re-encode of the same avatar can produce
+            // byte-level diffs even when no contributor actually joined or
+            // left. The sidecar manifest records the canonical login list.
+            const svgPath = path.join('docs', 'source', '_static', 'contributors.svg');
+            const manifestPath = path.join('docs', 'source', '_static', 'contributors.json');
+            const currentLogins = people.map((c) => c.login).sort((a, b) => a.localeCompare(b));
+            let previousLogins = null;
+            if (fs.existsSync(manifestPath)) {
+              try {
+                const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                if (Array.isArray(parsed.logins)) previousLogins = parsed.logins;
+              } catch (err) {
+                core.warning(`Could not parse ${manifestPath}: ${err.message}`);
+              }
+            }
+            const loginsUnchanged =
+              previousLogins !== null &&
+              previousLogins.length === currentLogins.length &&
+              previousLogins.every((l, i) => l === currentLogins[i]);
+            if (loginsUnchanged && fs.existsSync(svgPath)) {
+              core.info('Contributor login set unchanged; skipping SVG regeneration');
+              return;
+            }
+            core.info(`Rendering ${people.length} human contributors`);
+
+            const rows = Math.max(1, Math.ceil(people.length / COLS));
+            const width = PAD * 2 + COLS * AVATAR + (COLS - 1) * GAP;
+            const height = PAD * 2 + rows * AVATAR + (rows - 1) * GAP;
+            // SVG size scales linearly with the number of contributors
+            // (each 128px avatar is ~5-15 KB base64). ~12 KB at 33
+            // contributors, ~2-6 MB at 500. Comfortable for the
+            // foreseeable future.
+
+            let failures = 0;
+            const cells = await mapWithConcurrency(people, FETCH_CONCURRENCY, async (c, i) => {
+              const col = i % COLS;
+              const row = Math.floor(i / COLS);
+              const x = PAD + col * (AVATAR + GAP);
+              const y = PAD + row * (AVATAR + GAP);
+              const r = AVATAR / 2;
+              const cx = x + r;
+              const cy = y + r;
+              const clipId = `c${i}`;
+              const href = xmlEscape(`https://github.com/${c.login}`);
+              const title = xmlEscape(c.login);
+              const base = (c.avatar_url || '').split('?')[0];
+              const sized = `${base}?s=${AVATAR * 2}`;
+              let dataUri;
+              try {
+                dataUri = await fetchDataUri(sized);
+              } catch (err) {
+                failures += 1;
+                core.warning(`Avatar fetch failed for ${c.login}: ${err.message}; using placeholder`);
+                dataUri = PLACEHOLDER_DATA_URI;
+              }
+              return [
+                `  <a href="${href}" target="_blank" rel="noopener noreferrer">`,
+                `    <title>${title}</title>`,
+                `    <clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}" /></clipPath>`,
+                `    <image href="${dataUri}" x="${x}" y="${y}" width="${AVATAR}" height="${AVATAR}" clip-path="url(#${clipId})" preserveAspectRatio="xMidYMid slice" />`,
+                `  </a>`,
+              ].join('\n');
+            });
+            if (failures > 0) {
+              core.warning(`${failures}/${people.length} avatars used the placeholder`);
+            }
+
+            const svg = [
+              `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="CausalPy contributors">`,
+              `  <title>CausalPy contributors (${people.length})</title>`,
+              cells.join('\n'),
+              `</svg>`,
+              '',
+            ].join('\n');
+
+            fs.mkdirSync(path.dirname(svgPath), { recursive: true });
+            fs.writeFileSync(svgPath, svg);
+            fs.writeFileSync(
+              manifestPath,
+              JSON.stringify({ logins: currentLogins }, null, 2) + '\n',
+            );
+            core.info(`Wrote ${svgPath} (${(svg.length / 1024).toFixed(1)} KB)`);
+            core.info(`Wrote ${manifestPath} (${currentLogins.length} logins)`);
+
+      - name: Create pull request if changed
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Update contributors image"
+          title: "Update contributors image"
+          body: |
+            Automated refresh of `docs/source/_static/contributors.svg`.
+
+            Generated by `.github/workflows/contributors.yml` from the GitHub
+            contributors API. Each avatar is downloaded and base64-embedded
+            into the SVG so the file renders on GitHub (which blocks external
+            image references in SVGs). Bot accounts are filtered out.
+
+            Safe to merge once the preview looks right.
+          branch: bot/update-contributors
+          delete-branch: true
+          add-paths: |
+            docs/source/_static/contributors.svg
+            docs/source/_static/contributors.json
+          labels: documentation

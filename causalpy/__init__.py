@@ -25,6 +25,7 @@ from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.panel_regression import PanelRegression
 from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
@@ -56,6 +57,7 @@ __all__ = [
     "Pipeline",
     "PipelineContext",
     "PipelineResult",
+    "PanelRegression",
     "plot_correlations",
     "PrePostNEGD",
     "pymc_models",

@@ -23,7 +23,7 @@ import causalpy as cp
 
 
 @pytest.mark.integration
-def test_did():
+def test_did(did_data):
     """
     Test Difference in Differences (DID) scikit-learn experiment.
 
@@ -31,7 +31,7 @@ def test_did():
     1. data is a dataframe
     2. skl_experiements.DifferenceInDifferences returns correct type
     """
-    data = cp.load_data("did")
+    data = did_data
     result = cp.DifferenceInDifferences(
         data,
         formula="y ~ 1 + group*post_treatment",
@@ -85,7 +85,7 @@ def test_rd_drinking():
 
 
 @pytest.mark.integration
-def test_its():
+def test_its(its_data):
     """
     Test Interrupted Time Series scikit-learn experiment.
 
@@ -95,11 +95,7 @@ def test_its():
     3. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -128,7 +124,7 @@ def test_its():
 
 
 @pytest.mark.integration
-def test_sc():
+def test_sc(sc_data):
     """
     Test Synthetic Control scikit-learn experiment.
 
@@ -137,7 +133,7 @@ def test_sc():
     2. skl_experiements.SyntheticControl returns correct type
     3. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -175,13 +171,9 @@ def test_sc():
 
 
 @pytest.mark.integration
-def test_sc_datetime_treatment_time_plot():
+def test_sc_datetime_treatment_time_plot(geolift1_data):
     """Test SyntheticControl plotting with datetime treatment_time and sklearn model."""
-    df = (
-        cp.load_data("geolift1")
-        .assign(time=lambda x: pd.to_datetime(x["time"]))
-        .set_index("time")
-    )
+    df = geolift1_data
     treatment_time = pd.to_datetime("2022-01-01")
 
     result = cp.SyntheticControl(
@@ -219,7 +211,7 @@ def test_sc_convert_treatment_time_for_axis_fallback(error_type):
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects():
+def test_rd_linear_main_effects(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment main effects.
 
@@ -227,7 +219,7 @@ def test_rd_linear_main_effects():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
@@ -244,7 +236,7 @@ def test_rd_linear_main_effects():
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects_bandwidth():
+def test_rd_linear_main_effects_bandwidth(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment, main effects with
     bandwidth parameter.
@@ -253,7 +245,7 @@ def test_rd_linear_main_effects_bandwidth():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
@@ -310,7 +302,7 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_interaction():
+def test_rd_linear_with_interaction(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with interaction.
 
@@ -318,7 +310,7 @@ def test_rd_linear_with_interaction():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
@@ -335,7 +327,7 @@ def test_rd_linear_with_interaction():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_gaussian_process():
+def test_rd_linear_with_gaussian_process(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with Gaussian process model.
 
@@ -343,7 +335,7 @@ def test_rd_linear_with_gaussian_process():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.RegressionDiscontinuity(
         data,

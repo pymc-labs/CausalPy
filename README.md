@@ -166,4 +166,12 @@ Plans for the repository can be seen in the [Issues](https://github.com/pymc-lab
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](https://github.com/pymc-labs/CausalPy/blob/main/LICENSE)
+
+## Thanks to our contributors
+
+<a href="https://github.com/pymc-labs/CausalPy/graphs/contributors">
+  <img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/contributors.svg" alt="CausalPy contributors" />
+</a>
+
+The contributor image is regenerated weekly by a GitHub Actions workflow (`.github/workflows/contributors.yml`) that opens a PR when the contributor list changes.

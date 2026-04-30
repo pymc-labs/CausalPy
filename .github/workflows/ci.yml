@@ -26,12 +26,12 @@ jobs:
           python-version: "3.12"
       - name: Run prek on changed files in PRs
         if: github.event_name == 'pull_request'
-        uses: j178/prek-action@79f765515bd648eb4d6bb1b17277b7cb22cb6468 # v2.0.0
+        uses: j178/prek-action@cbc2f23eb5539cf20d82d1aabd0d0ecbcc56f4e3 # v2.0.2
         with:
           extra-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
       - name: Run prek on all files on pushes
         if: github.event_name != 'pull_request'
-        uses: j178/prek-action@79f765515bd648eb4d6bb1b17277b7cb22cb6468 # v2.0.0
+        uses: j178/prek-action@cbc2f23eb5539cf20d82d1aabd0d0ecbcc56f4e3 # v2.0.2
         with:
           extra-args: --all-files
 
@@ -49,7 +49,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pyproject2conda
-        run: pip install pyproject2conda
+        # Pinned to the 0.22.x line to match the local prek hook rev (v0.22.1).
+        # 0.23.0 introduced a regression:
+        # `AttributeError: 'CondaRequirement' object has no attribute 'channel'`
+        # raised from `_iter_parts` during `__hash__` of any conda requirement,
+        # so any invocation that processes conda deps fails immediately.
+        # The upper bound allows a hypothetical 0.22.x patch backport while
+        # excluding 0.23.x. Bump in lockstep with the .pre-commit-config.yaml
+        # rev once a fixed release is available.
+        run: pip install "pyproject2conda>=0.22.1,<0.23"
       - name: Regenerate environment.yml (same args as local prek hook config)
         run: |
           pyproject2conda yaml -e dev -o /tmp/environment.generated.yml -n CausalPy \
@@ -94,7 +102,7 @@ jobs:
           python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
           codespell
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
           name: ${{ matrix.python-version }}

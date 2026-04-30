@@ -147,11 +147,3 @@ The descriptions above assume standard usage. Always consider what your specific
 | Regression Discontinuity | Local treatment effect at cutoff | Prediction-based |
 
 For methods not covered in detail here (IV, IPW, ANCOVA), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.
-
----
-
-## References
-
-:::{bibliography}
-:filter: docname in docnames
-:::
