@@ -49,7 +49,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pyproject2conda
-        run: pip install pyproject2conda
+        # Pinned to match the local prek hook rev (v0.22.1). pyproject2conda
+        # 0.23.0 (released 2026-04-29) regressed with
+        # `AttributeError: 'CondaRequirement' object has no attribute 'channel'`.
+        # Bump in lockstep with the .pre-commit-config.yaml rev once a fixed
+        # release is available.
+        run: pip install "pyproject2conda==0.22.1"
       - name: Regenerate environment.yml (same args as local prek hook config)
         run: |
           pyproject2conda yaml -e dev -o /tmp/environment.generated.yml -n CausalPy \
