@@ -72,7 +72,8 @@ cp.SensitivityAnalysis(
 
 ## Where examples already exist
 
-- `PlaceboInTime`: {doc}`pipeline_workflow`, {doc}`report_demo`
+- `PlaceboInTime`: {doc}`its_post_intervention_analysis`, {doc}`pipeline_workflow`, {doc}`report_demo`
+- `PersistenceCheck`: {doc}`its_post_intervention_analysis`
 - `BandwidthSensitivity`: {doc}`rkink_pymc`
 - `PreTreatmentPlaceboCheck`: {doc}`staggered_did_pymc`
 - More check-specific walkthroughs are still being added, so some checks currently have API coverage but no dedicated notebook example yet.
@@ -171,6 +172,7 @@ For the pipeline mechanics, see {doc}`pipeline_workflow`. For HTML reporting of 
 :::{seealso}
 - {doc}`pipeline_workflow` --- end-to-end pipeline tutorial
 - {doc}`report_demo` --- HTML report generation
+- {doc}`its_post_intervention_analysis` --- fixed-period ITS example with `PlaceboInTime` and `PersistenceCheck`
 - {doc}`staggered_did_pymc` --- staggered DiD example with `PreTreatmentPlaceboCheck`
 - {doc}`rkink_pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
