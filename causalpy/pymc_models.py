@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Custom PyMC models for causal inference"""
+"""Custom PyMC models for causal inference."""
 
 import inspect
 import warnings
@@ -1078,7 +1078,7 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 
 
 class InstrumentalVariableRegression(PyMCModel):
-    """Custom PyMC model for instrumental linear regression
+    """Custom PyMC model for instrumental linear regression.
 
     Example
     --------
@@ -1392,8 +1392,7 @@ class InstrumentalVariableRegression(PyMCModel):
 
 
 class PropensityScore(PyMCModel):
-    r"""
-    Custom PyMC model for inverse propensity score models
+    r"""Custom PyMC model for inverse propensity score models.
 
     .. note:
         Generally, the `.fit()` method should be used rather than

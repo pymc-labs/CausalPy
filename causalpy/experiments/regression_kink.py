@@ -12,9 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Regression kink design
-"""
+"""Regression kink design."""
 
 import warnings  # noqa: I001
 
@@ -167,7 +165,7 @@ class RegressionKink(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if "treated" not in self.formula:
             raise FormulaException(
                 "A predictor called `treated` should be in the formula"

@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Instrumental variable regression
-"""
+"""Instrumental variable regression."""
 
 import warnings  # noqa: I001
 
@@ -203,7 +201,7 @@ class InstrumentalVariable(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns
         test = test & (treatment.strip() in self.data.columns)
@@ -226,8 +224,7 @@ class InstrumentalVariable(BaseExperiment):
             )
 
     def get_2SLS_fit(self) -> None:
-        """
-        Two Stage Least Squares Fit
+        """Two Stage Least Squares Fit.
 
         This function is called by the experiment, results are used for
         priors if none are provided.
@@ -248,8 +245,7 @@ class InstrumentalVariable(BaseExperiment):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self) -> None:
-        """
-        Naive Ordinary Least Squares
+        """Naive Ordinary Least Squares.
 
         This function is called by the experiment.
         """

@@ -11,8 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Staggered Difference in Differences (Imputation-based)
+"""Staggered Difference in Differences (Imputation-based).
 
 This module implements the imputation-based staggered DiD estimator, following
 the approach of Borusyak, Jaravel, and Spiess (2024). It handles settings where

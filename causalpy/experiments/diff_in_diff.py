@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Difference in differences
-"""
+"""Difference in differences."""
 
 from typing import Any, Literal
 
@@ -258,7 +256,7 @@ class DifferenceInDifferences(BaseExperiment):
             raise ValueError("Model type not recognized")
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
         # Check if post_treatment_variable_name is in formula

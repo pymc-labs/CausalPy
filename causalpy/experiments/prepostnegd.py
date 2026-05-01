@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Pretest/posttest nonequivalent group design
-"""
+"""Pretest/posttest nonequivalent group design."""
 
 from typing import Any, Literal
 
@@ -193,7 +191,7 @@ class PrePostNEGD(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""

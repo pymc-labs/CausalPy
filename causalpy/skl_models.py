@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Custom scikit-learn models for causal inference"""
+"""Custom scikit-learn models for causal inference."""
 
 from functools import partial
 
@@ -83,8 +83,10 @@ class ScikitLearnAdaptor:
 
 
 class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
-    """Weighted proportion model for causal inference. Used for synthetic control
-    methods for example"""
+    """Weighted proportion model for causal inference.
+
+    Used for synthetic control methods, for example.
+    """
 
     def loss(self, W: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
         """Compute root mean squared loss with data X, weights W, and predictor y.

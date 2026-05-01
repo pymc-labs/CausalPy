@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Regression discontinuity design
-"""
+"""Regression discontinuity design."""
 
 import warnings  # noqa: I001
 from typing import Any, Literal
@@ -246,7 +244,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # ******************************************************************************
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if "treated" not in self.formula:
             raise FormulaException(
                 "A predictor called `treated` should be in the formula"
