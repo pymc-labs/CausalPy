@@ -77,6 +77,7 @@ We appreciate being notified of problems with the existing CausalPy code. We pre
 Please verify that your issue is not being currently addressed by other issues or pull requests by using the GitHub search tool to look for key words in the project issue tracker.
 
 ## Use of agents
+
 PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
 
 ## Contributing code via pull requests
@@ -146,11 +147,11 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
     It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
-	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
+    If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
 
-	```bash
-	conda run -n CausalPy python -m ipykernel install --user --name CausalPy
-	```
+    ```bash
+    conda run -n CausalPy python -m ipykernel install --user --name CausalPy
+    ```
 
 1. You can then work on your changes locally, in your feature branch. Add changed files using `git add` and then `git commit` files:
 
@@ -226,6 +227,7 @@ We recommend that your contribution complies with the following guidelines befor
   ```bash
   make check_lint
   ```
+
   If you want to fix linting errors automatically, run
 
   ```bash
@@ -239,11 +241,14 @@ To build the documentation, run from the **project root**:
 ```bash
 make html
 ```
+
 To clean and rebuild the documentation from scratch:
+
 ```bash
 make cleandocs
 make html
 ```
+
  Docs are built in docs/_build/html, but these docs are not committed to the GitHub repository due to .gitignore.
 
  📌 Note: The previous docs/Makefile has been removed. Please use only the root-level Makefile for documentation commands
@@ -406,6 +411,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Decision process
 
 #### How people are invited
+
 - A maintainer opens a short nomination discussion (or uses an internal maintainer thread) referencing:
   - contributions (PRs/issues/reviews)
   - areas of ownership
@@ -413,15 +419,18 @@ Contributions are welcome from the community. This section describes how contrib
 - After a short review period, maintainers grant access.
 
 #### Resolving disagreements
+
 - Decisions are made by informal consensus among maintainers.
 - If consensus cannot be reached, a simple majority decides.
 - For project-wide decisions (e.g., major API changes, new maintainers), give at least one week for async discussion before finalizing.
 
 #### How to step down
+
 - Anyone can request to step down at any time.
 - Access can be reduced after long inactivity to minimize risk.
 
 #### A note on Admin access
+
 Admin access is reserved for project leads and is not part of the contributor pathway. Admins handle repository settings, secrets, and GitHub Actions configuration.
 
 ### Role expectations checklist

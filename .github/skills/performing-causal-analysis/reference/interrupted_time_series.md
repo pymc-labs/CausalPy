@@ -15,12 +15,14 @@ causalpy.experiments.InterruptedTimeSeries(
 ```
 
 ### Parameters
+
 *   **`data`** (`pd.DataFrame`): Input dataframe. Index should ideally be a `pd.DatetimeIndex`.
 *   **`treatment_time`** (`Union[int, float, pd.Timestamp]`): The point in time when the intervention occurred.
 *   **`formula`** (`str`): Statistical formula (e.g., `"y ~ 1 + t + C(month)"`).
 *   **`model`**: A PyMC model (e.g., `cp.pymc_models.LinearRegression`) or a Scikit-Learn Regressor.
 
 ### How it Works
+
 1.  **Split**: Data is split into pre- and post-intervention.
 2.  **Fit**: Model is trained **only on pre-intervention data**.
 3.  **Predict**: Fitted model predicts the outcome for the post-intervention period.

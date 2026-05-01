@@ -78,6 +78,16 @@ repos:
     rev: v0.25
     hooks:
       - id: validate-pyproject
+  # Lint repository Markdown files (issue #899). Configuration lives in
+  # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
+  # generated docs build are intentionally out of scope.
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.36
+    hooks:
+      - id: pymarkdown
+        args: [scan]
+        files: \.md$
+        exclude: ^(docs/_build/|\.scratch/)
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
   # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
   - repo: https://github.com/usnistgov/pyproject2conda
