@@ -178,6 +178,7 @@ skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whit
 checks = [
     "PR01",  # Parameters not documented
     "PR02",  # Unknown parameters
+    "PR04",  # Parameter has no type
 ]
 exclude = ['\._']
 
