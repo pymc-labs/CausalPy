@@ -188,6 +188,35 @@ def test_public_plot_parameters_are_documented(cls: type) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "module_name, class_name",
+    [
+        ("causalpy.experiments.instrumental_variable", "InstrumentalVariable"),
+        (
+            "causalpy.experiments.inverse_propensity_weighting",
+            "InversePropensityWeighting",
+        ),
+    ],
+)
+def test_stub_plot_raises_not_implemented(module_name: str, class_name: str) -> None:
+    """Stub ``plot()`` overrides must raise :class:`NotImplementedError`.
+
+    :class:`~causalpy.experiments.instrumental_variable.InstrumentalVariable`
+    and :class:`~causalpy.experiments.inverse_propensity_weighting.InversePropensityWeighting`
+    declare explicit kwarg-only ``plot()`` signatures purely to satisfy the
+    structural invariant from issue #886; both bodies are stubs that must
+    surface that fact loudly to callers rather than failing silently or
+    producing an empty figure. We bypass ``__init__`` with
+    :func:`object.__new__` because the stub bodies do not depend on instance
+    state and constructing real experiments would slow this invariant check
+    down considerably without adding coverage.
+    """
+    cls = getattr(importlib.import_module(module_name), class_name)
+    instance = object.__new__(cls)
+    with pytest.raises(NotImplementedError):
+        instance.plot()
+
+
 def test_base_experiment_has_no_public_plot() -> None:
     """The base class deliberately offers no public ``plot``.
 
