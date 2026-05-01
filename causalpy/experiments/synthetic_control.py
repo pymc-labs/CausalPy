@@ -382,16 +382,25 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
-        Plot the results for a specific treated unit
+        Plot the results for a specific treated unit.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
+            If ``None``, plots the first treated unit.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         counterfactual_label = "Counterfactual"
 
@@ -420,6 +429,7 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             pre_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -440,6 +450,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             post_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -469,12 +480,14 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -493,6 +506,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")

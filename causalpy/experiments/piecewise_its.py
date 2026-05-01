@@ -445,7 +445,10 @@ class PiecewiseITS(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for Bayesian models.
@@ -454,6 +457,11 @@ class PiecewiseITS(BaseExperiment):
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            fitted, counterfactual, causal effect, and cumulative effect bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
@@ -483,6 +491,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             y_pred_mu,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
 
@@ -494,6 +503,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             y_cf_mu,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
 
@@ -521,6 +531,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             self.effect,
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C2"},
         )
         ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
@@ -537,6 +548,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             self.cumulative_effect,
             ax=ax[2],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C3"},
         )
         ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)

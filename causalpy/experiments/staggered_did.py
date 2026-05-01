@@ -644,14 +644,38 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _bayesian_plot(
+        self, hdi_prob: float | None = None, **kwargs: Any
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for Bayesian model.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval shown by the
+            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
+            for ``StaggeredDiD`` is fixed at fit time during effect
+            aggregation (see ``_aggregate_effects_bayesian``) and the
+            resulting bounds are cached on the instance. If supplied here,
+            the value must match the cached
+            :attr:`~causalpy.experiments.staggered_did.StaggeredDiD.hdi_prob_`;
+            otherwise a :class:`ValueError` is raised. Pass ``None`` (the
+            default) to plot using the cached value.
 
         Returns
         -------
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
+        if hdi_prob is not None and hdi_prob != self.hdi_prob_:
+            raise ValueError(
+                "StaggeredDiD HDI bounds are computed during effect "
+                "aggregation, not at plot time. The cached HDI probability "
+                f"is {self.hdi_prob_}, but plot() received hdi_prob="
+                f"{hdi_prob}. To plot at a different HDI probability, "
+                "re-fit the experiment so that aggregation uses the desired "
+                "value, or omit hdi_prob to use the cached value."
+            )
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
         att_et = self.att_event_time_.copy()

@@ -298,9 +298,25 @@ class RegressionDiscontinuity(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs."""
+        """Generate plot for regression discontinuity designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the discontinuity at threshold.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        """
         fig, ax = plt.subplots()
 
         # Plot data: use two layers only when there are excluded observations
@@ -328,6 +344,7 @@ class RegressionDiscontinuity(BaseExperiment):
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
             label="Posterior mean",
         )
@@ -336,10 +353,10 @@ class RegressionDiscontinuity(BaseExperiment):
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
         percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+            [(1 - hdi_prob) / 2, 1 - (1 - hdi_prob) / 2]
         ).values
         ci = (
-            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
+            rf"$CI_{{{hdi_prob * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         discon = f"""

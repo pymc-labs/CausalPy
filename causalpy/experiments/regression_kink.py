@@ -246,9 +246,25 @@ class RegressionKink(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression kink designs."""
+        """Generate plot for regression kink designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the change in gradient at the
+            kink point. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        """
         fig, ax = plt.subplots()
         # Plot raw data
         sns.scatterplot(
@@ -264,6 +280,7 @@ class RegressionKink(BaseExperiment):
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles = [(h_line, h_patch)]
@@ -273,10 +290,10 @@ class RegressionKink(BaseExperiment):
         title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile(
-            [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
+            [(1 - hdi_prob) / 2, 1 - (1 - hdi_prob) / 2]
         ).values
         ci = (
-            rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
+            rf"$CI_{{{hdi_prob * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""

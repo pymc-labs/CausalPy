@@ -236,9 +236,25 @@ class PrePostNEGD(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: Any
+        self,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Generate plot for ANOVA-like experiments with non-equivalent group designs."""
+        """Generate plot for ANOVA-like experiments with non-equivalent group designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control and treatment groups,
+            and around the posterior of the estimated treatment effect.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        """
         fig, ax = plt.subplots(
             2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -260,6 +276,7 @@ class PrePostNEGD(BaseExperiment):
             self.pred_xi,
             self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -271,6 +288,7 @@ class PrePostNEGD(BaseExperiment):
             self.pred_xi,
             self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -284,7 +302,13 @@ class PrePostNEGD(BaseExperiment):
         )
 
         # Plot estimated caual impact / treatment effect
-        az.plot_posterior(self.causal_impact, ref_val=0, ax=ax[1], round_to=round_to)
+        az.plot_posterior(
+            self.causal_impact,
+            ref_val=0,
+            ax=ax[1],
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+        )
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 

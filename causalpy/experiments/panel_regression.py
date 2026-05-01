@@ -479,15 +479,25 @@ class PanelRegression(BaseExperiment):
             "inference."
         )
 
-    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
+    def _bayesian_plot(
+        self, hdi_prob: float = HDI_PROB, **kwargs: Any
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for Bayesian model.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around each
+            posterior coefficient via :func:`arviz.plot_forest`. Must be in
+            ``(0, 1]``. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal()
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
     def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for OLS model.
