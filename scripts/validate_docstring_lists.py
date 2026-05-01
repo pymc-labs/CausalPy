@@ -39,25 +39,32 @@ def _docstring_node_lineno(node: ast.AST) -> int:
     return body[0].lineno
 
 
+# RST and CommonMark both accept ``-``, ``*``, and ``+`` as bullet markers,
+# each followed by whitespace. Track all three so we don't miss alternative
+# bullet styles (or false-positive on continuation lines that use them).
+_BULLET_PREFIXES: tuple[str, ...] = ("- ", "* ", "+ ")
+
+
 def _find_offenders_in_docstring(doc: str, base_lineno: int) -> list[int]:
     """Return absolute line numbers of bullet lines lacking a leading blank.
 
-    A line is flagged when it starts with ``- `` (after leading whitespace) and
-    the immediately preceding line is non-blank, ends with ``:``, and is not
-    itself a bullet line. This matches the Napoleon-collapse pattern from #892
-    and avoids false positives on bullet-continuation lines.
+    A line is flagged when it starts with a bullet marker (``-``, ``*``, or
+    ``+`` followed by whitespace) and the immediately preceding line is
+    non-blank, ends with ``:``, and is not itself a bullet line. This matches
+    the Napoleon-collapse pattern from #892 and avoids false positives on
+    bullet-continuation lines.
     """
     offenders: list[int] = []
     lines = doc.split("\n")
     for i in range(1, len(lines)):
         cur_stripped = lines[i].lstrip()
         prev_stripped = lines[i - 1].rstrip()
-        if not cur_stripped.startswith("- "):
+        if not cur_stripped.startswith(_BULLET_PREFIXES):
             continue
         if not prev_stripped:
             continue
         prev_lstripped = prev_stripped.lstrip()
-        if prev_lstripped.startswith(("- ", "* ")):
+        if prev_lstripped.startswith(_BULLET_PREFIXES):
             continue
         if not prev_stripped.endswith(":"):
             continue
@@ -109,8 +116,8 @@ def main(argv: list[str]) -> int:
     print(
         "Inline bullet list detected without a preceding blank line in the "
         "following docstrings. Sphinx Napoleon will render these as a single "
-        "paragraph of literal hyphens (see issue #892). Insert a blank line "
-        "between the introductory line and the first bullet."
+        "paragraph of prose with the bullet markers inlined (see issue #892). "
+        "Insert a blank line between the introductory line and the first bullet."
     )
     print()
     for path, lineno, name in findings:
