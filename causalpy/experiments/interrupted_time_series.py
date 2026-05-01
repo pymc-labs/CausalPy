@@ -67,6 +67,25 @@ class InterruptedTimeSeries(BaseExperiment):
     **kwargs : dict
         Additional keyword arguments passed to the model.
 
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
+
+    The three-period design is useful for analyzing temporary interventions such as:
+
+    - Marketing campaigns with defined start and end dates
+    - Policy trials or pilot programs
+    - Clinical treatments with limited duration
+    - Seasonal interventions
+
+    Use ``effect_summary(period="intervention")`` to analyze effects during the
+    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
+    after the intervention ends.
+
     Examples
     --------
     **Two-period design (permanent intervention):**
@@ -103,25 +122,6 @@ class InterruptedTimeSeries(BaseExperiment):
     >>> # Get period-specific effect summaries
     >>> intervention_summary = result.effect_summary(period="intervention")
     >>> post_summary = result.effect_summary(period="post")
-
-    Notes
-    -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
-
-    The three-period design is useful for analyzing temporary interventions such as:
-
-    - Marketing campaigns with defined start and end dates
-    - Policy trials or pilot programs
-    - Clinical treatments with limited duration
-    - Seasonal interventions
-
-    Use ``effect_summary(period="intervention")`` to analyze effects during the
-    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
-    after the intervention ends.
     """
 
     supports_ols = True

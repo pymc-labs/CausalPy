@@ -173,6 +173,11 @@ class PyMCModel(pm.Model):
             Dictionary mapping parameter names to Prior objects. The keys should
             match parameter names used in the model's `build_model()` method.
 
+        See Also
+        --------
+        WeightedSumFitter.priors_from_data : Example implementation that sets
+            Dirichlet prior shape based on number of control units.
+
         Notes
         -----
         The base implementation returns an empty dictionary, meaning no
@@ -211,11 +216,6 @@ class PyMCModel(pm.Model):
         ...             dims=["treated_units", "coeffs"],
         ...         )
         ...     }
-
-        See Also
-        --------
-        WeightedSumFitter.priors_from_data : Example implementation that sets
-            Dirichlet prior shape based on number of control units.
         """
         return {}
 

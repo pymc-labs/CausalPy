@@ -81,6 +81,23 @@ class PiecewiseITS(BaseExperiment):
     cumulative_effect : xr.DataArray or np.ndarray
         Cumulative causal effect over time.
 
+    Notes
+    -----
+    The counterfactual is computed by setting all step/ramp terms to zero,
+    representing what would have happened without the interventions.
+
+    The `step` and `ramp` transforms are patsy stateful transforms that handle
+    both numeric and datetime time columns. For datetime, thresholds can be
+    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
+
+    References
+    ----------
+    - Wagner AK, et al. (2002). Segmented regression analysis of interrupted
+      time series studies in medication use research. Journal of Clinical
+      Pharmacy and Therapeutics.
+    - Lopez Bernal J, et al. (2017). Interrupted time series regression for
+      the evaluation of public health interventions: a tutorial. Int J Epidemiol.
+
     Examples
     --------
     >>> import causalpy as cp
@@ -122,23 +139,6 @@ class PiecewiseITS(BaseExperiment):
     ...     formula="y ~ 1 + date + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
     ...     model=...,
     ... )  # doctest: +SKIP
-
-    Notes
-    -----
-    The counterfactual is computed by setting all step/ramp terms to zero,
-    representing what would have happened without the interventions.
-
-    The `step` and `ramp` transforms are patsy stateful transforms that handle
-    both numeric and datetime time columns. For datetime, thresholds can be
-    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
-
-    References
-    ----------
-    - Wagner AK, et al. (2002). Segmented regression analysis of interrupted
-      time series studies in medication use research. Journal of Clinical
-      Pharmacy and Therapeutics.
-    - Lopez Bernal J, et al. (2017). Interrupted time series regression for
-      the evaluation of public health interventions: a tutorial. Int J Epidemiol.
     """
 
     supports_ols = True
