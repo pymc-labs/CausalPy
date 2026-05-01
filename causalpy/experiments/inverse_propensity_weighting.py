@@ -503,6 +503,43 @@ class InversePropensityWeighting(BaseExperiment):
 
         return [ate, trt, ntrt]
 
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
+
+        Notes
+        -----
+        Inverse propensity weighting does not expose a unified ``plot()``
+        view; instead, use the dedicated diagnostics
+        :meth:`plot_ate` (treatment-effect distribution) and
+        :meth:`plot_balance_ecdf` (covariate-balance ECDF). This stub
+        exists so every experiment subclass offers an explicit,
+        kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
+
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always; call :meth:`plot_ate` or :meth:`plot_balance_ecdf`
+            instead.
+        """
+        raise NotImplementedError(
+            "InversePropensityWeighting does not implement a unified plot(). "
+            "Use plot_ate() for the treatment-effect distribution or "
+            "plot_balance_ecdf() for the covariate-balance ECDF."
+        )
+
     def plot_ate(
         self,
         idata: az.InferenceData | None = None,

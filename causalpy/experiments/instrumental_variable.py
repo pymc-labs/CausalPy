@@ -259,7 +259,7 @@ class InstrumentalVariable(BaseExperiment):
         )
         self.ols_reg = ols_reg
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         show: bool = True,
@@ -270,8 +270,9 @@ class InstrumentalVariable(BaseExperiment):
         Notes
         -----
         Plotting is not yet implemented for instrumental variable
-        experiments. This signature is included to match the public
-        ``plot()`` contract on every experiment subclass.
+        experiments. This stub exists so every experiment subclass
+        offers an explicit, kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
 
         Parameters
         ----------

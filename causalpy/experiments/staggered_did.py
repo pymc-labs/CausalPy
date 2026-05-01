@@ -645,7 +645,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         hdi_prob: float | None = None,
@@ -683,11 +683,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ax : list[matplotlib.axes.Axes]
             A single-element list containing the event-study axes.
         """
-        return super().plot(
-            hdi_prob=hdi_prob,
-            figsize=figsize,
+        return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
         )
 
     def _bayesian_plot(

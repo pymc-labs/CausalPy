@@ -479,7 +479,7 @@ class PanelRegression(BaseExperiment):
             "inference."
         )
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         hdi_prob: float = HDI_PROB,
@@ -514,10 +514,10 @@ class PanelRegression(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the coefficient plot.
         """
-        return super().plot(
-            hdi_prob=hdi_prob,
+        return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
         )
 
     def _bayesian_plot(

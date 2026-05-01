@@ -73,45 +73,53 @@ def _all_base_experiment_subclasses() -> list[type]:
     return subclasses
 
 
-def _experiments_with_overridden_plot() -> Iterable[type]:
-    """Yield subclasses that define their own ``plot`` (not inherited).
+def _experiments_with_plot() -> Iterable[type]:
+    """Yield concrete subclasses that declare their own ``plot``.
 
-    The base class :class:`~causalpy.experiments.base.BaseExperiment` keeps a
-    generic ``plot(*args, **kwargs)`` for dispatch; subclasses that don't
-    override it are intentionally exempt from this invariant (e.g.
-    :class:`~causalpy.experiments.inverse_propensity_weighting.InversePropensityWeighting`,
-    which exposes purpose-built ``plot_ate`` / ``plot_balance_ecdf`` methods
-    rather than a unified ``plot``).
+    :class:`~causalpy.experiments.base.BaseExperiment` deliberately does
+    **not** define a public ``plot`` method — the shared dispatcher lives
+    in the protected helper ``_render_plot`` so that every subclass is
+    forced to declare its own explicit, documented ``plot`` (issue
+    `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_). Every
+    concrete subclass therefore should appear here, even those whose
+    ``plot`` is a stub raising :class:`NotImplementedError` (the stub
+    itself must still have an explicit signature and matching
+    docstring).
     """
     for cls in _all_base_experiment_subclasses():
         if "plot" in cls.__dict__:
             yield cls
 
 
-_OVERRIDING_SUBCLASSES = list(_experiments_with_overridden_plot())
+_OVERRIDING_SUBCLASSES = list(_experiments_with_plot())
 
 
-def test_at_least_several_overriding_subclasses_discovered() -> None:
-    """Sanity: the discovery walk finds the bulk of experiment classes.
+def test_every_concrete_subclass_declares_plot() -> None:
+    """Every concrete experiment subclass declares its own ``plot``.
 
-    Guards against the discovery returning empty (which would make every
-    parametrised test below trivially pass).
+    Because :class:`~causalpy.experiments.base.BaseExperiment` no longer
+    provides a public ``plot``, a subclass that forgets to declare one
+    will raise :class:`AttributeError` on ``result.plot()``. This test
+    guards against that regression by asserting every known concrete
+    subclass shows up in the discovery walk.
     """
     names = sorted(cls.__name__ for cls in _OVERRIDING_SUBCLASSES)
     expected = {
-        "InterruptedTimeSeries",
-        "SyntheticControl",
         "DifferenceInDifferences",
+        "InstrumentalVariable",
+        "InterruptedTimeSeries",
+        "InversePropensityWeighting",
+        "PanelRegression",
+        "PiecewiseITS",
+        "PrePostNEGD",
         "RegressionDiscontinuity",
         "RegressionKink",
-        "PrePostNEGD",
-        "PiecewiseITS",
-        "PanelRegression",
         "StaggeredDifferenceInDifferences",
+        "SyntheticControl",
     }
     missing = expected - set(names)
     assert not missing, (
-        f"Expected every plotting experiment to override plot(); "
+        f"Expected every concrete experiment to declare its own plot(); "
         f"missing: {sorted(missing)}; discovered: {names}"
     )
 
@@ -180,15 +188,25 @@ def test_public_plot_parameters_are_documented(cls: type) -> None:
     )
 
 
-def test_no_unexpected_var_keyword_anywhere() -> None:
-    """Belt-and-braces: even subclasses we did not explicitly cover above must
-    not regress to a bare ``**kwargs`` if they later add their own ``plot``
-    override. This ensures new subclasses join the invariant by default.
+def test_base_experiment_has_no_public_plot() -> None:
+    """The base class deliberately offers no public ``plot``.
+
+    The shared dispatcher lives in the protected helper ``_render_plot``
+    so that subclasses can't passively inherit a generic ``*args,
+    **kwargs`` signature and re-introduce the discoverability problem
+    described in #886. If this test starts failing, somebody has added a
+    public ``plot`` back to :class:`BaseExperiment`; either remove it or
+    update the design contract documented in ``AGENTS.md``.
     """
-    # Re-run the discovery; if a new subclass shows up between import and now
-    # (it shouldn't, but be defensive), include it.
-    discovered = sorted(cls.__name__ for cls in _experiments_with_overridden_plot())
-    assert discovered, "no overriding subclasses discovered"
-    # We rely on the parametrised invariant above to do the per-class check;
-    # this test guarantees a positive count and serves as documentation.
+    assert "plot" not in BaseExperiment.__dict__, (
+        "BaseExperiment must not declare a public plot(); the shared "
+        "dispatcher is _render_plot. See AGENTS.md and issue #886."
+    )
+    assert hasattr(BaseExperiment, "_render_plot"), (
+        "BaseExperiment should define the protected _render_plot helper "
+        "that subclass plot() methods delegate to."
+    )
+    # Sanity: the discovery walk must find at least one subclass; otherwise
+    # the parametrised invariants above are trivially passing.
+    assert _OVERRIDING_SUBCLASSES, "no concrete subclasses discovered"
     assert causalpy.__name__ == "causalpy"

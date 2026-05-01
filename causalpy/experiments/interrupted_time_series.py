@@ -596,7 +596,7 @@ class InterruptedTimeSeries(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         round_to: int | None = 2,
@@ -640,12 +640,12 @@ class InterruptedTimeSeries(BaseExperiment):
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
-        return super().plot(
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
             round_to=round_to,
             hdi_prob=hdi_prob,
             figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
         )
 
     def _bayesian_plot(

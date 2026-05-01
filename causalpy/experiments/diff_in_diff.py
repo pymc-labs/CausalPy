@@ -333,7 +333,7 @@ class DifferenceInDifferences(BaseExperiment):
         """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         round_to: int | None = None,
@@ -376,12 +376,12 @@ class DifferenceInDifferences(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
         """
-        return super().plot(
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
             round_to=round_to,
             hdi_prob=hdi_prob,
             figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
         )
 
     def _bayesian_plot(

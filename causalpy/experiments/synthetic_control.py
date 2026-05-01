@@ -378,7 +378,7 @@ class SyntheticControl(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         round_to: int | None = None,
@@ -429,14 +429,14 @@ class SyntheticControl(BaseExperiment):
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
-        return super().plot(
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
             round_to=round_to,
             treated_unit=treated_unit,
             hdi_prob=hdi_prob,
             plot_predictors=plot_predictors,
             figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
         )
 
     def _bayesian_plot(

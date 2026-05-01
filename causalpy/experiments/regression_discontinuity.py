@@ -297,7 +297,7 @@ class RegressionDiscontinuity(BaseExperiment):
         print("\n")
         self.print_coefficients(round_to)
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         round_to: int | None = 2,
@@ -338,12 +338,12 @@ class RegressionDiscontinuity(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
         """
-        return super().plot(
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
             round_to=round_to,
             hdi_prob=hdi_prob,
             figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
         )
 
     def _bayesian_plot(

@@ -235,7 +235,7 @@ class PrePostNEGD(BaseExperiment):
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
-    def plot(  # type: ignore[override]
+    def plot(
         self,
         *,
         round_to: int | None = None,
@@ -276,12 +276,12 @@ class PrePostNEGD(BaseExperiment):
             The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """
-        return super().plot(
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
             round_to=round_to,
             hdi_prob=hdi_prob,
             figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
         )
 
     def _bayesian_plot(
