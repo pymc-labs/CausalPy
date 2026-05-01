@@ -423,10 +423,12 @@ class PyMCModel(pm.Model):
         -----
         By using `mu` (the posterior expectation) rather than `y_hat` (the posterior
         predictive with observation noise), the uncertainty in the impact reflects:
+
         - Parameter uncertainty in the fitted model
         - Uncertainty in the counterfactual prediction
 
         But excludes:
+
         - Observation-level noise (sigma)
 
         This makes the impact plots focus on the systematic causal effect rather than
@@ -652,6 +654,7 @@ class WeightedSumFitter(PyMCModel):
         -------
         Dict[str, Prior]
             Dictionary containing:
+
             - "beta": Dirichlet prior with shape=(1,...,1) for n_control_units
         """
         n_predictors = X.shape[1]
@@ -846,6 +849,7 @@ class SoftmaxWeightedSumFitter(PyMCModel):
         -------
         dict[str, Prior]
             Dictionary containing:
+
             - "beta_raw": Normal prior with dims ["treated_units", "coeffs_raw"]
         """
         return {
@@ -1291,6 +1295,7 @@ class PropensityScore(PyMCModel):
 
         priors : dict, optional
             Dictionary specifying priors for outcome model parameters:
+
                 - "b_outcome": list [mean, std] for regression coefficients.
                 - "sigma": standard deviation of the outcome noise (default 1).
 
@@ -1555,7 +1560,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         Returns
         -------
         tuple
-            (time_for_trend, time_for_seasonality, X_for_pymc, num_obs)
+            ``(time_for_trend, time_for_seasonality, X_for_pymc, num_obs)``:
+
             - time_for_trend: numpy array of time values for trend component
             - time_for_seasonality: numpy array of day-of-year values
             - X_for_pymc: xarray DataArray for exogenous vars, or None if no exog vars

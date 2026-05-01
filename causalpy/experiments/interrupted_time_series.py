@@ -115,6 +115,7 @@ class InterruptedTimeSeries(BaseExperiment):
     counterfactual prediction uncertainty, but not individual observation variability.
 
     The three-period design is useful for analyzing temporary interventions such as:
+
     - Marketing campaigns with defined start and end dates
     - Policy trials or pilot programs
     - Clinical treatments with limited duration
@@ -329,6 +330,7 @@ class InterruptedTimeSeries(BaseExperiment):
         then sliced into two periods for analysis.
 
         NOTE: treatment_end_time is INCLUSIVE (>=) in post-intervention period.
+
         - Intervention period: treatment_time <= index < treatment_end_time
         - Post-intervention period: index >= treatment_end_time (inclusive)
         """
@@ -1116,6 +1118,7 @@ class InterruptedTimeSeries(BaseExperiment):
         -------
         dict[str, Any]
             Dictionary containing:
+
             - "mean_effect_during": Mean effect during intervention period
             - "mean_effect_post": Mean effect during post-intervention period
             - "persistence_ratio": Post-intervention mean effect divided by intervention mean (decimal, can exceed 1.0)
@@ -1296,6 +1299,7 @@ class InterruptedTimeSeries(BaseExperiment):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis:
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices

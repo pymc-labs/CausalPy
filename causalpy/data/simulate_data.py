@@ -592,6 +592,7 @@ def generate_staggered_did_data(
     -------
     pd.DataFrame
         Panel data with columns:
+
         - unit: Unit identifier
         - time: Time period
         - treated: Binary indicator (1 if treated at time t, 0 otherwise)
@@ -718,6 +719,7 @@ def generate_piecewise_its_data(
     y_t = β₀ + β₁t + Σₖ(level_k · I_k(t) + slope_k · R_k(t)) + ε_t
 
     Where:
+
     - I_k(t) = 1 if t >= T_k else 0 (step function for level change)
     - R_k(t) = max(0, t - T_k) (ramp function for slope change)
 
@@ -746,6 +748,7 @@ def generate_piecewise_its_data(
     -------
     df : pd.DataFrame
         DataFrame with columns:
+
         - 't': time index (0 to N-1)
         - 'y': observed outcome with noise
         - 'y_true': outcome without noise (ground truth)
@@ -753,6 +756,7 @@ def generate_piecewise_its_data(
         - 'effect': true causal effect at each time point
     params : dict
         Dictionary containing the true parameters:
+
         - 'baseline_intercept': β₀
         - 'baseline_slope': β₁
         - 'level_changes': list of level changes

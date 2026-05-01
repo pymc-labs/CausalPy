@@ -361,6 +361,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -390,6 +391,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -419,6 +421,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -448,6 +451,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -485,6 +489,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         list[float]
             A list of [ate, trt, ntrt] where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group

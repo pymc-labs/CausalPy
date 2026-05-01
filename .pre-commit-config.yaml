@@ -118,3 +118,14 @@ repos:
         language: python
         files: \.bib$
         additional_dependencies: [pybtex]
+      # Catch the Sphinx/Napoleon "wall of prose" rendering bug from issue #892:
+      # bullet lists inside docstrings must be preceded by a blank line, otherwise
+      # they are collapsed into the introductory paragraph. Neither
+      # numpydoc-validation nor ruff/pydocstyle inspect section bodies, so we
+      # enforce this with a small AST check.
+      - id: validate-docstring-lists
+        name: Validate blank line before bullet lists in docstrings
+        entry: python scripts/validate_docstring_lists.py
+        language: python
+        files: ^causalpy/.*\.py$
+        exclude: ^causalpy/tests/
