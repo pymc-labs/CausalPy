@@ -259,12 +259,31 @@ class InstrumentalVariable(BaseExperiment):
         )
         self.ols_reg = ols_reg
 
-    def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
-        """
-        Plot the results
+    def plot(  # type: ignore[override]
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Notes
+        -----
+        Plotting is not yet implemented for instrumental variable
+        experiments. This signature is included to match the public
+        ``plot()`` contract on every experiment subclass.
+
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
         """
         raise NotImplementedError("Plot method not implemented.")
 

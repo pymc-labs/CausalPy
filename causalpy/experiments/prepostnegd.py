@@ -235,10 +235,60 @@ class PrePostNEGD(BaseExperiment):
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
 
+    def plot(  # type: ignore[override]
+        self,
+        *,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (7, 9),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the pre-post non-equivalent group design results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure.
+            Defaults to ``None``, in which case 2 significant figures are
+            used.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control and treatment groups,
+            and around the posterior of the estimated treatment effect.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 9)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling. See
+            :meth:`~causalpy.experiments.base.BaseExperiment.plot` for
+            supported keys.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The two axes (top: scatter and posterior predictive bands,
+            bottom: estimated treatment effect posterior).
+        """
+        return super().plot(
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+            show=show,
+            legend_kwargs=legend_kwargs,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
         hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Generate plot for ANOVA-like experiments with non-equivalent group designs.
@@ -254,9 +304,11 @@ class PrePostNEGD(BaseExperiment):
             and around the posterior of the estimated treatment effect.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
         fig, ax = plt.subplots(
-            2, 1, figsize=(7, 9), gridspec_kw={"height_ratios": [3, 1]}
+            2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
         )
 
         # Plot raw data

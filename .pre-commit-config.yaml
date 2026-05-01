@@ -56,6 +56,17 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  # Validate that every public ``plot()`` override on a BaseExperiment subclass
+  # keeps its numpydoc Parameters block in sync with the function signature
+  # (issue #886). Configuration lives under [tool.numpydoc_validation] in
+  # pyproject.toml and is intentionally narrow: only ``.plot`` methods are
+  # checked, only PR01/PR02 are enforced, and the base ``BaseExperiment.plot``
+  # is excluded because it uses ``*args, **kwargs`` for dispatch.
+  - repo: https://github.com/numpy/numpydoc
+    rev: v1.10.0
+    hooks:
+      - id: numpydoc-validation
+        files: ^causalpy/experiments/.*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.20.1
     hooks:

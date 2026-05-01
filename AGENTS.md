@@ -65,6 +65,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **Custom exceptions**: Use project-specific exceptions from `causalpy.custom_exceptions`: `FormulaException`, `DataException`, `BadIndexException`
 - **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
 - **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
+- **Public `plot()` signatures**: Every experiment subclass that supports plotting must override the public ``plot()`` method with an explicit, kwarg-only signature (using ``*,``). Bare ``*args`` and ``**kwargs`` are forbidden at the public surface; they silently swallow real, supported parameters and hide them from Sphinx, IDE autocomplete, and ``help()``. Internally the public ``plot()`` should delegate to ``super().plot(...)`` (which dispatches to ``_bayesian_plot`` / ``_ols_plot``). Document every parameter in the docstring's ``Parameters`` block — the test ``causalpy/tests/test_public_plot_signatures.py`` and the ``numpydoc-validation`` pre-commit hook enforce this. For ``hdi_prob`` defaults, use the prose pattern (``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).``) rather than the numpydoc ``default=...`` slot, so the cross-reference renders.
 
 ## Code quality checks
 
