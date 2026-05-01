@@ -222,16 +222,9 @@ ignore_missing_imports = true
 [tool.marimo.runtime]
 watcher_on_save = "autorun"
 
-# PyMarkdown linter (pre-commit hook) configuration.
-# Primary motivator (issue #899) is enforcing MD032 — lists must be surrounded
-# by blank lines — to mirror the docstring rule already enforced by
-# ``validate-docstring-lists`` (issue #892). The rules below are deliberately
-# disabled because they conflict with project conventions or are noisy on the
-# existing Markdown corpus (see PR #899 for the audit).
+# PyMarkdown linter (pre-commit hook) configuration. Primary motivator (issue #899) is enforcing MD032 — lists must be surrounded by blank lines — to mirror the docstring rule already enforced by ``validate-docstring-lists`` (issue #892). The rules below are deliberately disabled because they conflict with project conventions or are noisy on the existing Markdown corpus (see PR #900 for the audit).
 [tool.pymarkdown]
-# Enable GitHub-flavoured / front-matter extensions so the linter understands
-# YAML front-matter (cursor agent / skill files), GFM task lists, tables,
-# strikethrough, and extended autolinks.
+# Enable GitHub-flavoured / front-matter extensions so the linter understands YAML front-matter (cursor agent / skill files), GFM task lists, tables, strikethrough, and extended autolinks.
 extensions.front-matter.enabled = true
 extensions.markdown-task-list-items.enabled = true
 extensions.markdown-tables.enabled = true
@@ -239,8 +232,7 @@ extensions.markdown-strikethrough.enabled = true
 extensions.markdown-extended-autolinks.enabled = true
 # Project convention: do not hard-wrap Markdown lines (see AGENTS.md).
 plugins.md013.enabled = false
-# Many top-level docs (skills, agent definitions, command snippets) start with
-# YAML front-matter or a short paragraph rather than an H1.
+# Many top-level docs (skills, agent definitions, command snippets) start with YAML front-matter or a short paragraph rather than an H1.
 plugins.md041.enabled = false
 # Allow a mix of setext and atx headings across files.
 plugins.md003.enabled = false
@@ -248,8 +240,7 @@ plugins.md003.enabled = false
 plugins.md030.enabled = false
 # Allow varying unordered-list indentation.
 plugins.md007.enabled = false
-# Skill / agent description lines naturally end in punctuation when promoted
-# to headings by the renderer.
+# Skill / agent description lines naturally end in punctuation when promoted to headings by the renderer.
 plugins.md026.enabled = false
 # Bold text used as pseudo-headings is an established pattern in skill files.
 plugins.md036.enabled = false
