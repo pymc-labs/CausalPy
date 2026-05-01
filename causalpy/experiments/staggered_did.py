@@ -455,7 +455,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             DataFrame containing pre-treatment observations from eventually-treated
             units (event_time < 0) for placebo check
         hdi_prob : float, optional
-            Probability mass for the HDI interval bounds, by default 0.94
+            Probability mass for the HDI interval bounds. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         # Store the HDI probability used for interval computation
         self.hdi_prob_ = hdi_prob
@@ -644,8 +645,58 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
+    def plot(
+        self,
+        *,
+        hdi_prob: float | None = None,
+        figsize: tuple[float, float] = (10, 6),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the staggered difference-in-differences event study.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval shown by the
+            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
+            for staggered DiD is fixed at fit time during effect aggregation
+            and the resulting bounds are cached on the instance. If
+            supplied here, the value must match the cached
+            :attr:`hdi_prob_`; otherwise a :class:`ValueError` is raised.
+            Pass ``None`` (the default) to plot using the cached value.
+            Ignored for OLS models.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            A single-element list containing the event-study axes.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
-        self, hdi_prob: float | None = None, **kwargs: Any
+        self,
+        hdi_prob: float | None = None,
+        figsize: tuple[float, float] = (10, 6),
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for Bayesian model.
 
@@ -661,6 +712,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             :attr:`~causalpy.experiments.staggered_did.StaggeredDiD.hdi_prob_`;
             otherwise a :class:`ValueError` is raised. Pass ``None`` (the
             default) to plot using the cached value.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(10, 6)``.
 
         Returns
         -------
@@ -676,7 +729,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "re-fit the experiment so that aggregation uses the desired "
                 "value, or omit hdi_prob to use the cached value."
             )
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
 
@@ -746,15 +799,24 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, list[plt.Axes]]:
+    def _ols_plot(
+        self,
+        figsize: tuple[float, float] = (10, 6),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot event-study results for OLS model.
+
+        Parameters
+        ----------
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(10, 6)``.
 
         Returns
         -------
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
 
@@ -845,7 +907,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Parameters
         ----------
         hdi_prob : float, optional
-            Probability for HDI interval. Defaults to 0.94.
+            Probability for HDI interval. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------

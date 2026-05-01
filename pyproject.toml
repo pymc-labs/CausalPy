@@ -164,6 +164,21 @@ extend-select = [
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
+# Numpydoc validation, intentionally narrow.
+# Used by the ``numpydoc-validation`` pre-commit hook to enforce that every
+# public ``plot()`` method on a :class:`BaseExperiment` subclass keeps its
+# numpydoc-style ``Parameters`` block in sync with the function signature
+# (issue #886). The exclude regex is a negative lookahead that skips every
+# node whose dotted name does *not* end in ``.plot``. The base class
+# deliberately offers no public ``plot()`` (the shared dispatcher lives in
+# the protected helper ``_render_plot``), so no carve-out is required.
+[tool.numpydoc_validation]
+checks = [
+    "PR01",  # Parameters not documented
+    "PR02",  # Unknown parameters
+]
+exclude = ['^(?!.*\.plot$).*$']
+
 [tool.coverage.run]
 source = ["causalpy"]
 omit = ["*/conftest.py", "*/tests/conftest.py"]

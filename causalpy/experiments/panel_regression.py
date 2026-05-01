@@ -479,6 +479,49 @@ class PanelRegression(BaseExperiment):
             "inference."
         )
 
+    def plot(
+        self,
+        *,
+        hdi_prob: float = HDI_PROB,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the panel regression coefficients.
+
+        Bayesian models render a forest plot with HDI intervals; OLS models
+        render a bar plot of point estimates. To plot only a subset of
+        coefficients (or to customise the figure size), call
+        :meth:`plot_coefficients` directly.
+
+        Parameters
+        ----------
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around
+            each posterior coefficient via :func:`arviz.plot_forest`. Must
+            be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the coefficient plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+        )
+
     def _bayesian_plot(
         self, hdi_prob: float = HDI_PROB, **kwargs: Any
     ) -> tuple[plt.Figure, plt.Axes]:

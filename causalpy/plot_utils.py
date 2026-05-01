@@ -50,7 +50,8 @@ def plot_xY(
     plot_hdi_kwargs : dict, optional
         Dictionary of keyword arguments passed to ax.plot().
     hdi_prob : float, optional
-        The size of the HDI. Default is 0.94.
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
     label : str, optional
         The plot label.
 
@@ -104,7 +105,8 @@ def get_hdi_to_df(
     x : xr.DataArray
         Xarray data array.
     hdi_prob : float, optional
-        The size of the HDI. Default is 0.94.
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
     Returns
     -------

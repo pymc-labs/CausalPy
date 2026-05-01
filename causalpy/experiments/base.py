@@ -215,47 +215,56 @@ class BaseExperiment(ABC):
         """Optional maketables plugin hook for default statistic rows."""
         return get_maketables_adapter(self.model).default_stat_keys(self)
 
-    def plot(
+    def _render_plot(
         self,
-        *args: Any,
-        show: bool = True,
-        legend_kwargs: dict[str, Any] | None = None,
-        **kwargs: Any,
+        *,
+        show: bool,
+        legend_kwargs: dict[str, Any] | None,
+        **draw_kwargs: Any,
     ) -> tuple:
-        """Plot the model.
+        """Template Method shared by every subclass's public ``plot``.
 
-        Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
-        depending on the model type.
+        Each :class:`BaseExperiment` subclass exposes its own explicit,
+        kwarg-only public ``plot()`` (issue
+        `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_) and
+        forwards the call here. This helper:
+
+        1. Applies the ``arviz-darkgrid`` style for the duration of the
+           draw call.
+        2. Dispatches to :meth:`_bayesian_plot` or :meth:`_ols_plot` based
+           on the model type.
+        3. Mutates the resulting legend(s) in place when *legend_kwargs*
+           is supplied, preserving custom handles built by the subclass.
+        4. Optionally calls :func:`matplotlib.pyplot.show`.
+
+        ``BaseExperiment`` deliberately does **not** define a public
+        ``plot()`` method: that would inherit a generic
+        ``*args, **kwargs`` signature into every subclass and re-introduce
+        the discoverability problem described in #886. Subclasses are
+        instead required to declare their own ``plot()`` with an explicit
+        keyword-only signature and call ``self._render_plot(...)``.
 
         Parameters
         ----------
-        show : bool, optional
-            Whether to automatically display the plot. Defaults to True.
-            Set to False if you want to modify the figure before displaying it.
+        show : bool
+            Whether to call :func:`matplotlib.pyplot.show` after drawing.
         legend_kwargs : dict, optional
-            Keyword arguments to adjust legend placement and styling.  The
-            existing legend is modified **in place** so that custom handles
-            (e.g. ``(Line2D, PolyCollection)`` tuples) are fully preserved.
-
+            Keyword arguments to adjust legend placement and styling. The
+            existing legend is modified **in place** so that custom
+            handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
+            :func:`~causalpy.plot_utils.plot_xY`) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
-            ``frameon``, ``title``.  ``bbox_transform`` is accepted
+            ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
-
-        Examples
-        --------
-        Move the legend outside the plot area to avoid overlap:
-
-        >>> fig, ax = result.plot(  # doctest: +SKIP
-        ...     show=False,
-        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
-        ... )
+        **draw_kwargs
+            Subclass-specific drawing parameters forwarded verbatim to
+            ``_bayesian_plot`` / ``_ols_plot``.
         """
-        # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                fig, ax = self._bayesian_plot(*args, **kwargs)
+                fig, ax = self._bayesian_plot(**draw_kwargs)
             elif isinstance(self.model, RegressorMixin):
-                fig, ax = self._ols_plot(*args, **kwargs)
+                fig, ax = self._ols_plot(**draw_kwargs)
             else:
                 raise ValueError("Unsupported model type")
 

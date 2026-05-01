@@ -333,10 +333,64 @@ class DifferenceInDifferences(BaseExperiment):
         """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the difference-in-differences results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title. Defaults to ``None``, in which case 2 significant figures
+            are used.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control, treatment, and
+            counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
+            OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
         hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """
@@ -352,6 +406,9 @@ class DifferenceInDifferences(BaseExperiment):
             posterior predictive bands for the control, treatment, and
             counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
         """
 
         def _plot_causal_impact_arrow(results, ax):
@@ -406,7 +463,7 @@ class DifferenceInDifferences(BaseExperiment):
                 va="center",
             )
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.scatterplot(
@@ -503,10 +560,22 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for difference-in-differences"""
-        fig, ax = plt.subplots()
+        """Generate plot for difference-in-differences.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
+        """
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.lineplot(

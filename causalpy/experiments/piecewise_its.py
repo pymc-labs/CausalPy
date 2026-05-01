@@ -444,10 +444,60 @@ class PiecewiseITS(BaseExperiment):
         print(f"Interruption times: {self.interruption_times}")
         self.print_coefficients(round_to)
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (10, 10),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the piecewise interrupted time-series results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title. Defaults to 2. Use ``None`` to render raw numbers.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            fitted, counterfactual, causal effect, and cumulative effect
+            bands. Must be in ``(0, 1]``. Ignored for OLS models. Defaults
+            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 10)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The three axes (top: observed, fitted and counterfactual;
+            middle: causal effect; bottom: cumulative effect).
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
         hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
@@ -462,6 +512,8 @@ class PiecewiseITS(BaseExperiment):
             fitted, counterfactual, causal effect, and cumulative effect bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(10, 10)``.
 
         Returns
         -------
@@ -472,7 +524,7 @@ class PiecewiseITS(BaseExperiment):
         """
         time_values = self.data[self.time_col].values
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 10))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         # TOP PLOT: Observed, Fitted, and Counterfactual
         # Observed data
@@ -574,7 +626,10 @@ class PiecewiseITS(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] = (10, 10),
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results for OLS models.
@@ -583,6 +638,8 @@ class PiecewiseITS(BaseExperiment):
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(10, 10)``.
 
         Returns
         -------
@@ -593,7 +650,7 @@ class PiecewiseITS(BaseExperiment):
         """
         time_values = self.data[self.time_col].values
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 10))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         # TOP PLOT: Observed, Fitted, and Counterfactual
         ax[0].plot(time_values, self.y.values, "k.", label="Observations")

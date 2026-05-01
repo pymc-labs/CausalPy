@@ -596,6 +596,58 @@ class InterruptedTimeSeries(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (7, 8),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the interrupted time-series results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
+            ``None`` to render raw numbers.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The three axes (top: predictions, middle: causal impact,
+            bottom: cumulative impact).
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     @staticmethod
     def _draw_singleton_hdi_marker(
         ax: plt.Axes,
@@ -634,6 +686,7 @@ class InterruptedTimeSeries(BaseExperiment):
         self,
         round_to: int | None = 2,
         hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
@@ -649,11 +702,13 @@ class InterruptedTimeSeries(BaseExperiment):
             posterior predictive, causal impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
         single_post_obs = len(self.datapost) <= 1
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
         pre_mu = self.pre_pred["posterior_predictive"].mu
@@ -874,17 +929,22 @@ class InterruptedTimeSeries(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] = (7, 8),
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
         Plot the results
 
         :param round_to:
             Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        :param figsize:
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         ax[0].plot(self.datapre.index, self.pre_y, "k.")
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
