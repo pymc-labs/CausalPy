@@ -327,9 +327,11 @@ class RegressionDiscontinuity(BaseExperiment):
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
-            Keyword arguments to adjust legend placement and styling. See
-            :meth:`~causalpy.experiments.base.BaseExperiment.plot` for
-            supported keys.
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
