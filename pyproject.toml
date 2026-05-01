@@ -180,6 +180,7 @@ checks = [
     "PR02",  # Unknown parameters
     "PR04",  # Parameter has no type
     "PR07",  # Parameter has no description
+    "PR10",  # Parameter requires a space before the colon
 ]
 exclude = ['\._']
 
