@@ -52,6 +52,11 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
 
     seen: set[int] = set()
 
+    # Defensive branches below (private modules, import failures, callables
+    # without a usable signature, etc.) are hit during the walk depending on
+    # which optional dependencies and modules happen to be importable; they
+    # are exempt from coverage so the safety net does not become a CI
+    # liability.
     for module_info in pkgutil.walk_packages(
         causalpy.__path__, prefix=f"{causalpy.__name__}."
     ):
@@ -59,10 +64,10 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
         if name.startswith("causalpy.tests"):
             continue
         if any(part.startswith("_") for part in name.split(".")[1:]):
-            continue
+            continue  # pragma: no cover
         try:
             mod = importlib.import_module(name)
-        except Exception:
+        except Exception:  # pragma: no cover
             continue
 
         for attr_name, attr in vars(mod).items():
@@ -81,7 +86,7 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
                 continue
             attr_qualname = getattr(attr, "__qualname__", None)
             if not isinstance(attr_qualname, str):
-                continue
+                continue  # pragma: no cover
 
             candidates: list[tuple[str, Callable[..., Any]]] = []
             if inspect.isclass(attr):
@@ -99,13 +104,13 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
             for qualname, fn in candidates:
                 try:
                     sig = inspect.signature(fn)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError):  # pragma: no cover
                     continue
                 param = sig.parameters.get("hdi_prob")
                 if param is None:
                     continue
                 if param.default is inspect.Parameter.empty:
-                    continue
+                    continue  # pragma: no cover
                 if param.default is None:
                     continue
                 yield qualname, fn
