@@ -831,26 +831,27 @@ class InterruptedTimeSeries(BaseExperiment):
             )
         ax[2].axhline(y=0, c="k")
 
-        # Intervention lines. Use a thin dashed style and a zorder just below
-        # the data so the treatment marker reads as an annotation rather than
-        # data, and never occludes data points or HDI ribbons - important for
-        # the edge case of very few post-treatment observations where the
-        # marker can land exactly on top of the only post-period datum.
+        # Intervention lines. Use a thin dashed black style and a zorder just
+        # below the data so the treatment marker reads as a neutral
+        # annotation rather than data, and never occludes data points or HDI
+        # ribbons - important for the edge case of very few post-treatment
+        # observations where the marker can land exactly on top of the only
+        # post-period datum.
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
                 ls="--",
                 lw=1.5,
-                color="r",
+                color="k",
                 zorder=1.5,
                 label="Treatment start" if i == 0 else None,
             )
             if self.treatment_end_time is not None:
                 ax[i].axvline(
                     x=self.treatment_end_time,
-                    ls="--",
+                    ls=":",
                     lw=1.5,
-                    color="orange",
+                    color="k",
                     zorder=1.5,
                     label="Treatment end" if i == 0 else None,
                 )
@@ -932,24 +933,24 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
-        # Intervention lines. Use a thin dashed style and a zorder just below
-        # the data so the treatment marker reads as an annotation rather than
-        # data, and never occludes data points.
+        # Intervention lines. Use a thin dashed black style and a zorder just
+        # below the data so the treatment marker reads as a neutral
+        # annotation rather than data, and never occludes data points.
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
                 ls="--",
                 lw=1.5,
-                color="r",
+                color="k",
                 zorder=1.5,
                 label="Treatment start" if i == 0 else None,
             )
             if self.treatment_end_time is not None:
                 ax[i].axvline(
                     x=self.treatment_end_time,
-                    ls="--",
+                    ls=":",
                     lw=1.5,
-                    color="orange",
+                    color="k",
                     zorder=1.5,
                     label="Treatment end" if i == 0 else None,
                 )
