@@ -56,7 +56,7 @@ def _all_base_experiment_subclasses() -> list[type]:
     """
     pkg = importlib.import_module("causalpy.experiments")
     for module_info in pkgutil.iter_modules(pkg.__path__):
-        if module_info.name.startswith("_"):
+        if module_info.name.startswith("_"):  # pragma: no cover
             continue
         importlib.import_module(f"{pkg.__name__}.{module_info.name}")
 
@@ -65,7 +65,7 @@ def _all_base_experiment_subclasses() -> list[type]:
     stack: list[type] = list(BaseExperiment.__subclasses__())
     while stack:
         cls = stack.pop()
-        if id(cls) in seen:
+        if id(cls) in seen:  # pragma: no cover
             continue
         seen.add(id(cls))
         subclasses.append(cls)
@@ -87,7 +87,7 @@ def _experiments_with_plot() -> Iterable[type]:
     docstring).
     """
     for cls in _all_base_experiment_subclasses():
-        if "plot" in cls.__dict__:
+        if "plot" in cls.__dict__:  # pragma: no branch
             yield cls
 
 
@@ -170,7 +170,7 @@ def test_public_plot_parameters_are_documented(cls: type) -> None:
     for name, param in sig.parameters.items():
         if name == "self":
             continue
-        if param.kind in (
+        if param.kind in (  # pragma: no cover
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         ):
@@ -179,7 +179,9 @@ def test_public_plot_parameters_are_documented(cls: type) -> None:
         numpydoc_pattern = re.compile(rf"^\s*{re.escape(name)}\s*:\s", re.MULTILINE)
         # Sphinx: ":param name:" or ":param type name:"
         sphinx_pattern = re.compile(rf":param\s+(?:\S+\s+)?{re.escape(name)}\s*:")
-        if not (numpydoc_pattern.search(doc) or sphinx_pattern.search(doc)):
+        if not (
+            numpydoc_pattern.search(doc) or sphinx_pattern.search(doc)
+        ):  # pragma: no cover
             missing.append(name)
     assert not missing, (
         f"{cls.__name__}.plot signature has parameter(s) {missing} that "
