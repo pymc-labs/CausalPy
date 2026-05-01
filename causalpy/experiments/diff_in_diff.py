@@ -74,6 +74,8 @@ class DifferenceInDifferences(BaseExperiment):
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
         A PyMC model for difference in differences. Defaults to LinearRegression.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Example
     --------
@@ -315,8 +317,11 @@ class DifferenceInDifferences(BaseExperiment):
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -666,6 +671,9 @@ class DifferenceInDifferences(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

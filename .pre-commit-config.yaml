@@ -53,17 +53,20 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
-  # Validate that every public ``plot()`` override on a BaseExperiment subclass
-  # keeps its numpydoc Parameters block in sync with the function signature
-  # (issue #886). Configuration lives under [tool.numpydoc_validation] in
-  # pyproject.toml and is intentionally narrow: only ``.plot`` methods are
-  # checked, only PR01/PR02 are enforced, and the base ``BaseExperiment.plot``
-  # is excluded because it uses ``*args, **kwargs`` for dispatch.
+  # Validate numpydoc-style docstrings across the package. The check set and
+  # exclude regex are configured under [tool.numpydoc_validation] in
+  # pyproject.toml. Originally introduced under #886 as a narrow check on
+  # public ``.plot`` overrides, the scope was widened under #898 to cover the
+  # whole ``causalpy`` package. The ``files`` pattern below excludes the test
+  # suite and the simulated-data helpers in ``causalpy/data/`` (those use the
+  # Sphinx ``:param:`` style for didactic clarity and are not part of the
+  # public API surface). Private members are excluded via the config-level
+  # regex in ``pyproject.toml``.
   - repo: https://github.com/numpy/numpydoc
     rev: v1.10.0
     hooks:
       - id: numpydoc-validation
-        files: ^causalpy/experiments/.*\.py$
+        files: ^causalpy/(?!tests/|data/).*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.1.0
     hooks:

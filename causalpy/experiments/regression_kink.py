@@ -44,21 +44,25 @@ from causalpy.custom_exceptions import (
 class RegressionKink(BaseExperiment):
     """A class to analyse regression kink designs.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param kink_point:
-        A scalar value at which the kink occurs
-    :param model:
-        A PyMC model. Defaults to LinearRegression.
-    :param running_variable_name:
-        The name of the running variable column
-    :param epsilon:
-        A small scalar for evaluating the causal impact above/below the kink
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the kink) is not used to fit
-        the model.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    kink_point : float
+        A scalar value at which the kink occurs.
+    model : PyMCModel, optional
+        A PyMC model. Defaults to :class:`LinearRegression`.
+    running_variable_name : str, default "x"
+        The name of the running variable column.
+    epsilon : float, default 0.001
+        A small scalar for evaluating the causal impact above/below the kink.
+    bandwidth : float, default np.inf
+        Data outside of the bandwidth (relative to the kink) is not used to
+        fit the model.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
     """
 
     supports_ols = False
@@ -229,8 +233,11 @@ class RegressionKink(BaseExperiment):
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(
             f"""
@@ -389,6 +396,9 @@ class RegressionKink(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

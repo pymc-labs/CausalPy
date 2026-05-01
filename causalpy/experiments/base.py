@@ -100,6 +100,12 @@ class BaseExperiment(ABC):
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
     Bayesian default. To use an OLS/sklearn model, pass one explicitly.
 
+    Parameters
+    ----------
+    model : PyMCModel, RegressorMixin, or None, default None
+        Model instance to use. If ``None`` and ``_default_model_class`` is set,
+        an instance of that default class is constructed.
+
     Notes
     -----
     Optional ``maketables`` integration is exposed through ``__maketables_*``
@@ -330,6 +336,13 @@ class BaseExperiment(ABC):
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
         depending on the model type.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the model-specific implementation.
+        **kwargs
+            Keyword arguments forwarded to the model-specific implementation.
         """
         if isinstance(self.model, PyMCModel):
             return self.get_plot_data_bayesian(*args, **kwargs)
@@ -339,11 +352,27 @@ class BaseExperiment(ABC):
             raise ValueError("Unsupported model type")
 
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for OLS models. Override in subclasses that support OLS."""
+        """Return plot data for OLS models. Override in subclasses that support OLS.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
@@ -405,6 +434,9 @@ class BaseExperiment(ABC):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; subclasses may consume
+            additional keyword arguments.
 
         Returns
         -------

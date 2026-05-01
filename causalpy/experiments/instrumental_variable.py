@@ -65,6 +65,8 @@ class InstrumentalVariable(BaseExperiment):
         A indicator for whether the treatment to be modelled is binary or not.
         Determines which PyMC model we use to model the joint outcome and
         treatment.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Example
     --------
@@ -291,8 +293,11 @@ class InstrumentalVariable(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         raise NotImplementedError("Summary method not implemented.")
 
@@ -314,6 +319,29 @@ class InstrumentalVariable(BaseExperiment):
         Generate a decision-ready summary of causal effects.
 
         Note: effect_summary is not yet implemented for InstrumentalVariable experiments.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (unused for InstrumentalVariable).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            For multi-unit experiments, the unit to analyse.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
         """
         raise NotImplementedError(
             "effect_summary is not yet implemented for InstrumentalVariable experiments."

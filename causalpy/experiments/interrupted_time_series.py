@@ -262,7 +262,17 @@ class InterruptedTimeSeries(BaseExperiment):
         treatment_time: int | float | pd.Timestamp,
         treatment_end_time: int | float | pd.Timestamp | None = None,
     ) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The experiment data.
+        treatment_time : int, float, or pd.Timestamp
+            Start of the treatment period.
+        treatment_end_time : int, float, pd.Timestamp, or None, default None
+            Optional end of the treatment period for three-period designs.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -591,8 +601,11 @@ class InterruptedTimeSeries(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -1034,8 +1047,11 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         Recover the data of the experiment along with the prediction and causal impact information.
 
-        :param hdi_prob:
-            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
+        Parameters
+        ----------
+        hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
+            Probability mass of the highest density interval. Defaults to the
+            project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         if isinstance(self.model, PyMCModel):
             hdi_pct = int(round(hdi_prob * 100))
@@ -1390,6 +1406,9 @@ class InterruptedTimeSeries(BaseExperiment):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

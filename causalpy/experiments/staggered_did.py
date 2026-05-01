@@ -94,6 +94,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     reference_event_time : int, optional
         Event-time index associated with plots (reserved for future use).
         Defaults to -1.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -1642,6 +1644,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

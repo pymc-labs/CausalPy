@@ -39,23 +39,27 @@ from .base import BaseExperiment
 class SyntheticControl(BaseExperiment):
     """The class for the synthetic control experiment.
 
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param control_units:
-        A list of control units to be used in the experiment
-    :param treated_units:
-        A list of treated units to be used in the experiment
-    :param model:
-        A PyMC or sklearn model. Defaults to WeightedSumFitter.
-    :param min_donor_correlation:
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    treatment_time : int, float, or pd.Timestamp
+        The time when treatment occurred, in reference to the data index.
+    control_units : list of str
+        A list of control units to be used in the experiment.
+    treated_units : list of str
+        A list of treated units to be used in the experiment.
+    model : PyMCModel, RegressorMixin, or None, default None
+        A PyMC or sklearn model. Defaults to :class:`WeightedSumFitter`.
+    min_donor_correlation : float, default 0.0
         Minimum acceptable Pearson correlation between each control unit and
         treated unit in the pre-treatment period. Control units below this
         threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
         negatively correlated donors).
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("sc")
@@ -311,7 +315,15 @@ class SyntheticControl(BaseExperiment):
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The experiment data.
+        treatment_time : int, float, or pd.Timestamp
+            The treatment time, expected to be compatible with ``data.index``.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -352,8 +364,11 @@ class SyntheticControl(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Control units: {self.control_units}")
@@ -759,11 +774,14 @@ class SyntheticControl(BaseExperiment):
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
 
-        :param hdi_prob:
-            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
-        :param treated_unit:
-            Which treated unit to extract data for. Must be a string name of the treated unit.
-            If None, uses the first treated unit.
+        Parameters
+        ----------
+        hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
+            Probability mass of the highest density interval. Defaults to
+            the project-wide :data:`~causalpy.constants.HDI_PROB`.
+        treated_unit : str, optional
+            Which treated unit to extract data for. Must be a string name
+            of the treated unit. If ``None``, uses the first treated unit.
         """
         if not isinstance(self.model, PyMCModel):
             raise ValueError("Unsupported model type")
@@ -907,6 +925,9 @@ class SyntheticControl(BaseExperiment):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

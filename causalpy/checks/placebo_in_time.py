@@ -292,6 +292,11 @@ class PlaceboInTime:
     def validate(self, experiment: BaseExperiment) -> None:
         """Check the experiment is compatible with PlaceboInTime.
 
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+
         Raises
         ------
         TypeError
@@ -826,6 +831,16 @@ class PlaceboInTime:
 
         Can be used standalone (``context=None``) when
         ``experiment_factory`` was provided, or within a pipeline.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted experiment whose treatment time will be shifted to
+            generate placebo folds.
+        context : PipelineContext or None, default None
+            Pipeline context providing ``experiment_config`` for re-fits.
+            If ``None``, an explicit ``experiment_factory`` must have been
+            supplied at construction time.
 
         Returns
         -------

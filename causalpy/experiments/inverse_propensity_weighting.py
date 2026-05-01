@@ -51,6 +51,8 @@ class InversePropensityWeighting(BaseExperiment):
         of these weighting schemes.
     model : PropensityScore, optional
         A PyMC model. Defaults to PropensityScore.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Example
     --------

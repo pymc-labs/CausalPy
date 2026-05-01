@@ -813,7 +813,31 @@ class PiecewiseITS(BaseExperiment):
         prefix: str = "Post-period",
         **kwargs: Any,
     ) -> EffectSummary:
-        """Generate a decision-ready summary of PiecewiseITS causal effects."""
+        """Generate a decision-ready summary of PiecewiseITS causal effects.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (see :meth:`BaseExperiment.effect_summary`).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation (PyMC only).
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals (1-alpha confidence).
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only).
+        treated_unit : str, optional
+            Multi-unit experiments select which unit to analyse.
+        period : None
+            Not supported by PiecewiseITS; pass ``None``.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+        """
         from causalpy.reporting import (
             _compute_statistics,
             _compute_statistics_ols,

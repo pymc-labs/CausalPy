@@ -93,7 +93,13 @@ class PriorSensitivity:
         self.alternatives = alternatives
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment uses a Bayesian (PyMC) model."""
+        """Verify the experiment uses a Bayesian (PyMC) model.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment.model, PyMCModel):
             raise TypeError(
                 "PriorSensitivity requires a Bayesian (PyMC) model. "
@@ -105,7 +111,15 @@ class PriorSensitivity:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Re-fit with each alternative model and compare effect estimates."""
+        """Re-fit with each alternative model and compare effect estimates.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted Bayesian experiment.
+        context : PipelineContext
+            Pipeline context providing ``experiment_config`` for re-fits.
+        """
         if context.experiment_config is None:
             raise RuntimeError(
                 "No experiment_config in context. Use EstimateEffect "
