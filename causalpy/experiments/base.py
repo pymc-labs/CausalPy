@@ -346,7 +346,14 @@ class BaseExperiment(ABC):
             - "decrease": P(effect < 0)
             - "two-sided": Two-sided p-value, report 1-p as "probability of effect"
         alpha : float, default=0.05
-            Significance level for HDI/CI intervals (1-alpha confidence level)
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+            For Bayesian models the effective HDI probability is
+            ``hdi_prob = 1 - alpha``. Note that this is independent of the
+            project-wide :data:`causalpy.constants.HDI_PROB` constant
+            (default 0.94) used by ``plot()`` and ``get_plot_data_bayesian()``,
+            so the same experiment may report a 95% HDI in
+            ``effect_summary()`` and a 94% HDI in ``plot()`` with default
+            settings.
         cumulative : bool, default=True
             Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
         relative : bool, default=True

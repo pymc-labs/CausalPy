@@ -27,14 +27,13 @@ from patsy import dmatrices
 from scipy import stats
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class PanelRegression(BaseExperiment):
@@ -501,7 +500,7 @@ class PanelRegression(BaseExperiment):
         return self._plot_coefficients_internal()
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -510,7 +509,7 @@ class PanelRegression(BaseExperiment):
         var_names : list[str], optional
             Specific coefficient names to plot.  If ``None``, plots all
             non-FE coefficients (as determined by ``_get_non_fe_labels``).
-        hdi_prob : float, default=0.94
+        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1).
         """
@@ -606,7 +605,7 @@ class PanelRegression(BaseExperiment):
         return plot_data
 
     def plot_coefficients(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Plot coefficient estimates with credible/confidence intervals.
 
@@ -619,7 +618,7 @@ class PanelRegression(BaseExperiment):
             Specific coefficient names to plot.  Names must match the patsy
             design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
             If ``None``, plots all non-FE coefficients.
-        hdi_prob : float, default=0.94
+        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Ignored for OLS models.
 
@@ -714,7 +713,7 @@ class PanelRegression(BaseExperiment):
         n_sample: int = 10,
         select: Literal["random", "extreme", "high_variance"] = "random",
         show_mean: bool = True,
-        hdi_prob: float = 0.94,
+        hdi_prob: float = HDI_PROB,
         interval_type: Literal["mean", "predictive"] = "mean",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
@@ -735,9 +734,9 @@ class PanelRegression(BaseExperiment):
             - "high_variance": Units with most within-unit variation
         show_mean : bool, default=True
             Whether to show the overall mean trajectory.
-        hdi_prob : float, default=0.94
+        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
             Probability mass for the HDI credible interval (Bayesian models only).
-            Common values are 0.94 (default) or 0.89.
+            Common alternative values are 0.89 or 0.5.
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
             - "mean": HDI of posterior ``mu`` (uncertainty in expected value)

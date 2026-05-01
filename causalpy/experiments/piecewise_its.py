@@ -631,7 +631,7 @@ class PiecewiseITS(BaseExperiment):
 
         Parameters
         ----------
-        hdi_prob : float, default=0.94
+        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
             Probability for the highest density interval.
 
         Returns

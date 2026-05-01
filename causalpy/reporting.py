@@ -32,6 +32,7 @@ import pandas as pd
 import xarray as xr
 from scipy.stats import t
 
+from causalpy.constants import HDI_PROB
 from causalpy.utils import _as_scalar
 
 
@@ -728,14 +729,22 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 def _compute_statistics(
     impact,
     counterfactual,
-    hdi_prob=0.95,
+    hdi_prob=HDI_PROB,
     direction="increase",
     cumulative=True,
     relative=True,
     min_effect=None,
     time_dim="obs_ind",
 ):
-    """Compute all summary statistics from posterior draws."""
+    """Compute all summary statistics from posterior draws.
+
+    Notes
+    -----
+    All in-tree callers pass ``hdi_prob`` explicitly (typically derived from
+    ``effect_summary``'s ``alpha`` as ``hdi_prob = 1 - alpha``), so this
+    default is effectively unused; it is set to :data:`HDI_PROB` to keep the
+    project-wide convention consistent.
+    """
     stats = {}
 
     # Average effect over window
