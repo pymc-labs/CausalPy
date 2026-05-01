@@ -179,6 +179,7 @@ checks = [
     "PR01",  # Parameters not documented
     "PR02",  # Unknown parameters
     "PR04",  # Parameter has no type
+    "PR07",  # Parameter has no description
 ]
 exclude = ['\._']
 
