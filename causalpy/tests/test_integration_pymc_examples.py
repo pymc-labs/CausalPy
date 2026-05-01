@@ -585,6 +585,48 @@ def test_sdid(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
+    """SDiD with a DatetimeIndex panel exercises the datetime branch in
+    ``_bayesian_plot`` and the full ``effect_summary`` body, including the
+    ``period``-warning path and the ``cumulative=False`` branch.
+    """
+    df = cp.load_data("sc").copy()
+    df.index = pd.date_range("2020-01-01", periods=len(df), freq="D")
+    treatment_time = df.index[70]
+
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+
+    # DatetimeIndex branch in _bayesian_plot calls format_date_axes.
+    fig, _ = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+
+    # Default effect_summary call covers the main body and prose generation.
+    summary = result.effect_summary()
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+    assert isinstance(summary.text, str) and len(summary.text) > 0
+
+    # Passing period= triggers the ignored-warning branch.
+    with pytest.warns(
+        UserWarning, match="ignored for SyntheticDifferenceInDifferences"
+    ):
+        result.effect_summary(period="post")
+
+    # cumulative=False covers the conditional ``obs_cum``/``counterfactual_cum``
+    # branches that are skipped by the default call above.
+    summary_no_cum = result.effect_summary(cumulative=False)
+    assert "cumulative" not in summary_no_cum.table.index
+
+
+@pytest.mark.integration
 def test_sc_brexit(mock_pymc_sample):
     """
     Test Synthetic Control experiment on Brexit data.

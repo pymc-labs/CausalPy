@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.experiments.synthetic_difference_in_differences import (
     SyntheticDifferenceInDifferences,
 )
@@ -293,3 +294,100 @@ class TestBuildReportingObjects:
 
         np.testing.assert_allclose(stub.pre_impact.to_numpy()[..., 0], expected_pre)
         np.testing.assert_allclose(stub.post_impact.to_numpy()[..., 0], expected_post)
+
+
+class TestInputValidation:
+    """Both ``BadIndexException`` branches in ``input_validation``."""
+
+    def test_datetime_index_requires_timestamp_treatment_time(self):
+        df = pd.DataFrame(
+            {"a": [1.0, 2.0, 3.0]},
+            index=pd.date_range("2020-01-01", periods=3),
+        )
+        stub = _make_experiment_stub()
+        with pytest.raises(BadIndexException, match="DatetimeIndex"):
+            stub.input_validation(df, treatment_time=2)
+
+    def test_int_index_rejects_timestamp_treatment_time(self):
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        stub = _make_experiment_stub()
+        with pytest.raises(BadIndexException, match="DatetimeIndex"):
+            stub.input_validation(df, treatment_time=pd.Timestamp("2020-01-01"))
+
+
+class TestErrorBranches:
+    """Error paths raised when the underlying model has no ``idata``."""
+
+    def test_extract_weight_posteriors_raises_when_idata_is_none(self):
+        stub = _make_experiment_stub(model=SimpleNamespace(idata=None))
+        with pytest.raises(RuntimeError, match="Model has not been fit"):
+            stub._extract_weight_posteriors()
+
+    def test_algorithm_raises_when_fit_leaves_idata_none(self, toy_panel):
+        class _NoIdataModel:
+            """Mimics a PyMCModel whose ``fit`` fails to populate ``idata``."""
+
+            idata = None
+
+            def fit(self, X, y, coords):
+                return None
+
+        stub = _make_experiment_stub(
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+            data=toy_panel.data,
+            treatment_time=toy_panel.treatment_time,
+            model=_NoIdataModel(),
+        )
+        with pytest.raises(AttributeError, match="failed to produce idata"):
+            stub.algorithm()
+
+
+class TestSummaryMultiTreated:
+    """``summary`` prints the list when more than one treated unit is present."""
+
+    def test_multi_treated_branch(self, capsys):
+        stub = _make_experiment_stub(
+            control_units=["c0"],
+            treated_units=["t0", "t1"],
+        )
+        stub.expt_type = "SyntheticDifferenceInDifferences"
+        stub.tau_posterior = xr.DataArray(
+            np.array([[1.0, 1.5], [0.5, 2.0]]),
+            dims=["chain", "draw"],
+        )
+
+        stub.summary()
+
+        captured = capsys.readouterr().out
+        assert "Treated units: ['t0', 't1']" in captured
+        assert "Treated unit:" not in captured
+
+
+class TestConvertTreatmentTimeForAxis:
+    """``_convert_treatment_time_for_axis`` falls back when conversion fails."""
+
+    def test_returns_input_when_convert_units_raises_typeerror(self):
+        class _XAxis:
+            @staticmethod
+            def convert_units(_value):
+                raise TypeError("cannot convert")
+
+        axis = SimpleNamespace(xaxis=_XAxis())
+        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
+            axis, 42
+        )
+        assert result == 42
+
+    def test_returns_input_when_convert_units_raises_valueerror(self):
+        class _XAxis:
+            @staticmethod
+            def convert_units(_value):
+                raise ValueError("bad value")
+
+        axis = SimpleNamespace(xaxis=_XAxis())
+        ts = pd.Timestamp("2020-01-01")
+        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
+            axis, ts
+        )
+        assert result == ts
