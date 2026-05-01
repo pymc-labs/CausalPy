@@ -509,9 +509,10 @@ class PanelRegression(BaseExperiment):
         var_names : list[str], optional
             Specific coefficient names to plot.  If ``None``, plots all
             non-FE coefficients (as determined by ``_get_non_fe_labels``).
-        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
-            coefficients. Must be in (0, 1).
+            coefficients. Must be in (0, 1). Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
@@ -618,9 +619,10 @@ class PanelRegression(BaseExperiment):
             Specific coefficient names to plot.  Names must match the patsy
             design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
             If ``None``, plots all non-FE coefficients.
-        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Ignored for OLS models.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
@@ -734,9 +736,10 @@ class PanelRegression(BaseExperiment):
             - "high_variance": Units with most within-unit variation
         show_mean : bool, default=True
             Whether to show the overall mean trajectory.
-        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
-            Probability mass for the HDI credible interval (Bayesian models only).
-            Common alternative values are 0.89 or 0.5.
+        hdi_prob : float
+            Probability mass for the HDI credible interval (Bayesian models
+            only). Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94). Common alternative values are 0.89 or 0.5.
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
             - "mean": HDI of posterior ``mu`` (uncertainty in expected value)

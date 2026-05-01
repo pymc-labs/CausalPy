@@ -7,6 +7,7 @@
   :recursive:
   :toctree: generated/
 
+  constants
   data
   pymc_models
   skl_models

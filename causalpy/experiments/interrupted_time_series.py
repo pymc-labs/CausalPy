@@ -1030,8 +1030,9 @@ class InterruptedTimeSeries(BaseExperiment):
 
         Parameters
         ----------
-        hdi_prob : float, default=:data:`causalpy.constants.HDI_PROB` (0.94)
-            Probability for HDI interval (Bayesian models only)
+        hdi_prob : float
+            Probability for the HDI interval (Bayesian models only). Defaults
+            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (Bayesian models only)
 
