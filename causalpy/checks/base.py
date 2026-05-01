@@ -129,5 +129,7 @@ class Check(Protocol):
         Returns
         -------
         CheckResult
+            Outcome of the check, including pass/fail status and any
+            diagnostic payload produced by the implementation.
         """
         ...

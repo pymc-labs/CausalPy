@@ -181,6 +181,7 @@ checks = [
     "PR04",  # Parameter has no type
     "PR07",  # Parameter has no description
     "PR10",  # Parameter requires a space before the colon
+    "RT03",  # Return value has no description
 ]
 exclude = ['\._']
 
