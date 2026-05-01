@@ -596,6 +596,40 @@ class InterruptedTimeSeries(BaseExperiment):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
+    @staticmethod
+    def _draw_singleton_hdi_marker(
+        ax: plt.Axes,
+        x: Any,
+        Y: xr.DataArray,
+        color: str,
+        hdi_prob: float = HDI_PROB,
+    ) -> Any:
+        """Overlay a median dot + HDI errorbar for a single post-period datum.
+
+        ``plot_xY`` (and the ``arviz.plot_hdi`` it wraps) renders a degenerate
+        zero-area polygon when the post-period contains a single observation,
+        so neither the median line nor the HDI ribbon is visible. Drawing an
+        explicit point and errorbar makes both the central tendency and the
+        uncertainty plain to read in that edge case. Returns the matplotlib
+        ``ErrorbarContainer`` so callers can use it as a legend handle.
+        """
+        Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
+        median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
+        hdi = az.hdi(Y_plot, hdi_prob=hdi_prob)
+        data_var = list(hdi.data_vars)[0]
+        bounds = np.asarray(hdi[data_var].values).reshape(-1)
+        lower, upper = float(bounds[0]), float(bounds[1])
+        return ax.errorbar(
+            x,
+            [median],
+            yerr=[[median - lower], [upper - median]],
+            fmt="o",
+            color=color,
+            ecolor=color,
+            capsize=4,
+            zorder=3,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -617,6 +651,7 @@ class InterruptedTimeSeries(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         counterfactual_label = "Counterfactual"
+        single_post_obs = len(self.datapost) <= 1
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
         # TOP PLOT --------------------------------------------------
@@ -660,7 +695,18 @@ class InterruptedTimeSeries(BaseExperiment):
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
-        handles.append((h_line, h_patch))
+        if single_post_obs:
+            # plot_xY's HDI ribbon collapses to a zero-area polygon for a
+            # single post-period datum; overlay an explicit median + HDI
+            # errorbar so the counterfactual is still visible. Use the
+            # errorbar artist itself as the legend handle so the legend
+            # matches what is actually drawn.
+            errbar = self._draw_singleton_hdi_marker(
+                ax[0], self.datapost.index, post_mu, color="C1"
+            )
+            handles.append(errbar)
+        else:
+            handles.append((h_line, h_patch))
         labels.append(counterfactual_label)
 
         ax[0].plot(
@@ -669,8 +715,11 @@ class InterruptedTimeSeries(BaseExperiment):
             if hasattr(self.post_y, "isel")
             else self.post_y[:, 0],
             "k.",
+            zorder=3,
         )
-        # Shaded causal effect
+        # Shaded causal effect (only meaningful when there are >=2 post-period
+        # points; with a single datum the fill_between collapses to nothing,
+        # so we omit the legend entry to avoid misleading the reader).
         post_pred_mu = az.extract(
             self.post_pred, group="posterior_predictive", var_names="mu"
         )
@@ -686,8 +735,9 @@ class InterruptedTimeSeries(BaseExperiment):
             color="C0",
             alpha=0.25,
         )
-        handles.append(h)
-        labels.append("Causal impact")
+        if not single_post_obs:
+            handles.append(h)
+            labels.append("Causal impact")
 
         # Title with R^2, supporting both unit_0_r2 and r2 keys
         r2_val = None
@@ -736,6 +786,10 @@ class InterruptedTimeSeries(BaseExperiment):
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
+        if single_post_obs:
+            self._draw_singleton_hdi_marker(
+                ax[1], self.datapost.index, self.post_impact, color="C1"
+            )
         ax[1].axhline(y=0, c="k")
         post_impact_mean = (
             self.post_impact.mean(["chain", "draw"])
@@ -771,23 +825,33 @@ class InterruptedTimeSeries(BaseExperiment):
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
+        if single_post_obs:
+            self._draw_singleton_hdi_marker(
+                ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+            )
         ax[2].axhline(y=0, c="k")
 
-        # Intervention lines
+        # Intervention lines. Use a thin dashed style and a zorder just below
+        # the data so the treatment marker reads as an annotation rather than
+        # data, and never occludes data points or HDI ribbons - important for
+        # the edge case of very few post-treatment observations where the
+        # marker can land exactly on top of the only post-period datum.
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
-                ls="-",
-                lw=3,
+                ls="--",
+                lw=1.5,
                 color="r",
+                zorder=1.5,
                 label="Treatment start" if i == 0 else None,
             )
             if self.treatment_end_time is not None:
                 ax[i].axvline(
                     x=self.treatment_end_time,
                     ls="--",
-                    lw=2,
+                    lw=1.5,
                     color="orange",
+                    zorder=1.5,
                     label="Treatment end" if i == 0 else None,
                 )
 
@@ -868,21 +932,25 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
-        # Intervention lines
+        # Intervention lines. Use a thin dashed style and a zorder just below
+        # the data so the treatment marker reads as an annotation rather than
+        # data, and never occludes data points.
         for i in [0, 1, 2]:
             ax[i].axvline(
                 x=self.treatment_time,
-                ls="-",
-                lw=3,
+                ls="--",
+                lw=1.5,
                 color="r",
+                zorder=1.5,
                 label="Treatment start" if i == 0 else None,
             )
             if self.treatment_end_time is not None:
                 ax[i].axvline(
                     x=self.treatment_end_time,
                     ls="--",
-                    lw=2,
+                    lw=1.5,
                     color="orange",
+                    zorder=1.5,
                     label="Treatment end" if i == 0 else None,
                 )
 
