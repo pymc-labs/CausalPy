@@ -29,7 +29,6 @@ lint: ## Run ruff linter and formatter
 check_lint: ## Check code formatting and linting without making changes
 	ruff check .
 	ruff format --diff --check .
-	interrogate .
 
 check-exports: ## Verify experiment/check public API export wiring
 	python scripts/check_public_exports.py --check

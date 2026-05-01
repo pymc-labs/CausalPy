@@ -593,7 +593,7 @@ class InversePropensityWeighting(BaseExperiment):
         if method is None:
             method = self.weighting_scheme
 
-        def plot_weights(bins, top0, top1, ax, color="population"):
+        def _plot_weights(bins, top0, top1, ax, color="population"):
             colors_dict = {
                 "population": ["orange", "skyblue", 0.6],
                 "pseudo_population": ["grey", "grey", 0.1],
@@ -619,7 +619,7 @@ class InversePropensityWeighting(BaseExperiment):
                 for bar in bars:
                     bar.set_edgecolor("black")
 
-        def make_hists(idata, i, axs, method=method):
+        def _make_hists(idata, i, axs, method=method):
             p_i = self._prepare_ps(az.extract(idata)["p"][:, i].values)
             if method == "raw":
                 weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
@@ -636,14 +636,14 @@ class InversePropensityWeighting(BaseExperiment):
             bins = np.arange(0.025, 0.99, 0.005)
             top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
             top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
-            plot_weights(bins, top0, top1, axs[0])
+            _plot_weights(bins, top0, top1, axs[0])
             top0, _ = np.histogram(
                 p_i[self.t.flatten() == 0], bins=bins, weights=weight0
             )
             top1, _ = np.histogram(
                 p_i[self.t.flatten() == 1], bins=bins, weights=weight1
             )
-            plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
+            _plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
 
         mosaic = """AAAAAA
                     BBBBCC"""
@@ -674,7 +674,7 @@ class InversePropensityWeighting(BaseExperiment):
             ["Treatment PS", "Control PS", "Weighted Pseudo Population", "Extreme PS"],
         )
 
-        [make_hists(idata, i, axs) for i in range(prop_draws)]
+        [_make_hists(idata, i, axs) for i in range(prop_draws)]
         ate_df = pd.DataFrame(
             [self.get_ate(i, idata, method=method) for i in range(ate_draws)],
             columns=["ATE", "Y(1)", "Y(0)"],

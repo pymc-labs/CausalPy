@@ -68,7 +68,6 @@ dependencies = [
 dev = [
     "prek",
     "twine",
-    "interrogate",
     "codespell",
     "nbformat",
     "nbconvert",
@@ -96,7 +95,7 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "prek", "ruff", "mypy"]
+lint = ["prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill"]
 
 [tool.pyproject2conda]
@@ -123,27 +122,6 @@ markers = [
     "integration: mark as an integration test.",
     "slow: mark test as slow.",
 ]
-
-[tool.interrogate]
-ignore-init-method = true
-ignore-init-module = true
-ignore-magic = false
-ignore-semiprivate = false
-ignore-private = false
-ignore-property-decorators = false
-ignore-module = false
-ignore-nested-functions = false
-ignore-nested-classes = true
-ignore-setters = false
-fail-under = 85
-exclude = ["setup.py", "docs", "build", "dist", ".marimo", ".scratch"]
-ignore-regex = ["^get$", "^mock_.*", ".*BaseClass.*"]
-# possible values: 0 (minimal output), 1 (-v), 2 (-vv)
-verbose = 1
-quiet = false
-whitelist-regex = []
-color = true
-omit-covered-files = false
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -184,6 +162,7 @@ checks = [
     "RT03",  # Return value has no description
     "SS03",  # Summary does not end with a period
     "GL07",  # Sections are in the wrong order
+    "GL08",  # Object does not have a docstring
 ]
 exclude = ['\._']
 

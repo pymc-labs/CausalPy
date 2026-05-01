@@ -164,6 +164,24 @@ class BaseExperiment(ABC):
             raise ValueError("OLS models not supported.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
+        """Fit the underlying model.
+
+        Subclasses must override this hook to delegate to their concrete
+        fitting routine; the base class only provides the abstract entry
+        point.
+
+        Parameters
+        ----------
+        *args : Any
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs : Any
+            Keyword arguments forwarded to the subclass implementation.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, when called on the base class.
+        """
         raise NotImplementedError("fit method not implemented")
 
     @property

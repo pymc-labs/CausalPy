@@ -257,6 +257,26 @@ class PyMCModel(pm.Model):
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
+        """Construct the PyMC model graph.
+
+        Subclasses must override this method to declare priors, deterministic
+        nodes, and the likelihood for the model.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Input features with dimensions ``["obs_ind", "coeffs"]``.
+        y : xarray.DataArray
+            Target variable with dimensions ``["obs_ind", "treated_units"]``.
+        coords : dict or None
+            Mapping of named dimensions to coordinate labels for the
+            underlying ``pm.Model``.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, when called on the base class.
+        """
         raise NotImplementedError(
             "This method must be implemented by a subclass"
         )  # pragma: no cover
@@ -483,6 +503,19 @@ class PyMCModel(pm.Model):
         return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact: xr.DataArray) -> xr.DataArray:
+        """Cumulative sum of pointwise causal impact along ``obs_ind``.
+
+        Parameters
+        ----------
+        impact : xarray.DataArray
+            Pointwise causal impact, typically the output of
+            :meth:`calculate_impact`.
+
+        Returns
+        -------
+        xarray.DataArray
+            Cumulative impact accumulated along the ``obs_ind`` dimension.
+        """
         return impact.cumsum(dim="obs_ind")
 
     def print_coefficients(
