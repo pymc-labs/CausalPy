@@ -597,13 +597,24 @@ class InterruptedTimeSeries(BaseExperiment):
         self.print_coefficients(round_to)
 
     def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
-        Plot the results
+        Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         counterfactual_label = "Counterfactual"
 
@@ -618,6 +629,7 @@ class InterruptedTimeSeries(BaseExperiment):
             self.datapre.index,
             pre_mu_plot,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -645,6 +657,7 @@ class InterruptedTimeSeries(BaseExperiment):
             self.datapost.index,
             post_mu_plot,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -707,6 +720,7 @@ class InterruptedTimeSeries(BaseExperiment):
             self.datapre.index,
             pre_impact_plot,
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         post_impact_plot = (
@@ -719,6 +733,7 @@ class InterruptedTimeSeries(BaseExperiment):
             self.datapost.index,
             post_impact_plot,
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -753,6 +768,7 @@ class InterruptedTimeSeries(BaseExperiment):
             self.datapost.index,
             post_cum_plot,
             ax=ax[2],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")
