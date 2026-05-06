@@ -161,6 +161,7 @@ class MixedModelFormula:
     Parsed mixed-effects formula object produced by ``Parser.parse(...)``.
 
     This lightweight representation stores:
+
     - ``lhs``: left-hand side variable name
     - ``rhs``: fixed-effects right-hand side expression
     - ``random_components``: parsed lme4-style ``(expr | group)`` components
