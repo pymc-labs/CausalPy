@@ -1008,6 +1008,42 @@ class TestHierarchicalLinearRegression:
         with cls.model:
             cls.idata = pm.sampling.mcmc.sample(**cls.sample_kwargs)
 
+    def test_default_priors_build_model(self) -> None:
+        model = HierarchicalLinearRegression()
+
+        model.build_model(
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            group_idx=self.group_idx,
+            coords=self.coords,
+        )
+
+        assert "beta_fixed" in model.named_vars
+        assert "sigma_fixed" in model.named_vars
+        assert "sigma_random" in model.named_vars
+        assert "beta_group" in model.named_vars
+        assert "beta_random" in model.named_vars
+
+    def test_partial_custom_priors_do_not_fall_back_to_defaults(self) -> None:
+        priors = {
+            "beta_fixed": self.model.priors["beta_fixed"],
+            "sigma_fixed": self.model.priors["sigma_fixed"],
+            "sigma_random": self.model.priors["sigma_random"],
+        }
+
+        self._expect_value_error(
+            lambda: HierarchicalLinearRegression(priors=priors).build_model(
+                X=self.X,
+                Z=self.Z,
+                y=self.y,
+                group_idx=self.group_idx,
+                coords=self.coords,
+                non_centered=True,
+            ),
+            "Missing required custom priors for non-centered parameterization: beta_group.",
+        )
+
     def test_centered_requires_sigma_random_prior(self) -> None:
         priors = {key: self.model.priors[key] for key in ["beta_fixed", "sigma_fixed"]}
         self._expect_value_error(
@@ -1019,7 +1055,7 @@ class TestHierarchicalLinearRegression:
                 coords=self.coords,
                 non_centered=False,
             ),
-            "Missing required priors for centered parameterization: sigma_random.",
+            "Missing required custom priors for centered parameterization: sigma_random.",
         )
 
     def test_noncentered_requires_beta_group_prior(self) -> None:
@@ -1036,7 +1072,7 @@ class TestHierarchicalLinearRegression:
                 coords=self.coords,
                 non_centered=True,
             ),
-            "Missing required priors for non-centered parameterization: beta_group.",
+            "Missing required custom priors for non-centered parameterization: beta_group.",
         )
 
     def test_centered_build_model_uses_centered_random_effects(self) -> None:

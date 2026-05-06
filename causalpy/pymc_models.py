@@ -609,6 +609,8 @@ class HierarchicalLinearRegression(PyMCModel):
 
     Set priors with keys ``beta_fixed``, ``sigma_random``, ``sigma_fixed``, and ``beta_group``.
 
+    Defaults priors are used only when no prior dict is supplied; custom priors must be complete for the selected parameterization.
+
     Example
     --------
     >>> import numpy as np
@@ -666,6 +668,31 @@ class HierarchicalLinearRegression(PyMCModel):
     >>> "mu" in idata.posterior
     True
     """
+
+    default_priors = {
+        "beta_fixed": Prior(
+            "Normal",
+            mu=0,
+            sigma=10,
+            dims=["treated_units", "coeffs"],
+        ),
+        "sigma_fixed": Prior(
+            "HalfNormal",
+            sigma=1,
+            dims=["treated_units"],
+        ),
+        "sigma_random": Prior(
+            "HalfNormal",
+            sigma=1,
+            dims=["treated_units", "random_coeffs"],
+        ),
+        "beta_group": Prior(
+            "Normal",
+            mu=0,
+            sigma=1,
+            dims=["groups", "treated_units", "random_coeffs"],
+        ),
+    }
 
     def _build_model_noncentered(
         self,
@@ -844,12 +871,17 @@ class HierarchicalLinearRegression(PyMCModel):
 
         required_priors = required_models_priors[parameterization]
 
-        missing_priors = sorted(required_priors.difference(self.priors))
+        priors_to_check = (
+            self._user_priors if self._user_priors is not None else self.priors
+        )
+        missing_priors = sorted(required_priors.difference(priors_to_check))
 
         if missing_priors:
             missing = ", ".join(missing_priors)
+            prior_source = "custom" if self._user_priors is not None else "configured"
             raise ValueError(
-                f"Missing required priors for {parameterization} parameterization: {missing}."
+                f"Missing required priors for {parameterization} parameterization: {missing}.\n"
+                f"Missing required {prior_source} priors for {parameterization} parameterization: {missing}."
             )
 
         if non_centered:
