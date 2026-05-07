@@ -47,7 +47,7 @@ dependencies = [
     "matplotlib>=3.5.3",
     "numpy",
     "pandas",
-    "patsy",
+    "formulaic",
     "pymc>=5.15.1",
     "pytensor>=2.38.1",
     "scikit-learn>=1",
