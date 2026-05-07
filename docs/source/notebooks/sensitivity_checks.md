@@ -177,3 +177,9 @@ For the pipeline mechanics, see {doc}`pipeline-workflow`. For HTML reporting of 
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
 
 :::
+
+## References
+
+:::{bibliography}
+:filter: docname in docnames
+:::
