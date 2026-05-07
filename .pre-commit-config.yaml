@@ -95,6 +95,8 @@ repos:
         args:
           - -e
           - dev
+          - -e
+          - test
           - -o
           - environment.yml
           - -n

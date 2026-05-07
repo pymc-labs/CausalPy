@@ -60,7 +60,7 @@ jobs:
         run: pip install "pyproject2conda>=0.22.1,<0.23"
       - name: Regenerate environment.yml (same args as local prek hook config)
         run: |
-          pyproject2conda yaml -e dev -o /tmp/environment.generated.yml -n CausalPy \
+          pyproject2conda yaml -e dev -e test -o /tmp/environment.generated.yml -n CausalPy \
             -w force --no-header \
             --python-include "python>=3.12" \
             -d make -d pip -d pymc-bart -r "marimo[mcp]"
@@ -95,13 +95,11 @@ jobs:
         with:
           environment-file: environment.yml
           environment-name: CausalPy
-          # Pin python to the matrix version and add test-only deps that are
-          # not in environment.yml (it is generated with `-e dev`, not `-e test`).
+          # Pin python to the matrix version. All other deps (including
+          # test-only ones) come from environment.yml, regenerated from
+          # pyproject.toml's `dev` + `test` extras via pyproject2conda.
           create-args: >-
             python=${{ matrix.python-version }}
-            pytest
-            pytest-cov
-            papermill
           cache-environment: true
       - name: Install package
         # --no-deps so pip does not pull pip-built pymc/pytensor on top of the
