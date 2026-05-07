@@ -12,5 +12,4 @@ structural_causal_models.ipynb
 custom_pymc_models.ipynb
 causal_video_resources
 causal_written_resources
-../references
 :::

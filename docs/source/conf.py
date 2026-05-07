@@ -15,7 +15,6 @@ import sys
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
@@ -75,7 +74,6 @@ extensions = [
     "sphinx_design",
     "sphinx_sitemap",
     "sphinx_togglebutton",
-    "strip_citation_labels",
 ]
 
 nb_execution_mode = "off"
@@ -96,8 +94,10 @@ master_doc = "index"
 
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
-bibtex_default_style = "alpha"
+bibtex_default_style = "unsrt"
 bibtex_reference_style = "author_year"
+
+suppress_warnings = ["bibtex.duplicate_citation", "bibtex.duplicate_label"]
 
 
 # numpydoc and autodoc typehints config
@@ -156,7 +156,6 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
