@@ -95,6 +95,7 @@ docs = [
     "ipywidgets",
     "sphinx-design",
     "sphinx-togglebutton",
+    "sphinxext-rediraffe",
 ]
 lint = ["interrogate", "prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "codespell", "nbformat", "nbconvert", "papermill"]

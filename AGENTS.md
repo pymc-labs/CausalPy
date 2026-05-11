@@ -38,7 +38,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 ## Documentation
 
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
-- **Notebook naming**: Use pattern `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`), organized by causal method
+- **Notebook naming**: Use lowercase hyphen-separated words with the full method name spelled out, then the dataset/variant token (if any), then the backend (`pymc` or `sklearn`). Pattern: `{method}[-{variant}]-{backend}.ipynb` (e.g., `difference-in-differences-pymc.ipynb`, `regression-discontinuity-drinking-sklearn.ipynb`, `synthetic-control-brexit-pymc.ipynb`). Prefer descriptive words over acronyms for SEO: `interrupted-time-series` over `its`, `regression-discontinuity` over `rd`, `synthetic-control` over `sc`, `instrumental-variables` over `iv`. When renaming an existing notebook, add an entry to `rediraffe_redirects` in `docs/source/conf.py` so the old URL keeps working.
 - **MyST directives**: Use `:::{note}` and other MyST features for callouts and formatting
 - **Glossary linking**: Link to glossary terms (defined in `glossary.rst`) on first mention in a file:
   - In Markdown files (`.md`, `.ipynb`): Use MyST syntax `{term}glossary term``

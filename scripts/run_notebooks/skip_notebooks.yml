@@ -3,5 +3,5 @@
 # These notebooks are skipped for various reasons documented below.
 
 # Requires JAX which is not installed in the test environment.
-- iv_pymc.ipynb
-- iv_weak_instruments.ipynb
+- instrumental-variables-pymc.ipynb
+- instrumental-variables-weak-instruments.ipynb

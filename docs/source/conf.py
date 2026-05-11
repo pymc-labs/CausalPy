@@ -75,8 +75,47 @@ extensions = [
     "sphinx_design",
     "sphinx_sitemap",
     "sphinx_togglebutton",
+    "sphinxext.rediraffe",
     "strip_citation_labels",
 ]
+
+# -- Redirects for renamed notebooks (issue #840) ---------------------------
+# Maps old docnames to new docnames so legacy URLs keep resolving.
+rediraffe_redirects = {
+    "notebooks/ancova_pymc": "notebooks/ancova-pymc",
+    "notebooks/did_pymc": "notebooks/difference-in-differences-pymc",
+    "notebooks/did_pymc_banks": "notebooks/difference-in-differences-banks-pymc",
+    "notebooks/did_skl": "notebooks/difference-in-differences-sklearn",
+    "notebooks/geolift1": "notebooks/geolift-single-cell",
+    "notebooks/inv_prop_latent": "notebooks/inverse-propensity-latent",
+    "notebooks/inv_prop_pymc": "notebooks/inverse-propensity-pymc",
+    "notebooks/its_covid": "notebooks/interrupted-time-series-covid",
+    "notebooks/its_lift_test": "notebooks/interrupted-time-series-lift-test",
+    "notebooks/its_post_intervention_analysis": "notebooks/interrupted-time-series-post-intervention-analysis",
+    "notebooks/its_pymc": "notebooks/interrupted-time-series-pymc",
+    "notebooks/its_pymc_comparative": "notebooks/interrupted-time-series-comparative-pymc",
+    "notebooks/its_skl": "notebooks/interrupted-time-series-sklearn",
+    "notebooks/iv_pymc": "notebooks/instrumental-variables-pymc",
+    "notebooks/iv_vs_priors": "notebooks/instrumental-variables-variable-selection-priors",
+    "notebooks/iv_weak_instruments": "notebooks/instrumental-variables-weak-instruments",
+    "notebooks/multi_cell_geolift": "notebooks/multi-cell-geolift",
+    "notebooks/panel_fixed_effects": "notebooks/panel-fixed-effects",
+    "notebooks/piecewise_its_pymc": "notebooks/piecewise-interrupted-time-series-pymc",
+    "notebooks/pipeline_workflow": "notebooks/pipeline-workflow",
+    "notebooks/rd_donut_pymc": "notebooks/regression-discontinuity-donut-pymc",
+    "notebooks/rd_pymc": "notebooks/regression-discontinuity-pymc",
+    "notebooks/rd_pymc_drinking": "notebooks/regression-discontinuity-drinking-pymc",
+    "notebooks/rd_skl": "notebooks/regression-discontinuity-sklearn",
+    "notebooks/rd_skl_drinking": "notebooks/regression-discontinuity-drinking-sklearn",
+    "notebooks/report_demo": "notebooks/reporting-demo",
+    "notebooks/rkink_pymc": "notebooks/regression-kink-pymc",
+    "notebooks/sc_pymc": "notebooks/synthetic-control-pymc",
+    "notebooks/sc_pymc_brexit": "notebooks/synthetic-control-brexit-pymc",
+    "notebooks/sc_skl": "notebooks/synthetic-control-sklearn",
+    "notebooks/staggered_did_pymc": "notebooks/staggered-difference-in-differences-pymc",
+}
+rediraffe_branch = "main"
+rediraffe_auto_redirect_perc = 0
 
 nb_execution_mode = "off"
 
