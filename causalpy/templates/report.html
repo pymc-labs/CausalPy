@@ -120,6 +120,13 @@
         {% if check_result.text %}
         <p>{{ check_result.text }}</p>
         {% endif %}
+        {% if check_result.figure_b64_list %}
+        {% for fig_b64 in check_result.figure_b64_list %}
+        <div class="plot">
+            <img src="data:image/png;base64,{{ fig_b64 | safe }}" alt="{{ check_result.check_name }} figure">
+        </div>
+        {% endfor %}
+        {% endif %}
         {% if check_result.table_html %}
         {{ check_result.table_html | safe }}
         {% endif %}

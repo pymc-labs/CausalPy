@@ -24,8 +24,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import matplotlib.pyplot as plt
 import pandas as pd
 
+from causalpy.checks._plot_helpers import forest_plot
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -48,6 +50,57 @@ class PlaceboInSpace:
     """
 
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}
+
+    @staticmethod
+    def plot(
+        result: CheckResult,
+        *,
+        baseline_stats: Any | None = None,
+        treated_label: str = "treated",
+        figsize: tuple[float, float] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Forest plot of placebo effects with the actual treated unit highlighted.
+
+        Parameters
+        ----------
+        result : CheckResult
+            The ``CheckResult`` returned by :meth:`run`.
+        baseline_stats : EffectSummary, optional
+            The original experiment's ``effect_summary()``.  When provided
+            the actual treated unit is appended and highlighted.
+        treated_label : str
+            Label for the actual treated unit row.
+        figsize : tuple, optional
+            Passed to matplotlib.
+
+        Returns
+        -------
+        tuple[plt.Figure, plt.Axes]
+        """
+        baseline_row = None
+        if baseline_stats is not None and baseline_stats.table is not None:
+            tbl = baseline_stats.table
+            baseline_row = {
+                "mean": tbl["mean"].iloc[0],
+                "hdi_lower": tbl["hdi_lower"].iloc[0],
+                "hdi_upper": tbl["hdi_upper"].iloc[0],
+            }
+
+        if result.table is None:
+            raise ValueError("Cannot plot: CheckResult has no table.")
+
+        return forest_plot(
+            result.table,
+            label_col="placebo_treated",
+            baseline_row=baseline_row,
+            baseline_label=treated_label,
+            xlabel="Average causal impact",
+            title="Placebo-in-space: treated vs. placebo units",
+            figsize=figsize,
+            baseline_color="C3",
+            comparison_color="C0",
+            highlight_color="C3",
+        )
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Verify the experiment is a SyntheticControl instance."""
@@ -130,9 +183,28 @@ class PlaceboInSpace:
             f"weakened."
         )
 
-        return CheckResult(
+        baseline_stats = experiment.effect_summary()
+
+        check_result = CheckResult(
             check_name="PlaceboInSpace",
             passed=None,
             table=table,
             text=text,
         )
+
+        if table is not None and not table.empty:
+            try:
+                fig, _ = self.plot(
+                    check_result,
+                    baseline_stats=baseline_stats,
+                    treated_label=(
+                        actual_treated[0] + " (treated)"
+                        if actual_treated
+                        else "treated"
+                    ),
+                )
+                check_result.figures = [fig]
+            except Exception:
+                logger.debug("PlaceboInSpace: could not generate figure", exc_info=True)
+
+        return check_result

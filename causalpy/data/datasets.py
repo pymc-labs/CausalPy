@@ -62,6 +62,7 @@ REAL_WORLD_DATASETS: dict[str, str] = {
     "brexit": "GDP_in_dollars_billions.csv",
     "covid": "deaths_and_temps_england_wales.csv",
     "drinking": "drinking.csv",
+    "prop99": "california_prop99.csv",
     "risk": "AJR2001.csv",
     "nhefs": "nhefs.csv",
     "schoolReturns": "schoolingReturns.csv",
@@ -95,6 +96,9 @@ def load_data(dataset: str) -> pd.DataFrame:
         - ``"its simple"`` - Simplified interrupted time series dataset
         - ``"rd"`` - Regression discontinuity example dataset
         - ``"sc"`` - Synthetic control example dataset
+        - ``"prop99"`` - California Proposition 99 tobacco control dataset for
+          synthetic control. Per-capita cigarette pack sales across 39 US states,
+          1970--2000 (Abadie, Diamond & Hainmueller, 2010).
         - ``"anova1"`` - ANCOVA example with pre/post treatment nonequivalent groups
         - ``"geolift1"`` - Single treatment geo-lift dataset for synthetic control
         - ``"geolift_multi_cell"`` - Multi-cell geo-lift dataset for synthetic control

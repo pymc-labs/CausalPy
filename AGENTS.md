@@ -67,6 +67,10 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
 - **Public `plot()` signatures**: ``BaseExperiment`` deliberately does **not** define a public ``plot()`` method. Every concrete experiment subclass must declare its own ``plot()`` with an explicit, kwarg-only signature (using ``*,``); bare ``*args`` and ``**kwargs`` are forbidden at the public surface because they silently swallow real, supported parameters and hide them from Sphinx, IDE autocomplete, and ``help()``. The body of ``plot()`` should delegate to the protected helper ``self._render_plot(...)`` (which applies the shared style context, dispatches to ``_bayesian_plot`` / ``_ols_plot``, applies ``legend_kwargs``, and optionally calls ``plt.show()``). Document every parameter in the docstring's ``Parameters`` block — the test ``causalpy/tests/test_public_plot_signatures.py`` and the ``numpydoc-validation`` pre-commit hook enforce this. For experiments without a unified plot view (e.g. ``InversePropensityWeighting``, ``InstrumentalVariable``), still declare an explicit ``plot()`` stub that raises ``NotImplementedError`` and points at the bespoke alternatives. For ``hdi_prob`` defaults, use the prose pattern (``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).``) rather than the numpydoc ``default=...`` slot, so the cross-reference renders.
 
+## Committing and pushing
+
+- **Check for unsaved notebooks**: Before committing, ask the user whether they have any unsaved notebooks or files open in the IDE. Notebooks in particular may contain expensive-to-recompute cell outputs that haven't been written to disk yet. The agent cannot detect unsaved IDE state, so always prompt the user to confirm all files are saved before staging and committing.
+
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
