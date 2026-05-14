@@ -171,12 +171,18 @@ class PowerCurveResult:
         The detection criterion used.
     raw_results : list[list[DressRehearsalResult]]
         Nested list: per effect size, per simulation.
+    noise_method : str
+        Residual-noise simulation method used.
+    block_length : int or None
+        Block length used for block-bootstrap residual noise, if applicable.
     """
 
     effect_sizes: list[float]
     detection_rates: list[float]
     criterion: str
     raw_results: list[list[DressRehearsalResult]] = field(repr=False)
+    noise_method: str = "iid_gaussian"
+    block_length: int | None = None
 
     def plot(self) -> tuple[plt.Figure, plt.Axes]:
         """Power curve: effect size vs detection rate."""
@@ -214,6 +220,8 @@ class PowerCurveResult:
                     "mean_recovery": np.mean(means),
                     "median_recovery": np.median(means),
                     "n_simulations": len(sim_results),
+                    "noise_method": self.noise_method,
+                    "block_length": self.block_length,
                 }
             )
         return pd.DataFrame(rows)

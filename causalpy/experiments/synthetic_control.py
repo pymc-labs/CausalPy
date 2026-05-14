@@ -1155,11 +1155,40 @@ class SyntheticControl(BaseExperiment):
         holdout_periods: int | None = None,
         sample_kwargs: dict | None = None,
         random_seed: int | None = None,
+        noise_method: Literal[
+            "iid_gaussian", "block_bootstrap", "ar1"
+        ] = "iid_gaussian",
+        block_length: int | None = None,
     ) -> PowerCurveResult:
         """Simulation-based Bayesian power curve.
 
         For each candidate effect size, runs :meth:`validate_design`
-        multiple times (with added noise) and records detection rates.
+        multiple times (with added residual noise) and records detection
+        rates. The simulation perturbs only the treated unit's pre-period
+        outcomes; donor paths, the model class, the candidate effect size,
+        and the design are fixed across simulations.
+
+        The default ``noise_method="iid_gaussian"`` preserves the original
+        implementation: it adds iid Gaussian noise with standard deviation
+        equal to the posterior-mean pre-period residual standard deviation.
+        This is a heuristic sensitivity calculation. It assumes independent,
+        homoscedastic Gaussian residual variation, and is not a canonical
+        synthetic-control sampling-distribution power analysis. No clean
+        synthetic-control reference is known for this exact treated-only
+        resampling scheme.
+
+        ``"block_bootstrap"`` and ``"ar1"`` are opt-in sensitivity checks
+        for short-range residual dependence. They are not universally better
+        replacements for iid Gaussian noise. All methods rely on
+        posterior-mean residuals and do not address donor-pool uncertainty,
+        heteroscedasticity, seasonality, posterior-predictive design priors,
+        or pseudo-post misfit bias. Users should compare noise methods and
+        cross-check the resulting curve with placebo-in-space and
+        placebo-in-time diagnostics. The block bootstrap samples overlapping
+        moving blocks of centered residuals. The AR(1) method centers the
+        residuals, estimates the lag-1 coefficient by least squares with no
+        intercept, clips it to ``[-0.99, 0.99]``, and simulates innovations
+        from the fitted residual innovation scale.
 
         Parameters
         ----------
@@ -1181,7 +1210,20 @@ class SyntheticControl(BaseExperiment):
         sample_kwargs : dict or None
             MCMC sampling arguments for refitted models.
         random_seed : int or None
-            RNG seed for reproducible noise injection.
+            RNG seed for reproducible noise injection. When provided and
+            ``sample_kwargs`` does not contain ``"random_seed"``, deterministic
+            per-refit PyMC seeds are drawn from the same RNG.
+        noise_method : {"iid_gaussian", "block_bootstrap", "ar1"}
+            Residual-noise simulation method. ``"iid_gaussian"`` keeps the
+            original iid Gaussian behavior. ``"block_bootstrap"`` resamples
+            contiguous centered residual blocks. ``"ar1"`` estimates and
+            simulates a zero-mean AR(1) residual path.
+        block_length : int or None
+            Block length for ``noise_method="block_bootstrap"``. If ``None``,
+            uses ``ceil(sqrt(n_pre))``, bounded to the pre-period length.
+            ``noise_method="ar1"`` requires at least 3 pre-period residuals;
+            use ``"iid_gaussian"`` or ``"block_bootstrap"`` for very short
+            pre-periods.
 
         Returns
         -------
@@ -1195,12 +1237,16 @@ class SyntheticControl(BaseExperiment):
 
         rng = np.random.default_rng(random_seed)
 
-        pre = self.datapre
-        residuals = self.pre_impact
-        if "treated_units" in residuals.dims:
-            residuals = residuals.isel(treated_units=0)
-        residual_std = float(
-            residuals.mean(dim=["chain", "draw"]).std(dim="obs_ind").values
+        residual_path = self._pre_period_residual_path()
+        self._validate_power_analysis_noise_args(
+            residual_path=residual_path,
+            noise_method=noise_method,
+            block_length=block_length,
+        )
+        resolved_block_length = (
+            self._resolve_power_analysis_block_length(block_length, len(residual_path))
+            if noise_method == "block_bootstrap"
+            else None
         )
 
         all_results: list[list[DressRehearsalResult]] = []
@@ -1215,19 +1261,35 @@ class SyntheticControl(BaseExperiment):
 
             for _sim_idx in range(n_simulations):
                 noise_data = self.data.copy()
-                noise = rng.normal(0, residual_std, size=len(pre))
+                noise = self._simulate_power_analysis_noise(
+                    residual_path=residual_path,
+                    rng=rng,
+                    noise_method=noise_method,
+                    block_length=resolved_block_length,
+                )
                 for col in self.treated_units:
                     noise_data.loc[noise_data.index < self.treatment_time, col] += noise
 
+                build_sample_kwargs = self._sample_kwargs_with_generated_seed(
+                    sample_kwargs=sample_kwargs,
+                    rng=rng,
+                    random_seed=random_seed,
+                )
+                validate_sample_kwargs = self._sample_kwargs_with_generated_seed(
+                    sample_kwargs=sample_kwargs,
+                    rng=rng,
+                    random_seed=random_seed,
+                )
+
                 noise_experiment = self._build_noisy_experiment(
-                    noise_data, sample_kwargs
+                    noise_data, build_sample_kwargs
                 )
 
                 result = noise_experiment.validate_design(
                     injected_effect=es,
                     holdout_periods=holdout_periods,
                     effect_type=effect_type,
-                    sample_kwargs=sample_kwargs,
+                    sample_kwargs=validate_sample_kwargs,
                 )
                 sim_results.append(result)
 
@@ -1252,7 +1314,159 @@ class SyntheticControl(BaseExperiment):
             detection_rates=detection_rates,
             criterion=criterion,
             raw_results=all_results,
+            noise_method=noise_method,
+            block_length=resolved_block_length,
         )
+
+    def _pre_period_residual_path(self) -> np.ndarray:
+        """Posterior-mean pre-period residual path used for power-analysis noise."""
+        residuals = self.pre_impact
+        if "treated_units" in residuals.dims:
+            residuals = residuals.isel(treated_units=0)
+        residual_path = residuals.mean(dim=["chain", "draw"])
+        return np.asarray(residual_path.values, dtype=float).reshape(-1)
+
+    @classmethod
+    def _validate_power_analysis_noise_args(
+        cls,
+        residual_path: np.ndarray,
+        noise_method: str,
+        block_length: int | None,
+    ) -> None:
+        """Validate residual-noise simulation arguments before refitting models."""
+        n_obs = len(residual_path)
+        if n_obs < 1:
+            raise ValueError("power_analysis() requires at least one pre-period row.")
+        if noise_method not in {"iid_gaussian", "block_bootstrap", "ar1"}:
+            raise ValueError(f"Unknown noise_method: {noise_method}")
+        if noise_method == "block_bootstrap":
+            cls._resolve_power_analysis_block_length(block_length, n_obs)
+        if noise_method == "ar1" and n_obs < 3:
+            raise ValueError(
+                'noise_method="ar1" requires at least 3 pre-period residuals. '
+                'Use noise_method="iid_gaussian" or "block_bootstrap" for very '
+                "short pre-periods."
+            )
+
+    @classmethod
+    def _simulate_power_analysis_noise(
+        cls,
+        residual_path: np.ndarray,
+        rng: np.random.Generator,
+        noise_method: str,
+        block_length: int | None,
+    ) -> np.ndarray:
+        """Simulate one residual-noise path for ``power_analysis``."""
+        cls._validate_power_analysis_noise_args(
+            residual_path=residual_path,
+            noise_method=noise_method,
+            block_length=block_length,
+        )
+        if noise_method == "iid_gaussian":
+            return cls._simulate_iid_gaussian_noise(residual_path, rng)
+        if noise_method == "block_bootstrap":
+            return cls._simulate_block_bootstrap_noise(
+                residual_path=residual_path,
+                rng=rng,
+                block_length=block_length,
+            )
+        return cls._simulate_ar1_noise(residual_path, rng)
+
+    @staticmethod
+    def _simulate_iid_gaussian_noise(
+        residual_path: np.ndarray,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Simulate iid Gaussian residual noise using the original scalar scale."""
+        residual_std = float(np.std(residual_path))
+        return rng.normal(0, residual_std, size=len(residual_path))
+
+    @staticmethod
+    def _resolve_power_analysis_block_length(
+        block_length: int | None,
+        n_obs: int,
+    ) -> int:
+        """Resolve and validate the moving-block bootstrap block length."""
+        if block_length is None:
+            return max(1, min(n_obs, int(np.ceil(np.sqrt(n_obs)))))
+        if block_length < 1 or block_length > n_obs:
+            raise ValueError(
+                "block_length must be between 1 and the number of pre-period "
+                f"residuals ({n_obs}); got {block_length}."
+            )
+        return block_length
+
+    @classmethod
+    def _simulate_block_bootstrap_noise(
+        cls,
+        residual_path: np.ndarray,
+        rng: np.random.Generator,
+        block_length: int | None,
+    ) -> np.ndarray:
+        """Resample centered residuals in overlapping contiguous blocks."""
+        residuals = np.asarray(residual_path, dtype=float)
+        n_obs = len(residuals)
+        resolved_block_length = cls._resolve_power_analysis_block_length(
+            block_length, n_obs
+        )
+        centered = residuals - residuals.mean()
+        max_start = n_obs - resolved_block_length
+        n_blocks = int(np.ceil(n_obs / resolved_block_length))
+        starts = rng.integers(0, max_start + 1, size=n_blocks)
+        blocks = [centered[start : start + resolved_block_length] for start in starts]
+        return np.concatenate(blocks)[:n_obs]
+
+    @staticmethod
+    def _simulate_ar1_noise(
+        residual_path: np.ndarray,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Estimate and simulate a zero-mean AR(1) residual path."""
+        residuals = np.asarray(residual_path, dtype=float)
+        n_obs = len(residuals)
+        if n_obs < 3:
+            raise ValueError(
+                'noise_method="ar1" requires at least 3 pre-period residuals. '
+                'Use noise_method="iid_gaussian" or "block_bootstrap" for very '
+                "short pre-periods."
+            )
+
+        centered = residuals - residuals.mean()
+        if float(np.var(centered)) == 0:
+            return np.zeros(n_obs)
+
+        lagged = centered[:-1]
+        current = centered[1:]
+        denominator = float(np.dot(lagged, lagged))
+        phi = 0.0 if denominator == 0 else float(np.dot(lagged, current) / denominator)
+        phi = float(np.clip(phi, -0.99, 0.99))
+
+        innovations = current - phi * lagged
+        innovation_std = float(np.std(innovations))
+        if innovation_std == 0:
+            return np.zeros(n_obs)
+
+        simulated = np.empty(n_obs)
+        simulated[0] = rng.normal(0, innovation_std / np.sqrt(1 - phi**2))
+        shocks = rng.normal(0, innovation_std, size=n_obs - 1)
+        for idx in range(1, n_obs):
+            simulated[idx] = phi * simulated[idx - 1] + shocks[idx - 1]
+        return simulated
+
+    @staticmethod
+    def _sample_kwargs_with_generated_seed(
+        sample_kwargs: dict | None,
+        rng: np.random.Generator,
+        random_seed: int | None,
+    ) -> dict | None:
+        """Add a deterministic PyMC seed unless the user supplied one."""
+        if random_seed is None:
+            return sample_kwargs
+
+        seeded_kwargs = dict(sample_kwargs) if sample_kwargs is not None else {}
+        if "random_seed" not in seeded_kwargs:
+            seeded_kwargs["random_seed"] = int(rng.integers(0, np.iinfo(np.int32).max))
+        return seeded_kwargs
 
     def _build_noisy_experiment(
         self,

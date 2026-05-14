@@ -17,6 +17,7 @@ validate_design(), power_analysis(), and donor_pool_quality().
 """
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
@@ -28,6 +29,7 @@ from causalpy.experiments.sc_results import (
     DressRehearsalResult,
     PowerCurveResult,
 )
+from causalpy.experiments.synthetic_control import SyntheticControl
 
 sample_kwargs = {
     "tune": 20,
@@ -40,6 +42,21 @@ sample_kwargs = {
 
 CONTROL_UNITS = ["a", "b", "c", "d", "e", "f", "g"]
 TREATED_UNITS = ["actual"]
+
+
+def _lag1_autocorrelation(values):
+    """Lag-1 autocorrelation for synthetic noise sanity checks."""
+    return np.corrcoef(values[:-1], values[1:])[0, 1]
+
+
+def _synthetic_ar1_residuals(n_obs=200, phi=0.85, random_seed=123):
+    """Generate a deterministic positively autocorrelated residual path."""
+    rng = np.random.default_rng(random_seed)
+    residuals = np.zeros(n_obs)
+    shocks = rng.normal(0, 1, size=n_obs - 1)
+    for idx in range(1, n_obs):
+        residuals[idx] = phi * residuals[idx - 1] + shocks[idx - 1]
+    return residuals
 
 
 @pytest.fixture(scope="module")
@@ -290,6 +307,8 @@ class TestPowerAnalysis:
         assert "effect_size" in df.columns
         assert "detection_rate" in df.columns
         assert "n_simulations" in df.columns
+        assert "noise_method" in df.columns
+        assert set(df["noise_method"]) == {"iid_gaussian"}
 
     @pytest.mark.integration
     def test_power_analysis_reproducible(self, fitted_sc):
@@ -302,6 +321,108 @@ class TestPowerAnalysis:
         r1 = fitted_sc.power_analysis(**kwargs)
         r2 = fitted_sc.power_analysis(**kwargs)
         assert r1.detection_rates == r2.detection_rates
+
+    @pytest.mark.integration
+    def test_power_analysis_accepts_block_bootstrap_noise_method(self, fitted_sc):
+        result = fitted_sc.power_analysis(
+            effect_sizes=[0.10],
+            n_simulations=1,
+            sample_kwargs=sample_kwargs,
+            random_seed=42,
+            noise_method="block_bootstrap",
+        )
+        assert isinstance(result, PowerCurveResult)
+        assert result.noise_method == "block_bootstrap"
+        assert result.block_length is not None
+
+    @pytest.mark.integration
+    def test_power_analysis_accepts_ar1_noise_method(self, fitted_sc):
+        result = fitted_sc.power_analysis(
+            effect_sizes=[0.10],
+            n_simulations=1,
+            sample_kwargs=sample_kwargs,
+            random_seed=42,
+            noise_method="ar1",
+        )
+        assert isinstance(result, PowerCurveResult)
+        assert result.noise_method == "ar1"
+
+    def test_power_analysis_rejects_unknown_noise_method(self, fitted_sc):
+        with pytest.raises(ValueError, match="Unknown noise_method"):
+            fitted_sc.power_analysis(
+                effect_sizes=[0.10],
+                n_simulations=1,
+                sample_kwargs=sample_kwargs,
+                noise_method="not_a_method",
+            )
+
+    def test_power_analysis_rejects_invalid_block_length(self, fitted_sc):
+        with pytest.raises(ValueError, match="block_length"):
+            fitted_sc.power_analysis(
+                effect_sizes=[0.10],
+                n_simulations=1,
+                sample_kwargs=sample_kwargs,
+                noise_method="block_bootstrap",
+                block_length=0,
+            )
+
+    def test_ar1_noise_rejects_very_short_pre_period(self):
+        with pytest.raises(ValueError, match="at least 3 pre-period residuals"):
+            SyntheticControl._simulate_power_analysis_noise(
+                residual_path=np.array([0.1, -0.1]),
+                rng=np.random.default_rng(42),
+                noise_method="ar1",
+                block_length=None,
+            )
+
+    def test_noise_helpers_are_reproducible_with_same_seed(self):
+        residuals = _synthetic_ar1_residuals()
+        for noise_method in ("iid_gaussian", "block_bootstrap", "ar1"):
+            noise_1 = SyntheticControl._simulate_power_analysis_noise(
+                residual_path=residuals,
+                rng=np.random.default_rng(42),
+                noise_method=noise_method,
+                block_length=10 if noise_method == "block_bootstrap" else None,
+            )
+            noise_2 = SyntheticControl._simulate_power_analysis_noise(
+                residual_path=residuals,
+                rng=np.random.default_rng(42),
+                noise_method=noise_method,
+                block_length=10 if noise_method == "block_bootstrap" else None,
+            )
+            np.testing.assert_array_equal(noise_1, noise_2)
+
+    def test_block_bootstrap_noise_preserves_positive_autocorrelation(self):
+        residuals = _synthetic_ar1_residuals()
+        rng = np.random.default_rng(42)
+        autocorrelations = [
+            _lag1_autocorrelation(
+                SyntheticControl._simulate_power_analysis_noise(
+                    residual_path=residuals,
+                    rng=rng,
+                    noise_method="block_bootstrap",
+                    block_length=20,
+                )
+            )
+            for _ in range(100)
+        ]
+        assert np.mean(autocorrelations) > 0.4
+
+    def test_ar1_noise_preserves_positive_autocorrelation(self):
+        residuals = _synthetic_ar1_residuals()
+        rng = np.random.default_rng(42)
+        autocorrelations = [
+            _lag1_autocorrelation(
+                SyntheticControl._simulate_power_analysis_noise(
+                    residual_path=residuals,
+                    rng=rng,
+                    noise_method="ar1",
+                    block_length=None,
+                )
+            )
+            for _ in range(100)
+        ]
+        assert np.mean(autocorrelations) > 0.6
 
     def test_power_analysis_requires_pymc(self):
         df = cp.load_data("sc")
