@@ -106,7 +106,7 @@ class InversePropensityWeighting(BaseExperiment):
         """
         t, X = dmatrices(self.formula, self.data)
         self._t_design_info = t.design_info
-        self._t_design_info = X.design_info
+        self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.t, self.X = np.asarray(t), np.asarray(X)
         self.y = self.data[self.outcome_variable]
