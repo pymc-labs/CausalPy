@@ -17,6 +17,7 @@ causalpy.experiments.DifferenceInDifferences(
 ```
 
 ### Parameters
+
 *   **`data`** (`pd.DataFrame`): Input dataframe containing panel data.
 *   **`formula`** (`str`): Statistical formula (e.g., `"y ~ 1 + group * post_treatment"`).
 *   **`time_variable_name`** (`str`): Column name for the time variable.
@@ -25,6 +26,7 @@ causalpy.experiments.DifferenceInDifferences(
 *   **`model`**: A PyMC model (e.g., `cp.pymc_models.LinearRegression`) or a Scikit-Learn Regressor.
 
 ### How it Works
+
 1.  **Fit**: The model fits all available data (pre/post, treatment/control).
 2.  **Counterfactual**: Predicted by setting the interaction term between `group` and `post_treatment` to 0.
 3.  **Impact**: The causal impact is the difference between observed and counterfactual.

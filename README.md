@@ -31,7 +31,6 @@ CausalPy helps you estimate causal effects with transparent assumptions, uncerta
 - **Bayesian-first estimation** via [PyMC](https://www.pymc.io/) with full uncertainty quantification, plus traditional OLS via [scikit-learn](https://scikit-learn.org)
 - **Decision-ready outputs:** Effect summaries with credible intervals (HDI), practical significance (ROPE), and publication-quality plots
 
-
 ## 📞 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
 
 CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call. _These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation below._
@@ -151,7 +150,7 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 
 If you use CausalPy in your research, please cite it. A Zenodo DOI for stable releases is planned. In the meantime, you can cite the repository:
 
-```
+```bibtex
 @software{causalpy,
   author = {{PyMC Labs}},
   title = {CausalPy: Causal inference for quasi-experiments in Python},

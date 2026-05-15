@@ -43,6 +43,7 @@ gh api graphql -f query='query { __type(name:"Mutation") { fields { name } } }'
 ## 3) Draft issue bodies for user review
 
 Create markdown drafts in `.scratch/issue_summaries/` for:
+
 - one parent tracking issue
 - one draft per child issue
 

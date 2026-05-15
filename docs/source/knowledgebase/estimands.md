@@ -6,7 +6,7 @@ Understanding **what** a method estimates is just as important as knowing **how*
 
 Following {cite:t}`lundberg2021estimand`, we distinguish three interconnected concepts in causal inference:
 
-```
+```text
 Theoretical Estimand     -->  Empirical Estimand      -->  Estimator
 ```
 
