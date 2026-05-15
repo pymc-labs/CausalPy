@@ -175,9 +175,3 @@ For the pipeline mechanics, see {doc}`pipeline_workflow`. For HTML reporting of 
 - {doc}`rkink_pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
 :::
-
-## References
-
-:::{bibliography}
-:filter: docname in docnames
-:::

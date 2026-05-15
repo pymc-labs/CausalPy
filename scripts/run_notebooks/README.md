@@ -25,10 +25,13 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 2. **Install Graphviz (system dependency)**
 
    - macOS:
+
      ```bash
      brew install graphviz
      ```
+
    - Ubuntu/Debian:
+
      ```bash
      sudo apt-get update && sudo apt-get install -y graphviz
      ```

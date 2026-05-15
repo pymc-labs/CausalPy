@@ -43,6 +43,7 @@ When you use PyMC models, CausalPy performs Bayesian inference, yielding posteri
 ### Point Estimates
 
 **Mean**
+
 - The average of the posterior distribution
 - Represents the expected value of the causal effect
 - **When to use:** Most commonly reported point estimate; balances all posterior information
@@ -72,9 +73,11 @@ The `hdi_prob` parameter controls the interval width (e.g., 0.95 for 95% HDI, 0.
 :::
 
 **Example interpretation:**
-```
+
+```text
 mean: 2.5, 95% HDI: [1.2, 3.8]
 ```
+
 "The estimated effect is 2.5 on average, and we can be 95% certain the true effect lies between 1.2 and 3.8."
 
 ### Hypothesis Testing
@@ -121,9 +124,11 @@ Unlike frequentist p-values, Bayesian posterior probabilities answer the questio
 4. For "two-sided" direction: `p_rope` = P(|effect| > min_effect)
 
 **Example:**
+
 ```python
 result.effect_summary(direction="increase", min_effect=1.0)
 ```
+
 If `p_rope = 0.85`, there's an 85% probability the effect exceeds your meaningful threshold of 1.0.
 
 :::{important}
@@ -163,9 +168,11 @@ Unlike Bayesian estimates, frequentist point estimates don't come with a probabi
 - **Larger standard errors** → wider confidence intervals → more uncertainty
 
 **Example interpretation:**
-```
+
+```text
 mean: 2.5, 95% CI: [1.1, 3.9]
 ```
+
 "The estimated effect is 2.5. If we repeated this study many times, 95% of such confidence intervals would contain the true effect."
 
 :::{important}
@@ -210,6 +217,7 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 ## Choosing Between Approaches
 
 ### When to use Bayesian inference (PyMC models):
+
 - ✅ You want direct probability statements about effects
 - ✅ You have prior information to incorporate
 - ✅ You need uncertainty quantification for complex hierarchical models
@@ -217,6 +225,7 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 - ✅ Small to moderate sample sizes where uncertainty matters
 
 ### When to use Frequentist inference (OLS models):
+
 - ✅ You need computational speed (OLS is faster)
 - ✅ Your audience expects classical statistical inference
 - ✅ Large sample sizes where approaches converge
@@ -232,6 +241,7 @@ Both approaches are valid and will often lead to similar conclusions, especially
 ## Summary Statistics by Effect Type
 
 ### Scalar Effects (DiD, RD, Regression Kink)
+
 For experiments with a single causal effect parameter:
 
 **Bayesian output:**
@@ -243,6 +253,7 @@ For experiments with a single causal effect parameter:
 - One row with: mean, ci_lower, ci_upper, p_value
 
 ### Time-Series Effects (ITS, Synthetic Control)
+
 For experiments with multiple post-treatment time points:
 
 **Two aggregation levels:**
@@ -283,6 +294,7 @@ print(summary.text)
 ```
 
 ### Basic usage (default Bayesian):
+
 ```python
 import causalpy as cp
 
@@ -296,6 +308,7 @@ print(summary.table)  # Numerical summary
 ```
 
 ### With directional hypothesis:
+
 ```python
 # Test for an increase
 summary = result.effect_summary(direction="increase")  # Reports p_gt_0
@@ -308,6 +321,7 @@ summary = result.effect_summary(direction="two-sided")  # Reports prob_of_effect
 ```
 
 ### With practical significance threshold:
+
 ```python
 # Only care about effects > 2.0
 summary = result.effect_summary(
@@ -320,6 +334,7 @@ print(summary.text)   # Prose interpretation
 ```
 
 ### For time-series experiments with custom window:
+
 ```python
 # ITS or Synthetic Control result
 summary = result.effect_summary(

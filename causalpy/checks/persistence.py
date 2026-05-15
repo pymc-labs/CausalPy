@@ -26,6 +26,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from causalpy.checks.base import CheckResult
+from causalpy.constants import HDI_PROB
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import PipelineContext
@@ -39,17 +40,18 @@ class PersistenceCheck:
 
     Parameters
     ----------
-    hdi_prob : float, default 0.95
-        HDI probability (Bayesian models only).
-    direction : str, default "increase"
-        Tail probability direction.
+    hdi_prob : float
+        HDI probability (Bayesian models only). Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+    direction : {"increase", "decrease", "two-sided"}
+        Tail probability direction. Defaults to ``"increase"``.
     """
 
     applicable_methods: set[type[BaseExperiment]] = {InterruptedTimeSeries}
 
     def __init__(
         self,
-        hdi_prob: float = 0.95,
+        hdi_prob: float = HDI_PROB,
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
     ) -> None:
         self.hdi_prob = hdi_prob

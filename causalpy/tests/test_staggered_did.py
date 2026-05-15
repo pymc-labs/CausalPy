@@ -1617,6 +1617,7 @@ def test_staggered_did_att_event_time_includes_pre_and_post_treatment():
     """Test that att_event_time_ includes both pre and post-treatment event times.
 
     This verifies the design: ATT estimates are computed for both:
+
     - Post-treatment periods (event_time >= 0): actual treatment effects
     - Pre-treatment periods (event_time < 0): placebo check for parallel trends
     """

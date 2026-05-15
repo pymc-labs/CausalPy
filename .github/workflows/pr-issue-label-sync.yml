@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Sync labels from closing issues
-        uses: williambdean/closing-labels@7a4384e0e725b80eee0142265d36c1332fda5f7a # v0.0.6
+        uses: williambdean/closing-labels@f4c2fcadcb3df832d1cb6db483d79df85647acec # v0.0.7
         with:
           exclude: "help wanted,good first issue"
           respect_unlabeled: true

@@ -26,7 +26,7 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -41,6 +41,7 @@ from causalpy.reporting import (
     _generate_table_did_ols,
 )
 from causalpy.utils import (
+    _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
     get_interaction_terms,
@@ -332,14 +333,82 @@ class DifferenceInDifferences(BaseExperiment):
         """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the difference-in-differences results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title. Defaults to ``None``, in which case 2 significant figures
+            are used.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control, treatment, and
+            counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
+            OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: Any
+        self,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """
-        Plot the results
+        Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control, treatment, and
+            counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
         """
 
         def _plot_causal_impact_arrow(results, ax):
@@ -357,6 +426,8 @@ class DifferenceInDifferences(BaseExperiment):
             y_pred_counterfactual = (
                 results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
             )
+            y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
+            y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
             # Calculate the x position to plot at
             # Note that we force to be float to avoid a type error using np.ptp with boolean
             # values
@@ -372,16 +443,19 @@ class DifferenceInDifferences(BaseExperiment):
             # Plot the arrow
             ax.annotate(
                 "",
-                xy=(x, y_pred_counterfactual),
+                xy=(x, y_pred_counterfactual_scalar),
                 xycoords="data",
-                xytext=(x, y_pred_treatment),
+                xytext=(x, y_pred_treatment_scalar),
                 textcoords="data",
                 arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
             )
             # Plot text annotation next to arrow
             ax.annotate(
                 "causal\nimpact",
-                xy=(x, np.mean([y_pred_counterfactual, y_pred_treatment])),
+                xy=(
+                    x,
+                    np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
+                ),
                 xycoords="data",
                 xytext=(5, 0),
                 textcoords="offset points",
@@ -389,7 +463,7 @@ class DifferenceInDifferences(BaseExperiment):
                 va="center",
             )
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.scatterplot(
@@ -409,6 +483,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -421,6 +496,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -461,6 +537,7 @@ class DifferenceInDifferences(BaseExperiment):
                     treated_units=0
                 ),
                 ax=ax,
+                hdi_prob=hdi_prob,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
             )
@@ -483,10 +560,22 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for difference-in-differences"""
-        fig, ax = plt.subplots()
+        """Generate plot for difference-in-differences.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
+        """
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.lineplot(
@@ -526,12 +615,14 @@ class DifferenceInDifferences(BaseExperiment):
             markersize=10,
             label="counterfactual",
         )
+        y_pred_counterfactual_scalar = _as_scalar(self.y_pred_counterfactual)
+        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment[1])
         # arrow to label the causal impact
         ax.annotate(
             "",
-            xy=(1.05, self.y_pred_counterfactual),
+            xy=(1.05, y_pred_counterfactual_scalar),
             xycoords="data",
-            xytext=(1.05, self.y_pred_treatment[1]),
+            xytext=(1.05, y_pred_treatment_post_scalar),
             textcoords="data",
             arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
         )
@@ -539,7 +630,7 @@ class DifferenceInDifferences(BaseExperiment):
             "causal\nimpact",
             xy=(
                 1.05,
-                np.mean([self.y_pred_counterfactual[0], self.y_pred_treatment[1]]),
+                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_post_scalar]),
             ),
             xycoords="data",
             xytext=(5, 0),

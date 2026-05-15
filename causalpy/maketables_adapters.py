@@ -28,6 +28,7 @@ import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import PyMCModel
 
 
@@ -144,13 +145,13 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     Priority:
     1) explicit user override via BaseExperiment.set_maketables_options()
     2) experiment-specific stored value (e.g. staggered_did hdi_prob_)
-    3) default 0.94 to align with CausalPy summary conventions
+    3) project-wide default :data:`causalpy.constants.HDI_PROB`
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        hdi_prob = getattr(experiment, "hdi_prob_", 0.94)
+        hdi_prob = getattr(experiment, "hdi_prob_", HDI_PROB)
     if hdi_prob is None:
-        hdi_prob = 0.94
+        hdi_prob = HDI_PROB
 
     try:
         hdi_prob = float(hdi_prob)

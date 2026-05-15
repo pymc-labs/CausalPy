@@ -31,4 +31,5 @@ Follows a **Plan-Execute-Verify** loop to ensure notebook correctness.
 *   **Plots**: Use `plt.gca()` or return figure. **No `plt.show()`**.
 
 ## Reference
+
 See [Best Practices](reference/best_practices.md) for code formatting, reactivity rules, and UI element usage.

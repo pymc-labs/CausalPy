@@ -30,15 +30,12 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.10
+    rev: v0.15.11
     hooks:
       # Run the linter
       - id: ruff
         types_or: [ python, pyi, jupyter ]
         args: [ --fix ]
-        # Exclude docs/ to avoid applying strict linting rules to example notebooks
-        # Remove this exclusion if you want to enforce strict rules on documentation
-        exclude: ^docs/
       # Run the formatter
       - id: ruff-format
         types_or: [ python, pyi, jupyter ]
@@ -56,6 +53,17 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  # Validate that every public ``plot()`` override on a BaseExperiment subclass
+  # keeps its numpydoc Parameters block in sync with the function signature
+  # (issue #886). Configuration lives under [tool.numpydoc_validation] in
+  # pyproject.toml and is intentionally narrow: only ``.plot`` methods are
+  # checked, only PR01/PR02 are enforced, and the base ``BaseExperiment.plot``
+  # is excluded because it uses ``*args, **kwargs`` for dispatch.
+  - repo: https://github.com/numpy/numpydoc
+    rev: v1.10.0
+    hooks:
+      - id: numpydoc-validation
+        files: ^causalpy/experiments/.*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.20.1
     hooks:
@@ -67,6 +75,16 @@ repos:
     rev: v0.25
     hooks:
       - id: validate-pyproject
+  # Lint repository Markdown files (issue #899). Configuration lives in
+  # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
+  # generated docs build are intentionally out of scope.
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.36
+    hooks:
+      - id: pymarkdown
+        args: [scan]
+        files: \.md$
+        exclude: ^(docs/_build/|\.scratch/)
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
   # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
   - repo: https://github.com/usnistgov/pyproject2conda
@@ -107,3 +125,14 @@ repos:
         language: python
         files: \.bib$
         additional_dependencies: [pybtex]
+      # Catch the Sphinx/Napoleon "wall of prose" rendering bug from issue #892:
+      # bullet lists inside docstrings must be preceded by a blank line, otherwise
+      # they are collapsed into the introductory paragraph. Neither
+      # numpydoc-validation nor ruff/pydocstyle inspect section bodies, so we
+      # enforce this with a small AST check.
+      - id: validate-docstring-lists
+        name: Validate blank line before bullet lists in docstrings
+        entry: python scripts/validate_docstring_lists.py
+        language: python
+        files: ^causalpy/.*\.py$
+        exclude: ^causalpy/tests/
