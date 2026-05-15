@@ -568,6 +568,43 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             f"{round(float(tau_hdi[1]), round_to)}]"
         )
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, np.ndarray]:
+        """Plot SDiD results: counterfactual, period impact, and cumulative impact.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round the ATT in the title. Defaults to
+            2. Use ``None`` for raw values.
+        show : bool, optional
+            Whether to call :func:`matplotlib.pyplot.show` after drawing.
+            Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments applied to the top-axis legend in place after
+            the figure is built. Supported keys include ``loc``,
+            ``bbox_to_anchor``, ``fontsize``, ``frameon``, ``title``, and
+            optionally ``bbox_transform`` alongside ``bbox_to_anchor``. See
+            :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure containing the three stacked panels.
+        ax : numpy.ndarray
+            Array of the three :class:`matplotlib.axes.Axes` instances.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+        )
+
     @staticmethod
     def _convert_treatment_time_for_axis(
         axis: plt.Axes, treatment_time: int | float | pd.Timestamp

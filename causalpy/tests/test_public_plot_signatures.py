@@ -116,6 +116,7 @@ def test_every_concrete_subclass_declares_plot() -> None:
         "RegressionKink",
         "StaggeredDifferenceInDifferences",
         "SyntheticControl",
+        "SyntheticDifferenceInDifferences",
     }
     missing = expected - set(names)
     assert not missing, (
