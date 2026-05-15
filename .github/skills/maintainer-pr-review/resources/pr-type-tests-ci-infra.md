@@ -18,6 +18,13 @@ Use this resource when a PR changes tests, fixtures, pre-commit hooks, GitHub Ac
 - CI and hook changes should be exercised locally where feasible, usually through targeted `prek` or relevant build commands.
 - Dependency or packaging changes should include import/install evidence or clear reasoning if not run locally.
 
+## Review Output Emphasis
+
+- In the PR summary, state which project safeguard or workflow changes and why it improves reliability, speed, or maintainability.
+- In findings, foreground weakened checks, hidden failures, dependency risk, flaky tests, security-sensitive CI permissions, and packaging drift.
+- In test evidence, distinguish local hook/test runs from remote CI status and note any jobs that were skipped or pending.
+- In open questions, focus on required-check policy, dependency ownership, and whether the automation change should be narrower.
+
 ## Request Changes When
 
 - A check is removed, skipped, or weakened without strong justification.

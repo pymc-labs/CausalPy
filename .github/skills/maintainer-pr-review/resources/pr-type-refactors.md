@@ -17,6 +17,13 @@ Use this resource when a PR reorganizes code, renames internals, extracts helper
 - Meaningful refactors should usually include unchanged or strengthened tests around the moved behavior.
 - Broad refactors should have a clear rationale in the PR description and should avoid unrelated formatting churn.
 
+## Review Output Emphasis
+
+- In the PR summary, describe the internal structure change and whether behavior is intended to remain unchanged.
+- In findings, foreground accidental behavior changes, API/import compatibility, weakened tests, and increased abstraction cost.
+- In test evidence, emphasize preservation evidence: existing tests run, characterization tests, or before/after equivalence checks.
+- In open questions, focus on whether any semantic change is intentional and whether the refactor should be split from behavior changes.
+
 ## Request Changes When
 
 - The refactor changes behavior without acknowledging it.

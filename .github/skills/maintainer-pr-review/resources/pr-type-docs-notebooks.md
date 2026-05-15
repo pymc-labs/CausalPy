@@ -18,6 +18,13 @@ Use this resource when a PR changes documentation pages, example notebooks, know
 - For substantial docs changes, `make html` should be run when feasible, especially when cross-references, citations, notebooks, or generated outputs changed.
 - Examples that import CausalPy should be checked in the `CausalPy` environment.
 
+## Review Output Emphasis
+
+- In the PR summary, describe the reader-facing learning goal or documentation gap being filled.
+- In findings, foreground technical accuracy, causal interpretation, broken examples, missing citations, cross-reference issues, and notebook execution risk.
+- In test evidence, separate structural validation, docs build evidence, and manual narrative review.
+- In open questions, focus on pedagogical intent, placement in the docs, and whether claims need softer wording or stronger support.
+
 ## Request Changes When
 
 - The docs teach a workflow that is not executable with the current code.

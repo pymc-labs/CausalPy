@@ -18,6 +18,13 @@ Use this resource when a PR adds a new user-facing capability, experiment option
 - PyMC-heavy tests should use lightweight `sample_kwargs` and deterministic seeds where appropriate.
 - User-facing features should include docs, examples, or notebook updates unless the feature is intentionally internal.
 
+## Review Output Emphasis
+
+- In the PR summary, explain the new user capability and who benefits from it.
+- In findings, foreground API shape, backend compatibility, causal/statistical interpretation, and missing user-facing docs or examples.
+- In test evidence, distinguish happy-path coverage from edge-case coverage and call out any supported backend that lacks evidence.
+- In open questions, focus on product/API decisions that become hard to change after release.
+
 ## Request Changes When
 
 - The feature is not covered by tests that would fail if the implementation were removed or broken.

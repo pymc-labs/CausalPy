@@ -32,12 +32,12 @@ Follow `resources/workflow.md` for the full workflow. At a glance:
 
 Classify the PR by its dominant risk profile, then read the matching resource file. For mixed PRs, read every relevant resource before reviewing.
 
-- Feature implementation: read `resources/features.md`.
-- Bug fix: read `resources/bug-fixes.md`.
-- Refactor: read `resources/refactors.md`.
-- Docs or notebooks: read `resources/docs-notebooks.md`.
-- Data or dataset changes: read `resources/data-datasets.md`.
-- Tests, CI, packaging, or infrastructure: read `resources/tests-ci-infra.md`.
+- Feature implementation: read `resources/pr-type-features.md`.
+- Bug fix: read `resources/pr-type-bug-fixes.md`.
+- Refactor: read `resources/pr-type-refactors.md`.
+- Docs or notebooks: read `resources/pr-type-docs-notebooks.md`.
+- Data or dataset changes: read `resources/pr-type-data-datasets.md`.
+- Tests, CI, packaging, or infrastructure: read `resources/pr-type-tests-ci-infra.md`.
 
 When classification is unclear, state the likely categories and review against the stricter applicable checklist.
 

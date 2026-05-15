@@ -18,6 +18,13 @@ Use this resource when a PR adds or changes packaged datasets, CSV files, datase
 - Dataset-backed docs or notebooks should cite the source and explain enough context for interpretation.
 - If data is transformed from an upstream source, the transformation should be reproducible or clearly documented.
 
+## Review Output Emphasis
+
+- In the PR summary, state what data is added or changed, why it belongs in CausalPy, and how users will access it.
+- In findings, foreground provenance, license, privacy, schema stability, loader behavior, package inclusion, and repository size.
+- In test evidence, call out loader tests, representative-value checks, and any docs/notebook validation using the dataset.
+- In open questions, focus on data source rights, transformation reproducibility, and whether the dataset is minimal for its purpose.
+
 ## Request Changes When
 
 - Provenance, license, or citation is missing for external data.

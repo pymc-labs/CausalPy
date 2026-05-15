@@ -17,6 +17,13 @@ Use this resource when a PR claims to correct broken behavior, regression, numer
 - If the fix is for docs, notebooks, packaging, or CI, the relevant build/check should be run or the reason for not running it should be stated.
 - Tests should cover the reported failure mode, not only a broader happy path.
 
+## Review Output Emphasis
+
+- In the PR summary, state the bug, affected users or workflows, and the root cause if it is clear.
+- In findings, foreground whether the fix actually addresses the root cause, whether it is too broad or too narrow, and whether adjacent behavior changed.
+- In test evidence, explicitly say whether there is a regression test that would fail before the fix.
+- In open questions, focus on ambiguity between intended behavior and previously released behavior.
+
 ## Request Changes When
 
 - No test or reproducible evidence demonstrates the fixed bug.
