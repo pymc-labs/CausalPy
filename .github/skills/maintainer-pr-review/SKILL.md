@@ -11,7 +11,7 @@ Use this skill to evaluate whether a PR is correct, safe, understandable, and me
 
 - If the user asks to review, assess, summarize risks, or decide whether a PR is ready to merge, use this skill.
 - If the user asks to make the PR green by fixing CI, conflicts, or review comments, use `pr-to-green` for CausalPy-specific greening work.
-- For continuous merge-readiness monitoring, repeat this skill's intake, CI, and comment checks on a cadence or use a project-provided automation skill if one exists. Do not assume personal or local-only skills are available.
+- For continuous merge-readiness monitoring, repeat this skill's intake, CI, and comment checks on a cadence. If the repository later adds a dedicated monitoring skill, prefer that.
 - If the review uncovers clear, small fixes and the user asked you to fix them, keep changes scoped to the PR's intent and follow the repo's commit and `prek` rules.
 - Never post review comments, approve, request changes, or merge through GitHub without explicit human approval.
 - Do not duplicate mechanical checks already covered by hooks and CI. If a recurring issue is mechanically enforceable but not enforced, recommend a follow-up issue instead of treating each instance as bespoke review work.
