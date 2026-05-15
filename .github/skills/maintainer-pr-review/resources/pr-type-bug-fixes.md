@@ -19,10 +19,7 @@ Use this resource when a PR claims to correct broken behavior, regression, numer
 
 ## Review Output Emphasis
 
-- In the PR summary, state the bug, affected users or workflows, and the root cause if it is clear.
-- In findings, foreground whether the fix actually addresses the root cause, whether it is too broad or too narrow, and whether adjacent behavior changed.
-- In test evidence, explicitly say whether there is a regression test that would fail before the fix.
-- In open questions, focus on ambiguity between intended behavior and previously released behavior.
+When writing the final review, foreground the bug, affected users or workflows, root-cause evidence, whether the patch is too broad or too narrow, whether adjacent behavior changed, and whether a regression test would fail before the fix.
 
 ## Request Changes When
 

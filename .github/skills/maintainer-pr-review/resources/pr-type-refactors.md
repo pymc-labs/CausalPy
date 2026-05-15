@@ -19,10 +19,7 @@ Use this resource when a PR reorganizes code, renames internals, extracts helper
 
 ## Review Output Emphasis
 
-- In the PR summary, describe the internal structure change and whether behavior is intended to remain unchanged.
-- In findings, foreground accidental behavior changes, API/import compatibility, weakened tests, and increased abstraction cost.
-- In test evidence, emphasize preservation evidence: existing tests run, characterization tests, or before/after equivalence checks.
-- In open questions, focus on whether any semantic change is intentional and whether the refactor should be split from behavior changes.
+When writing the final review, foreground whether behavior is meant to remain unchanged, any accidental semantic change, public API or import compatibility, preservation evidence from tests, and whether mechanical movement should be split from behavior changes.
 
 ## Request Changes When
 

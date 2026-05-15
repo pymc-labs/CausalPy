@@ -54,6 +54,22 @@ Prune a pattern when:
 
 When a pattern becomes a hook, remove it from the skill at the same time. Keeping both creates drift.
 
+## Owner and Trigger
+
+The owner is the maintainer or agent using this skill when they notice drift, repeated review misses, or a pattern that has become mechanical enough for automation. When that happens, create a GitHub issue against the project with the observed pattern, example PRs, and the proposed resource file to update.
+
+Use these triggers:
+
+- A pattern recurs in two or more PRs.
+- A review finds that the skill sent an agent to a nonexistent or local-only dependency.
+- A hook or CI check now covers a pattern documented here.
+- Roughly ten PR reviews have used this skill since the last maintenance pass.
+- Six months have passed since the last maintenance pass.
+
+## Validation for Skill Changes
+
+For meaningful changes to this skill, run formatting checks and do at least one real-world smoke review when feasible. A smoke review can be a focused review of an open PR, an existing review comment thread, or a recently merged PR; record what was reviewed and what the skill helped catch in the PR description.
+
 ## Review Cadence
 
 Every six months or after roughly ten PR reviews, check:

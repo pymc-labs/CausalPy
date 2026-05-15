@@ -20,10 +20,7 @@ Use this resource when a PR changes documentation pages, example notebooks, know
 
 ## Review Output Emphasis
 
-- In the PR summary, describe the reader-facing learning goal or documentation gap being filled.
-- In findings, foreground technical accuracy, causal interpretation, broken examples, missing citations, cross-reference issues, and notebook execution risk.
-- In test evidence, separate structural validation, docs build evidence, and manual narrative review.
-- In open questions, focus on pedagogical intent, placement in the docs, and whether claims need softer wording or stronger support.
+When writing the final review, foreground the reader-facing learning goal, technical accuracy, causal interpretation, executable examples, citation and cross-reference quality, notebook build or validation evidence, and whether claims need softer wording or stronger support.
 
 ## Request Changes When
 

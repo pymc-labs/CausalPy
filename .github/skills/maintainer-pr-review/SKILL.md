@@ -11,7 +11,7 @@ Use this skill to evaluate whether a PR is correct, safe, understandable, and me
 
 - If the user asks to review, assess, summarize risks, or decide whether a PR is ready to merge, use this skill.
 - If the user asks to make the PR green by fixing CI, conflicts, or review comments, use `pr-to-green` for CausalPy-specific greening work.
-- If the user asks to continuously keep a PR merge-ready, use `babysit`.
+- For continuous merge-readiness monitoring, repeat this skill's intake, CI, and comment checks on a cadence or use a project-provided automation skill if one exists. Do not assume personal or local-only skills are available.
 - If the review uncovers clear, small fixes and the user asked you to fix them, keep changes scoped to the PR's intent and follow the repo's commit and `prek` rules.
 - Never post review comments, approve, request changes, or merge through GitHub without explicit human approval.
 - Do not duplicate mechanical checks already covered by hooks and CI. If a recurring issue is mechanically enforceable but not enforced, recommend a follow-up issue instead of treating each instance as bespoke review work.
@@ -66,7 +66,7 @@ Read these when the PR touches the relevant surface:
 ## CausalPy Review Norms
 
 - Before reviewing code, read `AGENTS.md` and relevant local context. For docs-heavy PRs, also inspect `docs/source/notebooks/index.md`; for process-sensitive PRs, inspect `CONTRIBUTING.md` when present.
-- Use `$CONDA_EXE run -n CausalPy <command>` for commands that import project code, run tests, build docs, or invoke repo tooling.
+- Use `$CONDA_EXE run -n CausalPy <command>` for commands that import project code, run tests, build docs, or invoke repo tooling. `AGENTS.md` defines how to detect or set `CONDA_EXE`; if it is unset, inspect that environment guidance before running project commands.
 - Use full permissions for commands that import PyMC, PyTensor, or matplotlib to avoid false sandbox failures.
 - During review, prefer targeted local checks that match the changed surface. If you edit code or prepare a commit, run `prek run` during iteration and `prek run --all-files` before handoff unless the user explicitly says not to.
 - For markdown-only skill or docs changes, a structural read-back may be enough; report when full checks were not run and why.

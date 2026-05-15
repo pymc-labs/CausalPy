@@ -20,10 +20,7 @@ Use this resource when a PR changes tests, fixtures, pre-commit hooks, GitHub Ac
 
 ## Review Output Emphasis
 
-- In the PR summary, state which project safeguard or workflow changes and why it improves reliability, speed, or maintainability.
-- In findings, foreground weakened checks, hidden failures, dependency risk, flaky tests, security-sensitive CI permissions, and packaging drift.
-- In test evidence, distinguish local hook/test runs from remote CI status and note any jobs that were skipped or pending.
-- In open questions, focus on required-check policy, dependency ownership, and whether the automation change should be narrower.
+When writing the final review, foreground which project safeguard or workflow changed, whether the change improves signal without hiding failures, dependency and packaging risk, flaky or weakened tests, security-sensitive CI permissions, and which local or remote checks actually ran.
 
 ## Request Changes When
 

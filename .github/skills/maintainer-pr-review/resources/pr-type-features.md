@@ -20,10 +20,7 @@ Use this resource when a PR adds a new user-facing capability, experiment option
 
 ## Review Output Emphasis
 
-- In the PR summary, explain the new user capability and who benefits from it.
-- In findings, foreground API shape, backend compatibility, causal/statistical interpretation, and missing user-facing docs or examples.
-- In test evidence, distinguish happy-path coverage from edge-case coverage and call out any supported backend that lacks evidence.
-- In open questions, focus on product/API decisions that become hard to change after release.
+When writing the final review, foreground the new user capability, API shape, backend compatibility, causal/statistical interpretation, edge-case coverage, and any product or API decision that becomes hard to change after release.
 
 ## Request Changes When
 

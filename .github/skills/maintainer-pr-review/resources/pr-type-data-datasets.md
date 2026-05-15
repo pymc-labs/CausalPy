@@ -20,10 +20,7 @@ Use this resource when a PR adds or changes packaged datasets, CSV files, datase
 
 ## Review Output Emphasis
 
-- In the PR summary, state what data is added or changed, why it belongs in CausalPy, and how users will access it.
-- In findings, foreground provenance, license, privacy, schema stability, loader behavior, package inclusion, and repository size.
-- In test evidence, call out loader tests, representative-value checks, and any docs/notebook validation using the dataset.
-- In open questions, focus on data source rights, transformation reproducibility, and whether the dataset is minimal for its purpose.
+When writing the final review, foreground what data changed, why it belongs in CausalPy, provenance, license, privacy, schema stability, loader behavior, package inclusion, repository size, and whether tests or docs prove the dataset is usable.
 
 ## Request Changes When
 

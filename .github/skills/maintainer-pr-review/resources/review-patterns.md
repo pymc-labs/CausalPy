@@ -58,6 +58,7 @@ The docstring becomes the public spec. If tests assert a different definition, f
 
 A default that appears meaningful but imposes no constraint misleads users.
 
+- Canonical example: a placebo-in-time selector with `min_gap=1` while sampling distinct integer positions may not constrain anything in practice; either use a meaningful default such as the intervention length or document that the default is only a placeholder.
 - How to spot: ask "what does this default actually do?" for every new numeric or policy default.
 - Ask for a meaningful default or honest documentation that it is a no-op.
 
