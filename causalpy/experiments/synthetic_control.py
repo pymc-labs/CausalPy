@@ -886,6 +886,7 @@ class SyntheticControl(BaseExperiment):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis:
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices

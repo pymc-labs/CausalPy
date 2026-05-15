@@ -38,6 +38,7 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
     non-empty default value.
 
     Excluded:
+
       * Private callables (any path component starting with ``_``).
       * The ``causalpy.tests`` package.
       * ``hdi_prob`` parameters with no default (kwarg-only required arg).

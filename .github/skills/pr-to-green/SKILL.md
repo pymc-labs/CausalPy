@@ -8,12 +8,14 @@ description: Bring a pull request to green by syncing with main, resolving confl
 This skill provides a deterministic maintainer workflow for taking an in-flight PR branch to green.
 
 ## When to use
+
 - A PR is behind `main` and needs sync/rebase
 - There are merge conflicts to resolve intelligently
 - Remote checks are failing (tests, docs, lint, or packaging)
 - You need a concise update for the PR describing what was fixed and what remains
 
 ## Preconditions
+
 - Confirm branch and remotes before making git changes
 - Preserve user/unrelated local modifications; never discard unknown work
 - Use CausalPy environment commands:
@@ -123,6 +125,7 @@ Scope-drift report must include:
 - the recommended next step and why
 
 ## CausalPy guardrails
+
 - Never use destructive git commands unless explicitly requested
 - Do not create ad hoc test scripts; use `pytest` tests in `causalpy/tests/`
 - Keep PyMC-heavy tests runtime-controlled via `sample_kwargs`

@@ -418,6 +418,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         2. Event-time ATTs: ATT(e) for each event-time e = t - G
 
         For event-time ATTs, this includes both:
+
         - Post-treatment effects (event_time >= 0): actual treatment effects
         - Pre-treatment effects (event_time < 0): placebo/residual checks
 

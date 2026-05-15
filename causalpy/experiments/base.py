@@ -346,11 +346,13 @@ class BaseExperiment(ABC):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis (ITS/SC only, ignored for DiD/RD):
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS):
+
             - "increase": P(effect > 0)
             - "decrease": P(effect < 0)
             - "two-sided": Two-sided p-value, report 1-p as "probability of effect"

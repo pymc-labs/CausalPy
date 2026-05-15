@@ -361,6 +361,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -390,6 +391,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -419,6 +421,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -448,6 +451,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -485,6 +489,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         list[float]
             A list of [ate, trt, ntrt] where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -615,7 +620,7 @@ class InversePropensityWeighting(BaseExperiment):
                     bar.set_edgecolor("black")
 
         def make_hists(idata, i, axs, method=method):
-            p_i = az.extract(idata)["p"][:, i].values
+            p_i = self._prepare_ps(az.extract(idata)["p"][:, i].values)
             if method == "raw":
                 weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
                 weight1 = 1 / (p_i[self.t.flatten() == 1])
@@ -786,7 +791,7 @@ class InversePropensityWeighting(BaseExperiment):
         if weighting_scheme is None:
             weighting_scheme = self.weighting_scheme
 
-        ps = az.extract(idata)["p"].mean(dim="sample").values
+        ps = self._prepare_ps(az.extract(idata)["p"].mean(dim="sample").values)
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()

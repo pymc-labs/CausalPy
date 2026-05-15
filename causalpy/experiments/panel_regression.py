@@ -60,6 +60,7 @@ class PanelRegression(BaseExperiment):
         If provided, time fixed effects will be included. Default is None.
     fe_method : {"dummies", "demeaned"}, default="dummies"
         Method for handling fixed effects:
+
         - "dummies": Use unpooled dummy-variable fixed effects
           (``C(unit)``/``C(time)`` in formula). Gets individual unit effect
           estimates but creates N-1 dummy columns. Best for small N.
@@ -784,6 +785,7 @@ class PanelRegression(BaseExperiment):
             Number of units to sample if units not specified.
         select : {"random", "extreme", "high_variance"}, default="random"
             Method for selecting units:
+
             - "random": Random sample of units
             - "extreme": Units with largest positive and negative effects
             - "high_variance": Units with most within-unit variation
@@ -795,6 +797,7 @@ class PanelRegression(BaseExperiment):
             (currently 0.94). Common alternative values are 0.89 or 0.5.
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
+
             - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
             - "predictive": HDI of posterior predictive ``y_hat``
               (includes observation noise)
@@ -963,6 +966,7 @@ class PanelRegression(BaseExperiment):
         ----------
         kind : {"scatter", "histogram", "qq"}, default="scatter"
             Type of residual plot:
+
             - "scatter": Residuals vs fitted values
             - "histogram": Distribution of residuals
             - "qq": Q-Q plot for normality check

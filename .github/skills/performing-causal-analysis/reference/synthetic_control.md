@@ -16,6 +16,7 @@ causalpy.experiments.SyntheticControl(
 ```
 
 ### Parameters
+
 *   **`data`** (`pd.DataFrame`): Input dataframe containing panel data.
 *   **`treatment_time`** (`Union[int, float, pd.Timestamp]`): The time of intervention.
 *   **`control_units`** (`List[str]`): List of column names representing the control units.
@@ -23,6 +24,7 @@ causalpy.experiments.SyntheticControl(
 *   **`model`**: A PyMC model (typically `cp.pymc_models.WeightedSumFitter`) or a Scikit-Learn Regressor.
 
 ### How it Works
+
 1.  **Fit**: Model learns weights for `control_units` to approximate `treated_units` using **only pre-intervention data**.
 2.  **Predict**: Weights are applied to `control_units` in post-intervention period.
 3.  **Impact**: Difference between observed treated unit and synthetic counterfactual.

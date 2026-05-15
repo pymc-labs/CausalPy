@@ -1,6 +1,7 @@
 # API
 
 ## Modules
+
 ```{eval-rst}
 .. currentmodule:: causalpy
 .. autosummary::
