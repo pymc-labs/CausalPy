@@ -427,6 +427,95 @@ def test_its_covid(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
+    """Regression test: ITS plot must remain readable when the post-period
+    contains a single observation.
+
+    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
+    zero-area polygon, the median line has no neighbours to connect to, and
+    the (then top-of-zorder) treatment ``axvline`` covers the only datum -
+    leaving the bottom two panels visually empty. The fix
+        1. lowers the treatment-line zorder and switches it to a thin dashed
+           style so it reads as an annotation, never as data;
+        2. overlays an explicit median-plus-HDI errorbar on every panel;
+        3. swaps the legend handle to that errorbar so the legend matches
+           what is drawn (and drops the "Causal impact" entry whose
+           ``fill_between`` collapses to nothing).
+    """
+    from matplotlib.collections import LineCollection
+    from matplotlib.container import ErrorbarContainer
+
+    df = its_data
+    # Choose treatment_time so exactly one datum sits in the post-period.
+    treatment_time = df.index[-1]
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert len(result.datapost) == 1
+    fig, ax = result.plot()
+
+    treatment_axvlines = [
+        ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
+    ]
+    assert treatment_axvlines, "expected a treatment-start axvline"
+    assert all(ln.get_zorder() < 2 for ln in treatment_axvlines), (
+        "treatment axvline must sit below data (zorder<2) so it never "
+        "occludes the only post-period observation"
+    )
+    assert all(ln.get_linestyle() == "--" for ln in treatment_axvlines), (
+        "treatment axvline must be dashed to read as an annotation"
+    )
+    assert all(ln.get_linewidth() <= 2 for ln in treatment_axvlines), (
+        "treatment axvline must be thin to avoid dominating the plot"
+    )
+
+    # Each panel must contain at least one errorbar overlay
+    # (rendered as a LineCollection from the errorbar caps/whiskers).
+    for i, a in enumerate(ax):
+        line_collections = [c for c in a.collections if isinstance(c, LineCollection)]
+        assert line_collections, (
+            f"panel {i} should have a LineCollection from the singleton "
+            "errorbar overlay; otherwise the post-period is invisible"
+        )
+
+    # Top-panel legend must reflect what is actually drawn: a Counterfactual
+    # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
+    # and no "Causal impact" entry (since its fill_between is degenerate).
+    legend = ax[0].get_legend()
+    assert legend is not None, "top panel should have a legend"
+    legend_labels = [t.get_text() for t in legend.get_texts()]
+    assert "Counterfactual" in legend_labels
+    assert "Causal impact" not in legend_labels, (
+        "Causal impact entry must be dropped when its fill_between collapses"
+    )
+    cf_idx = legend_labels.index("Counterfactual")
+    cf_handle = legend.legend_handles[cf_idx]
+    # Matplotlib renders an ErrorbarContainer in the legend via a
+    # LineCollection proxy. What we want to assert is that the handle is
+    # *not* the old (Line2D, PolyCollection) tuple, since that would imply
+    # the legend swatch shows a ribbon that does not exist on the plot.
+    from matplotlib.collections import PolyCollection
+    from matplotlib.lines import Line2D
+
+    assert not (isinstance(cf_handle, tuple) and len(cf_handle) == 2), (
+        "Counterfactual legend handle should not be a (line, ribbon) tuple "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert not isinstance(cf_handle, PolyCollection), (
+        "Counterfactual legend handle should not be a PolyCollection ribbon "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert isinstance(cf_handle, ErrorbarContainer | LineCollection | Line2D), (
+        "Counterfactual legend handle should reflect the errorbar overlay, "
+        f"got {type(cf_handle).__name__}"
+    )
+    plt.close(fig)
+
+
+@pytest.mark.integration
 def test_sc(mock_pymc_sample, sc_data):
     """
     Test Synthetic Control experiment.
