@@ -53,7 +53,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
   - **PR drafts**: Create PR summary markdown files in `.scratch/pr_summaries/` (untracked).
   - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
-- **Markdown formatting**: Do not hard-wrap lines in markdown files; rely on editor auto-wrapping.
+- **No hard line wrapping in prose-like text**: Do not hard-wrap lines in any prose context — Markdown files, long comments in code (TOML/YAML/Python/etc.), commit-message bodies, PR descriptions, issue descriptions, or GitHub comments. One paragraph = one line; rely on the viewer/editor to re-wrap. Hard wraps look ragged at different widths, make diffs noisy on every reflow, and mangle when copied or quoted. Code itself, code blocks inside Markdown, ASCII tables, and structured config values are exempt — those need their literal line structure.
 
 ## Code structure and style
 
@@ -65,6 +65,7 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - **Custom exceptions**: Use project-specific exceptions from `causalpy.custom_exceptions`: `FormulaException`, `DataException`, `BadIndexException`
 - **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
 - **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
+- **Public `plot()` signatures**: ``BaseExperiment`` deliberately does **not** define a public ``plot()`` method. Every concrete experiment subclass must declare its own ``plot()`` with an explicit, kwarg-only signature (using ``*,``); bare ``*args`` and ``**kwargs`` are forbidden at the public surface because they silently swallow real, supported parameters and hide them from Sphinx, IDE autocomplete, and ``help()``. The body of ``plot()`` should delegate to the protected helper ``self._render_plot(...)`` (which applies the shared style context, dispatches to ``_bayesian_plot`` / ``_ols_plot``, applies ``legend_kwargs``, and optionally calls ``plt.show()``). Document every parameter in the docstring's ``Parameters`` block — the test ``causalpy/tests/test_public_plot_signatures.py`` and the ``numpydoc-validation`` pre-commit hook enforce this. For experiments without a unified plot view (e.g. ``InversePropensityWeighting``, ``InstrumentalVariable``), still declare an explicit ``plot()`` stub that raises ``NotImplementedError`` and points at the bespoke alternatives. For ``hdi_prob`` defaults, use the prose pattern (``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).``) rather than the numpydoc ``default=...`` slot, so the cross-reference renders.
 
 ## Code quality checks
 

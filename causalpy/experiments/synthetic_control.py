@@ -378,24 +378,102 @@ class SyntheticControl(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the synthetic control results for a specific treated unit.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title (e.g. the Bayesian :math:`R^2`). Defaults to ``None``,
+            in which case 2 significant figures are used.
+        treated_unit : str, optional
+            Which treated unit to plot. Must be one of the names supplied
+            via ``treated_units`` at construction time. Defaults to ``None``,
+            which selects the first treated unit.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool
+            Whether to overlay the donor (control) unit trajectories on the
+            top panel. Defaults to ``False``.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The three axes (top: predictions, middle: causal impact,
+            bottom: cumulative impact).
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            treated_unit=treated_unit,
+            hdi_prob=hdi_prob,
+            plot_predictors=plot_predictors,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
-        Plot the results for a specific treated unit
+        Plot the results for a specific treated unit.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
+            If ``None``, plots the first treated unit.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool, optional
+            Whether to overlay control-unit trajectories. Defaults to ``False``.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
 
@@ -420,6 +498,7 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             pre_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -440,6 +519,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             post_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -469,12 +549,14 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -493,6 +575,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")
@@ -515,7 +598,6 @@ class SyntheticControl(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        plot_predictors = kwargs.get("plot_predictors", False)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(
@@ -548,6 +630,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
@@ -558,6 +641,8 @@ class SyntheticControl(BaseExperiment):
         :param treated_unit:
             Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
+        :param figsize:
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
 
@@ -571,7 +656,7 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         ax[0].plot(
             self.datapre_treated["obs_ind"],
@@ -801,6 +886,7 @@ class SyntheticControl(BaseExperiment):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis:
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices

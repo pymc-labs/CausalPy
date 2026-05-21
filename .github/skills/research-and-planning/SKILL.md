@@ -8,5 +8,6 @@ description: Perform structured research and turn findings into an implementatio
 Use this skill to clarify requirements and produce a plan before implementation.
 
 ## References
+
 - [Research workflow](reference/research.md)
 - [Plan creation workflow](reference/make-plan.md)

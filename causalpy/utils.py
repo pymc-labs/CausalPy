@@ -210,6 +210,7 @@ def check_convex_hull_violation(
     -------
     dict
         Dictionary with keys:
+
         - 'passes': bool - whether the check passes
         - 'n_violations': int - number of time points with violations
         - 'pct_above': float - percentage of points where treated > max(controls)
