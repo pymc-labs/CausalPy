@@ -79,17 +79,19 @@ def _cmd_check(args: argparse.Namespace) -> None:
     """Handle ``causalpy skills check``."""
     from causalpy.skills._installer import check_version
 
-    installed = check_version(project_dir=args.project_dir)
-    if installed is None:
+    versions = check_version(project_dir=args.project_dir)
+    if not versions:
         print("  No installed CausalPy skills found in this project.")
-    elif installed == __version__:
-        print(f"  Skills are up to date (v{__version__}).")
-    else:
-        print(
-            f"  Installed skills are v{installed}, "
-            f"but CausalPy is v{__version__}.\n"
-            f"  Run `causalpy skills install` to update."
-        )
+        return
+    all_current = True
+    for plat, ver in versions.items():
+        if ver == __version__:
+            print(f"  [{plat}] v{ver} — up to date")
+        else:
+            print(f"  [{plat}] v{ver} — STALE (current: v{__version__})")
+            all_current = False
+    if not all_current:
+        print("\n  Run `causalpy skills install` to update.")
 
 
 def main(argv: list[str] | None = None) -> None:

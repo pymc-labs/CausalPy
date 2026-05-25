@@ -85,7 +85,7 @@ class TestInstallCursor:
         (tmp_path / ".cursor").mkdir()
         result = install(project_dir=tmp_path, platform="cursor")
         assert "cursor" in result
-        assert len(result["cursor"]) == 8
+        assert len(result["cursor"]) == 9
 
         skill_dir = tmp_path / ".cursor" / "skills" / "causalpy-designing-experiments"
         assert skill_dir.is_dir()
@@ -220,14 +220,23 @@ class TestUninstall:
 class TestCheckVersion:
     """Version checking for installed skills."""
 
-    def test_returns_none_when_not_installed(self, tmp_path):
-        assert check_version(project_dir=tmp_path) is None
+    def test_returns_empty_when_not_installed(self, tmp_path):
+        assert check_version(project_dir=tmp_path) == {}
 
-    def test_returns_version_when_installed(self, tmp_path):
+    def test_returns_per_platform_versions(self, tmp_path):
         (tmp_path / ".cursor").mkdir()
         install(project_dir=tmp_path, platform="cursor")
-        version = check_version(project_dir=tmp_path)
-        assert version is not None
+        versions = check_version(project_dir=tmp_path)
+        assert "cursor" in versions
+        assert versions["cursor"] is not None
+
+    def test_reports_multiple_platforms(self, tmp_path):
+        (tmp_path / ".cursor").mkdir()
+        install(project_dir=tmp_path, platform="cursor")
+        install(project_dir=tmp_path, platform="generic")
+        versions = check_version(project_dir=tmp_path)
+        assert "cursor" in versions
+        assert "generic" in versions
 
 
 class TestSymlinkSafety:

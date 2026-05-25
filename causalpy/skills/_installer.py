@@ -147,12 +147,20 @@ def uninstall(
     return result
 
 
-def check_version(project_dir: str | Path = ".") -> str | None:
-    """Return the installed skills version stamp if found, else ``None``."""
+def check_version(
+    project_dir: str | Path = ".",
+) -> dict[str, str | None]:
+    """Return a per-platform mapping of installed skill versions.
+
+    Each key is a platform name; the value is the version string found
+    for that platform, or ``None`` if no skills are installed there.
+    Only platforms that have skills installed are included.
+    """
     project = Path(project_dir).resolve()
-    for _plat_name, adapter_cls in _PLATFORM_ADAPTERS.items():
+    result: dict[str, str | None] = {}
+    for plat_name, adapter_cls in _PLATFORM_ADAPTERS.items():
         adapter = adapter_cls(project, VERSION_STAMP)
         version = adapter.get_installed_version()
         if version is not None:
-            return version
-    return None
+            result[plat_name] = version
+    return result

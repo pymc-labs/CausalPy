@@ -20,6 +20,6 @@ Developer skills live in ``.github/skills/`` and are auto-discovered
 in-repo via platform symlinks; they are **not** included here.
 """
 
-from causalpy.skills._installer import install, list_skills, uninstall
+from causalpy.skills._installer import check_version, install, list_skills, uninstall
 
-__all__ = ["install", "list_skills", "uninstall"]
+__all__ = ["check_version", "install", "list_skills", "uninstall"]

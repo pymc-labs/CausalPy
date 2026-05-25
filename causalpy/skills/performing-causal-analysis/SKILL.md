@@ -26,3 +26,4 @@ Detailed usage for specific methods:
 *   [Difference-in-Differences](reference/diff_in_diff.md)
 *   [Interrupted Time Series](reference/interrupted_time_series.md)
 *   [Synthetic Control](reference/synthetic_control.md)
+*   [Regression Discontinuity](reference/regression_discontinuity.md)
