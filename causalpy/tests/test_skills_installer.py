@@ -50,9 +50,14 @@ class TestDetectPlatforms:
         (tmp_path / ".claude").mkdir()
         assert "claude" in detect_platforms(tmp_path)
 
-    def test_detects_copilot_via_github_dir(self, tmp_path):
+    def test_detects_copilot_via_instructions_file(self, tmp_path):
         (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "copilot-instructions.md").touch()
         assert "copilot" in detect_platforms(tmp_path)
+
+    def test_github_dir_alone_does_not_detect_copilot(self, tmp_path):
+        (tmp_path / ".github").mkdir()
+        assert "copilot" not in detect_platforms(tmp_path)
 
     def test_detects_windsurf_via_dir(self, tmp_path):
         (tmp_path / ".windsurf").mkdir()
