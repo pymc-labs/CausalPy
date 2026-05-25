@@ -61,6 +61,26 @@ Alternatively, if you want the very latest version of the package you can instal
 pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
 
+## AI Agent Skills
+
+CausalPy ships with agent skills that teach AI coding assistants (Cursor, Claude Code, GitHub Copilot, Windsurf, etc.) how to use the library for causal inference. Install them into your project with:
+
+```bash
+# Auto-detect your AI platform
+causalpy skills install
+
+# Or target a specific platform
+causalpy skills install --platform cursor
+```
+
+You can also generate a standalone context document for any AI tool:
+
+```bash
+causalpy skills install --platform generic   # writes llms-causalpy.txt
+```
+
+Run `causalpy skills list` to see available skills, and `causalpy skills check` to verify your installed skills match the current CausalPy version.
+
 ## Quickstart
 
 ```python

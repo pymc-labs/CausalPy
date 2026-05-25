@@ -100,7 +100,11 @@ creation, bug reports, and issue evaluation workflows.
 
 ## Skills Location
 
-Canonical skills live in `.github/skills/`. The `.claude/skills` and
-`.cursor/skills` paths are symlinks to that directory. On Windows, symlink
-support may require Developer Mode or elevated permissions; if symlinks are not
-available, mirror `.github/skills/` into those locations and keep them in sync.
+Skills are split into two categories with separate homes:
+
+- **Developer skills** live in `.github/skills/` and are auto-discovered by agents working on the repo via the `.cursor/skills`, `.claude/skills`, and `.agents/skills` symlinks. These cover environment setup, PR workflows, issue triage, and other maintainer tasks.
+- **User skills** live in `causalpy/skills/` inside the Python package. They ship with the pip wheel so the installed version always matches the library API. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills.
+
+End users install user skills into their project with `causalpy skills install` (see `causalpy skills --help`). The CLI auto-detects the AI platform (Cursor, Claude Code, Copilot, Windsurf) or can target a specific one via `--platform`.
+
+On Windows, symlink support for developer skills may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into `.cursor/skills/`, `.claude/skills/`, and `.agents/skills/` and keep them in sync.
