@@ -34,7 +34,18 @@ Only Bayesian PyMC models are supported. The default is `cp.pymc_models.Instrume
 ## Example
 
 ```python
+import numpy as np
+import pandas as pd
 import causalpy as cp
+
+rng = np.random.default_rng(42)
+n = 100
+z = rng.normal(size=n)
+x = rng.normal(size=n)
+unobserved = rng.normal(size=n)
+t = 0.8 * z + 0.5 * x + unobserved + rng.normal(size=n)
+y = 1.5 * t + 0.5 * x + unobserved + rng.normal(size=n)
+df = pd.DataFrame({"y": y, "t": t, "x": x, "z": z})
 
 result = cp.InstrumentalVariable(
     instruments_data=df[["t", "z"]],

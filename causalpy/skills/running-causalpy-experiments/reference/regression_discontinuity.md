@@ -55,5 +55,5 @@ result.plot()
 ## Interpretation Checks
 
 - Check whether units can manipulate the running variable near the threshold.
-- Use `BandwidthSensitivity` and `McCraryDensityTest` for robustness.
+- Use `cp.checks.BandwidthSensitivity` and `cp.checks.McCraryDensityTest` through `cp.SensitivityAnalysis` for robustness.
 - Use `RegressionKink` when the causal estimand is a slope change rather than a jump.

@@ -13,7 +13,7 @@ Use this skill when the CausalPy experiment class is already known or has just b
 2. Choose a backend: PyMC models for posterior uncertainty and priors, or sklearn-compatible regressors where the experiment supports OLS/sklearn.
 3. Configure the model before construction. For PyMC, set `sample_kwargs` and scale-aware `priors` when predictors or outcomes are not standardized.
 4. Instantiate the experiment. CausalPy experiments fit during initialization.
-5. Inspect outputs with `summary()`, `effect_summary()`, `print_coefficients()`, and `plot()` where supported.
+5. Inspect outputs with `summary()`, `effect_summary()`, `print_coefficients()`, and `plot()` only where the chosen experiment supports them.
 6. Run relevant sensitivity checks through `cp.Pipeline`, `cp.EstimateEffect`, and `cp.SensitivityAnalysis` when robustness matters.
 
 ## Model And Prior Guardrails
@@ -36,7 +36,9 @@ Use this skill when the CausalPy experiment class is already known or has just b
 ## Important Exceptions
 
 - `InversePropensityWeighting.plot()` is intentionally a stub. Use `plot_ate()` and `plot_balance_ecdf()` instead.
+- `InversePropensityWeighting.effect_summary()` is not implemented. Inspect ATE draws, overlap, balance, and weight stability instead.
 - `InstrumentalVariable.plot()`, `summary()`, and `effect_summary()` are not implemented, so inspect model outputs and first-stage/second-stage diagnostics directly.
+- `PanelRegression.effect_summary()` is not implemented because panel fixed-effects models report coefficient-level estimates rather than time-window impacts. Use `summary()`, `print_coefficients()`, and `plot()` or `plot_coefficients()`.
 
 ## References
 

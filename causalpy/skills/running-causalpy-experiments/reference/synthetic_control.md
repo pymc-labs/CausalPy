@@ -52,5 +52,5 @@ result.plot()
 ## Interpretation Checks
 
 - Inspect pre-period fit and donor weights before interpreting the effect.
-- Check support with `ConvexHullCheck`, donor dependence with `LeaveOneOut`, and placebo effects with `PlaceboInSpace` or `PlaceboInTime`.
+- Check support with `cp.checks.ConvexHullCheck`, donor dependence with `cp.checks.LeaveOneOut`, and placebo effects with `cp.checks.PlaceboInSpace` or `cp.checks.PlaceboInTime`, typically through `cp.SensitivityAnalysis`.
 - Use `SyntheticDifferenceInDifferences` when time weighting is a core part of the design.

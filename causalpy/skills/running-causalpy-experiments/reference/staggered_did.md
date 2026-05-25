@@ -36,7 +36,27 @@ The default backend is `cp.pymc_models.LinearRegression`, and sklearn regressors
 ## Example
 
 ```python
+import numpy as np
+import pandas as pd
 import causalpy as cp
+
+units = [f"unit_{i}" for i in range(8)]
+times = range(8)
+treatment_times = {unit: 4 + (i % 2) for i, unit in enumerate(units[:6])}
+rng = np.random.default_rng(42)
+df = pd.DataFrame(
+    [
+        {
+            "unit": unit,
+            "time": time,
+            "treatment_time": treatment_times.get(unit, np.inf),
+            "treated": int(time >= treatment_times.get(unit, np.inf)),
+            "y": rng.normal() + 0.8 * int(time >= treatment_times.get(unit, np.inf)),
+        }
+        for unit in units
+        for time in times
+    ]
+)
 
 result = cp.StaggeredDifferenceInDifferences(
     data=df,

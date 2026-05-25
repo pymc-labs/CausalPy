@@ -30,7 +30,26 @@ Unlike many other experiments, `PanelRegression` does not set a default model cl
 ## Example
 
 ```python
+import numpy as np
+import pandas as pd
 import causalpy as cp
+
+units = [f"unit_{i}" for i in range(8)]
+times = range(6)
+rng = np.random.default_rng(42)
+df = pd.DataFrame(
+    [
+        {
+            "unit": unit,
+            "time": time,
+            "treatment": int(unit in units[:4] and time >= 3),
+            "x1": rng.normal(),
+            "y": rng.normal() + 0.5 * int(unit in units[:4] and time >= 3),
+        }
+        for unit in units
+        for time in times
+    ]
+)
 
 result = cp.PanelRegression(
     data=df,
@@ -42,7 +61,6 @@ result = cp.PanelRegression(
 )
 
 result.summary()
-summary = result.effect_summary(direction="increase")
 result.plot()
 ```
 

@@ -41,7 +41,6 @@ result = cp.InversePropensityWeighting(
     model=cp.pymc_models.PropensityScore(sample_kwargs={"target_accept": 0.95}),
 )
 
-summary = result.effect_summary(direction="increase")
 result.plot_ate()
 result.plot_balance_ecdf(covariate="age")
 ```
@@ -49,5 +48,6 @@ result.plot_balance_ecdf(covariate="age")
 ## Interpretation Checks
 
 - `plot()` is intentionally not a unified plot; call `plot_ate()` and `plot_balance_ecdf()`.
+- `effect_summary()` is not implemented for IPW; inspect the ATE plot and balance diagnostics instead.
 - Check overlap and weight stability before interpreting the ATE.
 - If important confounders are unmeasured, IPW does not solve the identification problem.

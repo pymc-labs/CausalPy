@@ -27,7 +27,13 @@ The default backend is `cp.pymc_models.LinearRegression`, and sklearn regressors
 ## Example
 
 ```python
+import numpy as np
+import pandas as pd
 import causalpy as cp
+
+rng = np.random.default_rng(42)
+t = np.arange(100)
+df = pd.DataFrame({"t": t, "y": 1 + 0.05 * t + 2 * (t >= 50) + 0.03 * np.maximum(0, t - 50) + rng.normal(0, 0.2, len(t))})
 
 result = cp.PiecewiseITS(
     data=df,
