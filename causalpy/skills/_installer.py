@@ -34,7 +34,6 @@ _PLATFORM_ADAPTERS: dict[Platform, type] = {
 
 _SKILL_DIRS = [
     "designing-experiments",
-    "loading-datasets",
     "performing-causal-analysis",
     "running-placebo-analysis",
 ]

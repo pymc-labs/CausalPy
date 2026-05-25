@@ -30,11 +30,10 @@ from causalpy.skills._installer import (
 class TestListSkills:
     """Verify bundled skill catalogue."""
 
-    def test_returns_all_four_skills(self):
+    def test_returns_all_skills(self):
         skills = list_skills()
-        assert len(skills) == 4
+        assert len(skills) == 3
         assert "designing-experiments" in skills
-        assert "loading-datasets" in skills
         assert "performing-causal-analysis" in skills
         assert "running-placebo-analysis" in skills
 
@@ -85,7 +84,7 @@ class TestInstallCursor:
         (tmp_path / ".cursor").mkdir()
         result = install(project_dir=tmp_path, platform="cursor")
         assert "cursor" in result
-        assert len(result["cursor"]) == 9
+        assert len(result["cursor"]) == 8
 
         skill_dir = tmp_path / ".cursor" / "skills" / "causalpy-designing-experiments"
         assert skill_dir.is_dir()
@@ -187,7 +186,7 @@ class TestUninstall:
         result = uninstall(project_dir=tmp_path, platform="cursor")
 
         assert "cursor" in result
-        assert len(result["cursor"]) == 4
+        assert len(result["cursor"]) == 3
         skills_dir = tmp_path / ".cursor" / "skills"
         remaining = [d for d in skills_dir.iterdir() if d.name.startswith("causalpy-")]
         assert remaining == []
