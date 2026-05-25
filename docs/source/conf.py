@@ -157,7 +157,9 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_extra_path = ["robots.txt", "llms.txt"]
+html_extra_path = ["robots.txt"]
+if os.path.exists(os.path.join(os.path.dirname(__file__), "llms.txt")):
+    html_extra_path.append("llms.txt")
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
