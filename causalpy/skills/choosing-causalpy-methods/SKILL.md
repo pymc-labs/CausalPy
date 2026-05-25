@@ -1,11 +1,11 @@
 ---
 name: choosing-causalpy-methods
-description: Choose the appropriate CausalPy experiment class from a causal question, data structure, treatment assignment, and identification assumptions. Use before writing analysis code when the method is not yet settled.
+description: Selects the appropriate CausalPy quasi-experimental method for causal or impact questions. Use when a user asks whether something worked, changed an outcome, caused an effect, or had impact/lift, even without explicit causal terms; triggers include campaigns, policies, product changes, rollouts, interventions, treatments, before-after comparisons, treated vs control groups, counterfactuals, ATE/ATT, DiD, interrupted time series, synthetic control, regression discontinuity, IV, IPW, panel/event-study questions, and any request that needs a causal design before analysis code.
 ---
 
 # Choosing CausalPy Methods
 
-Use this skill to translate a user's causal question into a CausalPy experiment choice. This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
+Use this skill to translate a user's causal or impact question into a CausalPy experiment choice, including plain-English questions like "did the campaign work?", "what was the effect of the rollout?", or "did the policy change sales?". This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
 
 ## Required Intake
 
