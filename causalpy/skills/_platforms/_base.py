@@ -48,7 +48,14 @@ class BasePlatformAdapter(ABC):
         return m.group(1) if m else None
 
     def _stamp(self, content: str) -> str:
-        """Prepend version stamp to content."""
+        """Insert version stamp without breaking YAML frontmatter parsing."""
+        if content.startswith("---"):
+            lines = content.splitlines(keepends=True)
+            for i, line in enumerate(lines[1:], start=1):
+                if line.strip() in {"---", "..."}:
+                    frontmatter = "".join(lines[: i + 1])
+                    remainder = "".join(lines[i + 1 :])
+                    return f"{frontmatter}{self.version_stamp}\n{remainder}"
         return f"{self.version_stamp}\n{content}"
 
     def _rmtree_if_exists(self, path: Path) -> bool:
