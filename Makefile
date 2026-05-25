@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint test uml html cleandocs doctest run_notebooks_full llms-txt help
+.PHONY: init setup lint check_lint test uml html cleandocs doctest run_notebooks_full help
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
@@ -37,14 +37,11 @@ test: ## Run all tests with pytest
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
 
-html: llms-txt ## Build HTML documentation with Sphinx
+html: ## Build HTML documentation with Sphinx
 	sphinx-build -b html docs/source docs/_build
 
 run_notebooks_full: ## Re-execute all notebooks and save outputs in place (slow)
 	python scripts/run_notebooks/runner.py --full
-
-llms-txt: ## Generate llms.txt from user skills for the docs site
-	python -m causalpy.skills._generate_llms_txt docs/source/llms.txt
 
 cleandocs: ## Clean the documentation build directories
 	rm -rf docs/_build

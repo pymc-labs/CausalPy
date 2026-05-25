@@ -13,13 +13,9 @@
 #   limitations under the License.
 """CausalPy agent skills for AI-assisted causal inference.
 
-User-facing skills that teach AI agents how to use CausalPy.  Ship with the
-pip wheel so the installed version always matches the library API.
+User-facing skills that teach AI agents how to use CausalPy.
+Distributed via Decision AI Hub (https://hub.decision.ai).
 
 Developer skills live in ``.github/skills/`` and are auto-discovered
 in-repo via platform symlinks; they are **not** included here.
 """
-
-from causalpy.skills._installer import check_version, install, list_skills, uninstall
-
-__all__ = ["check_version", "install", "list_skills", "uninstall"]
