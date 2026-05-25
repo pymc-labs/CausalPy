@@ -4,20 +4,22 @@ Use this card when the request involves an intervention over time but the data t
 
 ## Deciding Question
 
-What are the controls: no controls, donor time series, or treated/control groups observed over time?
+What are the controls: no controls, comparison/control series used as predictors, donor time series used for synthetic weights, or treated/control groups observed over time?
 
 ## Choose `InterruptedTimeSeries`
 
 - There is one aggregate or treated outcome series.
 - There is a known intervention time.
-- There are no donor units or treated/control group rows.
-- The counterfactual comes from extrapolating the pre-intervention trend.
+- There are no treated/control group rows.
+- The counterfactual comes from extrapolating the pre-intervention trend, optionally with comparison/control series as predictors.
+- If comparison/control series are included as formula predictors, this is Comparative Interrupted Time Series (CITS) implemented with `InterruptedTimeSeries`.
 
 ## Choose `SyntheticControl`
 
 - The data is a wide unit-by-time panel where columns are units.
 - There is at least one treated unit and multiple untreated donor units.
 - The counterfactual comes from a weighted donor combination that fits the treated unit in the pre-period.
+- Use this instead of CITS when the user wants constrained donor weighting rather than regression-style comparison-series predictors.
 
 ## Choose `DifferenceInDifferences`
 

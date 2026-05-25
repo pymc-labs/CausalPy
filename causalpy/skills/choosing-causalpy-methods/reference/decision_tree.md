@@ -13,6 +13,7 @@ Use this file as the canonical routing algorithm for choosing a CausalPy experim
 
 3. If assignment is a known intervention time, route by data topology.
    If data is one outcome series with no donor units, compare InterruptedTimeSeries and PiecewiseITS.
+   If data is one treated outcome series plus one or more comparison/control series used as formula predictors, route to InterruptedTimeSeries as Comparative Interrupted Time Series (CITS), then compare against SyntheticControl if the user wants constrained donor weighting.
    If data is a wide panel where columns are units and at least one untreated donor unit is available, compare SyntheticControl and SyntheticDifferenceInDifferences.
    If data is a long panel with treated and control groups, compare DifferenceInDifferences, StaggeredDifferenceInDifferences, and PanelRegression.
 
@@ -45,7 +46,7 @@ Use this file as the canonical routing algorithm for choosing a CausalPy experim
 
 ### `InterruptedTimeSeries`
 
-Use when there is one outcome series, a known intervention time, no donor pool, and the counterfactual should be forecast from the pre-intervention trend. Do not use it when the user has donor units or a treated/control panel.
+Use when there is one outcome series, a known intervention time, and the counterfactual should be forecast from the pre-intervention trend. This also covers Comparative Interrupted Time Series (CITS) when comparison/control series are included as predictors in the formula. Do not use it when the user wants synthetic-control donor weights or has a treated/control panel DiD design.
 
 ### `PiecewiseITS`
 
