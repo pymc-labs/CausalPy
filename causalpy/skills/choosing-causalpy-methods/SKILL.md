@@ -5,7 +5,7 @@ description: Selects the appropriate CausalPy quasi-experimental method for caus
 
 # Choosing CausalPy Methods
 
-Use this skill to translate a user's causal or impact question into a CausalPy experiment choice, including plain-English questions like "did the campaign work?", "what was the effect of the rollout?", or "did the policy change sales?". This includes Comparative Interrupted Time Series (CITS), which CausalPy routes through `InterruptedTimeSeries` with comparison/control series included as predictors. This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
+Use this skill to translate a user's causal or impact question into a CausalPy experiment choice, including plain-English questions like "did the campaign work?", "what was the effect of the rollout?", or "did the policy change sales?". This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
 
 ## Required Intake
 
