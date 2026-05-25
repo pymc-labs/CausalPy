@@ -37,7 +37,7 @@ test: ## Run all tests with pytest
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
 
-html: ## Build HTML documentation with Sphinx
+html: llms-txt ## Build HTML documentation with Sphinx
 	sphinx-build -b html docs/source docs/_build
 
 run_notebooks_full: ## Re-execute all notebooks and save outputs in place (slow)

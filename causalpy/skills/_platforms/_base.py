@@ -47,23 +47,32 @@ class BasePlatformAdapter(ABC):
         m = re.search(r"<!-- causalpy-skills v([\d.]+\S*) -->", text)
         return m.group(1) if m else None
 
+    _FRONTMATTER_RE = re.compile(r"^(---\n.*?\n---\n)", re.DOTALL)
+
     def _stamp(self, content: str) -> str:
-        """Insert version stamp without breaking YAML frontmatter parsing."""
-        if content.startswith("---"):
-            lines = content.splitlines(keepends=True)
-            for i, line in enumerate(lines[1:], start=1):
-                if line.strip() in {"---", "..."}:
-                    frontmatter = "".join(lines[: i + 1])
-                    remainder = "".join(lines[i + 1 :])
-                    return f"{frontmatter}{self.version_stamp}\n{remainder}"
+        """Insert version stamp into *content*, after YAML frontmatter if present."""
+        m = self._FRONTMATTER_RE.match(content)
+        if m:
+            return f"{m.group(1)}{self.version_stamp}\n{content[m.end():]}"
         return f"{self.version_stamp}\n{content}"
 
     def _rmtree_if_exists(self, path: Path) -> bool:
-        """Remove *path* (file or directory) if it exists. Return whether it existed."""
-        if path.exists():
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
+        """Remove *path* (file or directory) if it exists. Return whether it existed.
+
+        Symlinks are unlinked without following.  Real directories are only
+        removed if they resolve to a location inside ``self.project_dir``.
+        """
+        if not (path.exists() or path.is_symlink()):
+            return False
+        if path.is_symlink():
+            path.unlink()
             return True
-        return False
+        resolved = path.resolve()
+        if not resolved.is_relative_to(self.project_dir.resolve()):
+            msg = f"Refusing to remove path outside project dir: {resolved}"
+            raise ValueError(msg)
+        if resolved.is_dir():
+            shutil.rmtree(resolved)
+        else:
+            resolved.unlink()
+        return True
