@@ -77,9 +77,7 @@ def detect_platforms(project_dir: Path) -> list[Platform]:
         detected.append("cursor")
     if (project_dir / ".claude").is_dir():
         detected.append("claude")
-    if (project_dir / ".github" / "copilot-instructions.md").exists() or (
-        project_dir / ".github"
-    ).is_dir():
+    if (project_dir / ".github" / "copilot-instructions.md").exists():
         detected.append("copilot")
     if (project_dir / ".windsurf").is_dir() or (
         project_dir / ".windsurfrules"
