@@ -8,6 +8,6 @@ Developer-focused skills (environment setup, PR workflows, testing conventions, 
 
 | Path | Purpose |
 |------|---------|
-| `designing-experiments/` | Choosing the right quasi-experimental method |
-| `performing-causal-analysis/` | Fitting models, estimating impacts, plotting results |
+| `choosing-causalpy-methods/` | Choosing the right CausalPy experiment class from a causal question and data structure |
+| `running-causalpy-experiments/` | Fitting chosen experiments, configuring models and priors, summarizing, plotting, and interpreting results |
 | `running-placebo-analysis/` | Placebo-in-time sensitivity checks |

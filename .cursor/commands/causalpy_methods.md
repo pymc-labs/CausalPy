@@ -2,5 +2,5 @@
 
 This command points to Skills in `causalpy/skills/`:
 
-- `designing-experiments` for method selection
-- `performing-causal-analysis` for method usage and references
+- `choosing-causalpy-methods` for method selection
+- `running-causalpy-experiments` for method usage and references
