@@ -1,4 +1,4 @@
 # Causal Research
 
-This command points to the `designing-experiments` Skill in
-`.github/skills/designing-experiments/` for method selection guidance.
+This command points to the `choosing-causalpy-methods` Skill in
+`causalpy/skills/choosing-causalpy-methods/` for method selection guidance.
