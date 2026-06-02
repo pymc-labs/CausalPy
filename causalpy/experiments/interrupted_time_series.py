@@ -969,8 +969,11 @@ class InterruptedTimeSeries(BaseExperiment):
             label="Causal impact",
         )
 
+        score_val = self.score
+        if isinstance(score_val, pd.Series):
+            raise ValueError("Expected float score for OLS model, got Series")
         ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"
+            title=f"$R^2$ on pre-intervention data = {round_num(float(score_val), round_to)}"
         )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")

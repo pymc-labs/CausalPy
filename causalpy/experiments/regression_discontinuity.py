@@ -495,7 +495,10 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(float(self.score), round_to)}"
+        score_val = self.score
+        if isinstance(score_val, pd.Series):
+            raise ValueError("Expected float score for OLS model, got Series")
+        r2 = f"$R^2$ on fit data = {round_num(float(score_val), round_to)}"
         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
 
