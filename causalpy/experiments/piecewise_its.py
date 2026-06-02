@@ -663,7 +663,10 @@ class PiecewiseITS(BaseExperiment):
             linewidth=2,
         )
 
-        title_str = f"Piecewise ITS: $R^2$ = {round_num(float(self.score), round_to)}"
+        score_val = self.score
+        if isinstance(score_val, pd.Series):
+            raise ValueError("Expected float score for OLS model, got Series")
+        title_str = f"Piecewise ITS: $R^2$ = {round_num(float(score_val), round_to)}"
         ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect
