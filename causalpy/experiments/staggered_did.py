@@ -615,13 +615,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_et["event_time"] = att_et["event_time"].astype(int)
         self.att_event_time_ = att_et
 
-    def summary(self, round_to: int | None = 2) -> None:
+    def summary(
+        self, round_to: int | None = 2, include_group_time: bool = False
+    ) -> None:
         """Print summary of main results.
 
         Parameters
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        include_group_time : bool
+            Whether to print the disaggregated cohort-by-calendar-time
+            ``ATT(g, t)`` table after the event-time estimates. Defaults to
+            ``False``.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -643,6 +649,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             c for c in att_et.columns if c not in ["event_time", "type"]
         ]
         print(att_et[cols].to_string(index=False))
+        if include_group_time:
+            print("\nGroup-time estimates:")
+            print(self.att_group_time_.to_string(index=False))
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
@@ -693,13 +702,87 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
+    def plot_group_time(
+        self,
+        *,
+        hdi_prob: float | None = None,
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        include_placebo: bool = True,
+        figsize: tuple[float, float] | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot cohort-specific ``ATT(g, t)`` trajectories.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval shown by the
+            uncertainty bands. As with :meth:`plot`, Bayesian ``ATT(g, t)``
+            bounds are cached during effect aggregation. If supplied here, the
+            value must match the cached :attr:`hdi_prob_`; otherwise a
+            :class:`ValueError` is raised. Pass ``None`` (the default) to plot
+            using the cached value. Ignored for OLS models.
+        layout : {"facet", "overlay"}
+            Plot layout. ``"facet"`` draws one row per cohort and
+            ``"overlay"`` draws all cohorts on a single axes. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}
+            Time scale for the cohort trajectories. ``"event_time"`` plots
+            each cohort against periods since treatment, giving an
+            ``ATT(g, e)`` view derived from ``ATT(g, t)``. ``"calendar_time"``
+            plots each cohort against calendar time ``t``. Defaults to
+            ``"event_time"``.
+        include_placebo : bool
+            Whether to include pre-treatment residual estimates for
+            eventually-treated cohorts as placebo diagnostics. Defaults to
+            ``True``.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to a height scaled by
+            the number of cohorts when ``layout="facet"`` and ``(10, 6)``
+            when ``layout="overlay"``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in place**
+            so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            Axes containing the cohort trajectories. The list has one axes
+            per cohort when ``layout="facet"`` and one axes when
+            ``layout="overlay"``.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+            layout=layout,
+            x_axis=x_axis,
+            include_placebo=include_placebo,
+            figsize=figsize,
+            view="group_time",
+        )
+
     def _bayesian_plot(
         self,
         hdi_prob: float | None = None,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = (10, 6),
+        view: Literal["event_time", "group_time"] = "event_time",
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        include_placebo: bool = True,
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot event-study results for Bayesian model.
+        """Plot results for Bayesian model.
 
         Parameters
         ----------
@@ -715,6 +798,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             default) to plot using the cached value.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
+        view : {"event_time", "group_time"}, optional
+            Plot view to render. ``"event_time"`` draws the aggregated event
+            study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
+            trajectories. Defaults to ``"event_time"``.
+        layout : {"facet", "overlay"}, optional
+            Plot layout for the ``"group_time"`` view. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}, optional
+            Time scale for the ``"group_time"`` view. Defaults to
+            ``"event_time"``.
+        include_placebo : bool, optional
+            Whether to include pre-treatment residual estimates in the
+            ``"group_time"`` view. Defaults to ``True``.
 
         Returns
         -------
@@ -730,6 +826,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "re-fit the experiment so that aggregation uses the desired "
                 "value, or omit hdi_prob to use the cached value."
             )
+        if view == "group_time":
+            return self._bayesian_plot_group_time(
+                figsize=figsize,
+                layout=layout,
+                x_axis=x_axis,
+                include_placebo=include_placebo,
+            )
+        if view != "event_time":
+            raise ValueError("view must be 'event_time' or 'group_time'")
+
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
@@ -800,23 +906,114 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
+    def _bayesian_plot_group_time(
+        self,
+        figsize: tuple[float, float] | None = None,
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        include_placebo: bool = True,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories."""
+        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
+            x_axis=x_axis, include_placebo=include_placebo
+        )
+        cohort_groups = list(att_gt.groupby("cohort", sort=True))
+        sharex = x_axis == "event_time"
+        fig, axes = self._make_group_time_axes(
+            att_gt=att_gt,
+            layout=layout,
+            figsize=figsize,
+            sharex=sharex,
+            sharey=layout == "facet",
+        )
+
+        for cohort_idx, (cohort, cohort_data) in enumerate(cohort_groups):
+            ax = axes[cohort] if layout == "facet" else axes["overlay"]
+            self._plot_bayesian_group_time_segment(
+                ax=ax,
+                cohort_data=cohort_data[cohort_data["type"] == "placebo"],
+                x_col=x_col,
+                line_type="placebo",
+                color="gray" if layout == "facet" else f"C{cohort_idx % 10}",
+                label=(
+                    "Placebo estimate"
+                    if layout == "facet"
+                    else f"Cohort {cohort} placebo"
+                ),
+            )
+            self._plot_bayesian_group_time_segment(
+                ax=ax,
+                cohort_data=cohort_data[cohort_data["type"] == "ATT"],
+                x_col=x_col,
+                line_type="ATT",
+                color="C0" if layout == "facet" else f"C{cohort_idx % 10}",
+                label="ATT estimate" if layout == "facet" else f"Cohort {cohort} ATT",
+            )
+            self._format_group_time_axis(
+                ax=ax,
+                cohort=cohort if layout == "facet" else None,
+                x_label=self._get_group_time_axis_label(
+                    x_label=x_label,
+                    layout=layout,
+                    sharex=sharex,
+                    axis_index=cohort_idx,
+                    n_axes=len(cohort_groups),
+                ),
+                y_label=y_label,
+                x_axis=x_axis,
+                treatment_time=cohort,
+            )
+            ax.legend(fontsize=LEGEND_FONT_SIZE)
+
+        if layout == "overlay":
+            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+
+        return fig, list(axes.values())
+
     def _ols_plot(
         self,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = (10, 6),
+        view: Literal["event_time", "group_time"] = "event_time",
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        include_placebo: bool = True,
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot event-study results for OLS model.
+        """Plot results for OLS model.
 
         Parameters
         ----------
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
+        view : {"event_time", "group_time"}, optional
+            Plot view to render. ``"event_time"`` draws the aggregated event
+            study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
+            trajectories. Defaults to ``"event_time"``.
+        layout : {"facet", "overlay"}, optional
+            Plot layout for the ``"group_time"`` view. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}, optional
+            Time scale for the ``"group_time"`` view. Defaults to
+            ``"event_time"``.
+        include_placebo : bool, optional
+            Whether to include pre-treatment residual estimates in the
+            ``"group_time"`` view. Defaults to ``True``.
 
         Returns
         -------
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
+        if view == "group_time":
+            return self._ols_plot_group_time(
+                figsize=figsize,
+                layout=layout,
+                x_axis=x_axis,
+                include_placebo=include_placebo,
+            )
+        if view != "event_time":
+            raise ValueError("view must be 'event_time' or 'group_time'")
+
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
@@ -901,6 +1098,307 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ax.set_xticks(att_et["event_time"].values)
 
         return fig, [ax]
+
+    def _ols_plot_group_time(
+        self,
+        figsize: tuple[float, float] | None = None,
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        include_placebo: bool = True,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot OLS cohort-time ``ATT(g, t)`` trajectories."""
+        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
+            x_axis=x_axis, include_placebo=include_placebo
+        )
+        cohort_groups = list(att_gt.groupby("cohort", sort=True))
+        sharex = x_axis == "event_time"
+        fig, axes = self._make_group_time_axes(
+            att_gt=att_gt,
+            layout=layout,
+            figsize=figsize,
+            sharex=sharex,
+            sharey=layout == "facet",
+        )
+
+        for cohort_idx, (cohort, cohort_data) in enumerate(cohort_groups):
+            ax = axes[cohort] if layout == "facet" else axes["overlay"]
+            self._plot_ols_group_time_segment(
+                ax=ax,
+                cohort_data=cohort_data[cohort_data["type"] == "placebo"],
+                x_col=x_col,
+                line_type="placebo",
+                color="gray" if layout == "facet" else f"C{cohort_idx % 10}",
+                label=(
+                    "Placebo estimate"
+                    if layout == "facet"
+                    else f"Cohort {cohort} placebo"
+                ),
+            )
+            self._plot_ols_group_time_segment(
+                ax=ax,
+                cohort_data=cohort_data[cohort_data["type"] == "ATT"],
+                x_col=x_col,
+                line_type="ATT",
+                color="C0" if layout == "facet" else f"C{cohort_idx % 10}",
+                label="ATT estimate" if layout == "facet" else f"Cohort {cohort} ATT",
+            )
+            self._format_group_time_axis(
+                ax=ax,
+                cohort=cohort if layout == "facet" else None,
+                x_label=self._get_group_time_axis_label(
+                    x_label=x_label,
+                    layout=layout,
+                    sharex=sharex,
+                    axis_index=cohort_idx,
+                    n_axes=len(cohort_groups),
+                ),
+                y_label=y_label,
+                x_axis=x_axis,
+                treatment_time=cohort,
+            )
+            ax.legend(fontsize=LEGEND_FONT_SIZE)
+
+        if layout == "overlay":
+            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+
+        return fig, list(axes.values())
+
+    def _get_group_time_plot_data(
+        self,
+        x_axis: Literal["event_time", "calendar_time"],
+        include_placebo: bool,
+    ) -> tuple[pd.DataFrame, str, str, str]:
+        """Return cohort-time data with the requested plotting time scale."""
+        if x_axis not in {"event_time", "calendar_time"}:
+            raise ValueError("x_axis must be 'event_time' or 'calendar_time'")
+
+        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        att_gt["type"] = "ATT"
+        if include_placebo:
+            att_gt = pd.concat(
+                [self._get_group_time_placebo_data(), att_gt],
+                ignore_index=True,
+                sort=False,
+            ).sort_values(["cohort", "time"])
+
+        y_label = "ATT(g, e)" if x_axis == "event_time" else "ATT(g, t)"
+        if include_placebo:
+            y_label = f"{y_label} / placebo"
+
+        if x_axis == "event_time":
+            att_gt["event_time"] = att_gt["time"] - att_gt["cohort"]
+            return (
+                att_gt,
+                "event_time",
+                "Event Time (periods relative to treatment)",
+                y_label,
+            )
+        return att_gt, "time", "Calendar Time", y_label
+
+    def _get_group_time_placebo_data(self) -> pd.DataFrame:
+        """Return cohort-time placebo estimates for eventually-treated units."""
+        if isinstance(self.model, PyMCModel):
+            return self._get_group_time_placebo_data_bayesian()
+        return self._get_group_time_placebo_data_ols()
+
+    def _get_group_time_placebo_observations(self) -> pd.DataFrame:
+        """Return pre-treatment observations for eventually-treated units."""
+        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_pre_treatment = self.data["event_time"] < 0
+        return self.data[is_eventually_treated & is_pre_treatment].copy()
+
+    def _get_group_time_placebo_data_bayesian(self) -> pd.DataFrame:
+        """Return Bayesian cohort-time placebo estimates with HDI bounds."""
+        pretreatment_data = self._get_group_time_placebo_observations()
+        if len(pretreatment_data) == 0:
+            return pd.DataFrame()
+
+        hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
+        lower_pct = (1 - hdi_prob) / 2 * 100
+        upper_pct = (1 + hdi_prob) / 2 * 100
+        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        tau_draws_all = y_observed - mu_draws.values
+
+        att_gt_rows: list[dict[str, Any]] = []
+        gt_groups = pretreatment_data.groupby(["G", self.time_variable_name]).groups
+        for key, idx in gt_groups.items():
+            g_val = key[0]  # type: ignore[index]
+            t_val = key[1]  # type: ignore[index]
+            positions = [np.where(self.data.index == i)[0][0] for i in idx]
+            tau_gt = tau_draws_all[:, :, positions].mean(axis=2)
+            att_gt_rows.append(
+                {
+                    "cohort": g_val,
+                    "time": t_val,
+                    "att": float(tau_gt.mean()),
+                    "att_lower": float(np.percentile(tau_gt, lower_pct)),
+                    "att_upper": float(np.percentile(tau_gt, upper_pct)),
+                    "n_obs": len(positions),
+                    "type": "placebo",
+                }
+            )
+        return pd.DataFrame(att_gt_rows)
+
+    def _get_group_time_placebo_data_ols(self) -> pd.DataFrame:
+        """Return OLS cohort-time placebo residual estimates."""
+        pretreatment_data = self._get_group_time_placebo_observations()
+        if len(pretreatment_data) == 0:
+            return pd.DataFrame()
+
+        pretreatment_data["tau_hat"] = (
+            pretreatment_data[self.outcome_variable_name] - pretreatment_data["y_hat0"]
+        )
+        att_gt = (
+            pretreatment_data.groupby(["G", self.time_variable_name])["tau_hat"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        att_gt.columns = ["cohort", "time", "att", "att_std", "n_obs"]
+        att_gt["type"] = "placebo"
+        return att_gt
+
+    def _make_group_time_axes(
+        self,
+        att_gt: pd.DataFrame,
+        layout: Literal["facet", "overlay"],
+        figsize: tuple[float, float] | None,
+        sharex: bool,
+        sharey: bool,
+    ) -> tuple[plt.Figure, dict[Any, plt.Axes]]:
+        """Create axes for cohort trajectory plots."""
+        cohorts = list(att_gt["cohort"].drop_duplicates())
+        if layout == "overlay":
+            fig, ax = plt.subplots(
+                1, 1, figsize=figsize or (10, 6), layout="constrained"
+            )
+            return fig, {"overlay": ax}
+        if layout != "facet":
+            raise ValueError("layout must be 'facet' or 'overlay'")
+
+        fig_height = max(2.5 * len(cohorts), 3.0)
+        fig, axes_arr = plt.subplots(
+            len(cohorts),
+            1,
+            figsize=figsize or (10, fig_height),
+            sharex=sharex,
+            sharey=sharey,
+            squeeze=False,
+            layout="constrained",
+        )
+        return fig, {
+            cohort: axes_arr[row_idx, 0] for row_idx, cohort in enumerate(cohorts)
+        }
+
+    def _format_group_time_axis(
+        self,
+        ax: plt.Axes,
+        cohort: Any | None,
+        x_label: str,
+        y_label: str,
+        x_axis: Literal["event_time", "calendar_time"],
+        treatment_time: Any,
+    ) -> None:
+        """Apply shared formatting for cohort trajectory axes."""
+        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
+        if x_axis == "event_time":
+            ax.axvline(x=-0.5, color="red", linestyle="-", linewidth=1, alpha=0.5)
+        elif cohort is not None:
+            ax.axvline(
+                x=treatment_time - 0.5,
+                color="red",
+                linestyle="-",
+                linewidth=1,
+                alpha=0.5,
+            )
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel(y_label, fontsize=12)
+        if cohort is None:
+            ax.set_title("Staggered DiD Cohort Trajectories", fontsize=14)
+        else:
+            ax.set_title(f"Cohort {cohort}", fontsize=12)
+
+    def _get_group_time_axis_label(
+        self,
+        x_label: str,
+        layout: Literal["facet", "overlay"],
+        sharex: bool,
+        axis_index: int,
+        n_axes: int,
+    ) -> str:
+        """Return an x-axis label only where it helps the figure."""
+        if layout == "facet" and sharex and axis_index < n_axes - 1:
+            return ""
+        return x_label
+
+    def _plot_bayesian_group_time_segment(
+        self,
+        ax: plt.Axes,
+        cohort_data: pd.DataFrame,
+        x_col: str,
+        line_type: Literal["placebo", "ATT"],
+        color: str,
+        label: str,
+    ) -> None:
+        """Plot one Bayesian placebo or ATT segment for a cohort."""
+        if len(cohort_data) == 0:
+            return
+
+        marker = "s" if line_type == "placebo" else "o"
+        linestyle = "--" if line_type == "placebo" else "-"
+        alpha = 0.15 if line_type == "placebo" else 0.2
+        ax.plot(
+            cohort_data[x_col],
+            cohort_data["att"],
+            marker=marker,
+            linestyle=linestyle,
+            color=color,
+            label=label,
+        )
+        ax.fill_between(
+            cohort_data[x_col],
+            cohort_data["att_lower"],
+            cohort_data["att_upper"],
+            color=color,
+            alpha=alpha,
+        )
+
+    def _plot_ols_group_time_segment(
+        self,
+        ax: plt.Axes,
+        cohort_data: pd.DataFrame,
+        x_col: str,
+        line_type: Literal["placebo", "ATT"],
+        color: str,
+        label: str,
+    ) -> None:
+        """Plot one OLS placebo or ATT segment for a cohort."""
+        if len(cohort_data) == 0:
+            return
+
+        marker = "s" if line_type == "placebo" else "o"
+        linestyle = "--" if line_type == "placebo" else "-"
+        if {"att_std", "n_obs"}.issubset(cohort_data.columns):
+            se = cohort_data["att_std"] / np.sqrt(cohort_data["n_obs"])
+            ax.errorbar(
+                cohort_data[x_col],
+                cohort_data["att"],
+                yerr=1.96 * se,
+                fmt=f"{marker}{linestyle}",
+                capsize=4,
+                capthick=2,
+                color=color,
+                label=label,
+            )
+        else:
+            ax.plot(
+                cohort_data[x_col],
+                cohort_data["att"],
+                marker=marker,
+                linestyle=linestyle,
+                color=color,
+                label=label,
+            )
 
     def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """Get plotting data for Bayesian model.

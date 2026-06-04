@@ -451,3 +451,13 @@ def test_staggered_plot_rejects_mismatched_hdi_prob(mock_pymc_sample, fitted_sta
     other = 0.50 if fitted_staggered.hdi_prob_ != 0.50 else 0.99
     with pytest.raises(ValueError, match="HDI bounds are computed during"):
         fitted_staggered.plot(hdi_prob=other)
+
+
+@pytest.mark.integration
+def test_staggered_group_time_plot_rejects_mismatched_hdi_prob(
+    mock_pymc_sample, fitted_staggered
+):
+    """The group-time plot must also reject a non-cached ``hdi_prob``."""
+    other = 0.50 if fitted_staggered.hdi_prob_ != 0.50 else 0.99
+    with pytest.raises(ValueError, match="HDI bounds are computed during"):
+        fitted_staggered.plot_group_time(hdi_prob=other)
