@@ -380,17 +380,37 @@ class PlaceboInTime:
     ) -> list[Any]:
         """Randomly select pseudo-treatment times from the pre-period.
 
-        Builds a list of eligible candidate dates/indices from the
-        pre-intervention data, then randomly selects ``n_folds``
-        candidates subject to ``min_training_pct``, ``min_gap``,
-        ``allow_overlap``, and ``exclude_periods`` constraints.
+        The algorithm proceeds in two stages.
 
-        Selection is greedy without backtracking and can fail to pick
-        a valid combination on the first try when constraints are
-        tight.  To preserve reproducibility when a ``random_seed`` is
-        supplied, the method retries up to
-        :data:`MAX_RANDOM_SELECTION_RETRIES` times using deterministic
-        sub-seeds derived from ``random_seed`` before giving up.
+        1. **Candidate pool.**  Walks the sorted pre-intervention
+           index and keeps each position that satisfies *all* of:
+
+           * its period label is not in
+             :attr:`exclude_periods`;
+           * its position in the sorted pre-period index is at least
+             ``ceil(min_training_pct * n_total)`` so each placebo fold
+             has enough training data ahead of it;
+           * its pseudo-intervention window
+             ``[idx, idx + intervention_length)`` ends before the real
+             ``treatment_time`` (so the placebo and real intervention
+             cannot overlap in time).
+
+           If the resulting pool has fewer than :attr:`n_folds`
+           candidates the method raises :class:`ValueError` with the
+           knobs to relax (``n_folds`` / ``min_training_pct`` /
+           ``exclude_periods``).
+
+        2. **Greedy selection with retry.**  Hands the pool to
+           :meth:`_try_greedy_selection`, which picks
+           :attr:`n_folds` indices one at a time subject to
+           :attr:`min_gap` (positional distance in the candidate pool)
+           and :attr:`allow_overlap` (non-overlap of the pseudo
+           windows in time/index units).  Greedy without backtracking
+           can paint itself into a corner on tight constraints, so the
+           method runs up to :data:`MAX_RANDOM_SELECTION_RETRIES`
+           passes.  When :attr:`random_seed` is set, each retry uses a
+           deterministic sub-seed (``seed + attempt``) so the whole
+           routine remains reproducible across runs.
 
         Parameters
         ----------
@@ -528,14 +548,17 @@ class PlaceboInTime:
 
     @staticmethod
     def _windows_overlap(idx_a: Any, idx_b: Any, intervention_length: Any) -> bool:
-        """Return True if two intervention windows overlap.
+        """Return ``True`` iff two half-open intervention windows share a point.
 
-        A window starting at ``idx`` spans ``[idx, idx + intervention_length)``.
-        Two windows overlap iff their absolute separation is strictly
-        less than ``intervention_length``.  The comparison uses
-        ``idx + intervention_length`` rather than computing a Timedelta
-        directly so that it works uniformly for numeric indices and
-        for datetime indices combined with ``pd.DateOffset``.
+        Each window starting at index ``idx`` is treated as the
+        half-open interval ``[idx, idx + intervention_length)`` (start
+        inclusive, end exclusive).  Under that convention, the windows
+        ``[a, a + L)`` and ``[b, b + L)`` overlap iff
+        ``abs(a - b) < L`` -- two back-to-back windows at distance
+        exactly ``L`` are considered non-overlapping.  The
+        ``idx + intervention_length`` arithmetic, rather than a direct
+        Timedelta computation, lets the same expression handle numeric
+        indices and datetime indices with ``pd.DateOffset`` uniformly.
         """
         earlier, later = (idx_a, idx_b) if idx_a <= idx_b else (idx_b, idx_a)
         return later < earlier + intervention_length
@@ -936,7 +959,12 @@ class PlaceboInTime:
                 check_name="PlaceboInTime",
                 passed=None,
                 text="\n".join(parts),
-                metadata={"fold_results": fold_results},
+                metadata={
+                    "fold_results": fold_results,
+                    "rope_half_width": self.rope_half_width,
+                    "threshold": self.threshold,
+                    "expected_effect_prior": self.expected_effect_prior,
+                },
             )
 
         fold_means = np.array([fr.fold_mean for fr in fold_results])
@@ -977,10 +1005,14 @@ class PlaceboInTime:
 
         metadata: dict[str, Any] = {
             "fold_results": fold_results,
+            "fold_sds": fold_sds,
             "status_quo_idata": idata,
             "null_samples": theta_new_samples,
             "actual_cumulative_mean": actual_cumulative_mean,
             "p_effect_outside_null": p_outside,
+            "rope_half_width": self.rope_half_width,
+            "threshold": self.threshold,
+            "expected_effect_prior": self.expected_effect_prior,
         }
 
         n_posterior_samples = len(actual_cumulative.values)

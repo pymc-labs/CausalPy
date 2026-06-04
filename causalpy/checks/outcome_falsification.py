@@ -211,11 +211,38 @@ class OutcomeFalsification:
         Uses the experiment's ``effect_summary()`` method which provides
         standardized output across experiment types.  The returned table
         always contains ``hdi_lower`` and ``hdi_upper`` columns.
+
+        Raises
+        ------
+        RuntimeError
+            If ``effect_summary()`` returns an empty table or one that
+            does not expose the expected ``mean`` / ``hdi_lower`` /
+            ``hdi_upper`` columns.  This is a defensive guard against
+            future schema changes in ``effect_summary``: the
+            single-effect contract assumed here (``iloc[0]`` is *the*
+            effect row) should fail loudly rather than silently
+            returning the wrong row.
         """
         summary = experiment.effect_summary(
             alpha=alpha, direction="two-sided", cumulative=False, relative=False
         )
         table = summary.table
+
+        required_columns = {"mean", "hdi_lower", "hdi_upper"}
+        if table is None or len(table) == 0:
+            raise RuntimeError(
+                f"{type(experiment).__name__}.effect_summary() returned an "
+                f"empty table; cannot extract falsification effect statistics."
+            )
+        missing = required_columns - set(table.columns)
+        if missing:
+            raise RuntimeError(
+                f"{type(experiment).__name__}.effect_summary() table is "
+                f"missing required column(s) {sorted(missing)}; "
+                f"OutcomeFalsification expects a single-effect summary "
+                f"with columns {sorted(required_columns)}."
+            )
+
         row = table.iloc[0]
 
         return {

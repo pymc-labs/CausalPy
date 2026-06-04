@@ -457,6 +457,65 @@ def test_run_metadata_contains_null_distribution(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_run_metadata_carries_design_configuration(mock_pymc_sample):
+    """Design knobs (ROPE, threshold, prior) and fold_sds round-trip into metadata."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    prior_samples = np.random.default_rng(0).normal(90, 15, size=200)
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        rope_half_width=25.0,
+        threshold=0.9,
+        expected_effect_prior=prior_samples,
+        random_seed=42,
+    )
+    result = check.run(experiment)
+
+    assert result.metadata["rope_half_width"] == 25.0
+    assert result.metadata["threshold"] == 0.9
+    assert result.metadata["expected_effect_prior"] is prior_samples
+
+    fold_sds = result.metadata["fold_sds"]
+    assert isinstance(fold_sds, np.ndarray)
+    assert fold_sds.shape == (2,)
+    assert np.all(fold_sds > 0)
+    np.testing.assert_array_equal(
+        fold_sds,
+        np.array([fr.fold_sd for fr in result.metadata["fold_results"]]),
+    )
+
+
+@pytest.mark.integration
+def test_run_metadata_carries_defaults_when_unconfigured(mock_pymc_sample):
+    """Configuration metadata is present (None / default) even without ROPE/prior."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    assert result.metadata["rope_half_width"] is None
+    assert result.metadata["threshold"] == 0.95
+    assert result.metadata["expected_effect_prior"] is None
+    assert "fold_sds" in result.metadata
+
+
+@pytest.mark.integration
 def test_fold_treatment_times_are_shifted(mock_pymc_sample):
     """Test fold treatment times are shifted."""
     df = _make_its_data(n=2000)

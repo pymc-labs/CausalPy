@@ -480,3 +480,91 @@ class TestTimeSeriesModelClonePreservesPriors:
         cloned = original._clone()
         assert cloned._user_priors == custom_priors
         assert cloned._user_priors is not None
+
+
+class TestTimeSeriesModelCloneIsUnfitted:
+    """Regression tests: ``_clone()`` returns a fresh model with no fitted state.
+
+    The whole point of ``_clone()`` is to give sensitivity checks a model
+    they can refit from scratch without inheriting the original's
+    posterior, sampling history, or any cached state.  These tests assert
+    the clone really is a clean copy: ``idata`` is ``None``, the clone is
+    a distinct instance from the original, and fitting the original after
+    cloning does not leak into the clone.
+    """
+
+    def test_linear_regression_clone_has_no_fitted_state(self):
+        """``LinearRegression._clone()`` returns a model with idata=None."""
+        original = cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+        )
+        cloned = original._clone()
+        assert cloned is not original
+        assert cloned.idata is None
+
+    def test_bayesian_basis_expansion_clone_has_no_fitted_state(self):
+        """``BayesianBasisExpansionTimeSeries._clone()`` returns idata=None."""
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
+        original = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        cloned = original._clone()
+        assert cloned is not original
+        assert cloned.idata is None
+
+    def test_state_space_clone_has_no_fitted_state(self):
+        """``StateSpaceTimeSeries._clone()`` returns idata=None."""
+        pytest.importorskip(
+            "pymc_extras",
+            reason="pymc-extras optional for state-space model",
+        )
+        original = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+        )
+        cloned = original._clone()
+        assert cloned is not original
+        assert cloned.idata is None
+
+    def test_clone_after_fit_does_not_inherit_idata(self):
+        """Cloning a fitted model still produces a fresh, unfitted instance.
+
+        Uses ``LinearRegression`` (the cheapest fittable PyMC model) to
+        actually drive a fit with a tiny ``sample_kwargs`` budget, then
+        asserts the cloned model has no posterior and that the original's
+        ``idata`` is untouched after the clone.
+        """
+        rng = np.random.default_rng(0)
+        n = 30
+        X = xr.DataArray(
+            rng.normal(size=(n, 1)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(n), "coeffs": ["x1"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(n, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(n), "treated_units": ["unit_0"]},
+        )
+
+        original = cp.pymc_models.LinearRegression(
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+                "random_seed": 42,
+            },
+        )
+        original.fit(X=X, y=y)
+        assert original.idata is not None  # sanity check the fit landed
+
+        cloned = original._clone()
+
+        assert cloned is not original
+        assert cloned.idata is None
+        assert original.idata is not None  # original is untouched

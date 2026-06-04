@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,10 @@ from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.outcome_falsification import (
     FalsificationResult,
     OutcomeFalsification,
+)
+from causalpy.data.simulate_data import (
+    generate_did,
+    generate_piecewise_its_data,
 )
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import Pipeline, PipelineContext
@@ -432,3 +437,115 @@ def test_pipeline_integration(mock_pymc_sample):
     assert check_result.check_name == "OutcomeFalsification"
     assert check_result.passed is None  # informational
     assert check_result.table is not None
+
+
+# ===========================================================================
+# Parametrized cross-method integration tests
+# ===========================================================================
+#
+# OutcomeFalsification's formula-swapping logic is method-agnostic, so it
+# should work uniformly across the three ``applicable_methods``
+# (:class:`InterruptedTimeSeries`, :class:`DifferenceInDifferences`,
+# :class:`PiecewiseITS`).  ITS already has dedicated coverage above; the
+# parametrized suite below pins the DiD and PiecewiseITS paths so a
+# regression in either ``effect_summary`` schema (DiD's
+# ``"treatment_effect"`` row vs. ITS/PiecewiseITS's ``"average"`` row)
+# would surface here rather than only when a user runs the check.
+# ---------------------------------------------------------------------------
+
+
+def _make_did_data(seed: int = 42) -> pd.DataFrame:
+    """DiD dataset with main outcome y plus falsification outcomes z, w."""
+    rng = np.random.default_rng(seed)
+    df = generate_did(seed=seed)
+    df["z"] = rng.normal(size=len(df))
+    df["w"] = rng.normal(size=len(df))
+    return df
+
+
+def _make_piecewise_its_data(n: int = 100, seed: int = 42) -> pd.DataFrame:
+    """PiecewiseITS dataset with main outcome y plus falsification outcomes z, w."""
+    rng = np.random.default_rng(seed)
+    df, _params = generate_piecewise_its_data(
+        N=n, interruption_times=[50], level_changes=[5.0], seed=seed
+    )
+    df["z"] = rng.normal(size=len(df))
+    df["w"] = rng.normal(size=len(df))
+    return df
+
+
+def _build_did_context(df: pd.DataFrame) -> tuple[Any, PipelineContext]:
+    experiment_kwargs = {
+        "formula": "y ~ 1 + group*post_treatment",
+        "time_variable_name": "t",
+        "group_variable_name": "group",
+    }
+    experiment = cp.DifferenceInDifferences(
+        df, model=_make_pymc_model(), **experiment_kwargs
+    )
+    context = PipelineContext(data=df)
+    context.experiment = experiment
+    context.experiment_config = {
+        "method": cp.DifferenceInDifferences,
+        "model": _make_pymc_model(),
+        **experiment_kwargs,
+    }
+    return experiment, context
+
+
+def _build_piecewise_its_context(df: pd.DataFrame) -> tuple[Any, PipelineContext]:
+    experiment_kwargs = {
+        "formula": "y ~ 1 + t + step(t, 50) + ramp(t, 50)",
+    }
+    experiment = cp.PiecewiseITS(df, model=_make_pymc_model(), **experiment_kwargs)
+    context = PipelineContext(data=df)
+    context.experiment = experiment
+    context.experiment_config = {
+        "method": cp.PiecewiseITS,
+        "model": _make_pymc_model(),
+        **experiment_kwargs,
+    }
+    return experiment, context
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "method_name",
+    ["did", "piecewise_its"],
+)
+def test_run_across_applicable_methods(mock_pymc_sample, method_name):
+    """OutcomeFalsification.run() succeeds for each applicable method.
+
+    ITS is already exercised throughout the rest of this module; this
+    test pins the DiD and PiecewiseITS paths so the formula-swapping
+    machinery (and the row-shape it expects from ``effect_summary``)
+    keeps working uniformly across all three ``applicable_methods``.
+    """
+    if method_name == "did":
+        df = _make_did_data()
+        experiment, context = _build_did_context(df)
+        falsification_formula = "z ~ 1 + group*post_treatment"
+    else:
+        df = _make_piecewise_its_data()
+        experiment, context = _build_piecewise_its_context(df)
+        falsification_formula = "z ~ 1 + t + step(t, 50) + ramp(t, 50)"
+
+    check = OutcomeFalsification(formulas=[falsification_formula])
+    result = check.run(experiment, context)
+
+    assert isinstance(result, CheckResult)
+    assert result.check_name == "OutcomeFalsification"
+    assert result.passed is None  # informational
+    assert result.table is not None
+    assert len(result.table) == 1
+    assert result.table["formula"].iloc[0] == falsification_formula
+    assert "hdi_95%_lower" in result.table.columns
+    assert "hdi_95%_upper" in result.table.columns
+    # The falsification effect for an unrelated outcome should be a real
+    # number (not NaN) -- if we landed here the formula fitted cleanly.
+    assert not pd.isna(result.table["effect_mean"].iloc[0])
+
+    frs = result.metadata["falsification_results"]
+    assert len(frs) == 1
+    assert isinstance(frs[0], FalsificationResult)
+    assert frs[0].formula == falsification_formula
