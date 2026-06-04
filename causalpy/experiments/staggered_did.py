@@ -706,11 +706,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self,
         *,
         hdi_prob: float | None = None,
-        figsize: tuple[float, float] = (10, 6),
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
+        figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot cohort-specific ``ATT(g, t)`` trajectories over calendar time.
+        """Plot cohort-specific ``ATT(g, t)`` trajectories.
 
         Parameters
         ----------
@@ -721,9 +723,21 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             value must match the cached :attr:`hdi_prob_`; otherwise a
             :class:`ValueError` is raised. Pass ``None`` (the default) to plot
             using the cached value. Ignored for OLS models.
-        figsize : tuple of (float, float)
+        layout : {"facet", "overlay"}
+            Plot layout. ``"facet"`` draws one row per cohort and
+            ``"overlay"`` draws all cohorts on a single axes. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}
+            Time scale for the cohort trajectories. ``"event_time"`` plots
+            each cohort against periods since treatment, giving an
+            ``ATT(g, e)`` view derived from ``ATT(g, t)``. ``"calendar_time"``
+            plots each cohort against calendar time ``t``. Defaults to
+            ``"event_time"``.
+        figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
+            :func:`matplotlib.pyplot.subplots`. Defaults to a height scaled by
+            the number of cohorts when ``layout="facet"`` and ``(10, 6)``
+            when ``layout="overlay"``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -738,12 +752,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         fig : matplotlib.figure.Figure
             The figure that was created.
         ax : list[matplotlib.axes.Axes]
-            A single-element list containing the cohort-trajectory axes.
+            Axes containing the cohort trajectories. The list has one axes
+            per cohort when ``layout="facet"`` and one axes when
+            ``layout="overlay"``.
         """
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
+            layout=layout,
+            x_axis=x_axis,
             figsize=figsize,
             view="group_time",
         )
@@ -751,8 +769,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def _bayesian_plot(
         self,
         hdi_prob: float | None = None,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = (10, 6),
         view: Literal["event_time", "group_time"] = "event_time",
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot results for Bayesian model.
@@ -774,7 +794,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         view : {"event_time", "group_time"}, optional
             Plot view to render. ``"event_time"`` draws the aggregated event
             study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
-            trajectories over calendar time. Defaults to ``"event_time"``.
+            trajectories. Defaults to ``"event_time"``.
+        layout : {"facet", "overlay"}, optional
+            Plot layout for the ``"group_time"`` view. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}, optional
+            Time scale for the ``"group_time"`` view. Defaults to
+            ``"event_time"``.
 
         Returns
         -------
@@ -791,7 +817,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "value, or omit hdi_prob to use the cached value."
             )
         if view == "group_time":
-            return self._bayesian_plot_group_time(figsize=figsize)
+            return self._bayesian_plot_group_time(
+                figsize=figsize, layout=layout, x_axis=x_axis
+            )
         if view != "event_time":
             raise ValueError("view must be 'event_time' or 'group_time'")
 
@@ -867,38 +895,51 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _bayesian_plot_group_time(
         self,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = None,
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories."""
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(x_axis)
+        fig, axes = self._make_group_time_axes(
+            att_gt=att_gt,
+            layout=layout,
+            figsize=figsize,
+            sharex=x_axis == "event_time",
+        )
 
         for cohort, cohort_data in att_gt.groupby("cohort", sort=True):
+            ax = axes[cohort] if layout == "facet" else axes["overlay"]
             ax.plot(
-                cohort_data["time"],
+                cohort_data[x_col],
                 cohort_data["att"],
                 marker="o",
                 label=f"Cohort {cohort}",
             )
             ax.fill_between(
-                cohort_data["time"],
+                cohort_data[x_col],
                 cohort_data["att_lower"],
                 cohort_data["att_upper"],
                 alpha=0.2,
             )
+            self._format_group_time_axis(
+                ax=ax,
+                cohort=cohort if layout == "facet" else None,
+                x_label=x_label,
+                y_label=y_label,
+            )
 
-        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
-        ax.set_xlabel("Calendar Time", fontsize=12)
-        ax.set_ylabel("ATT(g, t)", fontsize=12)
-        ax.set_title("Staggered DiD Group-Time Effects", fontsize=14)
-        ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+        if layout == "overlay":
+            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
-        return fig, [ax]
+        return fig, list(axes.values())
 
     def _ols_plot(
         self,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = (10, 6),
         view: Literal["event_time", "group_time"] = "event_time",
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot results for OLS model.
@@ -910,7 +951,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         view : {"event_time", "group_time"}, optional
             Plot view to render. ``"event_time"`` draws the aggregated event
             study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
-            trajectories over calendar time. Defaults to ``"event_time"``.
+            trajectories. Defaults to ``"event_time"``.
+        layout : {"facet", "overlay"}, optional
+            Plot layout for the ``"group_time"`` view. Defaults to
+            ``"facet"``.
+        x_axis : {"event_time", "calendar_time"}, optional
+            Time scale for the ``"group_time"`` view. Defaults to
+            ``"event_time"``.
 
         Returns
         -------
@@ -918,7 +965,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Figure and axes objects.
         """
         if view == "group_time":
-            return self._ols_plot_group_time(figsize=figsize)
+            return self._ols_plot_group_time(
+                figsize=figsize, layout=layout, x_axis=x_axis
+            )
         if view != "event_time":
             raise ValueError("view must be 'event_time' or 'group_time'")
 
@@ -1009,17 +1058,25 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _ols_plot_group_time(
         self,
-        figsize: tuple[float, float] = (10, 6),
+        figsize: tuple[float, float] | None = None,
+        layout: Literal["facet", "overlay"] = "facet",
+        x_axis: Literal["event_time", "calendar_time"] = "event_time",
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot OLS cohort-time ``ATT(g, t)`` trajectories."""
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(x_axis)
+        fig, axes = self._make_group_time_axes(
+            att_gt=att_gt,
+            layout=layout,
+            figsize=figsize,
+            sharex=x_axis == "event_time",
+        )
 
         for cohort, cohort_data in att_gt.groupby("cohort", sort=True):
+            ax = axes[cohort] if layout == "facet" else axes["overlay"]
             if {"att_std", "n_obs"}.issubset(cohort_data.columns):
                 se = cohort_data["att_std"] / np.sqrt(cohort_data["n_obs"])
                 ax.errorbar(
-                    cohort_data["time"],
+                    cohort_data[x_col],
                     cohort_data["att"],
                     yerr=1.96 * se,
                     fmt="o-",
@@ -1029,19 +1086,87 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 )
             else:
                 ax.plot(
-                    cohort_data["time"],
+                    cohort_data[x_col],
                     cohort_data["att"],
                     marker="o",
                     label=f"Cohort {cohort}",
                 )
+            self._format_group_time_axis(
+                ax=ax,
+                cohort=cohort if layout == "facet" else None,
+                x_label=x_label,
+                y_label=y_label,
+            )
 
+        if layout == "overlay":
+            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+
+        return fig, list(axes.values())
+
+    def _get_group_time_plot_data(
+        self,
+        x_axis: Literal["event_time", "calendar_time"],
+    ) -> tuple[pd.DataFrame, str, str, str]:
+        """Return cohort-time data with the requested plotting time scale."""
+        if x_axis not in {"event_time", "calendar_time"}:
+            raise ValueError("x_axis must be 'event_time' or 'calendar_time'")
+
+        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        if x_axis == "event_time":
+            att_gt["event_time"] = att_gt["time"] - att_gt["cohort"]
+            return (
+                att_gt,
+                "event_time",
+                "Event Time (periods relative to treatment)",
+                "ATT(g, e)",
+            )
+        return att_gt, "time", "Calendar Time", "ATT(g, t)"
+
+    def _make_group_time_axes(
+        self,
+        att_gt: pd.DataFrame,
+        layout: Literal["facet", "overlay"],
+        figsize: tuple[float, float] | None,
+        sharex: bool,
+    ) -> tuple[plt.Figure, dict[Any, plt.Axes]]:
+        """Create axes for cohort trajectory plots."""
+        cohorts = list(att_gt["cohort"].drop_duplicates())
+        if layout == "overlay":
+            fig, ax = plt.subplots(
+                1, 1, figsize=figsize or (10, 6), layout="constrained"
+            )
+            return fig, {"overlay": ax}
+        if layout != "facet":
+            raise ValueError("layout must be 'facet' or 'overlay'")
+
+        fig_height = max(2.5 * len(cohorts), 3.0)
+        fig, axes_arr = plt.subplots(
+            len(cohorts),
+            1,
+            figsize=figsize or (10, fig_height),
+            sharex=sharex,
+            squeeze=False,
+            layout="constrained",
+        )
+        return fig, {
+            cohort: axes_arr[row_idx, 0] for row_idx, cohort in enumerate(cohorts)
+        }
+
+    def _format_group_time_axis(
+        self,
+        ax: plt.Axes,
+        cohort: Any | None,
+        x_label: str,
+        y_label: str,
+    ) -> None:
+        """Apply shared formatting for cohort trajectory axes."""
         ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
-        ax.set_xlabel("Calendar Time", fontsize=12)
-        ax.set_ylabel("ATT(g, t)", fontsize=12)
-        ax.set_title("Staggered DiD Group-Time Effects", fontsize=14)
-        ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
-
-        return fig, [ax]
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel(y_label, fontsize=12)
+        if cohort is None:
+            ax.set_title("Staggered DiD Cohort Trajectories", fontsize=14)
+        else:
+            ax.set_title(f"Cohort {cohort}", fontsize=12)
 
     def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """Get plotting data for Bayesian model.

@@ -954,11 +954,42 @@ def test_staggered_did_plot_group_time_elements_ols():
 
     fig, axes = result.plot_group_time(show=False)
 
+    assert len(axes) == len(result.cohorts)
+    for ax, cohort in zip(axes, result.cohorts, strict=True):
+        assert "Event Time" in ax.get_xlabel()
+        assert "ATT(g, e)" in ax.get_ylabel()
+        assert f"Cohort {cohort}" in ax.get_title()
+
+    plt.close(fig)
+
+
+def test_staggered_did_plot_group_time_overlay_calendar_ols():
+    """Test that OLS group-time plot can overlay cohorts on calendar time."""
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=15,
+        treatment_cohorts={5: 10, 10: 10},
+        seed=42,
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    )
+
+    fig, axes = result.plot_group_time(
+        layout="overlay", x_axis="calendar_time", show=False
+    )
+
     assert len(axes) == 1
     ax = axes[0]
     assert "Calendar Time" in ax.get_xlabel()
     assert "ATT(g, t)" in ax.get_ylabel()
-    assert "Group-Time" in ax.get_title()
+    assert "Cohort Trajectories" in ax.get_title()
 
     legend = ax.get_legend()
     assert legend is not None
@@ -1022,17 +1053,11 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
 
     fig, axes = result.plot_group_time(show=False)
 
-    assert len(axes) == 1
-    ax = axes[0]
-    assert "Calendar Time" in ax.get_xlabel()
-    assert "ATT(g, t)" in ax.get_ylabel()
-    assert "Group-Time" in ax.get_title()
-
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_labels = {text.get_text() for text in legend.get_texts()}
-    expected_labels = {f"Cohort {cohort}" for cohort in result.cohorts}
-    assert expected_labels.issubset(legend_labels)
+    assert len(axes) == len(result.cohorts)
+    for ax, cohort in zip(axes, result.cohorts, strict=True):
+        assert "Event Time" in ax.get_xlabel()
+        assert "ATT(g, e)" in ax.get_ylabel()
+        assert f"Cohort {cohort}" in ax.get_title()
 
     plt.close(fig)
 
