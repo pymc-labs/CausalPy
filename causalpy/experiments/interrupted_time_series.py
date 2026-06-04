@@ -970,7 +970,7 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
         ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"
+            title=f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to)}"  # type: ignore[arg-type]
         )
 
         ax[1].plot(self.datapre.index, self.pre_impact, "k.")

@@ -863,7 +863,7 @@ class SyntheticControl(BaseExperiment):
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"
+            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"  # type: ignore[arg-type]
 
     def effect_summary(
         self,

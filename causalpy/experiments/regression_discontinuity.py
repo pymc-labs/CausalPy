@@ -495,7 +495,7 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(float(self.score), round_to)}"
+        r2 = f"$R^2$ on fit data = {round_num(float(self.score), round_to)}"  # type: ignore[arg-type]
         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
 

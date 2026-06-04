@@ -663,7 +663,7 @@ class PiecewiseITS(BaseExperiment):
             linewidth=2,
         )
 
-        title_str = f"Piecewise ITS: $R^2$ = {round_num(float(self.score), round_to)}"
+        title_str = f"Piecewise ITS: $R^2$ = {round_num(float(self.score), round_to)}"  # type: ignore[arg-type]
         ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect
