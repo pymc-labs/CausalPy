@@ -289,10 +289,6 @@ class PlaceboInTime:
         self.n_design_replications = n_design_replications
         self.random_seed = random_seed
 
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
     def validate(self, experiment: BaseExperiment) -> None:
         """Check the experiment is compatible with PlaceboInTime.
 
@@ -314,10 +310,6 @@ class PlaceboInTime:
                 f"extraction, but got {type(experiment.model).__name__}. "
                 f"Use a PyMC model (e.g. cp.pymc_models.LinearRegression)."
             )
-
-    # ------------------------------------------------------------------
-    # Factory helpers (reused from original)
-    # ------------------------------------------------------------------
 
     def _get_factory(self, context: PipelineContext | None) -> Any:
         """Return a factory ``(data, treatment_time) -> experiment``."""
@@ -344,10 +336,6 @@ class PlaceboInTime:
             return method(data, **kw)
 
         return _factory
-
-    # ------------------------------------------------------------------
-    # Fold geometry (reused from original)
-    # ------------------------------------------------------------------
 
     def _compute_intervention_length(self, experiment: BaseExperiment) -> Any:
         """Compute intervention length from the experiment."""
@@ -573,10 +561,6 @@ class PlaceboInTime:
         pseudo_end = pseudo_treatment_time + intervention_length
         return data.loc[data.index < pseudo_end].copy()
 
-    # ------------------------------------------------------------------
-    # Posterior extraction
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _extract_cumulative_impact(experiment: BaseExperiment) -> xr.DataArray:
         """Extract posterior cumulative impact from a fitted experiment.
@@ -592,10 +576,6 @@ class PlaceboInTime:
 
         cumulative = post_impact.sum("obs_ind")
         return cumulative.stack(sample=("chain", "draw"))
-
-    # ------------------------------------------------------------------
-    # Hierarchical status-quo model
-    # ------------------------------------------------------------------
 
     def _build_status_quo_model(
         self,
@@ -680,10 +660,6 @@ class PlaceboInTime:
 
         return idata, theta_new_samples
 
-    # ------------------------------------------------------------------
-    # ROPE decision rule
-    # ------------------------------------------------------------------
-
     @staticmethod
     def bayesian_rope_decision(
         posterior_samples: np.ndarray,
@@ -716,10 +692,6 @@ class PlaceboInTime:
             return "null"
         else:
             return "indeterminate"
-
-    # ------------------------------------------------------------------
-    # Assurance (operating characteristics)
-    # ------------------------------------------------------------------
 
     def _draw_expected_effect_samples(self, n: int) -> np.ndarray:
         """Draw samples from the expected-effect prior.
@@ -835,10 +807,6 @@ class PlaceboInTime:
             null_decisions=null_arr,
             alt_decisions=alt_arr,
         )
-
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
 
     def run(
         self,
