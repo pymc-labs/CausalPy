@@ -615,13 +615,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_et["event_time"] = att_et["event_time"].astype(int)
         self.att_event_time_ = att_et
 
-    def summary(self, round_to: int | None = 2) -> None:
+    def summary(
+        self, round_to: int | None = 2, include_group_time: bool = False
+    ) -> None:
         """Print summary of main results.
 
         Parameters
         ----------
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
+        include_group_time : bool
+            Whether to print the disaggregated cohort-by-calendar-time
+            ``ATT(g, t)`` table after the event-time estimates. Defaults to
+            ``False``.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -643,6 +649,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             c for c in att_et.columns if c not in ["event_time", "type"]
         ]
         print(att_et[cols].to_string(index=False))
+        if include_group_time:
+            print("\nGroup-time estimates:")
+            print(self.att_group_time_.to_string(index=False))
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
@@ -693,13 +702,60 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
+    def plot_group_time(
+        self,
+        *,
+        hdi_prob: float | None = None,
+        figsize: tuple[float, float] = (10, 6),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot cohort-specific ``ATT(g, t)`` trajectories over calendar time.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval shown by the
+            uncertainty bands. As with :meth:`plot`, Bayesian ``ATT(g, t)``
+            bounds are cached during effect aggregation. If supplied here, the
+            value must match the cached :attr:`hdi_prob_`; otherwise a
+            :class:`ValueError` is raised. Pass ``None`` (the default) to plot
+            using the cached value. Ignored for OLS models.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in place**
+            so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            A single-element list containing the cohort-trajectory axes.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+            view="group_time",
+        )
+
     def _bayesian_plot(
         self,
         hdi_prob: float | None = None,
         figsize: tuple[float, float] = (10, 6),
+        view: Literal["event_time", "group_time"] = "event_time",
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot event-study results for Bayesian model.
+        """Plot results for Bayesian model.
 
         Parameters
         ----------
@@ -715,6 +771,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             default) to plot using the cached value.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
+        view : {"event_time", "group_time"}, optional
+            Plot view to render. ``"event_time"`` draws the aggregated event
+            study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
+            trajectories over calendar time. Defaults to ``"event_time"``.
 
         Returns
         -------
@@ -730,6 +790,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "re-fit the experiment so that aggregation uses the desired "
                 "value, or omit hdi_prob to use the cached value."
             )
+        if view == "group_time":
+            return self._bayesian_plot_group_time(figsize=figsize)
+        if view != "event_time":
+            raise ValueError("view must be 'event_time' or 'group_time'")
+
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
@@ -800,23 +865,63 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
+    def _bayesian_plot_group_time(
+        self,
+        figsize: tuple[float, float] = (10, 6),
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories."""
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+
+        for cohort, cohort_data in att_gt.groupby("cohort", sort=True):
+            ax.plot(
+                cohort_data["time"],
+                cohort_data["att"],
+                marker="o",
+                label=f"Cohort {cohort}",
+            )
+            ax.fill_between(
+                cohort_data["time"],
+                cohort_data["att_lower"],
+                cohort_data["att_upper"],
+                alpha=0.2,
+            )
+
+        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
+        ax.set_xlabel("Calendar Time", fontsize=12)
+        ax.set_ylabel("ATT(g, t)", fontsize=12)
+        ax.set_title("Staggered DiD Group-Time Effects", fontsize=14)
+        ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+
+        return fig, [ax]
+
     def _ols_plot(
         self,
         figsize: tuple[float, float] = (10, 6),
+        view: Literal["event_time", "group_time"] = "event_time",
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot event-study results for OLS model.
+        """Plot results for OLS model.
 
         Parameters
         ----------
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
+        view : {"event_time", "group_time"}, optional
+            Plot view to render. ``"event_time"`` draws the aggregated event
+            study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
+            trajectories over calendar time. Defaults to ``"event_time"``.
 
         Returns
         -------
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
+        if view == "group_time":
+            return self._ols_plot_group_time(figsize=figsize)
+        if view != "event_time":
+            raise ValueError("view must be 'event_time' or 'group_time'")
+
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = self.att_event_time_.copy()
@@ -899,6 +1004,42 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Set integer ticks for event time
         ax.set_xticks(att_et["event_time"].values)
+
+        return fig, [ax]
+
+    def _ols_plot_group_time(
+        self,
+        figsize: tuple[float, float] = (10, 6),
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot OLS cohort-time ``ATT(g, t)`` trajectories."""
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+
+        for cohort, cohort_data in att_gt.groupby("cohort", sort=True):
+            if {"att_std", "n_obs"}.issubset(cohort_data.columns):
+                se = cohort_data["att_std"] / np.sqrt(cohort_data["n_obs"])
+                ax.errorbar(
+                    cohort_data["time"],
+                    cohort_data["att"],
+                    yerr=1.96 * se,
+                    fmt="o-",
+                    capsize=4,
+                    capthick=2,
+                    label=f"Cohort {cohort}",
+                )
+            else:
+                ax.plot(
+                    cohort_data["time"],
+                    cohort_data["att"],
+                    marker="o",
+                    label=f"Cohort {cohort}",
+                )
+
+        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
+        ax.set_xlabel("Calendar Time", fontsize=12)
+        ax.set_ylabel("ATT(g, t)", fontsize=12)
+        ax.set_title("Staggered DiD Group-Time Effects", fontsize=14)
+        ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
         return fig, [ax]
 

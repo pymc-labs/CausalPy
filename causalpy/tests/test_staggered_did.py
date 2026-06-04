@@ -934,6 +934,41 @@ def test_staggered_did_plot_elements_ols():
     plt.close(fig)
 
 
+def test_staggered_did_plot_group_time_elements_ols():
+    """Test that OLS group-time plot contains expected cohort trajectories."""
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=15,
+        treatment_cohorts={5: 10, 10: 10},
+        seed=42,
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    )
+
+    fig, axes = result.plot_group_time(show=False)
+
+    assert len(axes) == 1
+    ax = axes[0]
+    assert "Calendar Time" in ax.get_xlabel()
+    assert "ATT(g, t)" in ax.get_ylabel()
+    assert "Group-Time" in ax.get_title()
+
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = {text.get_text() for text in legend.get_texts()}
+    expected_labels = {f"Cohort {cohort}" for cohort in result.cohorts}
+    assert expected_labels.issubset(legend_labels)
+
+    plt.close(fig)
+
+
 @pytest.mark.integration
 def test_staggered_did_plot_elements_bayesian(mock_pymc_sample):
     """Test that Bayesian plot contains expected elements."""
@@ -964,6 +999,69 @@ def test_staggered_did_plot_elements_bayesian(mock_pymc_sample):
     assert "Effect Estimate" in ax.get_ylabel()
 
     plt.close(fig)
+
+
+@pytest.mark.integration
+def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
+    """Test that Bayesian group-time plot contains expected cohort trajectories."""
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=15,
+        treatment_cohorts={5: 10, 10: 10},
+        seed=42,
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    fig, axes = result.plot_group_time(show=False)
+
+    assert len(axes) == 1
+    ax = axes[0]
+    assert "Calendar Time" in ax.get_xlabel()
+    assert "ATT(g, t)" in ax.get_ylabel()
+    assert "Group-Time" in ax.get_title()
+
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = {text.get_text() for text in legend.get_texts()}
+    expected_labels = {f"Cohort {cohort}" for cohort in result.cohorts}
+    assert expected_labels.issubset(legend_labels)
+
+    plt.close(fig)
+
+
+def test_staggered_did_summary_can_include_group_time(capsys):
+    """Test that summary can print the group-time ATT table on request."""
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=15,
+        treatment_cohorts={5: 10, 10: 10},
+        seed=42,
+    )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    )
+
+    result.summary(include_group_time=True)
+    captured = capsys.readouterr().out
+
+    assert "Event-time estimates:" in captured
+    assert "Group-time estimates:" in captured
+    assert "cohort" in captured
+    assert "time" in captured
 
 
 def test_staggered_did_n_obs_column():
