@@ -955,10 +955,17 @@ def test_staggered_did_plot_group_time_elements_ols():
     fig, axes = result.plot_group_time(show=False)
 
     assert len(axes) == len(result.cohorts)
+    assert axes[0].get_shared_y_axes().joined(axes[0], axes[1])
+    assert axes[0].get_xlabel() == ""
+    assert "Event Time" in axes[-1].get_xlabel()
     for ax, cohort in zip(axes, result.cohorts, strict=True):
-        assert "Event Time" in ax.get_xlabel()
         assert "ATT(g, e)" in ax.get_ylabel()
+        assert "placebo" in ax.get_ylabel()
         assert f"Cohort {cohort}" in ax.get_title()
+        legend = ax.get_legend()
+        assert legend is not None
+        legend_labels = {text.get_text() for text in legend.get_texts()}
+        assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
 
     plt.close(fig)
 
@@ -994,7 +1001,11 @@ def test_staggered_did_plot_group_time_overlay_calendar_ols():
     legend = ax.get_legend()
     assert legend is not None
     legend_labels = {text.get_text() for text in legend.get_texts()}
-    expected_labels = {f"Cohort {cohort}" for cohort in result.cohorts}
+    expected_labels = {
+        label
+        for cohort in result.cohorts
+        for label in (f"Cohort {cohort} placebo", f"Cohort {cohort} ATT")
+    }
     assert expected_labels.issubset(legend_labels)
 
     plt.close(fig)
@@ -1054,10 +1065,17 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
     fig, axes = result.plot_group_time(show=False)
 
     assert len(axes) == len(result.cohorts)
+    assert axes[0].get_shared_y_axes().joined(axes[0], axes[1])
+    assert axes[0].get_xlabel() == ""
+    assert "Event Time" in axes[-1].get_xlabel()
     for ax, cohort in zip(axes, result.cohorts, strict=True):
-        assert "Event Time" in ax.get_xlabel()
         assert "ATT(g, e)" in ax.get_ylabel()
+        assert "placebo" in ax.get_ylabel()
         assert f"Cohort {cohort}" in ax.get_title()
+        legend = ax.get_legend()
+        assert legend is not None
+        legend_labels = {text.get_text() for text in legend.get_texts()}
+        assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
 
     plt.close(fig)
 
