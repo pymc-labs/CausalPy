@@ -139,10 +139,6 @@ class OutcomeFalsification:
         self.alpha = alpha
         self.store_experiments = store_experiments
 
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
     def validate(self, experiment: BaseExperiment) -> None:
         """Verify the experiment is compatible with OutcomeFalsification.
 
@@ -164,10 +160,6 @@ class OutcomeFalsification:
                 f"extraction, but got {type(experiment.model).__name__}. "
                 f"Use a PyMC model (e.g. cp.pymc_models.LinearRegression)."
             )
-
-    # ------------------------------------------------------------------
-    # Factory helper
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_experiment(
@@ -196,10 +188,6 @@ class OutcomeFalsification:
             kwargs["model"] = clone_model(kwargs["model"])
 
         return method(context.data, **kwargs)
-
-    # ------------------------------------------------------------------
-    # Effect extraction
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_effect_stats(
@@ -250,10 +238,6 @@ class OutcomeFalsification:
             "hdi_lower": float(row["hdi_lower"]),
             "hdi_upper": float(row["hdi_upper"]),
         }
-
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
 
     def run(
         self,
