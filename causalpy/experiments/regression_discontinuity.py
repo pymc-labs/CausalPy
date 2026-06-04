@@ -34,6 +34,7 @@ from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
+    _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
     round_num,
@@ -495,7 +496,7 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(float(self.score), round_to)}"
+        r2 = f"$R^2$ on fit data = {round_num(_as_scalar(self.score), round_to)}"
         discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
         ax.set(title=r2 + "\n" + discon)
 
