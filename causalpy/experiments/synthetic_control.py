@@ -31,7 +31,7 @@ from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import check_convex_hull_violation, round_num
+from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -863,7 +863,7 @@ class SyntheticControl(BaseExperiment):
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"  # type: ignore[arg-type]
+            return f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to if round_to is not None else 2)}"
 
     def effect_summary(
         self,
