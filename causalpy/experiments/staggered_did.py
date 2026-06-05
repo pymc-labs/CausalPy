@@ -466,8 +466,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
             self.model.fit(X=self.X_train, y=self.y_train)
         else:
             raise ValueError("Model type not recognized")
