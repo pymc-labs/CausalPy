@@ -23,10 +23,21 @@ build:
       - git fetch origin main --depth=1
       - |
         if [ "$READTHEDOCS_VERSION_TYPE" = "external" ]; then
-          CHANGED_FILES=$(git diff --name-only origin/main -- docs/ .readthedocs.yaml causalpy/ || true)
-          RELEVANT_FILES=$(printf '%s\n' "$CHANGED_FILES" | grep -Ev '^causalpy/(tests|data|skills)/' || true)
+          CHANGED_FILES=$(git diff --name-only origin/main -- docs/ .readthedocs.yaml causalpy/ 2>/dev/null || true)
+          SHOULD_SKIP=1
 
-          if [ -z "$RELEVANT_FILES" ]; then
+          for FILE in $CHANGED_FILES; do
+            case "$FILE" in
+              causalpy/tests/*|causalpy/data/*|causalpy/skills/*)
+                ;;
+              *)
+                SHOULD_SKIP=0
+                break
+                ;;
+            esac
+          done
+
+          if [ "$SHOULD_SKIP" -eq 1 ]; then
             exit 183;
           fi
         fi
