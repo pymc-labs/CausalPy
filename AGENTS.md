@@ -6,7 +6,7 @@ Agent workflow for working in this repo. For codebase design and conventions, re
 
 Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `CausalPy` environment. Reuse an existing `CausalPy` env whenever possible; do not create or update an env unless the task needs the project environment and the existing env is missing, stale, or broken. Use `$CONDA_EXE run -n CausalPy <command>` for commands that import project code, run tests, build docs, or use repo tooling; never use `$CONDA_EXE activate`. For simple text/JSON inspection helpers that do not import project code, any Python on `PATH` is fine.
 
-See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
+See the [python-environment skill](.agents/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
 
 - If `$CONDA_EXE run -n CausalPy ...` fails because the named env cannot be resolved, inspect `$CONDA_EXE env list` and retry with `$CONDA_EXE run -p <full-prefix> <command>`.
 - In git worktrees, prefer reusing an existing env. Because the repo uses editable installs, rerun `make setup` in the current worktree only when that checkout has not been installed into the env yet or when dependencies changed.
@@ -76,14 +76,15 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 
 ## GitHub Issue Workflows
 
-Use the `github-issues` Skill in `.github/skills/github-issues/` for issue
+Use the `github-issues` Skill in `.agents/skills/github-issues/` for issue
 creation, bug reports, and issue evaluation workflows.
 
 ## Skills Location
 
 Skills are split into two categories with separate homes:
 
-- **Developer skills** live in `.github/skills/` and are auto-discovered by agents working on the repo via the `.cursor/skills`, `.claude/skills`, and `.agents/skills` symlinks. These cover environment setup, PR workflows, issue triage, and other maintainer tasks.
+- **Developer skills** live in `.agents/skills/`. This is the canonical shared location for repo-maintainer workflows such as environment setup, PR workflows, issue triage, and other maintainer tasks.
 - **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
+- When user-facing skills change, include a PR note or follow-up task to update the distributed Decision AI Hub copy after merge.
 
-On Windows, symlink support for developer skills may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into `.cursor/skills/`, `.claude/skills/`, and `.agents/skills/` and keep them in sync.
+If a developer's local tool does not yet discover `.agents/skills/`, they may create an uncommitted local compatibility symlink such as `.cursor/skills -> ../.agents/skills`, `.claude/skills -> ../.agents/skills`, or `.github/skills -> ../.agents/skills`. Do not commit those compatibility symlinks; keep `.agents/skills/` as the only tracked developer-skill home.
