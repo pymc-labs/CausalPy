@@ -1,7 +1,8 @@
 """Compare or emit the experiment inventory in ARCHITECTURE.md.
 
 Introspects concrete ``BaseExperiment`` subclasses and checks that
-``ARCHITECTURE.md`` documents each class with the correct backend support.
+``ARCHITECTURE.md`` documents each class with the correct backend support and
+structural notes.
 Use ``--print-markdown`` to regenerate table rows for paste into the doc.
 
 Usage
@@ -105,6 +106,17 @@ def _markdown_table_row(row: ExperimentInventoryRow, doc_row: dict[str, str]) ->
     return f"| `{row.class_name}` | {method} | {row.backends} | {quirk} |"
 
 
+def _mentions_model_required(quirk: str) -> bool:
+    """Return whether an inventory note says the experiment requires a model."""
+    return "model required" in quirk.lower()
+
+
+def _mentions_no_unified_plot(quirk: str) -> bool:
+    """Return whether an inventory note says the experiment lacks unified plotting."""
+    quirk_lower = quirk.lower()
+    return "no unified" in quirk_lower and "plot()" in quirk_lower
+
+
 def introspected_inventory() -> dict[str, ExperimentInventoryRow]:
     """Build inventory rows by introspecting experiment class definitions."""
     metadata = discover_experiment_metadata(REPO_ROOT / "causalpy" / "experiments")
@@ -139,6 +151,20 @@ def check_inventory(path: Path = ARCHITECTURE_PATH) -> list[str]:
             errors.append(
                 f"  {class_name}: backends mismatch "
                 f"(doc={doc_backends!r}, code={row.backends!r})"
+            )
+        doc_quirk = documented[class_name]["quirk"]
+        documents_model_required = _mentions_model_required(doc_quirk)
+        code_requires_model = row.default_model is None
+        if documents_model_required != code_requires_model:
+            errors.append(
+                f"  {class_name}: model-required note mismatch "
+                f"(doc={documents_model_required!r}, code={code_requires_model!r})"
+            )
+        documents_no_unified_plot = _mentions_no_unified_plot(doc_quirk)
+        if documents_no_unified_plot != row.plot_is_stub:
+            errors.append(
+                f"  {class_name}: plot-stub note mismatch "
+                f"(doc={documents_no_unified_plot!r}, code={row.plot_is_stub!r})"
             )
     return errors
 

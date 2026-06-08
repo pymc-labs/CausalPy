@@ -104,3 +104,71 @@ def test_cli_detects_backend_drift(tmp_path: Path, script_module) -> None:
     assert any(
         "RegressionKink" in line and "backends mismatch" in line for line in errors
     )
+
+
+def test_cli_detects_missing_model_required_note(tmp_path: Path, script_module) -> None:
+    """Model-required inventory notes should match ``_default_model_class``."""
+    architecture = tmp_path / "ARCHITECTURE.md"
+    architecture.write_text(
+        "\n".join(
+            [
+                "## Experiment Inventory",
+                "",
+                "| Class | Method | Backends | Notable quirk |",
+                "|-------|--------|----------|---------------|",
+                "| `PanelRegression` | Panel FE | OLS + Bayes | missing note |",
+            ]
+        )
+    )
+    errors = script_module.check_inventory(architecture)
+    assert any(
+        "PanelRegression" in line and "model-required note mismatch" in line
+        for line in errors
+    )
+
+
+def test_cli_detects_stale_model_required_note(tmp_path: Path, script_module) -> None:
+    """Default-model experiments should not be documented as model-required."""
+    architecture = tmp_path / "ARCHITECTURE.md"
+    architecture.write_text(
+        "\n".join(
+            [
+                "## Experiment Inventory",
+                "",
+                "| Class | Method | Backends | Notable quirk |",
+                "|-------|--------|----------|---------------|",
+                "| `RegressionKink` | RKD | Bayes only | model required |",
+            ]
+        )
+    )
+    errors = script_module.check_inventory(architecture)
+    assert any(
+        "RegressionKink" in line and "model-required note mismatch" in line
+        for line in errors
+    )
+
+
+def test_cli_detects_plot_stub_note_drift(tmp_path: Path, script_module) -> None:
+    """Unified-plot inventory notes should match explicit ``plot()`` stubs."""
+    architecture = tmp_path / "ARCHITECTURE.md"
+    architecture.write_text(
+        "\n".join(
+            [
+                "## Experiment Inventory",
+                "",
+                "| Class | Method | Backends | Notable quirk |",
+                "|-------|--------|----------|---------------|",
+                "| `InstrumentalVariable` | IV/2SLS | Bayes only | missing note |",
+                "| `RegressionKink` | RKD | Bayes only | no unified `plot()` |",
+            ]
+        )
+    )
+    errors = script_module.check_inventory(architecture)
+    assert any(
+        "InstrumentalVariable" in line and "plot-stub note mismatch" in line
+        for line in errors
+    )
+    assert any(
+        "RegressionKink" in line and "plot-stub note mismatch" in line
+        for line in errors
+    )
