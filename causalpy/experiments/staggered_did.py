@@ -1613,7 +1613,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 }
             )
 
-        return pd.DataFrame(att_et_rows)
+        return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
 
     def get_plot_data_ols(self) -> pd.DataFrame:
         """Get plotting data for OLS model.

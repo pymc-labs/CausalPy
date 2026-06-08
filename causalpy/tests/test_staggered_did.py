@@ -762,6 +762,37 @@ def test_staggered_did_warns_non_identified_without_never_treated(
     assert non_identified_et["att"].isna().all()
 
 
+def test_staggered_did_get_plot_data_bayesian_masks_non_identified_on_recompute(
+    mock_pymc_sample,
+):
+    """Non-default hdi_prob recompute path must still mask non-identified cells."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    plot_data = result.get_plot_data_bayesian(hdi_prob=0.80)
+
+    assert "identified" in plot_data.columns
+    non_identified_post = plot_data[
+        (plot_data["event_time"] >= 0) & ~plot_data["identified"]
+    ]
+    assert len(non_identified_post) > 0
+    assert non_identified_post["att"].isna().all()
+    assert non_identified_post["att_lower"].isna().all()
+    assert non_identified_post["att_upper"].isna().all()
+
+
 @pytest.mark.parametrize(
     "model_factory",
     [
