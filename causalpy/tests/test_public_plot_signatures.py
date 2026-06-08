@@ -228,11 +228,11 @@ def test_base_experiment_has_no_public_plot() -> None:
     **kwargs`` signature and re-introduce the discoverability problem
     described in #886. If this test starts failing, somebody has added a
     public ``plot`` back to :class:`BaseExperiment`; either remove it or
-    update the design contract documented in ``AGENTS.md``.
+    update the design contract documented in ``ARCHITECTURE.md``.
     """
     assert "plot" not in BaseExperiment.__dict__, (
         "BaseExperiment must not declare a public plot(); the shared "
-        "dispatcher is _render_plot. See AGENTS.md and issue #886."
+        "dispatcher is _render_plot. See ARCHITECTURE.md and issue #886."
     )
     assert hasattr(BaseExperiment, "_render_plot"), (
         "BaseExperiment should define the protected _render_plot helper "
