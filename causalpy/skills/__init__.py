@@ -16,6 +16,5 @@
 User-facing skills that teach AI agents how to use CausalPy.
 Distributed via Decision AI Hub (https://hub.decision.ai).
 
-Developer skills live in ``.agents/skills/`` and are auto-discovered
-in-repo via platform symlinks; they are **not** included here.
+Developer skills live in ``.agents/skills/``; they are **not** included here.
 """

@@ -83,8 +83,8 @@ creation, bug reports, and issue evaluation workflows.
 
 Skills are split into two categories with separate homes:
 
-- **Developer skills** live in `.agents/skills/` and are auto-discovered by agents working on the repo via the `.github/skills`, `.cursor/skills`, and `.claude/skills` compatibility symlinks. These cover environment setup, PR workflows, issue triage, and other maintainer tasks.
+- **Developer skills** live in `.agents/skills/`. This is the canonical shared location for repo-maintainer workflows such as environment setup, PR workflows, issue triage, and other maintainer tasks.
 - **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
 - When user-facing skills change, include a PR note or follow-up task to update the distributed Decision AI Hub copy after merge.
 
-On Windows, symlink support for developer skills may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.agents/skills/` into `.github/skills/`, `.cursor/skills/`, and `.claude/skills/` and keep them in sync.
+If a developer's local tool does not yet discover `.agents/skills/`, they may create an uncommitted local compatibility symlink such as `.cursor/skills -> ../.agents/skills`, `.claude/skills -> ../.agents/skills`, or `.github/skills -> ../.agents/skills`. Do not commit those compatibility symlinks; keep `.agents/skills/` as the only tracked developer-skill home.
