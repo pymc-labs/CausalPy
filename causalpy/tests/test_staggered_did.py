@@ -793,6 +793,56 @@ def test_staggered_did_get_plot_data_bayesian_masks_non_identified_on_recompute(
     assert non_identified_post["att_upper"].isna().all()
 
 
+def test_staggered_did_effect_summary_excludes_non_identified_cells():
+    """effect_summary prose should average only identified post-treatment ATTs."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        )
+
+    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    assert (~post_treatment["identified"]).any()
+
+    summary = result.effect_summary()
+    assert "Staggered DiD" in summary.text
+    assert isinstance(summary.table, pd.DataFrame)
+
+
+def test_staggered_did_mark_non_identified_att_rows_edge_cases():
+    """Cover empty and unknown-column paths in _mark_non_identified_att_rows."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        )
+
+    empty = result._mark_non_identified_att_rows(pd.DataFrame())
+    assert list(empty.columns) == ["identified"]
+    assert len(empty) == 0
+
+    unknown_cols = result._mark_non_identified_att_rows(pd.DataFrame({"x": [1]}))
+    assert unknown_cols["identified"].all()
+
+
 @pytest.mark.parametrize(
     "model_factory",
     [
