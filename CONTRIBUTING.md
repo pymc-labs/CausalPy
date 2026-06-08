@@ -210,6 +210,14 @@ We recommend that your contribution complies with the following guidelines befor
     make test
     ```
 
+- For pull requests that change Python source or tests, also run the local patch coverage gate before pushing:
+
+    ```bash
+    make test-patch-cov
+    ```
+
+    This runs the test suite with coverage, writes `coverage.xml`, and uses `diff-cover` to fail when changed lines versus `origin/main` fall below the local patch threshold. If your branch targets a different base, set `DIFF_COVER_COMPARE_BRANCH`, for example `DIFF_COVER_COMPARE_BRANCH=upstream/main make test-patch-cov`.
+
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
 - If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
