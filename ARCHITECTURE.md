@@ -89,4 +89,4 @@ Copy the closest existing experiment or model and follow the `BaseExperiment` co
 - Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors
 - Avoid backwards-compat shims for APIs introduced in the same PR
 
-**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update this file in the same PR.
+**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update this file in the same PR. Export wiring and the experiment inventory table are enforced by `scripts/check_public_exports.py` and `scripts/check_architecture_inventory.py` (also run via prek); run `make check-exports` / `make check-architecture` locally if needed.
