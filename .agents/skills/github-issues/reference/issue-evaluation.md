@@ -65,6 +65,7 @@ Create `.scratch/issue_comments/issue-<number>-evaluation.md` with:
 <Restate issue + status>
 
 ### Current Relevance
+
 - Code references checked:
 - Related PRs:
 - Changes since issue creation:
@@ -73,8 +74,10 @@ Create `.scratch/issue_comments/issue-<number>-evaluation.md` with:
 <Key points from comments>
 
 ### Recommendation
+
 - **Status:** <Ready / Needs info / Blocked / Can be closed>
 - **Proposed next steps:** <Actionable items>
+
 ```
 
 Present the draft for user approval before posting. Do not hard-wrap lines in markdown drafts; keep paragraphs on a single line.

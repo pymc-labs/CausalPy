@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.11
+    rev: v0.15.16
     hooks:
       # Run the linter
       - id: ruff
@@ -65,7 +65,7 @@ repos:
       - id: numpydoc-validation
         files: ^causalpy/experiments/.*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.20.1
+    rev: v2.1.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
@@ -79,7 +79,7 @@ repos:
   # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
   # generated docs build are intentionally out of scope.
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.36
+    rev: v0.9.37
     hooks:
       - id: pymarkdown
         args: [scan]
@@ -87,6 +87,8 @@ repos:
         exclude: ^(docs/_build/|\.scratch/)
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
   # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
+  # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
+  # (see check-environment-yml job in .github/workflows/ci.yml).
   - repo: https://github.com/usnistgov/pyproject2conda
     rev: v0.22.1
     hooks:

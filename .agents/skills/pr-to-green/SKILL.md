@@ -81,6 +81,7 @@ Use subagents (via the Task tool) when work is noisy, broad, or high-risk. Each 
 Trigger when CI logs are long/noisy, failures span multiple jobs, or failure family is unclear.
 
 Handoff (include in Task prompt):
+
 - PR number and branch name
 - Failed job names and relevant log snippets or `gh run view` output
 - Ask for: root cause ranking, fix-first order, and minimal patch plan
@@ -90,6 +91,7 @@ Handoff (include in Task prompt):
 Trigger when rebase/merge produces non-trivial conflicts, intent differs across branches, or conflict count is high.
 
 Handoff (include in Task prompt):
+
 - Target branch and merge/rebase direction
 - Full conflict list (`git diff --name-only --diff-filter=U`) and key conflict markers/snippets
 - Ask for: conflict risk map, lowest-risk resolution order, and explicit escalations
@@ -99,11 +101,13 @@ Handoff (include in Task prompt):
 Do not auto-resolve and continue silently when conflicts are highly complex. Instead, stop and request maintainer input with a brief report.
 
 Escalate by default when:
+
 - `.ipynb` conflicts are messy (overlapping cell content plus metadata/output churn)
 - conflict resolution would drop one branch's meaningful behavior
 - conflicts touch core contracts and intent is ambiguous (experiments/models/tests/docs all changed around same behavior)
 
 Escalation report must include:
+
 - conflicted file list and risk class
 - resolution options (1-2) with trade-offs
 - recommended next step and what decision is needed from maintainer
@@ -113,12 +117,14 @@ Escalation report must include:
 Do not keep patching silently when greening a PR turns into broader compatibility work outside the PR's feature surface. Stop after root-cause identification and ask the maintainer whether to continue in the PR or split the work into a separate branch/PR from `main`.
 
 Escalate by default when:
+
 - the failing checks are caused by third-party API or version drift in shared/core code
 - the fix would benefit multiple open PRs or the default branch, not just the current PR
 - the next fix would modify shared integrations beyond the feature the PR is introducing
 - successive CI reruns keep exposing new failure families outside the original PR scope
 
 Scope-drift report must include:
+
 - the original PR goal and the newly discovered broader issue
 - which files are feature-specific versus shared/core compatibility files
 - options: patch in the PR, split a separate compatibility PR, or pause for maintainer direction

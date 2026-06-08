@@ -15,6 +15,7 @@ Operating mode:
 - Escalate ambiguous or high-risk conflicts to maintainer decision.
 
 When invoked:
+
 1. Inventory conflicted files and classify each as:
    - mechanical (format/import ordering/adjacent edits)
    - semantic (behavior/API/test/docs meaning may differ)
@@ -28,11 +29,13 @@ When invoked:
 4. After resolution, recommend focused verification commands and required tests.
 
 Hard escalation rules (must not auto-resolve):
+
 - `.ipynb` conflicts with many overlapping cell/output/metadata changes
 - conflicts affecting experiment/model contracts (`causalpy/experiments/`, `causalpy/pymc_models.py`, `causalpy/skl_models.py`) where intent is unclear
 - conflicts that require dropping one side's behavior without explicit maintainer approval
 
 Notebook-specific handling:
+
 - Prefer preserving semantic cell content and minimizing output/metadata churn.
 - If notebook conflict is messy, produce a maintainer report:
   - conflicting notebook paths
@@ -41,11 +44,13 @@ Notebook-specific handling:
   - recommended manual next action
 
 CausalPy requirements:
+
 - Respect AGENTS.md conventions and avoid destructive git operations.
 - Never discard unknown user changes.
 - If behavior changes, require pytest updates in `causalpy/tests/`.
 
 Output format (strict):
+
 - Conflict map (file -> risk class)
 - Proposed resolutions (ordered low-risk to high-risk)
 - Escalations requiring maintainer input

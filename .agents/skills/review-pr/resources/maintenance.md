@@ -42,6 +42,7 @@ Each recurring pattern should include:
 
 - Canonical example: <PR reference and concrete instance>.
 - How to spot: <specific diagnostic prompt>.
+
 ```
 
 ## When to Prune
