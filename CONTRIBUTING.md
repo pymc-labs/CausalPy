@@ -210,6 +210,8 @@ We recommend that your contribution complies with the following guidelines befor
 
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
+- If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
+
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
@@ -254,6 +256,10 @@ make html
  📌 Note: The previous docs/Makefile has been removed. Please use only the root-level Makefile for documentation commands
 
 ## Overview of code structure
+
+For a prose overview of CausalPy's design — the layered architecture, the `BaseExperiment` contract, the two-backend (PyMC / scikit-learn) model system, the pipeline and checks systems, the formula interface, and the reporting layer — see [ARCHITECTURE.md](./ARCHITECTURE.md). It is the fastest way to understand where things live and how the pieces fit together.
+
+The auto-generated UML diagrams below complement that overview:
 
 Classes
 ![](docs/source/_static/classes.png)
