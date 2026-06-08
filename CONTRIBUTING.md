@@ -80,6 +80,8 @@ Please verify that your issue is not being currently addressed by other issues o
 
 PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
 
+This file is aimed at human contributors. AI agents working on code should follow [AGENTS.md](./AGENTS.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) instead — not load this guide into context unless the task is about contributor workflow or onboarding.
+
 ## Contributing code via pull requests
 
 While issue reporting is valuable, we strongly encourage users who are inclined to do so to submit patches for new or existing issues via pull requests. This is particularly the case for simple fixes, such as typos or tweaks to documentation, which do not require a heavy investment of time and attention.
