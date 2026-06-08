@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint test uml html cleandocs doctest run_notebooks_full help
+.PHONY: init setup lint check_lint check-exports check-architecture test uml html cleandocs doctest run_notebooks_full help
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
@@ -27,6 +27,12 @@ check_lint: ## Check code formatting and linting without making changes
 	ruff check .
 	ruff format --diff --check .
 	interrogate .
+
+check-exports: ## Verify experiment/check public API export wiring
+	python scripts/check_public_exports.py --check
+
+check-architecture: ## Verify ARCHITECTURE.md experiment inventory matches code
+	python scripts/check_architecture_inventory.py --check
 
 doctest: ## Run doctests for the causalpy module
 	python -m pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
