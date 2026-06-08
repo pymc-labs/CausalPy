@@ -10,7 +10,7 @@ When these user-facing skills change, update the distributed Decision AI Hub cop
 
 | Path | Purpose |
 |------|---------|
-| `choosing-causalpy-methods/` | Choosing the right CausalPy experiment class from a causal question and data structure |
+| `choosing-causalpy-methods/` | Route causal or impact questions to the right CausalPy experiment via ordered intake, disambiguation, and explicit no-fit outcomes |
 | `causal-detective/` | Challenging causal claims with threat assessment, counterfactual reasoning, and falsification checks |
 | `example-datasets/` | Loading bundled CausalPy example datasets for demos, tutorials, and tests |
 | `running-causalpy-experiments/` | Fitting chosen experiments, configuring models and priors, summarizing, plotting, and interpreting results |
