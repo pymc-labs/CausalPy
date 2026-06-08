@@ -19,6 +19,7 @@ the approach of Borusyak, Jaravel, and Spiess (2024). It handles settings where
 different units receive treatment at different times.
 """
 
+import warnings
 from typing import Any, Literal
 
 import numpy as np
@@ -58,6 +59,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
        units would have followed parallel outcome trajectories.
     3. **No anticipation**: Units do not change their behavior in anticipation
        of future treatment.
+    4. **Untreated support at each calendar period**: The time fixed effect
+       :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
+       least one unit is untreated in that period. Without never-treated units,
+       post-treatment effects for the last-treated cohort (and any calendar
+       periods where every unit is already treated) are not identified. CausalPy
+       warns when this condition fails and marks the affected ``ATT(g, t)`` and
+       ``ATT(e)`` cells as non-identified in the output tables.
 
     Parameters
     ----------
@@ -94,8 +102,14 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         and tau_hat (treatment effect) columns.
     att_group_time_ : pd.DataFrame
         Group-time ATT estimates: ATT(g, t) for each cohort g and calendar time t.
+        Includes an ``identified`` column; non-identified cells have ``NaN`` estimates.
     att_event_time_ : pd.DataFrame
         Event-time ATT estimates: ATT(e) for each event-time e = t - G.
+        Includes an ``identified`` column; non-identified cells have ``NaN`` estimates.
+    non_identified_periods_ : set
+        Calendar periods with no untreated observations.
+    non_identified_cohorts_ : set
+        Treatment cohorts with at least one non-identified post-treatment ATT(g, t).
 
     Notes
     -----
@@ -184,6 +198,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Step 3: Identify untreated observations (training set)
         self._identify_untreated_observations()
+
+        # Step 3b: Check calendar-period identification support
+        self._check_att_identification()
 
         # Step 4: Build design matrices
         self._build_design_matrices()
@@ -318,6 +335,92 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "No untreated observations found. Cannot fit the model. "
                 "Ensure there are never-treated units or pre-treatment periods."
             )
+
+    def _get_periods_without_untreated_support(self) -> set[Any]:
+        """Return calendar periods with zero untreated observations."""
+        untreated_periods = set(
+            self.data.loc[self.data["_is_untreated"], self.time_variable_name].unique()
+        )
+        all_periods = set(self.data[self.time_variable_name].unique())
+        return all_periods - untreated_periods
+
+    def _get_non_identified_cohorts(self, periods: set[Any]) -> set[Any]:
+        """Return cohorts with post-treatment cells in non-identified periods."""
+        non_identified_cohorts: set[Any] = set()
+        for cohort in self.cohorts:
+            for period in periods:
+                if period >= cohort:
+                    non_identified_cohorts.add(cohort)
+                    break
+        return non_identified_cohorts
+
+    def _check_att_identification(self) -> None:
+        """Detect non-identified ATT cells and warn when untreated support is missing."""
+        self.non_identified_periods_ = self._get_periods_without_untreated_support()
+        self.non_identified_cohorts_ = self._get_non_identified_cohorts(
+            self.non_identified_periods_
+        )
+
+        if not self.non_identified_periods_:
+            return
+
+        periods_str = ", ".join(str(p) for p in sorted(self.non_identified_periods_))
+        cohorts_str = ", ".join(str(c) for c in sorted(self.non_identified_cohorts_))
+        warnings.warn(
+            "No untreated observations in calendar period(s) "
+            f"{{{periods_str}}}; treatment effects for cohort(s) "
+            f"{{{cohorts_str}}} are not identified at the affected post-treatment "
+            "cells. Provide never-treated units or restrict the event window. "
+            "Non-identified ATT(g, t) and ATT(e) cells are marked in the output "
+            "tables (identified=False) with NaN estimates.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    def _is_calendar_period_identified(self, period: Any) -> bool:
+        """Return whether calendar period ``period`` has untreated support."""
+        return period not in self.non_identified_periods_
+
+    def _is_event_time_att_identified(self, event_time: int) -> bool:
+        """Return whether aggregated ATT(e) is identified."""
+        for cohort in self.cohorts:
+            period = cohort + event_time
+            has_contributing_obs = (
+                (self.data["G"] == cohort)
+                & (self.data[self.time_variable_name] == period)
+                & (self.data["event_time"] == event_time)
+            ).any()
+            if has_contributing_obs and not self._is_calendar_period_identified(period):
+                return False
+        return True
+
+    def _mark_non_identified_att_rows(self, att_df: pd.DataFrame) -> pd.DataFrame:
+        """Add ``identified`` column and mask non-identified point estimates."""
+        if len(att_df) == 0:
+            att_df = att_df.copy()
+            att_df["identified"] = pd.Series(dtype=bool)
+            return att_df
+
+        att_df = att_df.copy()
+        if "cohort" in att_df.columns and "time" in att_df.columns:
+            att_df["identified"] = att_df["time"].map(
+                self._is_calendar_period_identified
+            )
+        elif "event_time" in att_df.columns:
+            att_df["identified"] = att_df["event_time"].apply(
+                lambda e: self._is_event_time_att_identified(int(e))
+            )
+        else:
+            att_df["identified"] = True
+
+        value_columns = [
+            col
+            for col in ("att", "att_lower", "att_upper", "att_std")
+            if col in att_df.columns
+        ]
+        for col in value_columns:
+            att_df.loc[~att_df["identified"], col] = np.nan
+        return att_df
 
     def _build_design_matrices(self) -> None:
         """Build design matrices using patsy."""
@@ -499,7 +602,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "att_upper": float(np.percentile(tau_gt, upper_pct)),
                 }
             )
-        self.att_group_time_ = pd.DataFrame(att_gt_rows)
+        self.att_group_time_ = self._mark_non_identified_att_rows(
+            pd.DataFrame(att_gt_rows)
+        )
 
         # --- Event-time ATTs (including pre-treatment placebo) ---
         att_et_rows: list[dict] = []
@@ -563,7 +668,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 }
             )
 
-        self.att_event_time_ = pd.DataFrame(att_et_rows)
+        self.att_event_time_ = self._mark_non_identified_att_rows(
+            pd.DataFrame(att_et_rows)
+        )
 
     def _aggregate_effects_ols(
         self, treated_data: pd.DataFrame, pretreatment_data: pd.DataFrame
@@ -585,7 +692,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             .reset_index()
         )
         att_gt.columns = ["cohort", "time", "att", "att_std", "n_obs"]
-        self.att_group_time_ = att_gt
+        self.att_group_time_ = self._mark_non_identified_att_rows(att_gt)
 
         # --- Event-time ATTs (including pre-treatment placebo) ---
         # Compute tau_hat for pre-treatment observations (residuals)
@@ -613,7 +720,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         )
         att_et.columns = ["event_time", "att", "att_std", "n_obs"]
         att_et["event_time"] = att_et["event_time"].astype(int)
-        self.att_event_time_ = att_et
+        self.att_event_time_ = self._mark_non_identified_att_rows(att_et)
 
     def summary(
         self, round_to: int | None = 2, include_group_time: bool = False

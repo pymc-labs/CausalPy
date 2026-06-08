@@ -382,6 +382,10 @@ def _effect_summary_staggered_did(
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
     post_treatment = att_et[att_et["event_time"] >= 0]
+    if "identified" in post_treatment.columns:
+        post_treatment = post_treatment[post_treatment["identified"]]
+    if "identified" in pre_treatment.columns:
+        pre_treatment = pre_treatment[pre_treatment["identified"]]
 
     # Build summary table with all event-time effects
     table = att_et.copy()
