@@ -17,6 +17,7 @@ Is treatment timing common, staggered and absorbing, or not a quasi-experimental
 - Units adopt treatment at different times.
 - Treatment is absorbing: once treated, a unit stays treated.
 - The estimand is a cohort, event-time, or overall ATT path under no anticipation and parallel trends.
+- Each calendar period in the estimand needs at least one untreated unit. Without never-treated or not-yet-treated units, time fixed effects are not identified and CausalPy warns or fails.
 
 ## Choose `PanelRegression`
 

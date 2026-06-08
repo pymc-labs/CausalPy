@@ -21,7 +21,7 @@ Use this file as the canonical routing algorithm for choosing a CausalPy experim
    Use this when treated and control groups share one intervention timing and the estimand is the group-by-post interaction. If adoption timing differs by unit, switch to StaggeredDifferenceInDifferences. If there is only one baseline and one post outcome per unit, compare PrePostNEGD.
 
 5. If assignment is staggered adoption, route to StaggeredDifferenceInDifferences only when treatment is absorbing.
-   Use this for cohort or event-time ATT paths with unit-time panel data, no anticipation, and never-treated or not-yet-treated comparison information. If treatment can turn off or repeat, return Not implemented in CausalPy.
+   Use this for cohort or event-time ATT paths with unit-time panel data, no anticipation, and never-treated or not-yet-treated comparison information. Confirm each calendar period in the estimand has at least one untreated unit; otherwise return Not identifiable yet. If treatment can turn off or repeat, return Not implemented in CausalPy.
 
 6. If assignment is a cutoff or kink in a running variable, route by estimand.
    Use RegressionDiscontinuity for a sharp level jump at a cutoff. Use RegressionKink for a slope or treatment-intensity change at a kink point. If treatment probability changes but treatment is not sharp at the cutoff, return Not implemented in CausalPy unless the problem can be reframed as a general InstrumentalVariable analysis with clear caveats.
@@ -58,7 +58,7 @@ Use for treated and control groups observed before and after a common interventi
 
 ### `StaggeredDifferenceInDifferences`
 
-Use for long unit-time panels where units adopt treatment at different times and treatment is absorbing. Do not use it for reversible, intermittent, or non-absorbing treatments.
+Use for long unit-time panels where units adopt treatment at different times and treatment is absorbing. Requires never-treated or not-yet-treated units so each calendar period has untreated support for time fixed effects. Do not use it for reversible, intermittent, or non-absorbing treatments.
 
 ### `SyntheticControl`
 

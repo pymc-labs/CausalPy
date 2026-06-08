@@ -1,11 +1,11 @@
 ---
 name: choosing-causalpy-methods
-description: Selects the appropriate CausalPy quasi-experimental method for causal or impact questions. Use when a user asks whether something worked, changed an outcome, caused an effect, or had impact/lift, even without explicit causal terms; triggers include campaigns, policies, product changes, rollouts, interventions, treatments, before-after comparisons, treated vs control groups, counterfactuals, ATE/ATT, DiD, interrupted time series, CITS, comparative interrupted time series, comparison/control series, synthetic control, regression discontinuity, IV, IPW, panel/event-study questions, and any request that needs a causal design before analysis code.
+description: Choose the appropriate CausalPy experiment class from a causal or impact question, data structure, treatment assignment, and identification assumptions. Use before writing analysis code when the method is not yet settled, including plain-English questions about whether a campaign, policy, or intervention worked.
 ---
 
 # Choosing CausalPy Methods
 
-Use this skill to translate a user's causal or impact question into a CausalPy experiment choice, including plain-English questions like "did the campaign work?", "what was the effect of the rollout?", or "did the policy change sales?". This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
+Use this skill to translate a user's causal or impact question into a CausalPy experiment choice, including plain-English questions like "did the campaign work?", "what was the effect of the rollout?", or "did the policy change sales?". See [Skill triggers](reference/triggers.md) for additional discovery keywords. This is the design-intake skill, not the implementation skill. Optimize for agent use: follow the ordered routing steps, prefer explicit uncertainty over force-fitting, and do not write analysis code until the method route is matched or the user has answered the key ambiguity. Once the method is chosen, hand off to `running-causalpy-experiments` for constructor details, model configuration, priors, summaries, plots, and interpretation.
 
 ## Required Intake
 
@@ -43,7 +43,7 @@ Return exactly one of these outcomes.
 - Required columns/data layout: list the minimal structure needed.
 - Key assumptions: state what must be credible for causal interpretation.
 - Main risks: name likely failure modes and sensitivity checks.
-- Next step: route to `running-causalpy-experiments` and the relevant method reference.
+- Next step: route to `running-causalpy-experiments` and the relevant method reference. If the user wants to stress-test the claim before trusting it, also suggest `causal-detective`.
 
 ### Ambiguous
 
@@ -69,6 +69,7 @@ Return exactly one of these outcomes.
 
 ## References
 
+- [Skill triggers](reference/triggers.md)
 - [Decision tree](reference/decision_tree.md)
 - [Experiment decision guide](reference/experiment_decision_guide.md)
 - [Method capability matrix](reference/method_capability_matrix.md)
