@@ -21,6 +21,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pytensor
 import pytensor.tensor as pt
 import xarray as xr
 from arviz import r2_score
@@ -2431,3 +2432,343 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         # Use base class implementation - X is accepted but not used by predict()
         return super().score(X, y, coords, **kwargs)
+
+
+class HierarchicalLaunchITS(PyMCModel):
+    r"""
+    Hierarchical Bayesian interrupted time series model for multi-unit panels
+    with unit-specific treatment (launch) times.
+
+    Each unit (e.g. a product) has its own launch time. Per-unit intercepts,
+    covariate effects and launch "lift" are partially pooled toward shared
+    population-level hyperparameters, which lets sparse units borrow strength
+    from well-observed ones and yields a posterior distribution over the
+    population lift that can be used to forecast the effect of a *new* unit.
+
+    Three effect parameterizations are supported via the experiment layer:
+
+    - ``"instant"``: a single post-launch level shift per unit,
+      ``lift[unit] ~ Normal(mu_lift, sigma_lift)``.
+    - ``"event_study"``: per-unit dynamic coefficients ``delta[unit, event_bin]``
+      over user-specified post-launch event-time bins (pre-launch is the
+      implicit reference).
+    - ``"placebo"``: the event-study form extended with pre-launch leads; the
+      most negative leads serve as placebos that should be indistinguishable
+      from zero if the no-anticipation assumption holds.
+
+    All hierarchical parameters use a non-centered parametrization.
+
+    Expected inputs
+    ---------------
+    - ``X`` : ``xr.DataArray`` with dims ``["obs_ind", "coeffs"]`` holding the
+      standardized covariate design (built by the experiment from a patsy
+      formula, *without* an intercept — the hierarchical ``alpha`` plays that
+      role).
+    - ``y`` : ``xr.DataArray`` with dims ``["obs_ind", "treated_units"]``; the
+      single ``treated_units`` entry is retained for API consistency with the
+      rest of CausalPy — the per-unit hierarchy is indexed via the ``unit``
+      coord instead.
+    - ``aux`` (passed to :meth:`fit`/:meth:`predict`) : dict with keys
+      ``effect_type``, ``unit_idx`` (int array of length ``n_obs``) and, as
+      appropriate, ``F`` (Fourier basis), ``post`` (0/1 indicator) and ``D``
+      (one-hot event-bin design).
+
+    See :class:`causalpy.experiments.hierarchical_interrupted_time_series.HierarchicalInterruptedTimeSeries`
+    for the user-facing experiment wrapper that assembles ``aux`` from a long
+    panel DataFrame.
+    """
+
+    def __init__(
+        self,
+        sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+        self._aux: dict[str, Any] | None = None
+        self._pred_aux: dict[str, Any] | None = None
+
+    def _clone(self) -> "HierarchicalLaunchITS":
+        return type(self)(
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
+        )
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """Data-adaptive priors keyed to the scale of ``y``."""
+        y_mean = float(np.asarray(y).mean())
+        y_std = float(np.asarray(y).std())
+        if not np.isfinite(y_std) or y_std == 0.0:
+            y_std = 1.0
+        return {
+            "mu_alpha": Prior("Normal", mu=y_mean, sigma=2 * y_std),
+            "sigma_alpha": Prior("HalfNormal", sigma=y_std),
+            "mu_gamma": Prior("Normal", mu=0.0, sigma=2 * y_std),
+            "sigma_gamma": Prior("HalfNormal", sigma=y_std),
+            "mu_lift": Prior("Normal", mu=0.0, sigma=2 * y_std),
+            "sigma_lift": Prior("HalfNormal", sigma=y_std),
+            "mu_delta": Prior("Normal", mu=0.0, sigma=2 * y_std, dims="event_bin"),
+            "sigma_delta": Prior("HalfNormal", sigma=y_std, dims="event_bin"),
+            "mu_rho": Prior("Normal", mu=0.0, sigma=0.5),
+            "sigma_rho": Prior("HalfNormal", sigma=0.25),
+            "sigma_ar": Prior("HalfNormal", sigma=y_std),
+            "sigma": Prior("HalfNormal", sigma=y_std),
+        }
+
+    def fit(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+        aux: dict[str, Any] | None = None,
+    ) -> az.InferenceData:
+        """Fit the hierarchical launch ITS model.
+
+        Parameters
+        ----------
+        X, y, coords :
+            Standard PyMCModel inputs. ``coords`` must include a ``unit`` entry
+            (and an ``event_bin`` entry for the event-study / placebo variants).
+        aux : dict
+            Auxiliary design inputs; see the class docstring.
+        """
+        if aux is None:
+            raise ValueError(
+                "HierarchicalLaunchITS.fit() requires the `aux` keyword argument"
+            )
+        self._aux = aux
+        return super().fit(X, y, coords)
+
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+    ) -> None:
+        if self._aux is None:
+            raise RuntimeError(
+                "HierarchicalLaunchITS.build_model called without aux. "
+                "Use .fit(..., aux=...) rather than calling build_model directly."
+            )
+        aux = self._aux
+        effect_type = aux["effect_type"]
+        unit_idx_np = np.asarray(aux["unit_idx"], dtype=np.int64)
+        F_np = aux.get("F")
+        D_np = aux.get("D")
+        post_np = aux.get("post")
+
+        X_values = np.asarray(X)
+        n_obs, n_coeffs = X_values.shape
+
+        with self:
+            if coords is None:
+                coords = {}
+            coords = dict(coords)
+            coords.setdefault("treated_units", ["unit_0"])
+            coords.setdefault("obs_ind", np.arange(n_obs))
+            if "coeffs" not in coords:
+                coords["coeffs"] = [f"x{i}" for i in range(n_coeffs)]
+            self.add_coords(coords)
+
+            X_ = pm.Data("X", X_values, dims=["obs_ind", "coeffs"])
+            y_ = pm.Data("y", np.asarray(y), dims=["obs_ind", "treated_units"])
+            unit_idx_ = pm.Data("unit_idx", unit_idx_np, dims="obs_ind")
+
+            # Hierarchical intercept (non-centered)
+            mu_alpha = self.priors["mu_alpha"].create_variable("mu_alpha")
+            sigma_alpha = self.priors["sigma_alpha"].create_variable("sigma_alpha")
+            z_alpha = pm.Normal("z_alpha", 0.0, 1.0, dims="unit")
+            alpha = pm.Deterministic(
+                "alpha", mu_alpha + z_alpha * sigma_alpha, dims="unit"
+            )
+
+            # Hierarchical per-unit time trend (non-centered)
+            time_np = aux.get("time")
+            if time_np is not None:
+                time_ = pm.Data(
+                    "time",
+                    np.asarray(time_np, dtype=np.float64),
+                    dims="obs_ind",
+                )
+                mu_gamma = self.priors["mu_gamma"].create_variable("mu_gamma")
+                sigma_gamma = self.priors["sigma_gamma"].create_variable("sigma_gamma")
+                z_gamma = pm.Normal("z_gamma", 0.0, 1.0, dims="unit")
+                gamma = pm.Deterministic(
+                    "gamma", mu_gamma + z_gamma * sigma_gamma, dims="unit"
+                )
+                trend_contrib = gamma[unit_idx_] * time_
+            else:
+                trend_contrib = pt.zeros(n_obs)
+
+            # Hierarchical per-unit covariate effects (non-centered)
+            if n_coeffs > 0:
+                mu_beta = pm.Normal("mu_beta", 0.0, 2.0, dims="coeffs")
+                sigma_beta = pm.HalfNormal("sigma_beta", 1.0, dims="coeffs")
+                z_beta = pm.Normal("z_beta", 0.0, 1.0, dims=["unit", "coeffs"])
+                beta = pm.Deterministic(
+                    "beta",
+                    mu_beta[None, :] + z_beta * sigma_beta[None, :],
+                    dims=["unit", "coeffs"],
+                )
+                cov_contrib = pt.sum(X_ * beta[unit_idx_], axis=1)
+            else:
+                cov_contrib = pt.zeros(n_obs)
+
+            # Shared Fourier seasonality
+            if F_np is not None:
+                F_ = pm.Data("F", np.asarray(F_np), dims=["obs_ind", "fourier"])
+                beta_season = pm.Normal("beta_season", 0.0, 5.0, dims="fourier")
+                season_contrib = pt.dot(F_, beta_season)
+            else:
+                season_contrib = pt.zeros(n_obs)
+
+            # Effect component
+            if effect_type == "instant":
+                if post_np is None:
+                    raise ValueError("effect_type='instant' requires aux['post']")
+                post_ = pm.Data(
+                    "post", np.asarray(post_np, dtype=np.float64), dims="obs_ind"
+                )
+                mu_lift = self.priors["mu_lift"].create_variable("mu_lift")
+                sigma_lift = self.priors["sigma_lift"].create_variable("sigma_lift")
+                z_lift = pm.Normal("z_lift", 0.0, 1.0, dims="unit")
+                lift = pm.Deterministic(
+                    "lift", mu_lift + z_lift * sigma_lift, dims="unit"
+                )
+                effect_contrib = lift[unit_idx_] * post_
+            elif effect_type in ("event_study", "placebo"):
+                if D_np is None:
+                    raise ValueError(f"effect_type='{effect_type}' requires aux['D']")
+                D_ = pm.Data(
+                    "D",
+                    np.asarray(D_np, dtype=np.float64),
+                    dims=["obs_ind", "event_bin"],
+                )
+                mu_delta = self.priors["mu_delta"].create_variable("mu_delta")
+                sigma_delta = self.priors["sigma_delta"].create_variable("sigma_delta")
+                z_delta = pm.Normal("z_delta", 0.0, 1.0, dims=["unit", "event_bin"])
+                delta = pm.Deterministic(
+                    "delta",
+                    mu_delta[None, :] + z_delta * sigma_delta[None, :],
+                    dims=["unit", "event_bin"],
+                )
+                effect_contrib = pt.sum(D_ * delta[unit_idx_], axis=1)
+            else:
+                raise ValueError(
+                    f"Unknown effect_type {effect_type!r}; expected "
+                    "'instant', 'event_study' or 'placebo'"
+                )
+
+            # Optional hierarchical AR(1) residuals via scan
+            within_unit_tidx_np = aux.get("within_unit_tidx")
+            n_time_steps = aux.get("n_time_steps")
+            if within_unit_tidx_np is not None and n_time_steps is not None:
+                within_unit_tidx_ = pm.Data(
+                    "within_unit_tidx",
+                    np.asarray(within_unit_tidx_np, dtype=np.int64),
+                    dims="obs_ind",
+                )
+                n_units = len(coords.get("unit", []))
+
+                # Hierarchical AR coefficient (non-centered, tanh → stationarity)
+                mu_rho = self.priors["mu_rho"].create_variable("mu_rho")
+                sigma_rho = self.priors["sigma_rho"].create_variable("sigma_rho")
+                z_rho = pm.Normal("z_rho", 0.0, 1.0, dims="unit")
+                rho_raw = mu_rho + z_rho * sigma_rho
+                rho = pm.Deterministic("rho", pt.tanh(rho_raw), dims="unit")
+
+                # Pre-drawn innovations: (unit, time_step)
+                z_ar = pm.Normal("z_ar", 0.0, 1.0, dims=["unit", "time_step"])
+                sigma_ar = self.priors["sigma_ar"].create_variable("sigma_ar")
+
+                def ar_step(z_t, prev, rho_vec):
+                    """One AR(1) step: prev * rho + innovation."""
+                    return rho_vec * prev + z_t
+
+                # Scan along time axis, vectorised across units
+                # z_ar.T is (time_step, unit); scan iterates over axis 0
+                ar_resid_matrix = pytensor.scan(
+                    fn=ar_step,
+                    sequences=[z_ar.T],
+                    outputs_info=[pt.zeros(n_units)],
+                    non_sequences=[rho],
+                    n_steps=n_time_steps,
+                    return_updates=False,
+                )
+                # ar_resid_matrix: (time_step, unit)
+                ar_contrib = sigma_ar * ar_resid_matrix[within_unit_tidx_, unit_idx_]
+            else:
+                ar_contrib = pt.zeros(n_obs)
+
+            mu_row = (
+                alpha[unit_idx_]
+                + trend_contrib
+                + cov_contrib
+                + season_contrib
+                + effect_contrib
+                + ar_contrib
+            )
+            mu = pm.Deterministic(
+                "mu", mu_row[:, None], dims=["obs_ind", "treated_units"]
+            )
+            sigma = self.priors["sigma"].create_variable("sigma")
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_,
+                dims=["obs_ind", "treated_units"],
+            )
+
+    def _data_setter(self, X: xr.DataArray) -> None:
+        aux = self._pred_aux if self._pred_aux is not None else self._aux
+        if aux is None:
+            raise RuntimeError("HierarchicalLaunchITS has no aux data set")
+
+        n = X.shape[0]
+        obs_coords = np.arange(n)
+        named = set(self.named_vars)
+        data_to_set: dict[str, Any] = {
+            "X": np.asarray(X),
+            "y": np.zeros((n, 1)),
+            "unit_idx": np.asarray(aux["unit_idx"], dtype=np.int64),
+        }
+        if "time" in named:
+            time_val = aux.get("time")
+            if time_val is None:
+                raise ValueError("Model has time data but aux['time'] is missing")
+            data_to_set["time"] = np.asarray(time_val, dtype=np.float64)
+        if "F" in named:
+            F_val = aux.get("F")
+            if F_val is None:
+                raise ValueError("Model has Fourier data but aux['F'] is missing")
+            data_to_set["F"] = np.asarray(F_val)
+        if "post" in named:
+            post_val = aux.get("post")
+            if post_val is None:
+                raise ValueError("Model has post data but aux['post'] is missing")
+            data_to_set["post"] = np.asarray(post_val, dtype=np.float64)
+        if "D" in named:
+            D_val = aux.get("D")
+            if D_val is None:
+                raise ValueError("Model has D data but aux['D'] is missing")
+            data_to_set["D"] = np.asarray(D_val, dtype=np.float64)
+        if "within_unit_tidx" in named:
+            tidx_val = aux.get("within_unit_tidx")
+            if tidx_val is None:
+                raise ValueError("Model has within_unit_tidx but aux is missing it")
+            data_to_set["within_unit_tidx"] = np.asarray(tidx_val, dtype=np.int64)
+
+        with self:
+            pm.set_data(data_to_set, coords={"obs_ind": obs_coords})
+
+    def predict(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
+        aux: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> az.InferenceData:
+        """Posterior predictive using the supplied ``aux`` bundle."""
+        self._pred_aux = aux
+        try:
+            return super().predict(X, coords=coords, out_of_sample=out_of_sample)
+        finally:
+            self._pred_aux = None
