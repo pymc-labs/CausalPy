@@ -15,6 +15,8 @@
 Tests for StaggeredDifferenceInDifferences experiment class.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -701,6 +703,183 @@ def test_staggered_did_group_time_att_structure():
 
     # Check we have multiple cohorts
     assert len(result.att_group_time_["cohort"].unique()) >= 2
+
+
+def _no_never_treated_staggered_did_df() -> pd.DataFrame:
+    """Return a staggered panel where every unit is eventually treated."""
+    return generate_staggered_did_data(
+        n_units=20,
+        n_time_periods=10,
+        treatment_cohorts={3: 10, 7: 10},
+        seed=42,
+    )
+
+
+@pytest.mark.parametrize(
+    "model_factory",
+    [
+        pytest.param(lambda: LinearRegression(), id="ols"),
+        pytest.param(
+            lambda: cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            id="pymc",
+        ),
+    ],
+)
+def test_staggered_did_warns_non_identified_without_never_treated(
+    model_factory, mock_pymc_sample
+):
+    """No never-treated units should warn about non-identified post-treatment ATTs."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=model_factory(),
+        )
+
+    assert result.non_identified_periods_
+    assert 7 in result.non_identified_periods_
+    assert 7 in result.non_identified_cohorts_
+
+    assert "identified" in result.att_group_time_.columns
+    non_identified_gt = result.att_group_time_[~result.att_group_time_["identified"]]
+    assert len(non_identified_gt) > 0
+    assert non_identified_gt["att"].isna().all()
+
+    assert "identified" in result.att_event_time_.columns
+    non_identified_et = result.att_event_time_[
+        (result.att_event_time_["event_time"] >= 0)
+        & ~result.att_event_time_["identified"]
+    ]
+    assert len(non_identified_et) > 0
+    assert non_identified_et["att"].isna().all()
+
+
+def test_staggered_did_get_plot_data_bayesian_masks_non_identified_on_recompute(
+    mock_pymc_sample,
+):
+    """Non-default hdi_prob recompute path must still mask non-identified cells."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    plot_data = result.get_plot_data_bayesian(hdi_prob=0.80)
+
+    assert "identified" in plot_data.columns
+    non_identified_post = plot_data[
+        (plot_data["event_time"] >= 0) & ~plot_data["identified"]
+    ]
+    assert len(non_identified_post) > 0
+    assert non_identified_post["att"].isna().all()
+    assert non_identified_post["att_lower"].isna().all()
+    assert non_identified_post["att_upper"].isna().all()
+
+
+def test_staggered_did_effect_summary_excludes_non_identified_cells():
+    """effect_summary prose should average only identified post-treatment ATTs."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        )
+
+    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    assert (~post_treatment["identified"]).any()
+
+    summary = result.effect_summary()
+    assert "Staggered DiD" in summary.text
+    assert isinstance(summary.table, pd.DataFrame)
+
+
+def test_staggered_did_mark_non_identified_att_rows_edge_cases():
+    """Cover empty and unknown-column paths in _mark_non_identified_att_rows."""
+    df = _no_never_treated_staggered_did_df()
+
+    with pytest.warns(
+        UserWarning, match="No untreated observations in calendar period"
+    ):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        )
+
+    empty = result._mark_non_identified_att_rows(pd.DataFrame())
+    assert list(empty.columns) == ["identified"]
+    assert len(empty) == 0
+
+    unknown_cols = result._mark_non_identified_att_rows(pd.DataFrame({"x": [1]}))
+    assert unknown_cols["identified"].all()
+
+
+@pytest.mark.parametrize(
+    "model_factory",
+    [
+        pytest.param(lambda: LinearRegression(), id="ols"),
+        pytest.param(
+            lambda: cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            id="pymc",
+        ),
+    ],
+)
+def test_staggered_did_all_identified_with_never_treated(
+    model_factory, mock_pymc_sample
+):
+    """Never-treated units should identify all post-treatment ATT cells."""
+    df = generate_staggered_did_data(
+        n_units=30,
+        n_time_periods=10,
+        treatment_cohorts={3: 10, 7: 10},
+        seed=42,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            treatment_time_variable_name="treatment_time",
+            model=model_factory(),
+        )
+
+    assert result.non_identified_periods_ == set()
+    assert result.att_group_time_["identified"].all()
+    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    assert post_treatment["identified"].all()
 
 
 def test_staggered_did_no_untreated_observations():
