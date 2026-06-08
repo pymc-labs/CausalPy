@@ -81,4 +81,12 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 ## Adding New Code
 
-Copy the closest existing experiment or model and follow the `BaseExperiment` contract (`supports_ols`/`supports_bayes`, `algorithm()`, explicit `plot()`, `effect_summary()`). See [AGENTS.md](AGENTS.md) for coding conventions and the requirement to update this file when making structural changes.
+Copy the closest existing experiment or model and follow the `BaseExperiment` contract:
+
+- Declare `supports_ols` / `supports_bayes`; implement `_bayesian_plot()` / `_ols_plot()` only for supported backends
+- `algorithm()` with the fit/predict/impact flow; `effect_summary()` via helpers in `causalpy.reporting`
+- Public `plot(*, ...)` with a kwarg-only signature that delegates to `_render_plot()` — bare `*args` / `**kwargs` are forbidden on the public surface (enforced by `causalpy/tests/test_public_plot_signatures.py`). For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
+- Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors
+- Avoid backwards-compat shims for APIs introduced in the same PR
+
+**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update this file in the same PR.
