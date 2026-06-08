@@ -305,11 +305,6 @@ class PanelRegression(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
         elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, set fit_intercept=False so that the
-            # patsy intercept column is included in the coefficients array.
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:

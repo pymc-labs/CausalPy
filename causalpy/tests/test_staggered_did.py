@@ -846,7 +846,10 @@ def test_staggered_did_mark_non_identified_att_rows_edge_cases():
 @pytest.mark.parametrize(
     "model_factory",
     [
-        pytest.param(lambda: LinearRegression(), id="ols"),
+        # fit_intercept=False avoids the BaseExperiment fit_intercept
+        # override warning (#664) which would be caught by the
+        # simplefilter("error") below.
+        pytest.param(lambda: LinearRegression(fit_intercept=False), id="ols"),
         pytest.param(
             lambda: cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
             id="pymc",
