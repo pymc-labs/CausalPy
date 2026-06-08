@@ -8,7 +8,10 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint check-exports check-architecture test uml html cleandocs doctest run_notebooks_full help
+.PHONY: init setup lint check_lint check-exports check-architecture test test-patch-cov uml html cleandocs doctest run_notebooks_full help
+
+DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
+DIFF_COVER_FAIL_UNDER ?= 95
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
@@ -39,6 +42,10 @@ doctest: ## Run doctests for the causalpy module
 
 test: ## Run all tests with pytest
 	python -m pytest
+
+test-patch-cov: ## Run tests and fail if patch coverage versus the base branch is too low
+	python -m pytest --cov-report=xml --no-cov-on-fail
+	diff-cover coverage.xml --compare-branch=$(DIFF_COVER_COMPARE_BRANCH) --fail-under=$(DIFF_COVER_FAIL_UNDER)
 
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests

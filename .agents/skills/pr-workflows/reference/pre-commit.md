@@ -13,6 +13,9 @@ prek run --files path/to/file.py
 
 # Full verification before push/commit
 prek run --all-files
+
+# Python source/test changes: local patch coverage gate
+make test-patch-cov
 ```
 
 ## If hooks modify files
