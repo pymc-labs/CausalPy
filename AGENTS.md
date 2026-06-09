@@ -12,6 +12,12 @@ See the [python-environment skill](.github/skills/python-environment/SKILL.md) f
 - Dependencies live in `pyproject.toml`; `environment.yml` is generated from it (do not edit by hand—see CONTRIBUTING). Optional: `pymc-marketing` is in the `docs` extra only.
 - **Development**: The supported setup is the conda env (`environment.yml`). `pip install -e .[dev]` works but does not include conda-only tooling (e.g. `make`, `pymc-bart`, `marimo`); do not suggest pip-only dev as equivalent.
 
+## Architecture
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before making changes to core code. It describes the backend dispatch system, experiment lifecycle, formula/data pipeline, and data contracts — the foundational patterns that every change must respect.
+
+**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update ARCHITECTURE.md in the same PR. The file is a living reference, not a snapshot.
+
 ## Testing preferences
 
 - Write all Python tests as `pytest` style functions, not unittest classes
@@ -94,7 +100,9 @@ creation, bug reports, and issue evaluation workflows.
 
 ## Skills Location
 
-Canonical skills live in `.github/skills/`. The `.claude/skills` and
-`.cursor/skills` paths are symlinks to that directory. On Windows, symlink
-support may require Developer Mode or elevated permissions; if symlinks are not
-available, mirror `.github/skills/` into those locations and keep them in sync.
+Skills are split into two categories with separate homes:
+
+- **Developer skills** live in `.github/skills/` and are auto-discovered by agents working on the repo via the `.cursor/skills`, `.claude/skills`, and `.agents/skills` symlinks. These cover environment setup, PR workflows, issue triage, and other maintainer tasks.
+- **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
+
+On Windows, symlink support for developer skills may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into `.cursor/skills/`, `.claude/skills/`, and `.agents/skills/` and keep them in sync.

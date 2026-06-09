@@ -61,6 +61,10 @@ Alternatively, if you want the very latest version of the package you can instal
 pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
 
+## AI Agent Skills
+
+CausalPy includes agent skills that teach AI coding assistants how to use the library for causal inference. Skills are available via [Decision AI Hub](https://hub.decision.ai) and live in `causalpy/skills/` in the source tree.
+
 ## Quickstart
 
 ```python
