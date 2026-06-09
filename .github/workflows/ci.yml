@@ -62,7 +62,7 @@ jobs:
         run: |
           pyproject2conda yaml -e dev -e test -o /tmp/environment.generated.yml -n CausalPy \
             -w force --no-header \
-            --python-include "python>=3.12" \
+            --python-include "python>=3.11" \
             -d make -d pip -d pymc-bart -r "marimo[mcp]"
       - name: Check environment.yml is in sync with pyproject.toml
         run: |
@@ -80,10 +80,7 @@ jobs:
         shell: bash -el {0}
     strategy:
       matrix:
-        # 3.11 dropped from this prototype because environment.yml is generated with
-        # `--python-include "python>=3.12"`. Re-adding 3.11 needs a separate decision
-        # about whether the dev env should support it.
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.11", "3.14"]
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

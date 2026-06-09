@@ -11,7 +11,7 @@ name: CausalPy
 channels:
   - conda-forge
 dependencies:
-  - python>=3.12
+  - python>=3.11
   - arviz<1.0,>=0.14.0
   - codespell
   - graphviz

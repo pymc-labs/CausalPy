@@ -86,7 +86,7 @@ repos:
         files: \.md$
         exclude: ^(docs/_build/|\.scratch/)
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
-  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
+  # Dev env uses python>=3.11; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
   - repo: https://github.com/usnistgov/pyproject2conda
     rev: v0.22.1
     hooks:
@@ -104,7 +104,7 @@ repos:
           - -w
           - force
           - --python-include
-          - "python>=3.12"
+          - "python>=3.11"
           - -d
           - make
           - -d
