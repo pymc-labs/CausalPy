@@ -18,6 +18,8 @@ Base class for quasi experimental designs.
 from __future__ import annotations
 
 import contextlib
+import copy
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
@@ -25,7 +27,7 @@ from typing import Any, Literal
 import arviz as az
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.base import RegressorMixin
+from sklearn.base import RegressorMixin, clone
 
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
@@ -118,7 +120,27 @@ class BaseExperiment(ABC):
         # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
+            # Clone to avoid mutating the caller's estimator instance (#664).
+            try:
+                model = clone(model)
+            except TypeError:
+                # Models without get_params() can't be sklearn-cloned;
+                # fall back to a deep copy.
+                model = copy.deepcopy(model)
             model = create_causalpy_compatible_class(model)
+            # Patsy includes the intercept as a design-matrix column, so
+            # sklearn models must not add their own intercept.
+            if getattr(model, "fit_intercept", False):
+                warnings.warn(
+                    f"{type(model).__name__} had fit_intercept=True, but CausalPy "
+                    "requires fit_intercept=False because the intercept is already "
+                    "included in the design matrix by patsy. A cloned copy of the "
+                    "model with fit_intercept=False will be used; the original "
+                    "instance is unchanged.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                model.fit_intercept = False
 
         if model is None and self._default_model_class is not None:
             model = self._default_model_class()

@@ -1,32 +1,25 @@
 # AGENTS
 
+Agent workflow for working in this repo. For codebase design and conventions, read [ARCHITECTURE.md](ARCHITECTURE.md) before core code changes. Do **not** load [CONTRIBUTING.md](CONTRIBUTING.md) by default — it is a long human-contributor guide (setup, permissions, PR etiquette). Consult it only when the task is explicitly about contributor workflow or onboarding humans.
+
 ## Environment
 
 Use `mamba`, `micromamba`, or `conda` (in that preference order) to manage the `CausalPy` environment. Reuse an existing `CausalPy` env whenever possible; do not create or update an env unless the task needs the project environment and the existing env is missing, stale, or broken. Use `$CONDA_EXE run -n CausalPy <command>` for commands that import project code, run tests, build docs, or use repo tooling; never use `$CONDA_EXE activate`. For simple text/JSON inspection helpers that do not import project code, any Python on `PATH` is fine.
 
-See the [python-environment skill](.github/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
+See the [python-environment skill](.agents/skills/python-environment/SKILL.md) for full setup instructions: tool detection, environment creation, editable install, and troubleshooting.
 
 - If `$CONDA_EXE run -n CausalPy ...` fails because the named env cannot be resolved, inspect `$CONDA_EXE env list` and retry with `$CONDA_EXE run -p <full-prefix> <command>`.
 - In git worktrees, prefer reusing an existing env. Because the repo uses editable installs, rerun `make setup` in the current worktree only when that checkout has not been installed into the env yet or when dependencies changed.
 
-- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it (do not edit by hand—see CONTRIBUTING). Optional: `pymc-marketing` is in the `docs` extra only.
+- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it by a prek hook (do not edit by hand). Optional: `pymc-marketing` is in the `docs` extra only.
 - **Development**: The supported setup is the conda env (`environment.yml`). `pip install -e .[dev]` works but does not include conda-only tooling (e.g. `make`, `pymc-bart`, `marimo`); do not suggest pip-only dev as equivalent.
 
-## Architecture
-
-Read [ARCHITECTURE.md](ARCHITECTURE.md) before making changes to core code. It describes the backend dispatch system, experiment lifecycle, formula/data pipeline, and data contracts — the foundational patterns that every change must respect.
-
-**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update ARCHITECTURE.md in the same PR. The file is a living reference, not a snapshot.
-
-## Testing preferences
+## Testing
 
 - Write all Python tests as `pytest` style functions, not unittest classes
 - Use descriptive function names starting with `test_`
 - Prefer fixtures over setup/teardown methods
 - Use assert statements directly, not self.assertEqual
-
-## Testing approach
-
 - Never create throwaway test scripts or ad hoc verification files
 - If you need to test functionality, write a proper test in the test suite
 - All tests go in the `causalpy/tests/` directory following the project structure
@@ -61,21 +54,10 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before making changes to core code. It d
   - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
 - **No hard line wrapping in prose-like text**: Do not hard-wrap lines in any prose context — Markdown files, long comments in code (TOML/YAML/Python/etc.), commit-message bodies, PR descriptions, issue descriptions, or GitHub comments. One paragraph = one line; rely on the viewer/editor to re-wrap. Hard wraps look ragged at different widths, make diffs noisy on every reflow, and mangle when copied or quoted. Code itself, code blocks inside Markdown, ASCII tables, and structured config values are exempt — those need their literal line structure.
 
-## Code structure and style
-
-- **Experiment classes**: All experiment classes inherit from `BaseExperiment` in `causalpy/experiments/`. Must declare `supports_ols` and `supports_bayes` class attributes. Only implement abstract methods for supported model types (e.g., if only Bayesian is supported, implement `_bayesian_plot()` and `get_plot_data_bayesian()`; if only OLS is supported, implement `_ols_plot()` and `get_plot_data_ols()`)
-- **Model-agnostic design**: Experiment classes should work with both PyMC and scikit-learn models. Use `isinstance(self.model, PyMCModel)` vs `isinstance(self.model, RegressorMixin)` to dispatch to appropriate implementations
-- **Model classes**: PyMC models inherit from `PyMCModel` (extends `pm.Model`). Scikit-learn models use `RegressorMixin` and are made compatible via `create_causalpy_compatible_class()`. Common interface: `fit()`, `predict()`, `score()`, `calculate_impact()`, `print_coefficients()`
-- **Data handling**: PyMC models use `xarray.DataArray` with coords (keys like "coeffs", "obs_ind", "treated_units"). Scikit-learn models use numpy arrays. Data index should be named "obs_ind"
-- **Formulas**: Use patsy for formula parsing (via `dmatrices()`)
-- **Custom exceptions**: Use project-specific exceptions from `causalpy.custom_exceptions`: `FormulaException`, `DataException`, `BadIndexException`
-- **File organization**: Experiments in `causalpy/experiments/`, PyMC models in `causalpy/pymc_models.py`, scikit-learn models in `causalpy/skl_models.py`
-- **Backwards compatibility**: Avoid preserving backwards compatibility for API elements introduced within the same PR; only maintain compatibility for previously released APIs.
-- **Public `plot()` signatures**: ``BaseExperiment`` deliberately does **not** define a public ``plot()`` method. Every concrete experiment subclass must declare its own ``plot()`` with an explicit, kwarg-only signature (using ``*,``); bare ``*args`` and ``**kwargs`` are forbidden at the public surface because they silently swallow real, supported parameters and hide them from Sphinx, IDE autocomplete, and ``help()``. The body of ``plot()`` should delegate to the protected helper ``self._render_plot(...)`` (which applies the shared style context, dispatches to ``_bayesian_plot`` / ``_ols_plot``, applies ``legend_kwargs``, and optionally calls ``plt.show()``). Document every parameter in the docstring's ``Parameters`` block — the test ``causalpy/tests/test_public_plot_signatures.py`` and the ``numpydoc-validation`` pre-commit hook enforce this. For experiments without a unified plot view (e.g. ``InversePropensityWeighting``, ``InstrumentalVariable``), still declare an explicit ``plot()`` stub that raises ``NotImplementedError`` and points at the bespoke alternatives. For ``hdi_prob`` defaults, use the prose pattern (``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).``) rather than the numpydoc ``default=...`` slot, so the cross-reference renders.
-
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
+- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards
@@ -95,14 +77,15 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before making changes to core code. It d
 
 ## GitHub Issue Workflows
 
-Use the `github-issues` Skill in `.github/skills/github-issues/` for issue
+Use the `github-issues` Skill in `.agents/skills/github-issues/` for issue
 creation, bug reports, and issue evaluation workflows.
 
 ## Skills Location
 
 Skills are split into two categories with separate homes:
 
-- **Developer skills** live in `.github/skills/` and are auto-discovered by agents working on the repo via the `.cursor/skills`, `.claude/skills`, and `.agents/skills` symlinks. These cover environment setup, PR workflows, issue triage, and other maintainer tasks.
+- **Developer skills** live in `.agents/skills/`. This is the canonical shared location for repo-maintainer workflows such as environment setup, PR workflows, issue triage, and other maintainer tasks.
 - **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
+- When user-facing skills change, include a PR note or follow-up task to update the distributed Decision AI Hub copy after merge.
 
-On Windows, symlink support for developer skills may require Developer Mode or elevated permissions; if symlinks are not available, mirror `.github/skills/` into `.cursor/skills/`, `.claude/skills/`, and `.agents/skills/` and keep them in sync.
+If a developer's local tool does not yet discover `.agents/skills/`, they may create an uncommitted local compatibility symlink such as `.cursor/skills -> ../.agents/skills`, `.claude/skills -> ../.agents/skills`, or `.github/skills -> ../.agents/skills`. Do not commit those compatibility symlinks; keep `.agents/skills/` as the only tracked developer-skill home.

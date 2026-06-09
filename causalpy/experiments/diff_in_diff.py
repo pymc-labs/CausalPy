@@ -160,11 +160,6 @@ class DifferenceInDifferences(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # Ensure the intercept is part of the coefficients array rather than
-            # a separate intercept_ attribute.  See #664 / PR #693 for
-            # centralising this in BaseExperiment.
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y)
         else:
             raise ValueError("Model type not recognized")

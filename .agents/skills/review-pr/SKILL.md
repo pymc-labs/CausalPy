@@ -65,7 +65,7 @@ Read these when the PR touches the relevant surface:
 
 ## CausalPy Review Norms
 
-- Before reviewing code, read `AGENTS.md` and relevant local context. For docs-heavy PRs, also inspect `docs/source/notebooks/index.md`; for process-sensitive PRs, inspect `CONTRIBUTING.md` when present.
+- Before reviewing code, read `AGENTS.md` (workflow) and `ARCHITECTURE.md` (design) for core changes. For docs-heavy PRs, also inspect `docs/source/notebooks/index.md`; for process-sensitive PRs, inspect `CONTRIBUTING.md` when present.
 - Use `$CONDA_EXE run -n CausalPy <command>` for commands that import project code, run tests, build docs, or invoke repo tooling. `AGENTS.md` defines how to detect or set `CONDA_EXE`; if it is unset, inspect that environment guidance before running project commands.
 - Use full permissions for commands that import PyMC, PyTensor, or matplotlib to avoid false sandbox failures.
 - During review, prefer targeted local checks that match the changed surface. If you edit code or prepare a commit, run `prek run` during iteration and `prek run --all-files` before handoff unless the user explicitly says not to.

@@ -218,8 +218,6 @@ class PiecewiseITS(BaseExperiment):
             }
             self.model.fit(X=self.X, y=self.y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
             self.model.fit(X=self.X, y=self.y.isel(treated_units=0))
         else:
             raise ValueError("Model type not recognized")
