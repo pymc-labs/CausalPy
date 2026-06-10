@@ -26,7 +26,9 @@ from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import xarray as xr
 from sklearn.base import RegressorMixin, clone
 
 from causalpy.maketables_adapters import get_maketables_adapter
@@ -121,6 +123,67 @@ class BaseExperiment(ABC):
     supports_ols: bool
 
     _default_model_class: type[PyMCModel] | None = None
+
+    _deprecated_design_aliases: dict[str, tuple[str, str]] = {}
+    """Mapping of ``old_attr -> (dataset_attr, key)`` for deprecated design
+    matrix accessors.  Subclasses populate this so that
+    ``__getattr__`` can forward accesses with a deprecation warning."""
+
+    def __getattr__(self, name: str) -> Any:
+        aliases = type(self)._deprecated_design_aliases
+        if name in aliases:
+            dataset_attr, key = aliases[name]
+            warnings.warn(
+                f"{name} is deprecated, use {dataset_attr}['{key}']",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return getattr(self, dataset_attr)[key]
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    @staticmethod
+    def _build_design_dataset(
+        X_raw: np.ndarray,
+        y_raw: np.ndarray,
+        *,
+        obs_ind: np.ndarray | pd.Index,
+        coeffs: list[str],
+        treated_units: list[str] | None = None,
+    ) -> xr.Dataset:
+        """Build a standard ``xr.Dataset`` from raw design matrices.
+
+        Parameters
+        ----------
+        X_raw : np.ndarray
+            Predictor matrix, shape ``(n_obs, n_coeffs)``.
+        y_raw : np.ndarray
+            Outcome matrix, shape ``(n_obs, n_units)``.
+        obs_ind : array-like
+            Observation index coordinates.
+        coeffs : list[str]
+            Coefficient / column names for ``X_raw``.
+        treated_units : list[str], optional
+            Names for the treated-unit dimension of ``y_raw``.
+            Defaults to ``["unit_0"]``.
+        """
+        if treated_units is None:
+            treated_units = ["unit_0"]
+        return xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    X_raw,
+                    dims=["obs_ind", "coeffs"],
+                    coords={"obs_ind": obs_ind, "coeffs": coeffs},
+                ),
+                "y": xr.DataArray(
+                    y_raw,
+                    dims=["obs_ind", "treated_units"],
+                    coords={"obs_ind": obs_ind, "treated_units": treated_units},
+                ),
+            }
+        )
 
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
         # Ensure we've made any provided Scikit Learn model (as identified as being type

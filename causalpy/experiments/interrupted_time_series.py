@@ -127,6 +127,12 @@ class InterruptedTimeSeries(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {
+        "pre_X": ("pre_design", "X"),
+        "pre_y": ("pre_design", "y"),
+        "post_X": ("post_design", "X"),
+        "post_y": ("post_design", "y"),
+    }
 
     def __init__(
         self,
@@ -138,9 +144,8 @@ class InterruptedTimeSeries(BaseExperiment):
         **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
-        self.pre_y: xr.DataArray
-        self.post_y: xr.DataArray
-        # rename the index to "obs_ind"
+        self.pre_design: xr.Dataset
+        self.post_design: xr.Dataset
         data.index.name = "obs_ind"
         self.data = data
         self.input_validation(data, treatment_time, treatment_end_time)
@@ -154,96 +159,76 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for pre and post intervention periods using patsy."""
-        # set things up with pre-intervention data
         y, X = dmatrices(self.formula, self.datapre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.pre_y, self.pre_X = np.asarray(y), np.asarray(X)
-        # process post-intervention data
+        self._pre_y_raw, self._pre_X_raw = np.asarray(y), np.asarray(X)
         (new_y, new_x) = build_design_matrices(
             [self._y_design_info, self._x_design_info], self.datapost
         )
-        self.post_X = np.asarray(new_x)
-        self.post_y = np.asarray(new_y)
+        self._post_X_raw = np.asarray(new_x)
+        self._post_y_raw = np.asarray(new_y)
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays for pre and post periods."""
-        self.pre_X = xr.DataArray(
-            self.pre_X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre.index,
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into ``xr.Dataset`` objects for pre and post periods."""
+        self.pre_design = self._build_design_dataset(
+            self._pre_X_raw,
+            self._pre_y_raw,
+            obs_ind=self.datapre.index,
+            coeffs=self.labels,
         )
-        self.pre_y = xr.DataArray(
-            self.pre_y,  # Keep 2D shape
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapre.index, "treated_units": ["unit_0"]},
+        self.post_design = self._build_design_dataset(
+            self._post_X_raw,
+            self._post_y_raw,
+            obs_ind=self.datapost.index,
+            coeffs=self.labels,
         )
-        self.post_X = xr.DataArray(
-            self.post_X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost.index,
-                "coeffs": self.labels,
-            },
-        )
-        self.post_y = xr.DataArray(
-            self.post_y,  # Keep 2D shape
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.datapost.index, "treated_units": ["unit_0"]},
-        )
+        del self._pre_X_raw, self._pre_y_raw, self._post_X_raw, self._post_y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        # fit the model to the observed (pre-intervention) data
-        # All PyMC models now accept xr.DataArray with consistent API
+        pre_X = self.pre_design["X"]
+        pre_y = self.pre_design["y"]
+        post_X = self.post_design["X"]
+        post_y = self.post_design["y"]
+
         if isinstance(self.model, PyMCModel):
             COORDS: dict[str, Any] = {
                 "coeffs": self.labels,
-                "obs_ind": np.arange(self.pre_X.shape[0]),
+                "obs_ind": np.arange(pre_X.shape[0]),
                 "treated_units": ["unit_0"],
-                "datetime_index": self.datapre.index,  # For time series models
+                "datetime_index": self.datapre.index,
             }
-            self.model.fit(X=self.pre_X, y=self.pre_y, coords=COORDS)
+            self.model.fit(X=pre_X, y=pre_y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            # For OLS models, use 1D y data
-            self.model.fit(X=self.pre_X, y=self.pre_y.isel(treated_units=0))
+            self.model.fit(X=pre_X, y=pre_y.isel(treated_units=0))
         else:
             raise ValueError("Model type not recognized")
 
-        # score the goodness of fit to the pre-intervention data
         if isinstance(self.model, PyMCModel):
-            self.score = self.model.score(X=self.pre_X, y=self.pre_y)
+            self.score = self.model.score(X=pre_X, y=pre_y)
         elif isinstance(self.model, RegressorMixin):
-            self.score = self.model.score(
-                X=self.pre_X, y=self.pre_y.isel(treated_units=0)
-            )
+            self.score = self.model.score(X=pre_X, y=pre_y.isel(treated_units=0))
 
-        # get the model predictions of the observed (pre-intervention) data
         if isinstance(self.model, PyMCModel | RegressorMixin):
-            self.pre_pred = self.model.predict(X=self.pre_X)
+            self.pre_pred = self.model.predict(X=pre_X)
 
-        # calculate the counterfactual (post period)
         if isinstance(self.model, PyMCModel):
-            self.post_pred = self.model.predict(X=self.post_X, out_of_sample=True)
+            self.post_pred = self.model.predict(X=post_X, out_of_sample=True)
         elif isinstance(self.model, RegressorMixin):
-            self.post_pred = self.model.predict(X=self.post_X)
+            self.post_pred = self.model.predict(X=post_X)
 
-        # calculate impact - all PyMC models now use 2D data with treated_units
         if isinstance(self.model, PyMCModel):
-            self.pre_impact = self.model.calculate_impact(self.pre_y, self.pre_pred)
-            self.post_impact = self.model.calculate_impact(self.post_y, self.post_pred)
+            self.pre_impact = self.model.calculate_impact(pre_y, self.pre_pred)
+            self.post_impact = self.model.calculate_impact(post_y, self.post_pred)
         elif isinstance(self.model, RegressorMixin):
-            # SKL models work with 1D data
             self.pre_impact = self.model.calculate_impact(
-                self.pre_y.isel(treated_units=0), self.pre_pred
+                pre_y.isel(treated_units=0), self.pre_pred
             )
             self.post_impact = self.model.calculate_impact(
-                self.post_y.isel(treated_units=0), self.post_pred
+                post_y.isel(treated_units=0), self.post_pred
             )
 
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
@@ -740,9 +725,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         (h,) = ax[0].plot(
             self.datapre.index,
-            self.pre_y.isel(treated_units=0)
-            if hasattr(self.pre_y, "isel")
-            else self.pre_y[:, 0],
+            self.pre_design["y"].isel(treated_units=0),
             "k.",
             label="Observations",
         )
@@ -779,9 +762,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         ax[0].plot(
             self.datapost.index,
-            self.post_y.isel(treated_units=0)
-            if hasattr(self.post_y, "isel")
-            else self.post_y[:, 0],
+            self.post_design["y"].isel(treated_units=0),
             "k.",
             zorder=3,
         )
@@ -797,9 +778,7 @@ class InterruptedTimeSeries(BaseExperiment):
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_mu,
-            y2=self.post_y.isel(treated_units=0)
-            if hasattr(self.post_y, "isel")
-            else self.post_y[:, 0],
+            y2=self.post_design["y"].isel(treated_units=0),
             color="C0",
             alpha=0.25,
         )
@@ -959,10 +938,10 @@ class InterruptedTimeSeries(BaseExperiment):
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
-        ax[0].plot(self.datapre.index, self.pre_y, "k.")
+        ax[0].plot(self.datapre.index, self.pre_design["y"], "k.")
         ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
 
-        ax[0].plot(self.datapost.index, self.post_y, "k.")
+        ax[0].plot(self.datapost.index, self.post_design["y"], "k.")
         ax[0].plot(
             self.datapost.index,
             self.post_pred,
@@ -974,7 +953,7 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[0].fill_between(
             self.datapost.index,
             y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_y),
+            y2=np.squeeze(self.post_design["y"]),
             color="C0",
             alpha=0.25,
             label="Causal impact",
