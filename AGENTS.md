@@ -47,7 +47,7 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 - **API documentation**: Auto-generated from docstrings via Sphinx autodoc, no manual API docs needed
 - **Build**: Use `make html` to build documentation
 - **Doctest**: Use `make doctest` to test that Python examples in doctests work
-- **Notebook schema validation**: `prek run --all-files` runs `validate-notebooks` to catch `.ipynb` files that are valid JSON but invalid nbformat.
+- **Notebook validation**: `prek run --all-files` runs `validate-notebooks` to catch invalid nbformat and docs notebook convention errors.
 - **Notebook validation failure recovery**: Re-open and save (or re-run) in a notebook-aware editor; if it still fails, restore from `main` and reapply intended edits with notebook-aware tooling; rerun `prek run --all-files`; for docs notebook changes run `$CONDA_EXE run -n CausalPy make html` before pushing.
 - **Scratch files**: Put temporary notes and generated markdown in `.scratch/` (untracked). Move anything that should be kept into a tracked location.
   - **PR drafts**: Create PR summary markdown files in `.scratch/pr_summaries/` (untracked).

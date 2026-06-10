@@ -69,6 +69,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    defaults:
+      run:
+        # Required so the conda env activated by setup-micromamba persists across steps.
+        shell: bash -el {0}
     strategy:
       matrix:
         python-version: ["3.11", "3.14"]
@@ -78,14 +82,25 @@ jobs:
         with:
           # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Setup micromamba environment
+        uses: mamba-org/setup-micromamba@d7c9bd84e824b79d2af72a2d4196c7f4300d3476 # v3.0.0
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Update pip and setuptools
-        run: pip install --upgrade pip setuptools
-      - name: Setup environment
-        run: pip install -e .[test]
+          environment-file: environment.yml
+          environment-name: CausalPy
+          # Pin python to the matrix version. All other deps (including
+          # test-only ones) come from environment.yml, regenerated from
+          # pyproject.toml's `dev` + `test` extras via pyproject2conda.
+          create-args: >-
+            python=${{ matrix.python-version }}
+          cache-environment: true
+      - name: Install package
+        # --no-deps so pip does not pull pip-built pymc/pytensor on top of the
+        # conda-forge ones. Runtime deps come from environment.yml.
+        run: pip install --no-deps -e .
+      - name: Show environment
+        run: |
+          micromamba list
+          python -c "import pymc, pytensor; print('pymc', pymc.__version__); print('blas_ldflags=', pytensor.config.blas__ldflags)"
       - name: Run doctests
         run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
       - name: Run extra tests
