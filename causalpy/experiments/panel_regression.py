@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Panel Regression with Fixed Effects
-"""
+"""Panel Regression with Fixed Effects."""
 
 from typing import Any, Literal
 
@@ -26,14 +24,13 @@ from patsy import dmatrices
 from scipy import stats
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class PanelRegression(BaseExperiment):
@@ -60,6 +57,7 @@ class PanelRegression(BaseExperiment):
         If provided, time fixed effects will be included. Default is None.
     fe_method : {"dummies", "demeaned"}, default="dummies"
         Method for handling fixed effects:
+
         - "dummies": Use unpooled dummy-variable fixed effects
           (``C(unit)``/``C(time)`` in formula). Gets individual unit effect
           estimates but creates N-1 dummy columns. Best for small N.
@@ -67,6 +65,8 @@ class PanelRegression(BaseExperiment):
           but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -303,8 +303,6 @@ class PanelRegression(BaseExperiment):
             }
             self.model.fit(X=X, y=y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
             self.model.fit(X=X, y=y)
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
@@ -463,6 +461,29 @@ class PanelRegression(BaseExperiment):
             so the standard ITS/SC-style effect summary does not directly
             apply.  Use :meth:`summary` for coefficient-level inference.
 
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (placeholder; not consumed).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            Treated unit selector for multi-unit experiments.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+
         Raises
         ------
         NotImplementedError
@@ -475,15 +496,68 @@ class PanelRegression(BaseExperiment):
             "inference."
         )
 
-    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
+    def plot(
+        self,
+        *,
+        hdi_prob: float = HDI_PROB,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the panel regression coefficients.
+
+        Bayesian models render a forest plot with HDI intervals; OLS models
+        render a bar plot of point estimates. To plot only a subset of
+        coefficients (or to customise the figure size), call
+        :meth:`plot_coefficients` directly.
+
+        Parameters
+        ----------
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around
+            each posterior coefficient via :func:`arviz.plot_forest`. Must
+            be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the coefficient plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+        )
+
+    def _bayesian_plot(
+        self, hdi_prob: float = HDI_PROB, **kwargs: Any
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for Bayesian model.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around each
+            posterior coefficient via :func:`arviz.plot_forest`. Must be in
+            ``(0, 1]``. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal()
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
     def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for OLS model.
@@ -496,7 +570,7 @@ class PanelRegression(BaseExperiment):
         return self._plot_coefficients_internal()
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -505,9 +579,10 @@ class PanelRegression(BaseExperiment):
         var_names : list[str], optional
             Specific coefficient names to plot.  If ``None``, plots all
             non-FE coefficients (as determined by ``_get_non_fe_labels``).
-        hdi_prob : float, default=0.94
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
-            coefficients. Must be in (0, 1).
+            coefficients. Must be in (0, 1). Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
@@ -545,6 +620,12 @@ class PanelRegression(BaseExperiment):
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for Bayesian model.
 
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
         Returns
         -------
         pd.DataFrame
@@ -577,6 +658,12 @@ class PanelRegression(BaseExperiment):
     def get_plot_data_ols(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for OLS model.
 
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
         Returns
         -------
         pd.DataFrame
@@ -601,7 +688,7 @@ class PanelRegression(BaseExperiment):
         return plot_data
 
     def plot_coefficients(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Plot coefficient estimates with credible/confidence intervals.
 
@@ -614,9 +701,10 @@ class PanelRegression(BaseExperiment):
             Specific coefficient names to plot.  Names must match the patsy
             design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
             If ``None``, plots all non-FE coefficients.
-        hdi_prob : float, default=0.94
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Ignored for OLS models.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
@@ -709,7 +797,7 @@ class PanelRegression(BaseExperiment):
         n_sample: int = 10,
         select: Literal["random", "extreme", "high_variance"] = "random",
         show_mean: bool = True,
-        hdi_prob: float = 0.94,
+        hdi_prob: float = HDI_PROB,
         interval_type: Literal["mean", "predictive"] = "mean",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
@@ -725,16 +813,19 @@ class PanelRegression(BaseExperiment):
             Number of units to sample if units not specified.
         select : {"random", "extreme", "high_variance"}, default="random"
             Method for selecting units:
+
             - "random": Random sample of units
             - "extreme": Units with largest positive and negative effects
             - "high_variance": Units with most within-unit variation
         show_mean : bool, default=True
             Whether to show the overall mean trajectory.
-        hdi_prob : float, default=0.94
-            Probability mass for the HDI credible interval (Bayesian models only).
-            Common values are 0.94 (default) or 0.89.
+        hdi_prob : float
+            Probability mass for the HDI credible interval (Bayesian models
+            only). Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94). Common alternative values are 0.89 or 0.5.
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
+
             - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
             - "predictive": HDI of posterior predictive ``y_hat``
               (includes observation noise)
@@ -905,6 +996,7 @@ class PanelRegression(BaseExperiment):
         ----------
         kind : {"scatter", "histogram", "qq"}, default="scatter"
             Type of residual plot:
+
             - "scatter": Residuals vs fitted values
             - "histogram": Distribution of residuals
             - "qq": Q-Q plot for normality check

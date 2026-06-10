@@ -2,7 +2,7 @@
 
 Examples
 --------
-Run all notebooks:
+Run all notebooks (with mock injection, outputs discarded):
 
     python scripts/run_notebooks/runner.py
 
@@ -17,6 +17,14 @@ Run only sklearn notebooks:
 Exclude PyMC and sklearn notebooks (run others):
 
     python scripts/run_notebooks/runner.py --exclude-pattern _pymc --exclude-pattern _skl
+
+Full execution (no mock, saves outputs in place):
+
+    python scripts/run_notebooks/runner.py --full
+
+Full execution for a single notebook:
+
+    python scripts/run_notebooks/runner.py --full --pattern "sc_skl*.ipynb"
 
 """
 
@@ -96,9 +104,30 @@ def inject_mock_code(cells: list) -> None:
     )
 
 
-def run_notebook(notebook_path: Path) -> None:
-    """Run a notebook with mocked pm.sample."""
-    logging.info(f"Running notebook: {notebook_path.name}")
+def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
+    """Run a notebook, optionally without mock injection and saving outputs in place.
+
+    Parameters
+    ----------
+    notebook_path : Path
+        Path to the notebook to execute.
+    full : bool
+        If True, execute without mock injection and overwrite the notebook
+        with fresh outputs.  If False (default), inject mock code and
+        discard outputs.
+    """
+    mode = "full" if full else "mock"
+    logging.info(f"Running notebook ({mode}): {notebook_path.name}")
+
+    if full:
+        papermill.execute_notebook(
+            input_path=str(notebook_path),
+            output_path=str(notebook_path),
+            kernel_name=KERNEL_NAME,
+            progress_bar=True,
+            cwd=notebook_path.parent,
+        )
+        return
 
     nb = load_notebook_node(str(notebook_path))
     inject_mock_code(nb.cells)
@@ -172,6 +201,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Run notebooks in parallel when possible.",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        default=False,
+        help="Full execution: skip mock injection and overwrite notebooks with fresh outputs. This can take a long time.",
+    )
     return parser.parse_args()
 
 
@@ -188,6 +223,12 @@ if __name__ == "__main__":
     for nb in notebooks:
         logging.info(f"  - {nb.name}")
 
+    if args.full:
+        logging.warning(
+            "Full execution mode: notebooks will be run without mock injection "
+            "and outputs will be saved in place. This can take a long time."
+        )
+
     if args.parallel:
         try:
             from joblib import Parallel, delayed
@@ -196,9 +237,11 @@ if __name__ == "__main__":
                 "Parallel execution requires joblib. Install it or run without --parallel."
             ) from exc
 
-        Parallel(n_jobs=-1)(delayed(run_notebook)(notebook) for notebook in notebooks)
+        Parallel(n_jobs=-1)(
+            delayed(run_notebook)(notebook, full=args.full) for notebook in notebooks
+        )
     else:
         for notebook in notebooks:
-            run_notebook(notebook)
+            run_notebook(notebook, full=args.full)
 
     logging.info("All notebooks completed successfully!")

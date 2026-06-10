@@ -28,6 +28,7 @@ import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import PyMCModel
 
 
@@ -35,23 +36,55 @@ class MaketablesAdapter(Protocol):
     """Protocol for backend-specific maketables extraction."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Return canonical coefficient table for maketables."""
+        """Return canonical coefficient table for maketables.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment.
+        """
         ...
 
     def stat(self, experiment: Any, key: str) -> Any:
-        """Return a single model-level statistic by key."""
+        """Return a single model-level statistic by key.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment.
+        key : str
+            Statistic identifier (see :meth:`default_stat_keys`).
+        """
         ...
 
     def vcov_info(self, experiment: Any) -> dict[str, Any]:
-        """Return variance-covariance metadata dict."""
+        """Return variance-covariance metadata dict.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment.
+        """
         ...
 
     def stat_labels(self, experiment: Any) -> dict[str, str] | None:
-        """Return display labels for statistics."""
+        """Return display labels for statistics.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment.
+        """
         ...
 
     def default_stat_keys(self, experiment: Any) -> list[str] | None:
-        """Return ordered list of default statistic keys."""
+        """Return ordered list of default statistic keys.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment.
+        """
         ...
 
 
@@ -147,13 +180,13 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     Priority:
     1) explicit user override via BaseExperiment.set_maketables_options()
     2) experiment-specific stored value (e.g. staggered_did hdi_prob_)
-    3) default 0.94 to align with CausalPy summary conventions
+    3) project-wide default :data:`causalpy.constants.HDI_PROB`
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        hdi_prob = getattr(experiment, "hdi_prob_", 0.94)
+        hdi_prob = getattr(experiment, "hdi_prob_", HDI_PROB)
     if hdi_prob is None:
-        hdi_prob = 0.94
+        hdi_prob = HDI_PROB
 
     try:
         hdi_prob = float(hdi_prob)
@@ -220,7 +253,13 @@ class PyMCMaketablesAdapter:
     """Adapter for experiments backed by PyMCModel."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Build coefficient table from PyMC posterior draws with HDI intervals."""
+        """Build coefficient table from PyMC posterior draws with HDI intervals.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with a PyMC model.
+        """
         labels = list(getattr(experiment, "labels", []))
         if not labels:
             msg = "Experiment has no coefficient labels for maketables export."
@@ -244,7 +283,15 @@ class PyMCMaketablesAdapter:
         )
 
     def stat(self, experiment: Any, key: str) -> Any:
-        """Return a single Bayesian model-level statistic by key."""
+        """Return a single Bayesian model-level statistic by key.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with a PyMC model.
+        key : str
+            Statistic identifier.
+        """
         stats: dict[str, Any] = {
             "N": _safe_observation_count(experiment),
             "r2": _safe_r2_value(experiment),
@@ -255,15 +302,33 @@ class PyMCMaketablesAdapter:
         return stats.get(key)
 
     def vcov_info(self, experiment: Any) -> dict[str, Any]:
-        """Return Bayesian posterior variance-covariance metadata."""
+        """Return Bayesian posterior variance-covariance metadata.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with a PyMC model.
+        """
         return {"se_type": "Bayesian posterior", "vcov": None}
 
     def stat_labels(self, experiment: Any) -> dict[str, str] | None:
-        """Return display labels for Bayesian model statistics."""
+        """Return display labels for Bayesian model statistics.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with a PyMC model.
+        """
         return {"N": "N", "r2": "Bayesian R2", "se_type": "SE type"}
 
     def default_stat_keys(self, experiment: Any) -> list[str] | None:
-        """Return ordered list of default statistic keys for Bayesian models."""
+        """Return ordered list of default statistic keys for Bayesian models.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with a PyMC model.
+        """
         keys = ["N"]
         if _safe_r2_value(experiment) is not None:
             keys.append("r2")
@@ -274,7 +339,13 @@ class SklearnMaketablesAdapter:
     """Adapter for experiments backed by sklearn RegressorMixin."""
 
     def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Build coefficient table from sklearn model coefficients."""
+        """Build coefficient table from sklearn model coefficients.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with an sklearn model.
+        """
         labels = list(getattr(experiment, "labels", []))
         if not labels:
             msg = "Experiment has no coefficient labels for maketables export."
@@ -293,7 +364,15 @@ class SklearnMaketablesAdapter:
         return _canonical_frame(labels=labels, b=coeffs, se=nans, p=nans)
 
     def stat(self, experiment: Any, key: str) -> Any:
-        """Return a single OLS model-level statistic by key."""
+        """Return a single OLS model-level statistic by key.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with an sklearn model.
+        key : str
+            Statistic identifier.
+        """
         stats: dict[str, Any] = {
             "N": _safe_observation_count(experiment),
             "r2": _safe_r2_value(experiment),
@@ -304,15 +383,33 @@ class SklearnMaketablesAdapter:
         return stats.get(key)
 
     def vcov_info(self, experiment: Any) -> dict[str, Any]:
-        """Return OLS variance-covariance metadata."""
+        """Return OLS variance-covariance metadata.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with an sklearn model.
+        """
         return {"se_type": "Not available", "vcov": None}
 
     def stat_labels(self, experiment: Any) -> dict[str, str] | None:
-        """Return display labels for OLS model statistics."""
+        """Return display labels for OLS model statistics.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with an sklearn model.
+        """
         return {"N": "N", "r2": "R2", "se_type": "SE type"}
 
     def default_stat_keys(self, experiment: Any) -> list[str] | None:
-        """Return ordered list of default statistic keys for OLS models."""
+        """Return ordered list of default statistic keys for OLS models.
+
+        Parameters
+        ----------
+        experiment : Any
+            Fitted CausalPy experiment with an sklearn model.
+        """
         keys = ["N"]
         if _safe_r2_value(experiment) is not None:
             keys.append("r2")
@@ -320,7 +417,13 @@ class SklearnMaketablesAdapter:
 
 
 def get_maketables_adapter(model: Any) -> MaketablesAdapter:
-    """Return the adapter for a model backend."""
+    """Return the adapter for a model backend.
+
+    Parameters
+    ----------
+    model : Any
+        A PyMC or sklearn model instance.
+    """
     if isinstance(model, PyMCModel):
         return PyMCMaketablesAdapter()
     if isinstance(model, RegressorMixin):
