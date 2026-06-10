@@ -2264,6 +2264,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     r"""
     Bayesian Structural Time Series Model.
 
+    .. deprecated:: 1.0.0
+        Use :class:`StateSpaceTimeSeries` instead. This class will be removed
+        in a future release.
+
     This model allows for the inclusion of trend, seasonality (via Fourier series),
     and optional exogenous regressors.
 
@@ -2321,12 +2325,13 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             prior_sample_kwargs=prior_sample_kwargs,
         )
 
-        # Warn that this is experimental
         warnings.warn(
-            "BayesianBasisExpansionTimeSeries is experimental and its API may change in future versions. "
-            "Not recommended for production use.",
+            "BayesianBasisExpansionTimeSeries is deprecated and will be removed "
+            "in a future release. Use StateSpaceTimeSeries instead.",
             FutureWarning,
-            stacklevel=2,
+            # pm.Model's metaclass calls __init__, so level 2 lands on
+            # pymc/model/core.py rather than on the caller.
+            stacklevel=3,
         )
 
         # Store original configuration parameters
@@ -2867,14 +2872,6 @@ class StateSpaceTimeSeries(PyMCModel):
             sample_kwargs=sample_kwargs,
             priors=priors,
             prior_sample_kwargs=prior_sample_kwargs,
-        )
-
-        # Warn that this is experimental
-        warnings.warn(
-            "StateSpaceTimeSeries is experimental and its API may change in future versions. "
-            "Not recommended for production use.",
-            FutureWarning,
-            stacklevel=2,
         )
 
         if seasonality_component is None and seasonal_length < 2:
