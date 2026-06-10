@@ -15,7 +15,6 @@ dependencies:
   - arviz<1.0,>=0.14.0
   - codespell
   - graphviz
-  - interrogate
   - ipython!=8.7.0
   - jinja2
   - make
@@ -28,8 +27,8 @@ dependencies:
   - prek
   - pymc-bart
   - pymc-extras>=0.3.0
-  - pymc>=5.15.1
-  - pytensor>=2.38.1
+  - pymc<6,>=5.15.1
+  - pytensor<3,>=2.38.1
   - scikit-learn>=1
   - scipy
   - seaborn>=0.11.2
