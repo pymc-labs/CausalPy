@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -275,6 +277,79 @@ def test_rope_decision_barely_below_threshold():
 
 
 # ===========================================================================
+# Assurance formula validation (unit — no sampling)
+# ===========================================================================
+#
+# These tests pin the assurance-simulation formula
+# ``true_effect = theta_new + expected_effect`` (the corrected version).
+# The old formula ``true_effect = expected_effect`` ignored the status-quo
+# baseline, which understated the noise floor under the alternative and
+# inflated assurance.  The invariants below would fail under that old
+# formula.
+
+
+def test_assurance_formula_zero_expected_matches_null():
+    """When expected_effect == 0, alt and null decision rates should match.
+
+    Under the corrected formula ``true_effect = theta_new + expected_effect``,
+    expected_effect=0 makes the alternative distribution identical to the
+    null distribution, so TP rate must approximately equal FP rate.
+
+    Under the OLD (buggy) formula ``true_effect = expected_effect``,
+    true_effect would collapse to 0 under the alternative and TP rate
+    would be ~0 regardless of theta_new — which is what the fix corrects.
+    """
+    rng = np.random.default_rng(0)
+    theta_new_samples = rng.normal(loc=0.0, scale=5.0, size=2000)
+    fold_sds = np.array([1.0, 1.0, 1.0])
+
+    check = PlaceboInTime(
+        n_folds=2,
+        expected_effect_prior=np.zeros(2000),
+        rope_half_width=1.0,
+        random_seed=123,
+    )
+    ar = check._compute_assurance(
+        theta_new_samples=theta_new_samples,
+        fold_sds=fold_sds,
+        n_posterior_samples=500,
+    )
+
+    # With expected_effect identically zero the alt and null scenarios
+    # share the same true-effect distribution.
+    assert abs(ar.true_positive_rate - ar.false_positive_rate) < 0.05
+    assert abs(ar.true_negative_rate - ar.false_negative_rate) < 0.05
+
+
+def test_assurance_formula_large_expected_effect_dominates_baseline():
+    """Large expected_effect should push true positives well above false positives.
+
+    This pins the sign and direction of the fix: adding ``expected_effect``
+    on top of ``theta_new`` (rather than replacing it) means that when
+    expected_effect is large and positive the alternative scenario
+    detects the intervention much more often than the null does.
+    """
+    theta_new_samples = np.zeros(1000)  # null baseline tightly around 0
+    fold_sds = np.array([0.5])
+
+    check = PlaceboInTime(
+        n_folds=2,
+        expected_effect_prior=np.full(1000, 10.0),  # large effect
+        rope_half_width=1.0,
+        random_seed=123,
+    )
+    ar = check._compute_assurance(
+        theta_new_samples=theta_new_samples,
+        fold_sds=fold_sds,
+        n_posterior_samples=500,
+    )
+
+    assert ar.true_positive_rate > 0.9
+    assert ar.false_positive_rate < 0.1
+    assert ar.true_positive_rate > ar.false_positive_rate
+
+
+# ===========================================================================
 # Cumulative impact extraction (integration — needs PyMC)
 # ===========================================================================
 
@@ -379,6 +454,65 @@ def test_run_metadata_contains_null_distribution(mock_pymc_sample):
 
     p = result.metadata["p_effect_outside_null"]
     assert 0.0 <= p <= 1.0
+
+
+@pytest.mark.integration
+def test_run_metadata_carries_design_configuration(mock_pymc_sample):
+    """Design knobs (ROPE, threshold, prior) and fold_sds round-trip into metadata."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    prior_samples = np.random.default_rng(0).normal(90, 15, size=200)
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        rope_half_width=25.0,
+        threshold=0.9,
+        expected_effect_prior=prior_samples,
+        random_seed=42,
+    )
+    result = check.run(experiment)
+
+    assert result.metadata["rope_half_width"] == 25.0
+    assert result.metadata["threshold"] == 0.9
+    assert result.metadata["expected_effect_prior"] is prior_samples
+
+    fold_sds = result.metadata["fold_sds"]
+    assert isinstance(fold_sds, np.ndarray)
+    assert fold_sds.shape == (2,)
+    assert np.all(fold_sds > 0)
+    np.testing.assert_array_equal(
+        fold_sds,
+        np.array([fr.fold_sd for fr in result.metadata["fold_results"]]),
+    )
+
+
+@pytest.mark.integration
+def test_run_metadata_carries_defaults_when_unconfigured(mock_pymc_sample):
+    """Configuration metadata is present (None / default) even without ROPE/prior."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    assert result.metadata["rope_half_width"] is None
+    assert result.metadata["threshold"] == 0.95
+    assert result.metadata["expected_effect_prior"] is None
+    assert "fold_sds" in result.metadata
 
 
 @pytest.mark.integration
@@ -670,6 +804,483 @@ def test_no_assurance_without_prior(mock_pymc_sample):
     assert "assurance_result" not in result.metadata
     assert "assurance" not in result.metadata
     assert "Bayesian assurance" not in result.text
+
+
+# ===========================================================================
+# Default check registration
+# ===========================================================================
+
+
+# ===========================================================================
+# Random selection mode — construction tests (unit — no sampling)
+# ===========================================================================
+
+
+def test_selection_method_default():
+    """Default selection method is sequential."""
+    check = PlaceboInTime()
+    assert check.selection_method == "sequential"
+
+
+def test_selection_method_random():
+    """Random selection mode stores parameters."""
+    check = PlaceboInTime(
+        selection_method="random",
+        min_training_pct=0.40,
+        min_gap=2,
+        exclude_periods={"2020-01"},
+        random_seed=99,
+    )
+    assert check.selection_method == "random"
+    assert check.min_training_pct == 0.40
+    assert check.min_gap == 2
+    assert check.exclude_periods == {"2020-01"}
+
+
+def test_invalid_selection_method():
+    """Invalid selection method raises ValueError."""
+    with pytest.raises(ValueError, match="selection_method"):
+        PlaceboInTime(selection_method="invalid")
+
+
+def test_invalid_min_training_pct():
+    """min_training_pct outside (0, 1) raises ValueError."""
+    with pytest.raises(ValueError, match="min_training_pct"):
+        PlaceboInTime(selection_method="random", min_training_pct=0.0)
+    with pytest.raises(ValueError, match="min_training_pct"):
+        PlaceboInTime(selection_method="random", min_training_pct=1.0)
+
+
+def test_invalid_min_gap():
+    """min_gap < 1 raises ValueError."""
+    with pytest.raises(ValueError, match="min_gap"):
+        PlaceboInTime(selection_method="random", min_gap=0)
+
+
+def test_allow_overlap_default_false():
+    """allow_overlap defaults to False (non-overlap enforced)."""
+    check = PlaceboInTime(selection_method="random")
+    assert check.allow_overlap is False
+
+
+def test_allow_overlap_stores_value():
+    """allow_overlap=True is stored on the instance."""
+    check = PlaceboInTime(selection_method="random", allow_overlap=True)
+    assert check.allow_overlap is True
+
+
+def test_repr_random_selection():
+    """repr includes selection_method when not sequential."""
+    check = PlaceboInTime(n_folds=4, selection_method="random")
+    r = repr(check)
+    assert "selection_method='random'" in r
+    assert "n_folds=4" in r
+
+
+def test_repr_sequential_omits_selection_method():
+    """repr omits selection_method when sequential (default)."""
+    check = PlaceboInTime(n_folds=3)
+    assert "selection_method" not in repr(check)
+
+
+def test_repr_hides_default_allow_overlap():
+    """allow_overlap=False (default) is not shown in repr."""
+    check = PlaceboInTime(selection_method="random")
+    assert "allow_overlap" not in repr(check)
+
+
+def test_repr_shows_non_default_allow_overlap():
+    """allow_overlap=True is surfaced in repr."""
+    check = PlaceboInTime(selection_method="random", allow_overlap=True)
+    assert "allow_overlap=True" in repr(check)
+
+
+# ===========================================================================
+# Random fold selection — geometry tests (unit — no sampling)
+# ===========================================================================
+
+
+def test_random_fold_treatment_times_count():
+    """Random selection returns exactly n_folds treatment times."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert len(times) == 3
+    # All must be before treatment_time
+    assert all(t < 150 for t in times)
+    # Sorted
+    assert times == sorted(times)
+
+
+def test_random_fold_treatment_times_reproducible():
+    """Same seed produces same selection."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    kwargs = {
+        "n_folds": 3,
+        "selection_method": "random",
+        "min_training_pct": 0.20,
+        "random_seed": 42,
+    }
+    times1 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    times2 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert times1 == times2
+
+
+def test_random_fold_different_seeds_differ():
+    """Different seeds produce different selections."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    times1 = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+    )._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    times2 = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=99,
+    )._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=20
+    )
+    assert times1 != times2
+
+
+def test_random_fold_respects_min_gap():
+    """Selected folds respect the min_gap constraint."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        min_gap=5,
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=10
+    )
+    # Gaps between consecutive selected times should be >= min_gap
+    # (since they were selected from a candidate list with min_gap spacing)
+    for i in range(len(times) - 1):
+        assert times[i + 1] - times[i] >= 5
+
+
+def test_random_fold_respects_exclude_periods():
+    """Excluded periods are not selected."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    # Exclude all candidates by excluding every string representation
+    exclude = {str(i) for i in range(200)}
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        exclude_periods=exclude,
+        random_seed=42,
+    )
+    with pytest.raises(ValueError, match="eligible candidate"):
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=150, intervention_length=10
+        )
+
+
+def test_random_fold_too_few_candidates_raises():
+    """Raises when there aren't enough eligible candidates."""
+    # Very short pre-period
+    data = pd.DataFrame({"y": np.zeros(10)}, index=np.arange(10))
+    check = PlaceboInTime(
+        n_folds=5,
+        selection_method="random",
+        min_training_pct=0.50,
+        random_seed=42,
+    )
+    with pytest.raises(ValueError, match="eligible candidate"):
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=8, intervention_length=2
+        )
+
+
+def test_random_fold_with_datetime_index():
+    """Random selection works with datetime-indexed data."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="MS")
+    data = pd.DataFrame({"y": np.zeros(100)}, index=dates)
+    treatment = pd.Timestamp("2027-01-01")
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.20,
+        exclude_periods={"2020-06"},
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data,
+        treatment_time=treatment,
+        intervention_length=pd.DateOffset(months=6),
+    )
+    assert len(times) == 3
+    assert all(t < treatment for t in times)
+    # Excluded month should not appear
+    for t in times:
+        assert t.strftime("%Y-%m") != "2020-06"
+
+
+# ===========================================================================
+# Non-overlap constraint (unit — no sampling)
+# ===========================================================================
+#
+# Default behaviour prevents pseudo-intervention windows from overlapping
+# each other; this is the fix for Ben's review points 1 and 2 from the
+# 2026-04-23 round.  The two folds share observations if they overlap,
+# which violates the exchangeability assumption of the hierarchical
+# status-quo model.
+
+
+def test_random_folds_do_not_overlap_by_default():
+    """Default (allow_overlap=False): no two selected windows overlap."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    intervention_length = 20
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        random_seed=42,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=intervention_length
+    )
+    # Sorted times should have gaps >= intervention_length
+    for i in range(len(times) - 1):
+        assert times[i + 1] - times[i] >= intervention_length, (
+            f"Folds at {times[i]} and {times[i + 1]} overlap "
+            f"with intervention_length={intervention_length}"
+        )
+
+
+def test_random_folds_allow_overlap_when_requested():
+    """allow_overlap=True lets folds pack closer than intervention_length.
+
+    We make the non-overlap constraint very tight (large intervention
+    relative to the pool) so that the non-overlap default would
+    drastically reduce the number of feasible arrangements.  With
+    ``allow_overlap=True`` the selection should still succeed and at
+    least one pair should be closer than ``intervention_length``.
+    """
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    intervention_length = 40
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.05,
+        allow_overlap=True,
+        random_seed=0,
+    )
+    times = check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=intervention_length
+    )
+    gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
+    assert min(gaps) < intervention_length, (
+        "allow_overlap=True should permit at least one gap shorter than "
+        f"intervention_length={intervention_length}, got gaps={gaps}"
+    )
+
+
+def test_windows_overlap_helper_numeric():
+    """_windows_overlap detects overlap for numeric indices."""
+    # Non-overlapping: [0, 10) and [10, 20) share no observations
+    assert PlaceboInTime._windows_overlap(0, 10, 10) is False
+    # Overlapping: [0, 10) and [5, 15)
+    assert PlaceboInTime._windows_overlap(0, 5, 10) is True
+    # Order-independent
+    assert PlaceboInTime._windows_overlap(5, 0, 10) is True
+
+
+def test_windows_overlap_helper_datetime():
+    """_windows_overlap detects overlap for datetime indices + DateOffset."""
+    t_a = pd.Timestamp("2020-01-01")
+    t_b = pd.Timestamp("2020-07-01")
+    t_c = pd.Timestamp("2020-04-01")
+    length = pd.DateOffset(months=6)
+    # [2020-01, 2020-07) and [2020-07, 2021-01) are back-to-back: non-overlap
+    assert PlaceboInTime._windows_overlap(t_a, t_b, length) is False
+    # [2020-01, 2020-07) and [2020-04, 2020-10) overlap in April-July
+    assert PlaceboInTime._windows_overlap(t_a, t_c, length) is True
+
+
+# ===========================================================================
+# Bounded-retry greedy selection (unit — no sampling)
+# ===========================================================================
+#
+# Replaces the "retry with a different random_seed" error-message
+# workaround.  With a seed set, the retry loop deterministically
+# explores up to ``MAX_RANDOM_SELECTION_RETRIES`` sub-seeds before
+# raising.
+
+
+def test_greedy_retry_preserves_reproducibility():
+    """Same seed still produces identical results after retry refactor."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    kwargs = {
+        "n_folds": 3,
+        "selection_method": "random",
+        "min_training_pct": 0.10,
+        "min_gap": 5,
+        "random_seed": 7,
+    }
+    t1 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=10
+    )
+    t2 = PlaceboInTime(**kwargs)._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=10
+    )
+    assert t1 == t2
+
+
+def test_greedy_retry_raises_when_infeasible():
+    """When no attempt can satisfy constraints the final error mentions retries."""
+    # 3 folds, intervention_length=50 so non-overlap needs 100 units span,
+    # but eligible window is only ~50 units (pos 20..99 with pseudo_end<=150).
+    # No arrangement can fit 3 non-overlapping windows of length 50 there.
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        random_seed=42,
+    )
+    with pytest.raises(ValueError, match="greedy attempts"):
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=150, intervention_length=50
+        )
+
+
+def test_greedy_retry_error_suggests_relaxing_constraints():
+    """The failure message names the settings the user can relax."""
+    n = 200
+    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        random_seed=42,
+    )
+    try:
+        check._compute_random_fold_treatment_times(
+            data, treatment_time=150, intervention_length=50
+        )
+    except ValueError as err:
+        msg = str(err)
+        assert "allow_overlap" in msg
+        assert "min_gap" in msg
+        assert "n_folds" in msg
+    else:  # pragma: no cover - we expect the error
+        raise AssertionError("Expected infeasible selection to raise.")
+
+
+# ===========================================================================
+# expected_effect_prior cycling warning (unit — no sampling)
+# ===========================================================================
+
+
+def test_draw_expected_effect_samples_warns_when_shorter_than_n():
+    """Warn when numpy prior has fewer samples than requested replications."""
+    check = PlaceboInTime(
+        expected_effect_prior=np.array([1.0, 2.0, 3.0]),
+        rope_half_width=0.5,
+    )
+    with pytest.warns(UserWarning, match="cycled through"):
+        out = check._draw_expected_effect_samples(n=100)
+    # Behaviour preserved: the raw array is returned and cycling happens
+    # at the consumer in ``_compute_assurance``.
+    np.testing.assert_array_equal(out, np.array([1.0, 2.0, 3.0]))
+
+
+def test_draw_expected_effect_samples_no_warning_when_long_enough():
+    """No warning when numpy prior already has >= n samples."""
+    prior = np.ones(200)
+    check = PlaceboInTime(
+        expected_effect_prior=prior,
+        rope_half_width=0.5,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = check._draw_expected_effect_samples(n=50)
+    np.testing.assert_array_equal(out, prior)
+
+
+def test_draw_expected_effect_samples_rvs_no_warning():
+    """Objects with .rvs(n) receive n directly and never warn."""
+
+    class _Dist:
+        def __init__(self):
+            self.last_n: int | None = None
+
+        def rvs(self, n):
+            self.last_n = n
+            return np.linspace(0.0, 1.0, n)
+
+    dist = _Dist()
+    check = PlaceboInTime(
+        expected_effect_prior=dist,
+        rope_half_width=0.5,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = check._draw_expected_effect_samples(n=13)
+    assert dist.last_n == 13
+    assert len(out) == 13
+
+
+# ===========================================================================
+# Random selection — full run (integration — needs PyMC)
+# ===========================================================================
+
+
+@pytest.mark.integration
+def test_run_random_selection(mock_pymc_sample):
+    """Full run with random selection mode."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        selection_method="random",
+        min_training_pct=0.20,
+        random_seed=42,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    assert isinstance(result, CheckResult)
+    assert result.check_name == "PlaceboInTime"
+    assert result.passed is not None
+    assert len(result.metadata["fold_results"]) == 2
+    for fr in result.metadata["fold_results"]:
+        assert fr.pseudo_treatment_time < experiment.treatment_time
 
 
 # ===========================================================================

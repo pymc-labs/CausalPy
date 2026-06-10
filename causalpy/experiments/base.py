@@ -18,6 +18,8 @@ Base class for quasi experimental designs.
 from __future__ import annotations
 
 import contextlib
+import copy
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
@@ -25,7 +27,7 @@ from typing import Any, Literal
 import arviz as az
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.base import RegressorMixin
+from sklearn.base import RegressorMixin, clone
 
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
@@ -98,6 +100,12 @@ class BaseExperiment(ABC):
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
     Bayesian default. To use an OLS/sklearn model, pass one explicitly.
 
+    Parameters
+    ----------
+    model : PyMCModel, RegressorMixin, or None, default None
+        Model instance to use. If ``None`` and ``_default_model_class`` is set,
+        an instance of that default class is constructed.
+
     Notes
     -----
     Optional ``maketables`` integration is exposed through ``__maketables_*``
@@ -118,7 +126,27 @@ class BaseExperiment(ABC):
         # Ensure we've made any provided Scikit Learn model (as identified as being type
         # RegressorMixin) compatible with CausalPy by appending our custom methods.
         if isinstance(model, RegressorMixin):
+            # Clone to avoid mutating the caller's estimator instance (#664).
+            try:
+                model = clone(model)
+            except TypeError:
+                # Models without get_params() can't be sklearn-cloned;
+                # fall back to a deep copy.
+                model = copy.deepcopy(model)
             model = create_causalpy_compatible_class(model)
+            # Patsy includes the intercept as a design-matrix column, so
+            # sklearn models must not add their own intercept.
+            if getattr(model, "fit_intercept", False):
+                warnings.warn(
+                    f"{type(model).__name__} had fit_intercept=True, but CausalPy "
+                    "requires fit_intercept=False because the intercept is already "
+                    "included in the design matrix by patsy. A cloned copy of the "
+                    "model with fit_intercept=False will be used; the original "
+                    "instance is unchanged.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                model.fit_intercept = False
 
         if model is None and self._default_model_class is not None:
             model = self._default_model_class()
@@ -136,6 +164,24 @@ class BaseExperiment(ABC):
             raise ValueError("OLS models not supported.")
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
+        """Fit the underlying model.
+
+        Subclasses must override this hook to delegate to their concrete
+        fitting routine; the base class only provides the abstract entry
+        point.
+
+        Parameters
+        ----------
+        *args : Any
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs : Any
+            Keyword arguments forwarded to the subclass implementation.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, when called on the base class.
+        """
         raise NotImplementedError("fit method not implemented")
 
     @property
@@ -215,47 +261,56 @@ class BaseExperiment(ABC):
         """Optional maketables plugin hook for default statistic rows."""
         return get_maketables_adapter(self.model).default_stat_keys(self)
 
-    def plot(
+    def _render_plot(
         self,
-        *args: Any,
-        show: bool = True,
-        legend_kwargs: dict[str, Any] | None = None,
-        **kwargs: Any,
+        *,
+        show: bool,
+        legend_kwargs: dict[str, Any] | None,
+        **draw_kwargs: Any,
     ) -> tuple:
-        """Plot the model.
+        """Template Method shared by every subclass's public ``plot``.
 
-        Internally, this function dispatches to either `_bayesian_plot` or `_ols_plot`
-        depending on the model type.
+        Each :class:`BaseExperiment` subclass exposes its own explicit,
+        kwarg-only public ``plot()`` (issue
+        `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_) and
+        forwards the call here. This helper:
+
+        1. Applies the ``arviz-darkgrid`` style for the duration of the
+           draw call.
+        2. Dispatches to :meth:`_bayesian_plot` or :meth:`_ols_plot` based
+           on the model type.
+        3. Mutates the resulting legend(s) in place when *legend_kwargs*
+           is supplied, preserving custom handles built by the subclass.
+        4. Optionally calls :func:`matplotlib.pyplot.show`.
+
+        ``BaseExperiment`` deliberately does **not** define a public
+        ``plot()`` method: that would inherit a generic
+        ``*args, **kwargs`` signature into every subclass and re-introduce
+        the discoverability problem described in #886. Subclasses are
+        instead required to declare their own ``plot()`` with an explicit
+        keyword-only signature and call ``self._render_plot(...)``.
 
         Parameters
         ----------
-        show : bool, optional
-            Whether to automatically display the plot. Defaults to True.
-            Set to False if you want to modify the figure before displaying it.
+        show : bool
+            Whether to call :func:`matplotlib.pyplot.show` after drawing.
         legend_kwargs : dict, optional
-            Keyword arguments to adjust legend placement and styling.  The
-            existing legend is modified **in place** so that custom handles
-            (e.g. ``(Line2D, PolyCollection)`` tuples) are fully preserved.
-
+            Keyword arguments to adjust legend placement and styling. The
+            existing legend is modified **in place** so that custom
+            handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
+            :func:`~causalpy.plot_utils.plot_xY`) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
-            ``frameon``, ``title``.  ``bbox_transform`` is accepted
+            ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
-
-        Examples
-        --------
-        Move the legend outside the plot area to avoid overlap:
-
-        >>> fig, ax = result.plot(  # doctest: +SKIP
-        ...     show=False,
-        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
-        ... )
+        **draw_kwargs
+            Subclass-specific drawing parameters forwarded verbatim to
+            ``_bayesian_plot`` / ``_ols_plot``.
         """
-        # Apply arviz-darkgrid style only during plotting, then revert
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if isinstance(self.model, PyMCModel):
-                fig, ax = self._bayesian_plot(*args, **kwargs)
+                fig, ax = self._bayesian_plot(**draw_kwargs)
             elif isinstance(self.model, RegressorMixin):
-                fig, ax = self._ols_plot(*args, **kwargs)
+                fig, ax = self._ols_plot(**draw_kwargs)
             else:
                 raise ValueError("Unsupported model type")
 
@@ -299,6 +354,13 @@ class BaseExperiment(ABC):
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
         depending on the model type.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the model-specific implementation.
+        **kwargs
+            Keyword arguments forwarded to the model-specific implementation.
         """
         if isinstance(self.model, PyMCModel):
             return self.get_plot_data_bayesian(*args, **kwargs)
@@ -308,11 +370,27 @@ class BaseExperiment(ABC):
             raise ValueError("Unsupported model type")
 
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for OLS models. Override in subclasses that support OLS."""
+        """Return plot data for OLS models. Override in subclasses that support OLS.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
@@ -337,16 +415,25 @@ class BaseExperiment(ABC):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis (ITS/SC only, ignored for DiD/RD):
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS):
+
             - "increase": P(effect > 0)
             - "decrease": P(effect < 0)
             - "two-sided": Two-sided p-value, report 1-p as "probability of effect"
         alpha : float, default=0.05
-            Significance level for HDI/CI intervals (1-alpha confidence level)
+            Significance level for HDI/CI intervals (1-alpha confidence level).
+            For Bayesian models the effective HDI probability is
+            ``hdi_prob = 1 - alpha``. Note that this is independent of the
+            project-wide :data:`~causalpy.constants.HDI_PROB` constant
+            (currently 0.94) used by :meth:`plot` and
+            :meth:`get_plot_data_bayesian`, so the same experiment may report
+            a 95% HDI in :meth:`effect_summary` and a 94% HDI in :meth:`plot`
+            with default settings.
         cumulative : bool, default=True
             Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
         relative : bool, default=True
@@ -365,6 +452,9 @@ class BaseExperiment(ABC):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; subclasses may consume
+            additional keyword arguments.
 
         Returns
         -------

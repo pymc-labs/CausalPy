@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""CausalPy experiment module"""
+"""CausalPy experiment module."""
 
 from .diff_in_diff import DifferenceInDifferences
 from .instrumental_variable import InstrumentalVariable
@@ -24,6 +24,7 @@ from .regression_discontinuity import RegressionDiscontinuity
 from .regression_kink import RegressionKink
 from .staggered_did import StaggeredDifferenceInDifferences
 from .synthetic_control import SyntheticControl
+from .synthetic_difference_in_differences import SyntheticDifferenceInDifferences
 
 __all__ = [
     "DifferenceInDifferences",
@@ -37,4 +38,5 @@ __all__ = [
     "RegressionKink",
     "StaggeredDifferenceInDifferences",
     "SyntheticControl",
+    "SyntheticDifferenceInDifferences",
 ]
