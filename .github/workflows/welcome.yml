@@ -1,14 +1,18 @@
 name: Welcome New Contributors
 
 on:
+  # zizmor: ignore[dangerous-triggers]
+  # pull_request_target is required so this workflow can comment and label on
+  # PRs from forks (the read-only pull_request token cannot write). Safe here:
+  # we never check out or execute PR contents, only call SHA-pinned actions,
+  # and the only user-controlled value (github.actor) is hoisted to env and
+  # used in a Markdown body, never in a shell or expression context.
   pull_request_target:
     types: [opened]
   issues:
     types: [opened]
 
-permissions:
-  issues: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   welcome:
@@ -18,12 +22,17 @@ jobs:
       !contains(github.actor, '[bot]') &&
       !contains(github.actor, 'dependabot') &&
       !contains(github.actor, 'renovate')
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      ACTOR: ${{ github.actor }}
     steps:
       - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           issue_message: |
-            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
 
             Thank you for opening your first issue! We appreciate you taking the time to post this.
 
@@ -35,7 +44,7 @@ jobs:
             A maintainer will take a look soon. Thanks for being part of the CausalPy community! 🎉
 
           pr_message: |
-            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
 
             Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
 
