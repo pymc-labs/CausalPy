@@ -169,9 +169,11 @@ Sensitivity checks are **diagnostics**, not definitive verdicts. A passing check
 For the pipeline mechanics, see {doc}`pipeline_workflow`. For HTML reporting of check results, see {doc}`report_demo`. More method-specific sensitivity walkthroughs will be added over time; where they already exist, they are linked above.
 
 :::{seealso}
+
 - {doc}`pipeline_workflow` --- end-to-end pipeline tutorial
 - {doc}`report_demo` --- HTML report generation
 - {doc}`staggered_did_pymc` --- staggered DiD example with `PreTreatmentPlaceboCheck`
 - {doc}`rkink_pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
+
 :::

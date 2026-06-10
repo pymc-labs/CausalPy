@@ -79,6 +79,7 @@ Use this structure:
 
 ```markdown
 ## Findings
+
 - [severity] `path`: issue, why it matters, and what should change.
 
 ## Merge Readiness
