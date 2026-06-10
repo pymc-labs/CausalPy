@@ -1075,6 +1075,17 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
     def build_model(self, X, y, coords: dict[str, Any] | None) -> None:
         """
         Build the PyMC model with both unit-weight and time-weight modules.
+
+        Parameters
+        ----------
+        X : dict
+            Mapping with ``"unit"`` and ``"time"`` design matrices for the
+            unit-weight and time-weight modules respectively.
+        y : dict
+            Mapping with ``"unit"`` and ``"time"`` outcome arrays for the
+            unit-weight and time-weight modules respectively.
+        coords : dict or None
+            Coordinate names for the model's named dimensions.
         """
         with self:
             self.add_coords(coords)
@@ -1727,6 +1738,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     sample_kwargs : dict, optional
         A dictionary of kwargs that get unpacked and passed to the
         :func:`pymc.sample` function. Defaults to an empty dictionary.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case default priors are used.
     """  # noqa: W605
 
     def __init__(
@@ -2221,6 +2235,9 @@ class StateSpaceTimeSeries(PyMCModel):
         Kwargs passed to `pm.sample`.
     mode : str, optional
         Pytensor compile mode passed to `build_statespace_graph`. Defaults to None.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case default priors are used.
     """
 
     def __init__(

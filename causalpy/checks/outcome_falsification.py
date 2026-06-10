@@ -142,6 +142,11 @@ class OutcomeFalsification:
     def validate(self, experiment: BaseExperiment) -> None:
         """Verify the experiment is compatible with OutcomeFalsification.
 
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+
         Raises
         ------
         TypeError
@@ -253,6 +258,13 @@ class OutcomeFalsification:
         This is an informational check (``passed=None``).  The
         researcher interprets whether the pattern of effect sizes
         across outcomes supports their causal story.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted experiment to check.
+        context : PipelineContext
+            Pipeline context providing ``experiment_config`` for re-fits.
 
         Returns
         -------
