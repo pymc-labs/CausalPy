@@ -823,6 +823,40 @@ class TestStateSpaceTimeSeriesCoverage:
         assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
         assert len(incl) == 2
 
+    def test_vs_horseshoe_structure(self, sample_data):
+        """Horseshoe on covariates: shrinkage factor table is well formed.
+
+        Structure-only by design: the suite mocks pm.sample session-wide.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.randn(n, 2),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="horseshoe",
+        )
+        model.fit(X=X, y=y_da)
+
+        assert "beta_exog" in model.idata.posterior
+        shrink = model.get_shrinkage_factors()
+        assert isinstance(shrink, pd.DataFrame)
+        assert len(shrink) == 2
+
+        # Inclusion probabilities are a spike-and-slab concept
+        with pytest.raises(ValueError, match="spike_and_slab"):
+            model.get_inclusion_probabilities()
+
     def test_vs_clone_preserves_config(self):
         """_clone carries the variable selection configuration."""
         model = cp.pymc_models.StateSpaceTimeSeries(
