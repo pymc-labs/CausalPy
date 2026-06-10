@@ -2861,8 +2861,10 @@ class StateSpaceTimeSeries(PyMCModel):
         ----------
         X : xr.DataArray, optional
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
-            coordinates on obs_ind for out-of-sample predictions. Not required for
-            in-sample predictions.
+            coordinates on obs_ind for out-of-sample predictions, and must
+            contain the covariate columns used at fit time when the model was
+            fit with exogenous regressors. Not required for in-sample
+            predictions.
         coords : dict, optional
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
