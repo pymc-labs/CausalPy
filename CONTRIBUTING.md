@@ -80,6 +80,8 @@ Please verify that your issue is not being currently addressed by other issues o
 
 PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
 
+This file is aimed at human contributors. AI agents working on code should follow [AGENTS.md](./AGENTS.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) instead — not load this guide into context unless the task is about contributor workflow or onboarding.
+
 ## Contributing code via pull requests
 
 While issue reporting is valuable, we strongly encourage users who are inclined to do so to submit patches for new or existing issues via pull requests. This is particularly the case for simple fixes, such as typos or tweaks to documentation, which do not require a heavy investment of time and attention.
@@ -208,7 +210,17 @@ We recommend that your contribution complies with the following guidelines befor
     make test
     ```
 
+- For pull requests that change Python source or tests, also run the local patch coverage gate before pushing:
+
+    ```bash
+    make test-patch-cov
+    ```
+
+    This runs the test suite with coverage, writes `coverage.xml`, and uses `diff-cover` to fail when changed lines fall below the local patch threshold. The compare branch defaults to `upstream/main` when that tracking branch exists and falls back to `origin/main` otherwise. If your branch targets a different base, set `DIFF_COVER_COMPARE_BRANCH`, for example `DIFF_COVER_COMPARE_BRANCH=upstream/release make test-patch-cov`.
+
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
+
+- If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
 
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.
 
@@ -254,6 +266,10 @@ make html
  📌 Note: The previous docs/Makefile has been removed. Please use only the root-level Makefile for documentation commands
 
 ## Overview of code structure
+
+For a prose overview of CausalPy's design — the layered architecture, the `BaseExperiment` contract, the two-backend (PyMC / scikit-learn) model system, the pipeline and checks systems, the formula interface, and the reporting layer — see [ARCHITECTURE.md](./ARCHITECTURE.md). It is the fastest way to understand where things live and how the pieces fit together.
+
+The auto-generated UML diagrams below complement that overview:
 
 Classes
 ![](docs/source/_static/classes.png)
