@@ -128,6 +128,7 @@ gh api graphql -f query='query {
 Do **not** apply fallback automatically.
 
 When native sub-issues are unavailable, first inform the user:
+
 - what capability check failed (missing `parent`/`subIssues` fields or no `addSubIssue` mutation)
 - that native hierarchy cannot be created in this repo/account context
 - that a markdown tracking-issue fallback is available
@@ -137,8 +138,10 @@ Then explicitly ask whether they want to proceed with fallback. Only continue af
 Use a tracking issue body with markdown task links:
 
 ```md
+
 - [ ] #123 Child issue one
 - [ ] #124 Child issue two
+
 ```
 
 This renders correctly on GitHub and preserves parent-child tracking even without native hierarchy.

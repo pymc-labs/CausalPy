@@ -5,40 +5,52 @@ Use this file as the canonical routing algorithm for choosing a CausalPy experim
 ## Routing Algorithm
 
 ```text
+
 1. Check required intake.
+
    If estimand, assignment mechanism, data topology, and control type are not known, ask for the single missing fact that most changes the route.
 
 2. Check for unsupported goals before force-fitting.
+
    If the user needs matching, mediation, survival models, causal forests/CATE, fuzzy RD, non-absorbing staggered treatment, augmented synthetic control, matrix completion, alternative staggered DiD estimators, or continuous/multi-arm treatment outside IV or kink settings, return the Not implemented in CausalPy output.
 
 3. If assignment is a known intervention time, route by data topology.
+
    If data is one outcome series with no donor units, compare InterruptedTimeSeries and PiecewiseITS.
    If data is one treated outcome series plus one or more comparison/control series used as formula predictors, route to InterruptedTimeSeries as Comparative Interrupted Time Series (CITS), then compare against SyntheticControl if the user wants constrained donor weighting.
    If data is a wide panel where columns are units and at least one untreated donor unit is available, compare SyntheticControl and SyntheticDifferenceInDifferences.
    If data is a long panel with treated and control groups, compare DifferenceInDifferences, StaggeredDifferenceInDifferences, and PanelRegression.
 
 4. If assignment is a common treated/control pre/post design, route to DifferenceInDifferences.
+
    Use this when treated and control groups share one intervention timing and the estimand is the group-by-post interaction. If adoption timing differs by unit, switch to StaggeredDifferenceInDifferences. If there is only one baseline and one post outcome per unit, compare PrePostNEGD.
 
 5. If assignment is staggered adoption, route to StaggeredDifferenceInDifferences only when treatment is absorbing.
+
    Use this for cohort or event-time ATT paths with unit-time panel data, no anticipation, and never-treated or not-yet-treated comparison information. Confirm each calendar period in the estimand has at least one untreated unit; otherwise return Not identifiable yet. If treatment can turn off or repeat, return Not implemented in CausalPy.
 
 6. If assignment is a cutoff or kink in a running variable, route by estimand.
+
    Use RegressionDiscontinuity for a sharp level jump at a cutoff. Use RegressionKink for a slope or treatment-intensity change at a kink point. If treatment probability changes but treatment is not sharp at the cutoff, return Not implemented in CausalPy unless the problem can be reframed as a general InstrumentalVariable analysis with clear caveats.
 
 7. If assignment depends on a credible instrument, route to InstrumentalVariable.
+
    Require a relevance story, exclusion restriction, and outcome/treatment/instrument data. If the user mainly has measured confounders rather than an instrument, compare InversePropensityWeighting and PanelRegression instead.
 
 8. If treatment is observed and confounded, route by treatment type and adjustment story.
+
    Use InversePropensityWeighting only for binary treatment with measured confounders and plausible overlap. Use PanelRegression only when the analysis target is fixed-effects coefficient estimation and the user understands the result is not automatically a causal design. If confounding is unmeasured and there is no valid instrument, return Not identifiable yet or Not implemented in CausalPy rather than forcing IPW.
 
 9. If data contains pre and post outcomes but not a repeated time panel, compare PrePostNEGD and DifferenceInDifferences.
+
    Use PrePostNEGD for baseline-adjusted nonequivalent group designs with one pretest and one posttest outcome. Use DifferenceInDifferences only when there are repeated observations over time that support a pre/post group trend comparison.
 
 10. Apply capability gates before finalizing.
+
     If the user requires OLS/sklearn, avoid Bayesian-only methods. If the user requires `effect_summary()` or a unified `plot()`, check the method capability matrix before selecting IV, IPW, or PanelRegression.
 
 11. Return one output contract.
+
     Return Matched, Ambiguous, Not identifiable yet, or Not implemented in CausalPy. Do not write analysis code as part of this skill unless the route is Matched and the user explicitly asks to proceed.
 ```
 

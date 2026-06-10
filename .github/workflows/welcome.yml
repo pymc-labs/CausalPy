@@ -17,6 +17,11 @@ permissions: {}
 jobs:
   welcome:
     runs-on: ubuntu-latest
+    # Skip automated accounts (pre-commit-ci, dependabot, etc.) — see contributors.yml BOT_PATTERN.
+    if: >-
+      !contains(github.actor, '[bot]') &&
+      !contains(github.actor, 'dependabot') &&
+      !contains(github.actor, 'renovate')
     permissions:
       issues: write
       pull-requests: write
