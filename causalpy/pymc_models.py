@@ -3078,6 +3078,11 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         Score the Bayesian R^2 given inputs X and outputs y.
 
+        In-sample predictions come from the Kalman smoother, which conditions
+        on the observed y, so this R^2 reads higher than for models that
+        predict from covariates alone. Compare scores only within
+        state-space models.
+
         Parameters
         ----------
         X : xr.DataArray, optional

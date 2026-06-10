@@ -164,6 +164,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
+:::{grid-item-card} Bayesian structural time series with state space models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/interrupted-time-series-bsts.png
+:link: interrupted-time-series-bsts
+:link-type: doc
+:::
+
 :::{grid-item-card} Interrupted Time Series for fixed-period interventions
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-post-intervention-analysis.png
@@ -441,6 +448,7 @@ staggered-difference-in-differences-pymc.ipynb
 
 interrupted-time-series-sklearn.ipynb
 interrupted-time-series-pymc.ipynb
+interrupted-time-series-bsts.ipynb
 interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
