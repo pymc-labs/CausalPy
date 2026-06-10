@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Panel Regression with Fixed Effects
-"""
+"""Panel Regression with Fixed Effects."""
 
 from typing import Any, Literal
 
@@ -68,6 +66,8 @@ class PanelRegression(BaseExperiment):
           but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -463,6 +463,29 @@ class PanelRegression(BaseExperiment):
             so the standard ITS/SC-style effect summary does not directly
             apply.  Use :meth:`summary` for coefficient-level inference.
 
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (placeholder; not consumed).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            Treated unit selector for multi-unit experiments.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+
         Raises
         ------
         NotImplementedError
@@ -599,6 +622,12 @@ class PanelRegression(BaseExperiment):
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for Bayesian model.
 
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
         Returns
         -------
         pd.DataFrame
@@ -630,6 +659,12 @@ class PanelRegression(BaseExperiment):
 
     def get_plot_data_ols(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for OLS model.
+
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

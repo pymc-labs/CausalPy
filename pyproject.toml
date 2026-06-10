@@ -68,7 +68,6 @@ dependencies = [
 dev = [
     "prek",
     "twine",
-    "interrogate",
     "codespell",
     "nbformat",
     "nbconvert",
@@ -96,7 +95,7 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-lint = ["interrogate", "prek", "ruff", "mypy"]
+lint = ["prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill"]
 
 [tool.pyproject2conda]
@@ -124,27 +123,6 @@ markers = [
     "slow: mark test as slow.",
 ]
 
-[tool.interrogate]
-ignore-init-method = true
-ignore-init-module = true
-ignore-magic = false
-ignore-semiprivate = false
-ignore-private = false
-ignore-property-decorators = false
-ignore-module = false
-ignore-nested-functions = false
-ignore-nested-classes = true
-ignore-setters = false
-fail-under = 85
-exclude = ["setup.py", "docs", "build", "dist", ".marimo", ".scratch"]
-ignore-regex = ["^get$", "^mock_.*", ".*BaseClass.*"]
-# possible values: 0 (minimal output), 1 (-v), 2 (-vv)
-verbose = 1
-quiet = false
-whitelist-regex = []
-color = true
-omit-covered-files = false
-
 [tool.ruff.format]
 docstring-code-format = true
 
@@ -168,20 +146,25 @@ extend-select = [
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
-# Numpydoc validation, intentionally narrow.
-# Used by the ``numpydoc-validation`` pre-commit hook to enforce that every
-# public ``plot()`` method on a :class:`BaseExperiment` subclass keeps its
-# numpydoc-style ``Parameters`` block in sync with the function signature
-# (issue #886). The exclude regex is a negative lookahead that skips every
-# node whose dotted name does *not* end in ``.plot``. The base class
-# deliberately offers no public ``plot()`` (the shared dispatcher lives in
-# the protected helper ``_render_plot``), so no carve-out is required.
+# Numpydoc validation. Originally introduced under #886 as a narrow check on
+# public ``.plot`` overrides, expanded under #898 to enforce a curated set of
+# numpydoc rules across the whole ``causalpy`` package. The ``exclude`` regex
+# matches any dotted node whose path contains a private (underscore-prefixed)
+# component — private helpers, dunders, and members of private modules are
+# considered implementation detail and not subject to docstring validation.
 [tool.numpydoc_validation]
 checks = [
     "PR01",  # Parameters not documented
     "PR02",  # Unknown parameters
+    "PR04",  # Parameter has no type
+    "PR07",  # Parameter has no description
+    "PR10",  # Parameter requires a space before the colon
+    "RT03",  # Return value has no description
+    "SS03",  # Summary does not end with a period
+    "GL07",  # Sections are in the wrong order
+    "GL08",  # Object does not have a docstring
 ]
-exclude = ['^(?!.*\.plot$).*$']
+exclude = ['\._']
 
 [tool.coverage.run]
 source = ["causalpy"]

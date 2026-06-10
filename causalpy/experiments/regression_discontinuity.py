@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Regression discontinuity design
-"""
+"""Regression discontinuity design."""
 
 import warnings  # noqa: I001
 from typing import Any, Literal
@@ -47,28 +45,33 @@ class RegressionDiscontinuity(BaseExperiment):
     """
     A class to analyse sharp regression discontinuity experiments.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param treatment_threshold:
-        A scalar threshold value at which the treatment is applied
-    :param model:
-        A PyMC or sklearn model. Defaults to LinearRegression.
-    :param running_variable_name:
-        The name of the predictor variable that the treatment threshold is based upon
-    :param epsilon:
-        A small scalar value which determines how far above and below the treatment
-        threshold to evaluate the causal impact.
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the discontinuity) is not used to fit
-        the model.
-    :param donut_hole:
-        Observations within this distance from the treatment threshold are excluded from
-        model fitting. Used as a robustness check when observations closest to the
-        threshold may be problematic (e.g., due to manipulation or heaping). Defaults
-        to 0.0 (no exclusion). Must be non-negative and less than bandwidth if bandwidth
-        is finite.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    treatment_threshold : float
+        A scalar threshold value at which the treatment is applied.
+    model : PyMCModel, RegressorMixin, or None, default None
+        A PyMC or sklearn model. Defaults to :class:`LinearRegression`.
+    running_variable_name : str, default "x"
+        The name of the predictor variable that the treatment threshold is
+        based upon.
+    epsilon : float, default 0.001
+        A small scalar value which determines how far above and below the
+        treatment threshold to evaluate the causal impact.
+    bandwidth : float, default np.inf
+        Data outside of the bandwidth (relative to the discontinuity) is not
+        used to fit the model.
+    donut_hole : float, default 0.0
+        Observations within this distance from the treatment threshold are
+        excluded from model fitting. Used as a robustness check when
+        observations closest to the threshold may be problematic (e.g., due
+        to manipulation or heaping). Must be non-negative and less than
+        ``bandwidth`` if ``bandwidth`` is finite.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Example
     --------
@@ -241,7 +244,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # ******************************************************************************
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if "treated" not in self.formula:
             raise FormulaException(
                 "A predictor called `treated` should be in the formula"
@@ -279,10 +282,13 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def summary(self, round_to: int | None = None) -> None:
         """
-        Print summary of main results and model coefficients
+        Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print("Regression Discontinuity experiment")
         print(f"Formula: {self.formula}")
@@ -547,6 +553,9 @@ class RegressionDiscontinuity(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

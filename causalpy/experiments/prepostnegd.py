@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Pretest/posttest nonequivalent group design
-"""
+"""Pretest/posttest nonequivalent group design."""
 
 from typing import Any, Literal
 
@@ -40,19 +38,23 @@ from .base import BaseExperiment
 
 class PrePostNEGD(BaseExperiment):
     """
-    A class to analyse data from pretest/posttest designs
+    A class to analyse data from pretest/posttest designs.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param group_variable_name:
-        Name of the column in data for the group variable, should be either
-        binary or boolean
-    :param pretreatment_variable_name:
-        Name of the column in data for the pretreatment variable
-    :param model:
-        A PyMC model. Defaults to LinearRegression.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    group_variable_name : str
+        Name of the column in ``data`` for the group variable; should be
+        either binary or boolean.
+    pretreatment_variable_name : str
+        Name of the column in ``data`` for the pretreatment variable.
+    model : PyMCModel, optional
+        A PyMC model. Defaults to :class:`LinearRegression`.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Example
     --------
@@ -189,7 +191,7 @@ class PrePostNEGD(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""
@@ -226,8 +228,11 @@ class PrePostNEGD(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -385,6 +390,9 @@ class PrePostNEGD(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

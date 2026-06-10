@@ -11,6 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+"""CausalPy: causal inference for quasi-experiments in Python."""
 
 import causalpy.checks as checks  # noqa: E402
 import causalpy.pymc_models as pymc_models

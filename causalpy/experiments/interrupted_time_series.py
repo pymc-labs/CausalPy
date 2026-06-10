@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Interrupted Time Series Analysis
-"""
+"""Interrupted Time Series Analysis."""
 
 from typing import Any, Literal
 
@@ -69,6 +67,25 @@ class InterruptedTimeSeries(BaseExperiment):
     **kwargs : dict
         Additional keyword arguments passed to the model.
 
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
+
+    The three-period design is useful for analyzing temporary interventions such as:
+
+    - Marketing campaigns with defined start and end dates
+    - Policy trials or pilot programs
+    - Clinical treatments with limited duration
+    - Seasonal interventions
+
+    Use ``effect_summary(period="intervention")`` to analyze effects during the
+    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
+    after the intervention ends.
+
     Examples
     --------
     **Two-period design (permanent intervention):**
@@ -105,25 +122,6 @@ class InterruptedTimeSeries(BaseExperiment):
     >>> # Get period-specific effect summaries
     >>> intervention_summary = result.effect_summary(period="intervention")
     >>> post_summary = result.effect_summary(period="post")
-
-    Notes
-    -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
-
-    The three-period design is useful for analyzing temporary interventions such as:
-
-    - Marketing campaigns with defined start and end dates
-    - Policy trials or pilot programs
-    - Clinical treatments with limited duration
-    - Seasonal interventions
-
-    Use ``effect_summary(period="intervention")`` to analyze effects during the
-    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
-    after the intervention ends.
     """
 
     supports_ols = True
@@ -262,7 +260,17 @@ class InterruptedTimeSeries(BaseExperiment):
         treatment_time: int | float | pd.Timestamp,
         treatment_end_time: int | float | pd.Timestamp | None = None,
     ) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The experiment data.
+        treatment_time : int, float, or pd.Timestamp
+            Start of the treatment period.
+        treatment_end_time : int, float, pd.Timestamp, or None, default None
+            Optional end of the treatment period for three-period designs.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -591,8 +599,11 @@ class InterruptedTimeSeries(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -1034,8 +1045,11 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         Recover the data of the experiment along with the prediction and causal impact information.
 
-        :param hdi_prob:
-            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
+        Parameters
+        ----------
+        hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
+            Probability mass of the highest density interval. Defaults to the
+            project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         if isinstance(self.model, PyMCModel):
             hdi_pct = int(round(hdi_prob * 100))
@@ -1390,6 +1404,9 @@ class InterruptedTimeSeries(BaseExperiment):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

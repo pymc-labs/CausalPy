@@ -11,8 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Staggered Difference in Differences (Imputation-based)
+"""Staggered Difference in Differences (Imputation-based).
 
 This module implements the imputation-based staggered DiD estimator, following
 the approach of Borusyak, Jaravel, and Spiess (2024). It handles settings where
@@ -94,6 +93,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     reference_event_time : int, optional
         Event-time index associated with plots (reserved for future use).
         Defaults to -1.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -1642,6 +1643,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

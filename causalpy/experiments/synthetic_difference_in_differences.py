@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Synthetic Difference-in-Differences Experiment
+Synthetic Difference-in-Differences Experiment.
 """
 
 import warnings
@@ -57,6 +57,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     model : PyMCModel or sklearn.base.RegressorMixin, optional
         A ``SyntheticDifferenceInDifferencesWeightFitter`` instance. Defaults
         to ``SyntheticDifferenceInDifferencesWeightFitter``.
+    **kwargs : dict
+        Additional keyword arguments (currently unused).
 
     Examples
     --------
@@ -150,7 +152,16 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
-        """Validate the input data for correctness."""
+        """Validate the input data for correctness.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            A dataframe in wide format (columns = units, rows = time periods).
+        treatment_time : int, float or pandas.Timestamp
+            The time when treatment occurred, should be in reference to the
+            data index.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -806,6 +817,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Ignored for SDiD (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
 
         Returns
         -------

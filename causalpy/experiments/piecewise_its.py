@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Piecewise Interrupted Time Series Analysis (Segmented Regression)
-"""
+"""Piecewise Interrupted Time Series Analysis (Segmented Regression)."""
 
 import re
 from typing import Any, Literal
@@ -83,6 +81,23 @@ class PiecewiseITS(BaseExperiment):
     cumulative_effect : xr.DataArray or np.ndarray
         Cumulative causal effect over time.
 
+    Notes
+    -----
+    The counterfactual is computed by setting all step/ramp terms to zero,
+    representing what would have happened without the interventions.
+
+    The `step` and `ramp` transforms are patsy stateful transforms that handle
+    both numeric and datetime time columns. For datetime, thresholds can be
+    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
+
+    References
+    ----------
+    - Wagner AK, et al. (2002). Segmented regression analysis of interrupted
+      time series studies in medication use research. Journal of Clinical
+      Pharmacy and Therapeutics.
+    - Lopez Bernal J, et al. (2017). Interrupted time series regression for
+      the evaluation of public health interventions: a tutorial. Int J Epidemiol.
+
     Examples
     --------
     >>> import causalpy as cp
@@ -124,23 +139,6 @@ class PiecewiseITS(BaseExperiment):
     ...     formula="y ~ 1 + date + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
     ...     model=...,
     ... )  # doctest: +SKIP
-
-    Notes
-    -----
-    The counterfactual is computed by setting all step/ramp terms to zero,
-    representing what would have happened without the interventions.
-
-    The `step` and `ramp` transforms are patsy stateful transforms that handle
-    both numeric and datetime time columns. For datetime, thresholds can be
-    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
-
-    References
-    ----------
-    - Wagner AK, et al. (2002). Segmented regression analysis of interrupted
-      time series studies in medication use research. Journal of Clinical
-      Pharmacy and Therapeutics.
-    - Lopez Bernal J, et al. (2017). Interrupted time series regression for
-      the evaluation of public health interventions: a tutorial. Int J Epidemiol.
     """
 
     supports_ols = True
@@ -813,7 +811,31 @@ class PiecewiseITS(BaseExperiment):
         prefix: str = "Post-period",
         **kwargs: Any,
     ) -> EffectSummary:
-        """Generate a decision-ready summary of PiecewiseITS causal effects."""
+        """Generate a decision-ready summary of PiecewiseITS causal effects.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (see :meth:`BaseExperiment.effect_summary`).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation (PyMC only).
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals (1-alpha confidence).
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold (PyMC only).
+        treated_unit : str, optional
+            Multi-unit experiments select which unit to analyse.
+        period : None
+            Not supported by PiecewiseITS; pass ``None``.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+        """
         from causalpy.reporting import (
             _compute_statistics,
             _compute_statistics_ols,
