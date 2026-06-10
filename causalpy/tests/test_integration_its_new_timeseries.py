@@ -234,3 +234,52 @@ def test_state_space_predict_and_score():
     )
     with pytest.raises(RuntimeError, match="Model must be fit before"):
         unfitted_model.predict(X=None)
+
+
+@pytest.mark.integration
+def test_its_with_state_space_covariates():
+    """ITS + StateSpaceTimeSeries with exogenous covariates end to end."""
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+
+    rng = np.random.default_rng(seed=42)
+    n = 100
+    dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear / 7)
+    y = 5 + 0.05 * np.arange(n) + season + 2.0 * x1 - 1.5 * x2 + rng.normal(0, 0.3, n)
+    df = pd.DataFrame({"y": y, "x1": x1, "x2": x2}, index=dates)
+
+    model = cp.pymc_models.StateSpaceTimeSeries(
+        level_order=2,
+        seasonal_length=7,
+        sample_kwargs={
+            "chains": 1,
+            "draws": 100,
+            "tune": 100,
+            "progressbar": False,
+            "random_seed": 7,
+        },
+    )
+
+    # patsy adds an Intercept column; the model drops it with a warning
+    with pytest.warns(UserWarning, match="Dropping the 'Intercept' column"):
+        result = cp.InterruptedTimeSeries(
+            data=df,
+            treatment_time=dates[80],
+            formula="y ~ 1 + x1 + x2",
+            model=model,
+        )
+
+    # Regression coefficients should recover the known effects (loosely,
+    # given the short series and minimal sampling)
+    assert "beta_exog" in result.idata.posterior
+    beta = result.idata.posterior["beta_exog"].mean(("chain", "draw")).values
+    assert np.abs(beta - np.array([2.0, -1.5])).max() < 0.75
+
+    # No intervention effect in the DGP, so the post-period impact is small
+    post_impact_mean = float(result.post_impact.mean())
+    assert abs(post_impact_mean) < 1.0
