@@ -124,25 +124,6 @@ class BaseExperiment(ABC):
 
     _default_model_class: type[PyMCModel] | None = None
 
-    _deprecated_design_aliases: dict[str, tuple[str, str]] = {}
-    """Mapping of ``old_attr -> (dataset_attr, key)`` for deprecated design
-    matrix accessors.  Subclasses populate this so that
-    ``__getattr__`` can forward accesses with a deprecation warning."""
-
-    def __getattr__(self, name: str) -> Any:
-        aliases = type(self)._deprecated_design_aliases
-        if name in aliases:
-            dataset_attr, key = aliases[name]
-            warnings.warn(
-                f"{name} is deprecated, use {dataset_attr}['{key}']",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return getattr(self, dataset_attr)[key]
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'"
-        )
-
     @staticmethod
     def _build_design_dataset(
         X_raw: np.ndarray,

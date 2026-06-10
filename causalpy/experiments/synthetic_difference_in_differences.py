@@ -110,12 +110,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = SyntheticDifferenceInDifferencesWeightFitter
-    _deprecated_design_aliases = {
-        "datapre_control": ("pre_design", "control"),
-        "datapre_treated": ("pre_design", "treated"),
-        "datapost_control": ("post_design", "control"),
-        "datapost_treated": ("post_design", "treated"),
-    }
 
     def __init__(
         self,

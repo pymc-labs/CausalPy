@@ -90,7 +90,6 @@ class PrePostNEGD(BaseExperiment):
     supports_ols = False
     supports_bayes = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
