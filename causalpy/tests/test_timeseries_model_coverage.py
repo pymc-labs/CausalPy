@@ -306,25 +306,57 @@ class TestStateSpaceTimeSeriesCoverage:
         )
         return y_da
 
-    def test_custom_trend_component_without_apply_method(self):
-        """Test validation error when custom trend component lacks apply method."""
+    def test_custom_trend_component_wrong_type(self):
+        """Test validation error when custom trend component is not a
+        statespace component."""
         with pytest.raises(
             ValueError,
-            match="Custom trend_component must have an 'apply' method",
+            match="Custom trend_component must be a pymc-extras structural",
         ):
             cp.pymc_models.StateSpaceTimeSeries(
                 trend_component=MockComponentNoApply(),
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
-    def test_custom_seasonality_component_without_apply_method(self):
-        """Test validation error when custom seasonality component lacks apply method."""
+    def test_custom_seasonality_component_wrong_type(self):
+        """Test validation error when custom seasonality component is not a
+        statespace component."""
         with pytest.raises(
             ValueError,
-            match="Custom seasonality_component must have an 'apply' method",
+            match="Custom seasonality_component must be a pymc-extras structural",
         ):
             cp.pymc_models.StateSpaceTimeSeries(
                 seasonality_component=MockComponentNoApply(),
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+
+    def test_custom_statespace_components_accepted(self, sample_data):
+        """Real pymc-extras structural components are valid custom components."""
+        from pymc_extras.statespace import structural as st
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            trend_component=st.LevelTrend(order=1),
+            seasonality_component=st.FrequencySeasonality(season_length=7, name="freq"),
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=sample_data)
+
+        assert "initial_level_trend" in (rv.name for rv in model.free_RVs)
+
+    def test_component_base_class_moved_upstream(self, monkeypatch):
+        """A moved upstream base class gives an actionable error."""
+        import sys
+
+        from pymc_extras.statespace import structural as st
+
+        component = st.LevelTrend(order=1)
+        monkeypatch.setitem(
+            sys.modules, "pymc_extras.statespace.models.structural.core", None
+        )
+
+        with pytest.raises(ImportError, match="does not expose it at that path"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                trend_component=component,
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 

@@ -2422,9 +2422,13 @@ class StateSpaceTimeSeries(PyMCModel):
     seasonal_length : int, optional
         Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
     trend_component : optional
-        Custom state-space trend component.
+        Custom state-space trend component. Must be a pymc-extras structural
+        component (e.g. `pymc_extras.statespace.structural.LevelTrend`).
+        Components with non-default names introduce their own parameter
+        names; pass matching entries in `priors`.
     seasonality_component : optional
-        Custom state-space seasonal component.
+        Custom state-space seasonal component. Same requirements as
+        `trend_component`.
     sample_kwargs : dict, optional
         Kwargs passed to `pm.sample`.
     mode : str, optional
@@ -2496,22 +2500,29 @@ class StateSpaceTimeSeries(PyMCModel):
         Validate custom components only. Optional dependencies are imported lazily
         when default components are actually needed.
         """
-        # Validate custom components have required methods
-        if self._custom_trend_component is not None and not hasattr(
-            self._custom_trend_component, "apply"
-        ):
-            raise ValueError(
-                "Custom trend_component must have an 'apply' method that accepts time data "
-                "and returns a PyMC tensor."
-            )
+        # Validate custom components. The base class is only needed when the
+        # user supplies one, so the import stays out of the default path.
+        custom_components = [
+            ("trend_component", self._custom_trend_component),
+            ("seasonality_component", self._custom_seasonality_component),
+        ]
+        if any(component is not None for _, component in custom_components):
+            try:
+                from pymc_extras.statespace.models.structural.core import Component
+            except ImportError as err:
+                raise ImportError(
+                    "Custom components are checked against "
+                    "pymc_extras.statespace.models.structural.core.Component, and "
+                    "this pymc-extras version does not expose it at that path."
+                ) from err
 
-        if self._custom_seasonality_component is not None and not hasattr(
-            self._custom_seasonality_component, "apply"
-        ):
-            raise ValueError(
-                "Custom seasonality_component must have an 'apply' method that accepts time data "
-                "and returns a PyMC tensor."
-            )
+            for label, component in custom_components:
+                if component is not None and not isinstance(component, Component):
+                    raise ValueError(
+                        f"Custom {label} must be a pymc-extras structural state-space "
+                        "component (e.g. pymc_extras.statespace.structural.LevelTrend), "
+                        f"got {type(component).__name__}."
+                    )
 
         # Initialize components
         self._trend_component = None
