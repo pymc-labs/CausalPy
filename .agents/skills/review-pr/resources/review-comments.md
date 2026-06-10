@@ -57,6 +57,7 @@ Thanks for the PR. I have comments grouped by severity below.
 
 - [Specific positive about the implementation, tests, docs, or scope.]
 - [Another specific positive when available.]
+
 ```
 
 Keep positives specific. Generic praise adds little, but concrete reinforcement helps contributors preserve the good parts while fixing issues.

@@ -143,6 +143,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
     ```
 
     This single command:
+
     - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
     - Installs all development extras (`dev`, `docs`, `test`, `lint`)
     - Sets up prek hooks
@@ -292,6 +293,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Current maintainers
 
 <!-- Update this list as the team evolves -->
+
 - [@drbenvincent](https://github.com/drbenvincent)
 - [@juanitorduz](https://github.com/juanitorduz)
 - [@NathanielF](https://github.com/NathanielF)
@@ -321,21 +323,25 @@ Contributions are welcome from the community. This section describes how contrib
 #### 1) Community participant (public access)
 
 **Who this is for**
+
 - Anyone engaging with the project: users, researchers, educators, and prospective contributors.
 
 **What you can do**
+
 - Open issues (bug reports, feature requests, questions).
 - Participate in discussions.
 - Submit PRs from forks (code, docs, tests, examples).
 - Review PRs by leaving comments and suggestions.
 
 **Expectations**
+
 - Follow the [Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
 - Prefer small, focused PRs.
 - Include tests and docs updates when appropriate.
 - Be responsive to reviewer feedback.
 
 **Signals you may be ready for elevated access**
+
 - Consistently helpful participation and good judgment.
 - High-quality issue reports (clear repro, version info).
 - A track record of merged contributions and constructive reviews.
@@ -345,28 +351,34 @@ Contributions are welcome from the community. This section describes how contrib
 #### 2) Triager (Triage)
 
 **Who this is for**
+
 - Contributors who help maintain project hygiene by managing issues and PR flow without changing code directly.
 
 **What you can do (typical)**
+
 - Apply and manage labels.
 - Ask for reproductions, logs, environment details.
 - Close duplicates, redirect questions to Discussions.
 - Keep PRs moving by requesting changes, tagging reviewers, and nudging for updates.
 
 **What you cannot do**
+
 - Merge PRs.
 - Change repository settings.
 
 **Expectations**
+
 - Use a consistent labeling taxonomy.
 - Be neutral and kind; focus on clarity.
 - Escalate ambiguous/controversial decisions to maintainers.
 
 **Suggested criteria**
+
 - Demonstrated helpfulness over time (e.g., 4–8 weeks of consistent triage activity).
 - Sound judgment on duplicates, scope, and priority.
 
 **Nomination and granting**
+
 - Maintainers can invite directly, or a contributor can request the role by [opening a GitHub issue](https://github.com/pymc-labs/CausalPy/issues/new).
 - Access is reviewed periodically; inactivity may result in stepping down.
 
@@ -375,24 +387,29 @@ Contributions are welcome from the community. This section describes how contrib
 #### 3) Collaborator (Write)
 
 **Who this is for**
+
 - Contributors who actively push changes and can be trusted with direct write access.
 
 **What you can do (typical)**
+
 - Push branches to the main repository.
 - Help maintain CI, docs, examples.
 - Perform routine maintenance tasks (refactors, dependency updates) within agreed scope.
 
 **Expectations**
+
 - Demonstrate good engineering hygiene: tests, docs, changelog discipline (as applicable).
 - Respect backwards compatibility and public API stability.
 - Participate in code review (both giving and receiving).
 
 **Suggested criteria**
+
 - Sustained contributions (e.g., multiple merged PRs across at least a few weeks/months).
 - High-quality reviews that improve code quality and catch issues.
 - Familiarity with project standards and tooling.
 
 **Safety mechanisms**
+
 - Branch protection remains enabled (required checks, review requirements).
 - Prefer PR-based changes even for collaborators.
 
@@ -401,25 +418,30 @@ Contributions are welcome from the community. This section describes how contrib
 #### 4) Maintainer (Maintain)
 
 **Who this is for**
+
 - People who help run the project: merging, release coordination, and repository management.
 
 **What you can do (typical)**
+
 - Merge PRs.
 - Manage labels and milestones.
 - Coordinate releases and ensure release notes are accurate.
 - Manage project boards (if used).
 
 **Expectations**
+
 - Consistent review and merge quality.
 - Ability to mediate disagreements and drive decisions.
 - Active stewardship of community norms.
 
 **Suggested criteria**
+
 - Track record of high-impact contributions and reliable collaboration.
 - Demonstrated leadership: mentoring, reviews, triage, roadmap contributions.
 - Comfortable with responsible disclosure and security processes (if applicable).
 
 **Onboarding**
+
 - Start with a limited scope (e.g., one module or docs/releases) and expand.
 
 ---
@@ -459,6 +481,7 @@ Admin access is reserved for project leads and is not part of the contributor pa
 ### Appendix: Quick rubric for promotion
 
 Consider promoting when a contributor reliably demonstrates:
+
 - **Quality:** produces correct changes with appropriate tests/docs.
 - **Judgment:** scopes work well and respects compatibility.
 - **Collaboration:** responds to review, helps others, communicates.

@@ -32,6 +32,7 @@ Bug-specific template:
 <Clear, concise description of the bug>
 
 ## Steps to Reproduce
+
 1. <Step 1>
 2. <Step 2>
 
@@ -42,6 +43,7 @@ Bug-specific template:
 <What actually happens>
 
 ## Environment
+
 - CausalPy version:
 - Python version:
 - OS:

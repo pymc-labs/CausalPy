@@ -1582,8 +1582,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         trend_component: Any | None = None,
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -1608,6 +1609,18 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._trend_component = None
         self._seasonality_component = None
         self._validate_and_initialize_components()
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            n_order=self.n_order,
+            n_changepoints_trend=self.n_changepoints_trend,
+            prior_sigma=self.prior_sigma,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
+        )
 
     def _validate_and_initialize_components(self):
         """
@@ -2058,8 +2071,9 @@ class StateSpaceTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -2077,6 +2091,18 @@ class StateSpaceTimeSeries(PyMCModel):
         self.ss_mod: Any = None
         self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            level_order=self.level_order,
+            seasonal_length=self.seasonal_length,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+            mode=self.mode,
+            priors=self._user_priors,
+        )
 
     def _validate_and_initialize_components(self):
         """

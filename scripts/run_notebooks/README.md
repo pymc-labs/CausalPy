@@ -45,7 +45,9 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 ## Notes
 
 - The runner executes using the `python3` Jupyter kernel. Ensure your environment
+
   provides that kernel (e.g., from `ipykernel` installed via the docs extras).
+
 - The CI workflow uses Python 3.12 and installs the same extras.
 
 ## Usage
@@ -70,6 +72,7 @@ python scripts/run_notebooks/runner.py --parallel
 ## CI Integration
 
 The GitHub Actions workflow (`.github/workflows/test_notebook.yml`) runs this script in parallel:
+
 - Job 1: PyMC notebooks
 - Job 2: Sklearn notebooks
 - Job 3: Other notebooks

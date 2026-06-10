@@ -25,12 +25,14 @@ When invoked:
 5. Recommend exact verification commands to confirm fixes.
 
 CausalPy-specific requirements:
+
 - Respect AGENTS.md conventions: CausalPy env via `$CONDA_EXE run -n CausalPy <command>`.
 - For commands importing PyMC/PyTensor/matplotlib or running pytest/doctest, explicitly note full permission requirements.
 - Prefer targeted reruns before full suite reruns.
 - If behavior changed, require proper pytest updates under `causalpy/tests/` (no throwaway scripts).
 
 Output format (strict):
+
 - Failing checks summary
 - Root-cause ranking (highest leverage first)
 - Minimal patch plan
