@@ -138,8 +138,8 @@ class SyntheticControl(BaseExperiment):
 
         for i in range(n_units):
             unit_check = check_convex_hull_violation(
-                self.pre_design["treated"].isel(treated_units=i).values,
-                self.pre_design["control"].values,
+                self.pre_design["treated"].isel(treated_units=i),
+                self.pre_design["control"],
             )
             total_violations += unit_check["n_violations"]
             total_above += unit_check["pct_above"] * n_pre_points / 100

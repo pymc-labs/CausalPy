@@ -303,7 +303,8 @@ class PyMCModel(pm.Model):
                 raise ValueError(
                     f"Data node '{name}' not found in model. "
                     f"If your model uses different data node names, "
-                    f"override _data_setter()."
+                    f"override _data_setter() (see "
+                    f"BayesianBasisExpansionTimeSeries for an example)."
                 )
 
         new_no_of_observations = X.shape[0]

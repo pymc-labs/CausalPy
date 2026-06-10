@@ -158,6 +158,34 @@ def test_deprecated_alias_sc(mock_pymc_sample, old_attr, dataset_attr, key):
 
 
 # ---------------------------------------------------------------------------
+# Parametrised tests – synthetic difference-in-differences
+# ---------------------------------------------------------------------------
+
+
+def _make_sdid(mock_pymc_sample) -> cp.SyntheticDifferenceInDifferences:
+    df = cp.load_data("sc")
+    treatment_time = 70
+    return cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs={"random_seed": 42, "progressbar": False}
+        ),
+    )
+
+
+@pytest.mark.parametrize("old_attr,dataset_attr,key", _SC_CASES)
+def test_deprecated_alias_sdid(mock_pymc_sample, old_attr, dataset_attr, key):
+    result = _make_sdid(mock_pymc_sample)
+    with pytest.warns(DeprecationWarning, match=old_attr):
+        old_val = getattr(result, old_attr)
+    new_val = getattr(result, dataset_attr)[key]
+    xrt.assert_identical(old_val, new_val)
+
+
+# ---------------------------------------------------------------------------
 # ConvexHullCheck should NOT trigger any DeprecationWarning
 # ---------------------------------------------------------------------------
 
