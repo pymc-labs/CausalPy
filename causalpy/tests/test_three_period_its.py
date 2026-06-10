@@ -37,8 +37,13 @@ sample_kwargs = {
 
 
 @pytest.fixture
-def datetime_data(rng):
-    """Create datetime-indexed data with three periods."""
+def datetime_data():
+    """Create datetime-indexed data with three periods.
+
+    Uses its own seeded generator (not the session-scoped ``rng`` fixture) so
+    the data does not depend on how many draws earlier tests consumed.
+    """
+    rng = np.random.default_rng(seed=42)
     dates = pd.date_range(start="2023-01-01", end="2024-12-31", freq="W")
     n_weeks = len(dates)
 
@@ -68,8 +73,13 @@ def datetime_data(rng):
 
 
 @pytest.fixture
-def integer_data(rng):
-    """Create integer-indexed data with three periods."""
+def integer_data():
+    """Create integer-indexed data with three periods.
+
+    Uses its own seeded generator (not the session-scoped ``rng`` fixture) so
+    the data does not depend on how many draws earlier tests consumed.
+    """
+    rng = np.random.default_rng(seed=42)
     n_points = 100
     indices = np.arange(n_points)
 
@@ -824,10 +834,10 @@ def test_analyze_persistence_pymc(datetime_data, mock_pymc_sample):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Persistence ratio is a decimal. It can be negative (counterfactual above
+    # the observed post-period) and can exceed 1 (post-effect > intervention-effect),
+    # so only check the type.
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
-    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
     assert persistence["mean_effect_during"] is not None
@@ -860,10 +870,10 @@ def test_analyze_persistence_sklearn(datetime_data):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Persistence ratio is a decimal. It can be negative (counterfactual above
+    # the observed post-period) and can exceed 1 (post-effect > intervention-effect),
+    # so only check the type.
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
-    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
     assert persistence["mean_effect_during"] is not None
