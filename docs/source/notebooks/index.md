@@ -53,7 +53,7 @@ its_pymc.ipynb
 its_post_intervention_analysis.ipynb
 its_covid.ipynb
 its_lift_test.ipynb
-its_place_in_time_analysis.ipynb
+its_placebo_in_time_analysis.ipynb
 :::
 
 :::{toctree}
