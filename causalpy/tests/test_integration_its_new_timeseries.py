@@ -288,3 +288,55 @@ def test_its_with_state_space_covariates():
     n_post = n - 80
     assert result.post_impact.sizes["obs_ind"] == n_post
     assert np.isfinite(result.post_impact.values).all()
+
+
+@pytest.mark.integration
+def test_its_with_state_space_variable_selection():
+    """ITS + StateSpaceTimeSeries with spike-and-slab covariate selection.
+
+    Structure-only assertions: the suite mocks pm.sample session-wide,
+    so posterior values come from the prior.
+    """
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+
+    rng = np.random.default_rng(seed=42)
+    n = 90
+    dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    x3 = rng.normal(size=n)
+    y = 5 + 2.0 * x1 + rng.normal(0, 0.3, n)
+    df = pd.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3}, index=dates)
+
+    model = cp.pymc_models.StateSpaceTimeSeries(
+        level_order=1,
+        seasonal_length=7,
+        sample_kwargs={
+            "chains": 1,
+            "draws": 50,
+            "tune": 50,
+            "progressbar": False,
+            "random_seed": 7,
+        },
+        vs_prior_type="spike_and_slab",
+    )
+
+    result = cp.InterruptedTimeSeries(
+        data=df,
+        treatment_time=dates[70],
+        formula="y ~ 0 + x1 + x2 + x3",
+        model=model,
+    )
+
+    assert "beta_exog" in result.idata.posterior
+    assert "gamma_beta_exog" in result.idata.posterior
+
+    incl = model.get_inclusion_probabilities()
+    assert isinstance(incl, pd.DataFrame)
+    assert len(incl) == 3
+    assert ((incl["prob"] >= 0) & (incl["prob"] <= 1)).all()
+
+    assert np.isfinite(result.post_impact.values).all()

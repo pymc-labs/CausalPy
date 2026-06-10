@@ -739,6 +739,102 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(ValueError, match="missing exogenous columns"):
             model.predict(X=X_bad, out_of_sample=True)
 
+    def test_vs_prior_without_covariates_raises(self, sample_data):
+        """vs_prior_type without covariates is a configuration error."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="spike_and_slab",
+        )
+        with pytest.raises(ValueError, match="no exogenous covariates"):
+            model.build_model(y=sample_data)
+
+    def test_vs_prior_invalid_type(self):
+        """Unknown vs_prior_type fails at construction."""
+        with pytest.raises(ValueError, match="Unknown prior_type"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+                vs_prior_type="lasso",  # type: ignore[arg-type]
+            )
+
+    def test_vs_prior_beta_exog_precedence_warning(self):
+        """Passing both vs_prior_type and a beta_exog prior warns."""
+        from pymc_extras.prior import Prior
+
+        with pytest.warns(UserWarning, match="variable selection prior takes"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+                vs_prior_type="spike_and_slab",
+                priors={"beta_exog": Prior("Normal", mu=0, sigma=1)},
+            )
+
+    def test_vs_helpers_require_configuration_and_fit(self):
+        """Helper methods guard against missing config and missing fit."""
+        plain = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        with pytest.raises(ValueError, match="not configured with vs_prior_type"):
+            plain.get_inclusion_probabilities()
+        with pytest.raises(ValueError, match="not configured with vs_prior_type"):
+            plain.get_shrinkage_factors()
+
+        unfit = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="spike_and_slab",
+        )
+        with pytest.raises(RuntimeError, match="must be fit first"):
+            unfit.get_inclusion_probabilities()
+        with pytest.raises(RuntimeError, match="must be fit first"):
+            unfit.get_shrinkage_factors()
+
+    def test_vs_spike_and_slab_structure(self, sample_data):
+        """Spike-and-slab on covariates: selection variables in the
+        posterior and a well-formed inclusion-probability table.
+
+        Structure-only by design: the suite mocks pm.sample session-wide,
+        so posterior values are prior draws.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.randn(n, 2),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="spike_and_slab",
+        )
+        model.fit(X=X, y=y_da)
+
+        assert "beta_exog" in model.idata.posterior
+        assert "gamma_beta_exog" in model.idata.posterior
+
+        incl = model.get_inclusion_probabilities()
+        assert isinstance(incl, pd.DataFrame)
+        assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
+        assert len(incl) == 2
+
+    def test_vs_clone_preserves_config(self):
+        """_clone carries the variable selection configuration."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="horseshoe",
+            vs_hyperparams={"nu": 5},
+        )
+        clone = model._clone()
+        assert clone.vs_prior_type == "horseshoe"
+        assert clone.vs_hyperparams == {"nu": 5}
+        assert clone.vs_prior is not None
+
     def test_clone_preserves_config(self):
         """Test that _clone carries over the full model configuration."""
         from pymc_extras.prior import Prior

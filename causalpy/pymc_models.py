@@ -2383,6 +2383,13 @@ class StateSpaceTimeSeries(PyMCModel):
         `default_priors`. The `P0` covariance is parameterized through its
         diagonal under the key `"P0_diag"`. Dims are resolved from the built
         state-space model, so priors do not need to declare them.
+    vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+        Variable selection prior for the exogenous regression coefficients.
+        Requires covariates. Takes precedence over a `beta_exog` entry in
+        `priors`.
+    vs_hyperparams : dict, optional
+        Hyperparameters for the variable selection prior. See
+        :class:`causalpy.variable_selection_priors.VariableSelectionPrior`.
     """
 
     default_priors = {
@@ -2403,6 +2410,8 @@ class StateSpaceTimeSeries(PyMCModel):
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
         priors: dict[str, Prior] | None = None,
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
@@ -2422,6 +2431,20 @@ class StateSpaceTimeSeries(PyMCModel):
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
         self._exog_names: list[str] = []
+        self.vs_prior_type = vs_prior_type
+        self.vs_hyperparams = vs_hyperparams
+        self.vs_prior: VariableSelectionPrior | None = None
+        if vs_prior_type is not None:
+            # Validates the prior type eagerly
+            self.vs_prior = VariableSelectionPrior(vs_prior_type, vs_hyperparams or {})
+            if priors and "beta_exog" in priors:
+                warnings.warn(
+                    "Both vs_prior_type and a beta_exog entry in priors were "
+                    "given. The variable selection prior takes precedence for "
+                    "beta_exog.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         self._validate_and_initialize_components()
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
@@ -2438,6 +2461,8 @@ class StateSpaceTimeSeries(PyMCModel):
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
             priors=self._user_priors if priors is None else priors,
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
         )
 
     def _validate_and_initialize_components(self):
@@ -2609,6 +2634,12 @@ class StateSpaceTimeSeries(PyMCModel):
         season = self._get_seasonality_component()
         combined = trend + season
         self._exog_names = self._extract_exog_names(X)
+        if self.vs_prior is not None and not self._exog_names:
+            raise ValueError(
+                "vs_prior_type was set but the model has no exogenous "
+                "covariates. Pass covariates via X, e.g. with a "
+                "'y ~ 0 + x1 + x2' formula."
+            )
         if self._exog_names:
             from pymc_extras.statespace import structural as st
 
@@ -2661,6 +2692,15 @@ class StateSpaceTimeSeries(PyMCModel):
                     prior.dims = dims[0]
                     P0_diag = prior.create_variable("P0_diag")
                     pm.Deterministic("P0", pt.diag(P0_diag), dims=dims)
+                elif name == "beta_exog" and self.vs_prior is not None:
+                    self.vs_prior.create_prior(
+                        "beta_exog",
+                        n_params=len(self._exog_names),
+                        dims=dims,
+                        X=X.sel(coeffs=self._exog_names).values
+                        if X is not None
+                        else None,
+                    )
                 else:
                     prior = deepcopy(self.priors[name])
                     prior.dims = dims
@@ -2762,6 +2802,69 @@ class StateSpaceTimeSeries(PyMCModel):
             if isinstance(conditional_idata, xr.DataTree)
             else conditional_idata
         )
+
+    def get_inclusion_probabilities(
+        self, param_name: str = "beta_exog"
+    ) -> pd.DataFrame:
+        """
+        Posterior inclusion probabilities of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="spike_and_slab"` and has been fit.
+
+        Interpret the probabilities as a relative ranking of the candidate
+        regressors. The `beta_exog` point estimates shrink toward zero
+        under this prior (the state-space `P0` lets the regression states
+        drift from the parameter), but counterfactual forecasts use the
+        smoothed states and are not affected by that attenuation.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor with columns "prob" (inclusion
+            probability), "selected" (probability above 0.5), and
+            "gamma_mean" (mean of the selection indicator).
+        """
+        if self.vs_prior is None:
+            raise ValueError(
+                "Model was not configured with vs_prior_type; there are no "
+                "inclusion probabilities to report."
+            )
+        if self.idata is None:
+            raise RuntimeError("Model must be fit first.")
+        return self.vs_prior.get_inclusion_probabilities(self.idata, param_name)
+
+    def get_shrinkage_factors(self, param_name: str = "beta_exog") -> pd.DataFrame:
+        """
+        Shrinkage factors of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="horseshoe"` and has been fit.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor with the effective shrinkage applied to
+            its coefficient.
+        """
+        if self.vs_prior is None:
+            raise ValueError(
+                "Model was not configured with vs_prior_type; there are no "
+                "shrinkage factors to report."
+            )
+        if self.idata is None:
+            raise RuntimeError("Model must be fit first.")
+        return self.vs_prior.get_shrinkage_factors(self.idata, param_name)
 
     def _forecast(
         self,
