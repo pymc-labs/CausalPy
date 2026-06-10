@@ -641,6 +641,96 @@ class TestStateSpaceTimeSeriesCoverage:
             "treated_units",
         )
 
+    def test_missing_y_values_handled(self, sample_data):
+        """The Kalman filter handles NaN in y; predictions stay finite."""
+        y_da = sample_data.copy()
+        y_da[5, 0] = np.nan
+        y_da[12, 0] = np.nan
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        idata = model.fit(X=None, y=y_da)
+
+        y_hat = idata.posterior_predictive["y_hat"]
+        assert np.isfinite(y_hat.isel(obs_ind=[5, 12]).values).all()
+
+    def test_short_series(self):
+        """A short series (n=25) fits and predicts in sample."""
+        dates = pd.date_range(start="2020-01-01", periods=25, freq="D")
+        y_da = xr.DataArray(
+            (10 + np.random.randn(25)).reshape(-1, 1),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=None, y=y_da)
+        pred = model.predict(X=None)
+        assert pred.posterior_predictive["y_hat"].sizes["obs_ind"] == 25
+
+    def test_seasonal_length_below_two_raises(self):
+        """seasonal_length=1 is rejected with a clear error."""
+        with pytest.raises(ValueError, match="seasonal_length must be at least 2"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                seasonal_length=1,
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+
+    def test_integer_index_without_datetime_raises(self):
+        """Integer obs_ind without a datetime_index fallback is rejected."""
+        y_int = xr.DataArray(
+            np.random.randn(30, 1),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(30), "treated_units": ["unit_0"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        with pytest.raises(ValueError, match="must contain datetime values"):
+            model.build_model(y=y_int)
+
+    def test_forecast_index_mismatch_warns(self, sample_data):
+        """Out-of-sample dates that break the training frequency warn."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=None, y=sample_data)
+
+        last = pd.Timestamp(sample_data.coords["obs_ind"].values[-1])
+        gapped = pd.date_range(last + pd.Timedelta(days=4), periods=5, freq="D")
+        X_gapped = xr.DataArray(
+            np.zeros((5, 0)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": gapped, "coeffs": []},
+        )
+        with pytest.warns(UserWarning, match="relabeled onto X's dates"):
+            model.predict(X=X_gapped, out_of_sample=True)
+
     def test_default_model_free_rvs(self, sample_data):
         """Lock the default model contract: same five RVs as before the
         priors refactor."""
