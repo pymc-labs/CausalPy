@@ -176,43 +176,50 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             )
 
     def _prepare_data(self) -> None:
-        """Prepare xarray DataArrays for control and treated units in pre/post periods.
+        """Bundle control and treated data into ``xr.Dataset`` objects per period.
 
-        Also constructs the dict-based inputs expected by
-        SyntheticDifferenceInDifferencesWeightFitter.
+        Builds ``pre_design`` / ``post_design`` datasets with ``control`` and
+        ``treated`` variables, mirroring :class:`SyntheticControl`.
         """
-        # Four-quadrant split as xarray DataArrays (same as SyntheticControl)
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
+        self.pre_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapre[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapre[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapre[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapre[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
+        self.post_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapost[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapost[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapost[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapost[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
 
     def algorithm(self) -> None:

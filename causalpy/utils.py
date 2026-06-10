@@ -186,7 +186,8 @@ def get_interaction_terms(formula: str) -> list[str]:
 
 
 def check_convex_hull_violation(
-    treated_series: np.ndarray, control_matrix: np.ndarray
+    treated_series: np.ndarray | xr.DataArray,
+    control_matrix: np.ndarray | xr.DataArray,
 ) -> dict:
     """
     Check if treated series values fall within the range of control series.
@@ -197,11 +198,14 @@ def check_convex_hull_violation(
     This is a necessary (but not sufficient) condition for the treated unit
     to lie within the convex hull of control units.
 
+    Both arguments accept either ``np.ndarray`` or ``xr.DataArray`` inputs;
+    only positional (axis-based) operations are used internally.
+
     Parameters
     ----------
-    treated_series : np.ndarray
+    treated_series : np.ndarray or xr.DataArray
         1D array of treated unit values (shape: n_timepoints)
-    control_matrix : np.ndarray
+    control_matrix : np.ndarray or xr.DataArray
         2D array of control unit values (shape: n_timepoints x n_controls)
 
     Returns

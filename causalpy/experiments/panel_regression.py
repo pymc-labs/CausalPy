@@ -19,7 +19,6 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from scipy import stats
@@ -277,35 +276,33 @@ class PanelRegression(BaseExperiment):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(  # type: ignore[assignment]
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(  # type: ignore[assignment]
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
-        )
+        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit the model."""
+        X = self.design["X"]
+        y = self.design["y"]
+
         if isinstance(self.model, PyMCModel):
             COORDS = {
                 "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
+                "obs_ind": np.arange(X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
+            self.model.fit(X=X, y=y, coords=COORDS)
         elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.X, y=self.y)
+            self.model.fit(X=X, y=y)
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply demeaned transformation (demean by group).
@@ -409,7 +406,7 @@ class PanelRegression(BaseExperiment):
         if self.n_periods:
             print(f"Periods: {self.n_periods} ({self.time_fe_variable})")
         print(f"FE method: {self.fe_method}")
-        print(f"Observations: {self.X.shape[0]}")
+        print(f"Observations: {self.design['X'].shape[0]}")
         print("=" * 60)
 
         coeff_labels = self._get_non_fe_labels()
@@ -644,7 +641,7 @@ class PanelRegression(BaseExperiment):
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
+                "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": pred_mean,
                 "y_fitted_lower": pred_lower,
                 "y_fitted_upper": pred_upper,
@@ -672,13 +669,13 @@ class PanelRegression(BaseExperiment):
             DataFrame with fitted values
         """
         if isinstance(self.model, RegressorMixin):
-            y_fitted = np.squeeze(self.model.predict(self.X))  # type: ignore[attr-defined]
+            y_fitted = np.squeeze(self.model.predict(self.design["X"]))
         else:
             raise ValueError("Model is not an OLS model")
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
+                "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": y_fitted,
                 self.unit_fe_variable: self.data[self.unit_fe_variable].values,
             }
@@ -925,7 +922,7 @@ class PanelRegression(BaseExperiment):
             sorted_obs_indices = unit_obs_indices[sort_order]
 
             # Get actual y values (sorted by time)
-            y_actual = self.y.values.flatten()[sorted_obs_indices]  # type: ignore[attr-defined]
+            y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
 
             # Plot actual
             ax.plot(
@@ -968,7 +965,9 @@ class PanelRegression(BaseExperiment):
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.X))[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
+                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                    sorted_obs_indices
+                ]  # type: ignore[union-attr]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,

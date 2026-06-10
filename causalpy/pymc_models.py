@@ -75,6 +75,11 @@ class PyMCModel(pm.Model):
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
     useful for causal inference.
 
+    The base :meth:`_data_setter` assumes the model graph contains mutable data
+    nodes named ``"X"`` (predictors) and ``"y"`` (target).  Subclasses that use
+    different data nodes should override :meth:`_data_setter`.  See
+    :class:`BayesianBasisExpansionTimeSeries` for an example.
+
     Parameters
     ----------
     sample_kwargs : dict, optional
@@ -283,18 +288,25 @@ class PyMCModel(pm.Model):
 
     def _data_setter(self, X: xr.DataArray) -> None:
         """
-        Set data for the model.
+        Set data for the model for prediction.
 
-        This method is used internally to register new data for the model for
-        prediction.
+        This method is called by :meth:`predict` to register new predictor data
+        and reshape the target placeholder so that ``pm.sample_posterior_predictive``
+        can run with the new observation count.
 
-        NOTE: We are actively changing the `X`. Often, this matrix will have a different
-        number of rows than the original data. So to make the shapes work, we need to
-        update all data nodes in the model to have the correct shape. The values are not
-        used, so we set them to 0. In our case, we just have data nodes X and y, but if
-        in the future we get more complex models with more data nodes, then we'll need
-        to update all of them - ideally programmatically.
+        The base implementation updates mutable data nodes named ``"X"`` and
+        ``"y"``.  Subclasses that use different data nodes should override this
+        method.  See :class:`BayesianBasisExpansionTimeSeries` for an example.
         """
+        for name in ("X", "y"):
+            if name not in self.named_vars:
+                raise ValueError(
+                    f"Data node '{name}' not found in model. "
+                    f"If your model uses different data node names, "
+                    f"override _data_setter() (see "
+                    f"BayesianBasisExpansionTimeSeries for an example)."
+                )
+
         new_no_of_observations = X.shape[0]
 
         # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
@@ -307,7 +319,6 @@ class PyMCModel(pm.Model):
             )
             n_treated_units = len(treated_units_coord)
 
-            # Always use 2D format for consistency
             pm.set_data(
                 {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
                 coords={"obs_ind": obs_coords},

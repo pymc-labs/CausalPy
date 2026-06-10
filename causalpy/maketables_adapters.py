@@ -90,7 +90,10 @@ class MaketablesAdapter(Protocol):
 
 def _safe_observation_count(experiment: Any) -> int | None:
     """Best-effort observation count across experiment classes."""
-    for attr in ("X", "data", "datapre", "datapost"):
+    design = getattr(experiment, "design", None)
+    if isinstance(design, xr.Dataset) and "X" in design:
+        return int(design["X"].shape[0])
+    for attr in ("data", "datapre", "datapost"):
         obj = getattr(experiment, attr, None)
         if obj is None:
             continue

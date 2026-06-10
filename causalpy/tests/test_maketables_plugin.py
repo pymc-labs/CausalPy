@@ -566,8 +566,13 @@ class TestSafeObservationCount:
         stub = _Stub(data=np.zeros((42, 3)))
         assert _safe_observation_count(stub) == 42
 
-    def test_returns_count_from_X_attr(self):
-        stub = _Stub(X=np.zeros((10, 2)))
+    def test_returns_count_from_design_dataset(self):
+        import xarray as xr
+
+        design = xr.Dataset(
+            {"X": xr.DataArray(np.zeros((10, 2)), dims=["obs_ind", "coeffs"])}
+        )
+        stub = _Stub(design=design)
         assert _safe_observation_count(stub) == 10
 
     def test_returns_none_when_no_attrs(self):
@@ -575,7 +580,7 @@ class TestSafeObservationCount:
         assert _safe_observation_count(stub) is None
 
     def test_skips_none_attrs(self):
-        stub = _Stub(data=None, X=None, datapre=np.zeros((5, 1)))
+        stub = _Stub(data=None, datapre=np.zeros((5, 1)))
         assert _safe_observation_count(stub) == 5
 
     def test_skips_attr_without_shape(self):
