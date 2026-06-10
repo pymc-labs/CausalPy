@@ -2476,6 +2476,13 @@ class StateSpaceTimeSeries(PyMCModel):
             stacklevel=2,
         )
 
+        if seasonality_component is None and seasonal_length < 2:
+            # FrequencySeasonality needs at least one harmonic; season_length=1
+            # fails with an obscure ZeroDivisionError inside pymc-extras
+            raise ValueError(
+                "seasonal_length must be at least 2. For a model without "
+                "seasonality, pass a custom seasonality_component."
+            )
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
         self.level_order = level_order
@@ -3030,6 +3037,20 @@ class StateSpaceTimeSeries(PyMCModel):
             # Rename 'time' to 'obs_ind' to match CausalPy conventions
             if "time" in forecast_copy.dims:
                 forecast_copy = forecast_copy.rename({"time": "obs_ind"})
+
+            # The forecast generates its own future index from the training
+            # frequency; results are then relabeled with X's dates. Warn when
+            # the two disagree, since values map positionally.
+            forecast_idx = pd.DatetimeIndex(forecast_copy.coords["obs_ind"].values)
+            if not forecast_idx.equals(idx):
+                warnings.warn(
+                    "The dates in X do not match the forecast index generated "
+                    "from the training data frequency. Forecast values are "
+                    "relabeled onto X's dates by position; check that the "
+                    "post-period dates continue the training frequency.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
             # Extract the forecasted observed data and add treated_units dimension
             y_hat = forecast_copy["forecast_observed"].isel(observed_state=0)
