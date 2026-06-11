@@ -20,18 +20,18 @@ myst:
 
 The Python causal inference ecosystem has several strong packages, each with different strengths. Here's how CausalPy fits in:
 
-| | CausalPy | DoWhy | CausalML | pyfixest |
-|---|---|---|---|---|
-| **Primary focus** | Quasi-experimental causal effect estimation | End-to-end causal reasoning pipeline (graph → identify → estimate → refute) | Uplift modeling and heterogeneous treatment effects (CATE/ITE) | High-dimensional fixed effects regression (econometrics) |
-| **Bayesian estimation** | First-class via PyMC, with full posterior distributions and HDI | Limited — primarily frequentist estimators | No | No |
-| **Uncertainty quantification** | Credible intervals (HDI), ROPE analysis, tail probabilities | Confidence intervals, refutation tests | Confidence intervals | Cluster-robust and heteroscedasticity-robust standard errors |
-| **Synthetic control** | Yes — Bayesian weighted | No | No | No |
-| **Difference-in-differences** | Yes — including staggered adoption | Yes — as one of many estimators | No | Yes — TWFE, Did2s, Sun-Abraham |
-| **Regression discontinuity** | Yes — Bayesian and OLS | No | No | No |
-| **Interrupted time series** | Yes | No | No | No |
-| **Causal discovery** | No — use causal-learn or DoWhy-GCM | Yes — via DoWhy-GCM extension | No | No |
-| **Uplift / CATE modeling** | No — use CausalML or EconML | Yes — via EconML integration | Yes — primary focus | No |
-| **Best for** | Teams that need uncertainty-aware estimates from a quasi-experimental design | Projects that require formal identification and robustness testing across a causal DAG | A/B test personalization, targeting optimization, CATE estimation | Fast econometric regressions with many fixed effects |
+| | CausalPy | CausalImpact | DoWhy | CausalML | pyfixest |
+|---|---|---|---|---|---|
+| **Primary focus** | Quasi-experimental causal effect estimation | Time series impact analysis (BSTS) | End-to-end causal reasoning pipeline (graph → identify → estimate → refute) | Uplift modeling and heterogeneous treatment effects (CATE/ITE) | High-dimensional fixed effects regression (econometrics) |
+| **Bayesian estimation** | First-class via PyMC, with full posterior distributions and HDI | Yes — Bayesian Structural Time Series | Limited — primarily frequentist estimators | No | No |
+| **Uncertainty quantification** | Credible intervals (HDI), ROPE analysis, tail probabilities | Posterior credible intervals | Confidence intervals, refutation tests | Confidence intervals | Cluster-robust and heteroscedasticity-robust standard errors |
+| **Synthetic control** | Yes — Bayesian weighted | Yes | No | No | No |
+| **Difference-in-differences** | Yes — including staggered adoption | No | Yes — as one of many estimators | No | Yes — TWFE, Did2s, Sun-Abraham |
+| **Regression discontinuity** | Yes — Bayesian and OLS | No | No | No | No |
+| **Interrupted time series** | Yes | Yes | No | No | No |
+| **Causal discovery** | No — use causal-learn or DoWhy-GCM | No | Yes — via DoWhy-GCM extension | No | No |
+| **Uplift / CATE modeling** | No — use CausalML or EconML | No | Yes — via EconML integration | Yes — primary focus | No |
+| **Best for** | Teams that need uncertainty-aware estimates from a quasi-experimental design | Rapid impact analysis of a single time series using synthetic control | Projects that require formal identification and robustness testing across a causal DAG | A/B test personalization, targeting optimization, CATE estimation | Fast econometric regressions with many fixed effects |
 
 ### When to choose CausalPy
 
