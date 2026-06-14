@@ -116,6 +116,13 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        if self._model_backend.is_ols and len(treated_units) > 1:
+            raise ValueError(
+                "OLS/sklearn synthetic control supports only a single treated "
+                f"unit, but {len(treated_units)} were given: {treated_units}. "
+                "Use a PyMC model (e.g. WeightedSumFitter) for multiple treated "
+                "units, or run a separate experiment per treated unit."
+            )
         if not (-1 <= min_donor_correlation <= 1):
             raise ValueError(
                 f"min_donor_correlation must be between -1 and 1, "

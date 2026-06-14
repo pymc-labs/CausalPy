@@ -70,8 +70,10 @@ def _sklearn_array(value: Any) -> np.ndarray:
 def _sklearn_y(y: Any) -> np.ndarray:
     """Coerce outcome arrays to sklearn's preferred 1D shape when possible.
 
-    ponytail: only collapses a single trailing treated-units column; multi-output
-    ``y`` with more than one column is passed through unchanged.
+    ponytail: collapses a single trailing treated-units column to 1D. Genuine
+    multi-output ``y`` (>1 column) is passed through unchanged; experiments whose
+    sklearn backend cannot fit multiple outcomes (e.g. synthetic control's
+    ``WeightedProportion``) must reject that case upstream at construction.
     """
     arr = _sklearn_array(y)
     if arr.ndim == 2 and arr.shape[1] == 1:
