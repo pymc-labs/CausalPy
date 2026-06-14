@@ -29,6 +29,7 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -150,15 +151,11 @@ class DifferenceInDifferences(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if self._model_backend.is_bayesian:
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self._model_backend.fit(X=X, y=y, coords=COORDS)
-        else:
-            self._model_backend.fit(X=X, y=y)
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         # predicted outcome for control group
         self.x_pred_control = (

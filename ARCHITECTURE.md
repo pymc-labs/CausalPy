@@ -25,20 +25,21 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two sta
 
 Backend dispatch is centralized in `causalpy/experiments/model_adapter.py`. `BaseExperiment.__init__` calls `make_model_adapter()`, which handles sklearn coercion (`clone`/`deepcopy`, `create_causalpy_compatible_class()`, `fit_intercept=False` warning), default-model instantiation, and `supports_bayes`/`supports_ols` validation. Each experiment stores `self._model_backend` (private) and keeps `self.model` as the public handle.
 
-Experiments branch on backend via the adapter rather than scattered `isinstance` checks:
+Standard regression experiments call `self._model_backend.fit(X, y, coords=build_coords(...))` unconditionally. `build_coords()` assembles the PyMC `coeffs` / `obs_ind` / `treated_units` dict; sklearn backends ignore `coords`. `SklearnModelAdapter` normalizes inputs before delegating to sklearn: xarray `DataArray` values become numpy arrays, and a single-column `treated_units` outcome is squeezed to 1D so call sites do not need per-experiment `.isel(treated_units=0)` branches.
 
 ```python
-if self._model_backend.is_bayesian:
-    # Bayesian path — xarray DataArrays, InferenceData, coords
-    self._model_backend.fit(X=X, y=y, coords=COORDS)
-elif self._model_backend.is_ols:
-    # OLS path — numpy arrays (y shape preserved per experiment)
-    self._model_backend.fit(X=X, y=y)
+from causalpy.experiments.model_adapter import build_coords
+
+self._model_backend.fit(
+    X=X,
+    y=y,
+    coords=build_coords(self.labels, X.shape[0]),
+)
 ```
 
-`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction.
+Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization.
 
-Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model). Experiments with non-standard fit signatures (e.g. `InstrumentalVariable`, `InversePropensityWeighting`) call `self.model.fit(...)` directly with their custom arguments.
+`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
 
 ## Experiment Lifecycle
 

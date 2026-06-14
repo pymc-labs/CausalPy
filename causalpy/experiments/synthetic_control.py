@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
@@ -275,25 +276,15 @@ class SyntheticControl(BaseExperiment):
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
-        if self._model_backend.is_bayesian:
-            COORDS = {
-                # key must stay as "coeffs" unless we can find a way to auto identify
-                # the predictor dimension name. "coeffs" is assumed by
-                # PyMCModel.print_coefficients for example.
-                "coeffs": self.control_units,
-                "treated_units": self.treated_units,
-                "obs_ind": np.arange(self.datapre.shape[0]),
-            }
-            self._model_backend.fit(
-                X=self.pre_design["control"],
-                y=self.pre_design["treated"],
-                coords=COORDS,
-            )
-        else:
-            self._model_backend.fit(
-                X=self.pre_design["control"].data,
-                y=self.pre_design["treated"].isel(treated_units=0).data,
-            )
+        self._model_backend.fit(
+            X=self.pre_design["control"],
+            y=self.pre_design["treated"],
+            coords=build_coords(
+                self.control_units,
+                self.datapre.shape[0],
+                treated_units=self.treated_units,
+            ),
+        )
 
         # score the goodness of fit to the pre-intervention data
         self.score = self._model_backend.score(

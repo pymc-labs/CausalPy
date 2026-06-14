@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -295,15 +296,11 @@ class PanelRegression(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if self._model_backend.is_bayesian:
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self._model_backend.fit(X=X, y=y, coords=COORDS)
-        else:
-            self._model_backend.fit(X=X, y=y)
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply demeaned transformation (demean by group).

@@ -22,12 +22,61 @@ from typing import Any, Literal
 
 import arviz as az
 import numpy as np
+import xarray as xr
 from sklearn.base import RegressorMixin, clone
 
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
 
 BackendKind = Literal["pymc", "sklearn"]
+
+
+def build_coords(
+    coeffs: list[str] | tuple[str, ...],
+    n_obs: int,
+    *,
+    treated_units: tuple[str, ...] | list[str] = ("unit_0",),
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build the standard PyMC coordinate dict for regression experiments.
+
+    Parameters
+    ----------
+    coeffs : list of str or tuple of str
+        Coefficient / predictor names for the ``coeffs`` coord.
+    n_obs : int
+        Number of observations; used to build ``obs_ind`` as ``np.arange(n_obs)``.
+    treated_units : list of str or tuple of str, default ``("unit_0",)``
+        Names for the treated-unit dimension of ``y``.
+    **extra
+        Additional coordinate entries merged into the result (e.g.
+        ``datetime_index`` for ITS).
+    """
+    return {
+        "coeffs": list(coeffs),
+        "obs_ind": np.arange(n_obs),
+        "treated_units": list(treated_units),
+        **extra,
+    }
+
+
+def _sklearn_array(value: Any) -> np.ndarray:
+    """Coerce xarray or array-like inputs to a numpy array for sklearn."""
+    if isinstance(value, xr.DataArray):
+        return np.asarray(value.data)
+    return np.asarray(value)
+
+
+def _sklearn_y(y: Any) -> np.ndarray:
+    """Coerce outcome arrays to sklearn's preferred 1D shape when possible.
+
+    ponytail: only collapses a single trailing treated-units column; multi-output
+    ``y`` with more than one column is passed through unchanged.
+    """
+    arr = _sklearn_array(y)
+    if arr.ndim == 2 and arr.shape[1] == 1:
+        return np.squeeze(arr, axis=1)
+    return arr
 
 
 class ModelAdapter(ABC):
@@ -279,7 +328,7 @@ class SklearnModelAdapter(ModelAdapter):
         coords : dict, optional
             Ignored for sklearn backends.
         """
-        return self._model.fit(X=X, y=y)
+        return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
 
     def predict(
         self,
@@ -299,7 +348,7 @@ class SklearnModelAdapter(ModelAdapter):
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
         """
-        return self._model.predict(X=X, **kwargs)
+        return self._model.predict(X=_sklearn_array(X), **kwargs)
 
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
         """Score predictions from the sklearn model.
@@ -313,7 +362,7 @@ class SklearnModelAdapter(ModelAdapter):
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
         """
-        return self._model.score(X=X, y=y, **kwargs)
+        return self._model.score(X=_sklearn_array(X), y=_sklearn_y(y), **kwargs)
 
     def coefficients(self) -> np.ndarray:
         """Return fitted sklearn coefficients."""

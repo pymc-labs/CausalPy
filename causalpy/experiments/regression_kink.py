@@ -23,6 +23,7 @@ import pandas as pd
 import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 import xarray as xr
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -130,11 +131,7 @@ class RegressionKink(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        COORDS = {
-            "coeffs": self.labels,
-            "obs_ind": np.arange(X.shape[0]),
-            "treated_units": ["unit_0"],
-        }
+        COORDS = build_coords(self.labels, X.shape[0])
         self._model_backend.fit(X=X, y=y, coords=COORDS)
 
         self.score = self._model_backend.score(X=X, y=y)
