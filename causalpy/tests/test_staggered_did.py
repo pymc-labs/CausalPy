@@ -1695,7 +1695,7 @@ def test_staggered_did_unrecognized_model_type_fit():
         seed=42,
     )
 
-    with pytest.raises(ValueError, match="Model type not recognized"):
+    with pytest.raises(ValueError, match="Unsupported model type"):
         cp.StaggeredDifferenceInDifferences(
             df,
             formula="y ~ 1 + C(unit) + C(time)",

@@ -247,7 +247,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         6. :meth:`_build_reporting_objects` constructs the xarray objects
            required by the reporting helpers.
         """
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             raise NotImplementedError(
                 "OLS estimation for SyntheticDifferenceInDifferences is not yet "
                 "implemented. Please use a PyMC model."
@@ -258,7 +258,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         T_pre = self.datapre.shape[0]
 
         X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
-        self.model.fit(X=X, y=y, coords=coords)
+        self._model_backend.fit(X=X, y=y, coords=coords)
         if self.model.idata is None:
             raise AttributeError("Model fitting failed to produce idata")
 

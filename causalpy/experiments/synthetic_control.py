@@ -275,7 +275,7 @@ class SyntheticControl(BaseExperiment):
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             COORDS = {
                 # key must stay as "coeffs" unless we can find a way to auto identify
                 # the predictor dimension name. "coeffs" is assumed by
@@ -284,30 +284,28 @@ class SyntheticControl(BaseExperiment):
                 "treated_units": self.treated_units,
                 "obs_ind": np.arange(self.datapre.shape[0]),
             }
-            self.model.fit(
+            self._model_backend.fit(
                 X=self.pre_design["control"],
                 y=self.pre_design["treated"],
                 coords=COORDS,
             )
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(
+        else:
+            self._model_backend.fit(
                 X=self.pre_design["control"].data,
                 y=self.pre_design["treated"].isel(treated_units=0).data,
             )
-        else:
-            raise ValueError("Model type not recognized")
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(
+        self.score = self._model_backend.score(
             X=self.pre_design["control"],
             y=self.pre_design["treated"],
         )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.pre_design["control"])
+        self.pre_pred = self._model_backend.predict(X=self.pre_design["control"])
 
         # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.post_design["control"])
+        self.post_pred = self._model_backend.predict(X=self.post_design["control"])
         self.pre_impact = self.model.calculate_impact(
             self.pre_design["treated"], self.pre_pred
         )
@@ -359,7 +357,7 @@ class SyntheticControl(BaseExperiment):
             observed = (
                 self.pre_design["treated"].sel(treated_units=unit).values.flatten()
             )
-            if isinstance(self.model, PyMCModel):
+            if self._model_backend.is_bayesian:
                 predicted = (
                     self.pre_pred["posterior_predictive"]["mu"]
                     .sel(treated_units=unit)
@@ -795,7 +793,7 @@ class SyntheticControl(BaseExperiment):
             Which treated unit to extract data for. Must be a string name
             of the treated unit. If ``None``, uses the first treated unit.
         """
-        if not isinstance(self.model, PyMCModel):
+        if not self._model_backend.is_bayesian:
             raise ValueError("Unsupported model type")
 
         hdi_pct = int(round(hdi_prob * 100))
@@ -879,7 +877,7 @@ class SyntheticControl(BaseExperiment):
 
     def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian model - get unit-specific R² scores using unified format
             unit_index = self.treated_units.index(treated_unit)
             r2_val = round_num(
@@ -968,7 +966,7 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(

@@ -150,17 +150,15 @@ class DifferenceInDifferences(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             COORDS = {
                 "coeffs": self.labels,
                 "obs_ind": np.arange(X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=X, y=y)
+            self._model_backend.fit(X=X, y=y, coords=COORDS)
         else:
-            raise ValueError("Model type not recognized")
+            self._model_backend.fit(X=X, y=y)
 
         # predicted outcome for control group
         self.x_pred_control = (
@@ -177,7 +175,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self.model.predict(np.asarray(new_x))
+        self.y_pred_control = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = (
@@ -194,7 +192,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self.model.predict(np.asarray(new_x))
+        self.y_pred_treatment = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
@@ -224,10 +222,10 @@ class DifferenceInDifferences(BaseExperiment):
                 and self.group_variable_name in label
             ):
                 new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
+        self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
         # calculate causal impact
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             assert self.model.idata is not None
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
@@ -239,10 +237,12 @@ class DifferenceInDifferences(BaseExperiment):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
-        elif isinstance(self.model, RegressorMixin):
+        elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
             # Store the coefficient into dictionary {intercept:value}
-            coef_map = dict(zip(self.labels, self.model.get_coeffs(), strict=False))
+            coef_map = dict(
+                zip(self.labels, self._model_backend.coefficients(), strict=False)
+            )
             # Create and find the interaction term based on the values user provided
             interaction_term = (
                 f"{self.group_variable_name}:{self.post_treatment_variable_name}"
@@ -676,9 +676,7 @@ class DifferenceInDifferences(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        from causalpy.pymc_models import PyMCModel
-
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         if is_pymc:
             return _effect_summary_did(
