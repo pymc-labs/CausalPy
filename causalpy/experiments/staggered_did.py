@@ -446,7 +446,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Convert to xarray for PyMC models
         n_train = self.X_train.shape[0]
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             X_train_xr = xr.DataArray(
                 self.X_train,
                 dims=["obs_ind", "coeffs"],
@@ -465,17 +465,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "obs_ind": np.arange(n_train),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.X_train, y=self.y_train)
+            self._model_backend.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
         else:
-            raise ValueError("Model type not recognized")
+            self._model_backend.fit(X=self.X_train, y=self.y_train)
 
     def _predict_counterfactuals(self) -> None:
         """Predict counterfactual outcomes for all observations."""
         n_full = self.X_full.shape[0]
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             X_full_xr = xr.DataArray(
                 self.X_full,
                 dims=["obs_ind", "coeffs"],
@@ -484,7 +482,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "coeffs": self.labels,
                 },
             )
-            self.y_pred = self.model.predict(X=X_full_xr)
+            self.y_pred = self._model_backend.predict(X=X_full_xr)
 
             # Extract posterior mean for y_hat0
             y_hat0_mean = (
@@ -494,11 +492,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 .values
             )
             self.data["y_hat0"] = y_hat0_mean
-        elif isinstance(self.model, RegressorMixin):
-            self.y_pred = self.model.predict(self.X_full)
-            self.data["y_hat0"] = np.squeeze(self.y_pred)
         else:
-            raise ValueError("Model type not recognized")
+            self.y_pred = self._model_backend.predict(self.X_full)
+            self.data["y_hat0"] = np.squeeze(self.y_pred)
 
     def _compute_treatment_effects(self) -> None:
         """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
@@ -537,7 +533,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         is_pre_treatment = self.data["event_time"] < 0
         pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self._aggregate_effects_bayesian(treated_data, pretreatment_data)
         else:
             self._aggregate_effects_ols(treated_data, pretreatment_data)
@@ -1303,7 +1299,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _get_group_time_placebo_data(self) -> pd.DataFrame:
         """Return cohort-time placebo estimates for eventually-treated units."""
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             return self._get_group_time_placebo_data_bayesian()
         return self._get_group_time_placebo_data_ols()
 

@@ -194,36 +194,35 @@ class InterruptedTimeSeries(BaseExperiment):
         post_X = self.post_design["X"]
         post_y = self.post_design["y"]
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             COORDS: dict[str, Any] = {
                 "coeffs": self.labels,
                 "obs_ind": np.arange(pre_X.shape[0]),
                 "treated_units": ["unit_0"],
                 "datetime_index": self.datapre.index,
             }
-            self.model.fit(X=pre_X, y=pre_y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=pre_X, y=pre_y.isel(treated_units=0))
+            self._model_backend.fit(X=pre_X, y=pre_y, coords=COORDS)
         else:
-            raise ValueError("Model type not recognized")
+            self._model_backend.fit(X=pre_X, y=pre_y.isel(treated_units=0))
 
-        if isinstance(self.model, PyMCModel):
-            self.score = self.model.score(X=pre_X, y=pre_y)
-        elif isinstance(self.model, RegressorMixin):
-            self.score = self.model.score(X=pre_X, y=pre_y.isel(treated_units=0))
+        if self._model_backend.is_bayesian:
+            self.score = self._model_backend.score(X=pre_X, y=pre_y)
+        else:
+            self.score = self._model_backend.score(
+                X=pre_X, y=pre_y.isel(treated_units=0)
+            )
 
-        if isinstance(self.model, PyMCModel | RegressorMixin):
-            self.pre_pred = self.model.predict(X=pre_X)
+        self.pre_pred = self._model_backend.predict(X=pre_X)
 
-        if isinstance(self.model, PyMCModel):
-            self.post_pred = self.model.predict(X=post_X, out_of_sample=True)
-        elif isinstance(self.model, RegressorMixin):
-            self.post_pred = self.model.predict(X=post_X)
+        if self._model_backend.is_bayesian:
+            self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
+        else:
+            self.post_pred = self._model_backend.predict(X=post_X)
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self.pre_impact = self.model.calculate_impact(pre_y, self.pre_pred)
             self.post_impact = self.model.calculate_impact(post_y, self.post_pred)
-        elif isinstance(self.model, RegressorMixin):
+        else:
             self.pre_impact = self.model.calculate_impact(
                 pre_y.isel(treated_units=0), self.pre_pred
             )
@@ -340,7 +339,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Split predictions and impacts
         # Handle both PyMC (xarray) and OLS (numpy) cases
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         if is_pymc:
             # PyMC: use xarray selection
@@ -449,7 +448,7 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         from causalpy.reporting import _extract_hdi_bounds
 
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
         time_dim = "obs_ind"
         hdi_prob = 1 - alpha
         prob_persisted: float | None
@@ -1030,7 +1029,7 @@ class InterruptedTimeSeries(BaseExperiment):
             Probability mass of the highest density interval. Defaults to the
             project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             hdi_pct = int(round(hdi_prob * 100))
 
             pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
@@ -1221,7 +1220,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 "This method is only available for three-period designs."
             )
 
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
         time_dim = "obs_ind"
 
         if is_pymc:
@@ -1404,7 +1403,7 @@ class InterruptedTimeSeries(BaseExperiment):
             _generate_table_ols,
         )
 
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         # Handle period parameter for three-period designs
         if period is not None:

@@ -295,15 +295,15 @@ class PanelRegression(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             COORDS = {
                 "coeffs": self.labels,
                 "obs_ind": np.arange(X.shape[0]),
                 "treated_units": ["unit_0"],
             }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=X, y=y)
+            self._model_backend.fit(X=X, y=y, coords=COORDS)
+        else:
+            self._model_backend.fit(X=X, y=y)
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply demeaned transformation (demean by group).
@@ -420,7 +420,7 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # PyMC print_coefficients uses coordinate-based lookup so a
             # filtered label list works correctly.
             self.model.print_coefficients(coeff_labels, round_to)
@@ -589,7 +589,7 @@ class PanelRegression(BaseExperiment):
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: use az.plot_forest directly
             axes = az.plot_forest(
                 self.model.idata,
@@ -632,7 +632,7 @@ class PanelRegression(BaseExperiment):
             DataFrame with fitted values and credible intervals
         """
         # Get posterior predictions
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
@@ -669,7 +669,7 @@ class PanelRegression(BaseExperiment):
         pd.DataFrame
             DataFrame with fitted values
         """
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             y_fitted = np.squeeze(self.model.predict(self.design["X"]))
         else:
             raise ValueError("Model is not an OLS model")
@@ -754,7 +754,7 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
@@ -848,7 +848,7 @@ class PanelRegression(BaseExperiment):
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
         # Check if model is Bayesian
-        is_bayesian = isinstance(self.model, PyMCModel)
+        is_bayesian = self._model_backend.is_bayesian
 
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
@@ -1007,7 +1007,7 @@ class PanelRegression(BaseExperiment):
             Figure and axes objects
         """
         # Get plot data
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             plot_data = self.get_plot_data_bayesian()
         else:
             plot_data = self.get_plot_data_ols()

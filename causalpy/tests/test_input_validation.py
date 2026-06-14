@@ -690,7 +690,7 @@ def test_rd_unrecognized_model_type():
 
         pass
 
-    with pytest.raises(ValueError, match="Model type not recognized"):
+    with pytest.raises(ValueError, match="Unsupported model type"):
         cp.RegressionDiscontinuity(
             df,
             formula="y ~ 1 + x + treated + x:treated",

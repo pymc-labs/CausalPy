@@ -23,18 +23,22 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two sta
 
 ## Two-Backend Model
 
-Dispatch is via `isinstance` checks throughout `BaseExperiment` and experiment subclasses:
+Backend dispatch is centralized in `causalpy/experiments/model_adapter.py`. `BaseExperiment.__init__` calls `make_model_adapter()`, which handles sklearn coercion (`clone`/`deepcopy`, `create_causalpy_compatible_class()`, `fit_intercept=False` warning), default-model instantiation, and `supports_bayes`/`supports_ols` validation. Each experiment stores `self._model_backend` (private) and keeps `self.model` as the public handle.
+
+Experiments branch on backend via the adapter rather than scattered `isinstance` checks:
 
 ```python
-if isinstance(self.model, PyMCModel):
-    # Bayesian path — xarray DataArrays, InferenceData
-elif isinstance(self.model, RegressorMixin):
-    # OLS path — numpy arrays
+if self._model_backend.is_bayesian:
+    # Bayesian path — xarray DataArrays, InferenceData, coords
+    self._model_backend.fit(X=X, y=y, coords=COORDS)
+elif self._model_backend.is_ols:
+    # OLS path — numpy arrays (y shape preserved per experiment)
+    self._model_backend.fit(X=X, y=y)
 ```
 
-`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` (mutates the instance in place).
+`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction.
 
-Every experiment declares `supports_ols` and `supports_bayes`; `BaseExperiment.__init__` validates the model type. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
+Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model). Experiments with non-standard fit signatures (e.g. `InstrumentalVariable`, `InversePropensityWeighting`) call `self.model.fit(...)` directly with their custom arguments.
 
 ## Experiment Lifecycle
 
@@ -77,7 +81,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
 | **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
 | **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
-| **create_causalpy_compatible_class** | Mutates the passed sklearn instance in place; does not return a new object. |
+| **create_causalpy_compatible_class** | Applied during `make_model_adapter()` for sklearn backends; clones the user instance before patching. |
 
 ## Adding New Code
 

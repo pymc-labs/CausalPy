@@ -1329,7 +1329,7 @@ def test_piecewise_its_unrecognized_model_type():
     class FakeModel:
         pass
 
-    with pytest.raises(ValueError, match="Model type not recognized"):
+    with pytest.raises(ValueError, match="Unsupported model type"):
         cp.PiecewiseITS(
             df,
             formula="y ~ 1 + t + step(t, 50)",
