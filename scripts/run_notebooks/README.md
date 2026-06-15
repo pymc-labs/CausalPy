@@ -52,6 +52,8 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 
 - Full execution also includes notebooks listed in `skip_notebooks.yml` (e.g. JAX-based IV examples) so committed outputs can be refreshed locally. Install the `docs` extra (`pip install -e ".[docs]"` or `make setup`) so `jax` and `numpyro` are available for `iv_pymc` and `iv_weak_instruments`.
 
+- After a successful `--full` run the runner calls `os._exit(0)` so JAX/ipykernel background threads do not leave the process hanging once work is done.
+
 - The CI workflow uses Python 3.12 and installs the same extras.
 
 ## Usage

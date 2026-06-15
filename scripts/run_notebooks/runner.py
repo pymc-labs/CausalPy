@@ -30,6 +30,7 @@ Full execution for a single notebook:
 
 import argparse
 import logging
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
@@ -231,6 +232,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _hard_exit() -> None:
+    """Exit without waiting on non-daemon threads left by JAX/ipykernel/tqdm."""
+    os._exit(0)
+
+
 if __name__ == "__main__":
     setup_logging()
     args = parse_args()
@@ -276,3 +282,4 @@ if __name__ == "__main__":
             )
 
     logging.info("All notebooks completed successfully!")
+    _hard_exit()
