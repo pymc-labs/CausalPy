@@ -30,6 +30,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -443,48 +444,40 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _fit_model(self) -> None:
         """Fit the model on untreated observations only."""
-        # Convert to xarray for PyMC models
         n_train = self.X_train.shape[0]
-
-        if self._model_backend.is_bayesian:
-            X_train_xr = xr.DataArray(
-                self.X_train,
-                dims=["obs_ind", "coeffs"],
-                coords={
-                    "obs_ind": np.arange(n_train),
-                    "coeffs": self.labels,
-                },
-            )
-            y_train_xr = xr.DataArray(
-                self.y_train,
-                dims=["obs_ind", "treated_units"],
-                coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
-            )
-            COORDS = {
-                "coeffs": self.labels,
+        X_train_xr = xr.DataArray(
+            self.X_train,
+            dims=["obs_ind", "coeffs"],
+            coords={
                 "obs_ind": np.arange(n_train),
-                "treated_units": ["unit_0"],
-            }
-            self._model_backend.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
-        else:
-            self._model_backend.fit(X=self.X_train, y=self.y_train)
+                "coeffs": self.labels,
+            },
+        )
+        y_train_xr = xr.DataArray(
+            self.y_train,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
+        )
+        self._model_backend.fit(
+            X=X_train_xr,
+            y=y_train_xr,
+            coords=build_coords(self.labels, n_train),
+        )
 
     def _predict_counterfactuals(self) -> None:
         """Predict counterfactual outcomes for all observations."""
         n_full = self.X_full.shape[0]
+        X_full_xr = xr.DataArray(
+            self.X_full,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(n_full),
+                "coeffs": self.labels,
+            },
+        )
+        self.y_pred = self._model_backend.predict(X=X_full_xr)
 
         if self._model_backend.is_bayesian:
-            X_full_xr = xr.DataArray(
-                self.X_full,
-                dims=["obs_ind", "coeffs"],
-                coords={
-                    "obs_ind": np.arange(n_full),
-                    "coeffs": self.labels,
-                },
-            )
-            self.y_pred = self._model_backend.predict(X=X_full_xr)
-
-            # Extract posterior mean for y_hat0
             y_hat0_mean = (
                 self.y_pred["posterior_predictive"]
                 .mu.mean(dim=["chain", "draw"])
@@ -493,7 +486,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
             self.data["y_hat0"] = y_hat0_mean
         else:
-            self.y_pred = self._model_backend.predict(self.X_full)
             self.data["y_hat0"] = np.squeeze(self.y_pred)
 
     def _compute_treatment_effects(self) -> None:

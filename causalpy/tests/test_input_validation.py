@@ -298,6 +298,18 @@ def test_sc_input_error(sc_data):
         )
 
 
+def test_sc_ols_multiple_treated_units_error(sc_data):
+    """OLS/sklearn synthetic control supports only a single treated unit."""
+    with pytest.raises(ValueError, match="single treated"):
+        _ = cp.SyntheticControl(
+            sc_data,
+            70,
+            control_units=["a", "b", "c", "d", "e"],
+            treated_units=["actual", "f"],
+            model=cp.skl_models.WeightedProportion(),
+        )
+
+
 def test_sc_brexit_input_error():
     """Confirm a BadIndexException is raised if the data index is datetime and the
     treatment time is not pd.Timestamp."""

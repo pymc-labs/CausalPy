@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -200,22 +201,14 @@ class PiecewiseITS(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if self._model_backend.is_bayesian:
-            COORDS: dict[str, Any] = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self._model_backend.fit(X=X, y=y, coords=COORDS)
-        else:
-            self._model_backend.fit(X=X, y=y.isel(treated_units=0))
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         self.y_pred = self._model_backend.predict(X=X)
-
-        if self._model_backend.is_bayesian:
-            self.score = self._model_backend.score(X=X, y=y)
-        else:
-            self.score = self._model_backend.score(X=X, y=y.isel(treated_units=0))
+        self.score = self._model_backend.score(X=X, y=y)
 
         # Compute counterfactual and effects
         self._compute_counterfactual_and_effects()

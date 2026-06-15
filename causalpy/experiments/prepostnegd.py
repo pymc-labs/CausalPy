@@ -27,6 +27,7 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -139,17 +140,16 @@ class PrePostNEGD(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if self._model_backend.is_bayesian:
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self._model_backend.fit(X=X, y=y, coords=COORDS)
-        elif self._model_backend.is_ols:
+        if self._model_backend.is_ols:
             raise NotImplementedError("Not implemented for OLS model")
-        else:
+        if not self._model_backend.is_bayesian:
             raise ValueError("Model type not recognized")
+
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an

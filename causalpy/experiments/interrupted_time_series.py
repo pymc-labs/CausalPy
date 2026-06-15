@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -194,30 +195,20 @@ class InterruptedTimeSeries(BaseExperiment):
         post_X = self.post_design["X"]
         post_y = self.post_design["y"]
 
-        if self._model_backend.is_bayesian:
-            COORDS: dict[str, Any] = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(pre_X.shape[0]),
-                "treated_units": ["unit_0"],
-                "datetime_index": self.datapre.index,
-            }
-            self._model_backend.fit(X=pre_X, y=pre_y, coords=COORDS)
-        else:
-            self._model_backend.fit(X=pre_X, y=pre_y.isel(treated_units=0))
+        self._model_backend.fit(
+            X=pre_X,
+            y=pre_y,
+            coords=build_coords(
+                self.labels,
+                pre_X.shape[0],
+                datetime_index=self.datapre.index,
+            ),
+        )
 
-        if self._model_backend.is_bayesian:
-            self.score = self._model_backend.score(X=pre_X, y=pre_y)
-        else:
-            self.score = self._model_backend.score(
-                X=pre_X, y=pre_y.isel(treated_units=0)
-            )
+        self.score = self._model_backend.score(X=pre_X, y=pre_y)
 
         self.pre_pred = self._model_backend.predict(X=pre_X)
-
-        if self._model_backend.is_bayesian:
-            self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
-        else:
-            self.post_pred = self._model_backend.predict(X=post_X)
+        self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
 
         if self._model_backend.is_bayesian:
             self.pre_impact = self.model.calculate_impact(pre_y, self.pre_pred)
