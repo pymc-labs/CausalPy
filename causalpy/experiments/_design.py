@@ -126,28 +126,6 @@ def build_patsy_design(
     return transform, np.asarray(X), np.asarray(y)
 
 
-def build_patsy_predictors(
-    formula: str, data: pd.DataFrame
-) -> tuple[PatsyDesignTransform, np.ndarray]:
-    """Build a predictor-only design transform (e.g. propensity covariate side).
-
-    Parameters
-    ----------
-    formula : str
-        Patsy model formula.
-    data : pandas.DataFrame
-        Input data used to fit the design metadata.
-    """
-    _, X = dmatrices(formula, data, eval_env=1)
-    transform = PatsyDesignTransform(
-        _x_design_info=X.design_info,
-        _y_design_info=None,
-        labels=list(X.design_info.column_names),
-        outcome_name=None,
-    )
-    return transform, np.asarray(X)
-
-
 def build_patsy_formula_sides(
     formula: str, data: pd.DataFrame
 ) -> tuple[PatsyDesignTransform, PatsyDesignTransform, np.ndarray, np.ndarray]:

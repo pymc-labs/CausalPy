@@ -1613,3 +1613,26 @@ def test_ramp_transform_datetime_series():
     result = transform.transform(x, threshold)
     expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
     np.testing.assert_array_equal(result, expected)
+
+
+def test_piecewise_its_empty_interruption_times_datapost():
+    """Empty interruption_times yields an empty datapost and null CausalResult fields."""
+    df, _ = generate_piecewise_its_data(
+        N=50,
+        interruption_times=[25],
+        level_changes=[2.0],
+        slope_changes=[0.1],
+        noise_sigma=0.5,
+        seed=42,
+    )
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 25) + ramp(t, 25)",
+        model=LinearRegression(),
+    )
+    result.interruption_times = []
+    result._create_post_intervention_attributes()
+
+    assert len(result.datapost) == 0
+    assert result.result.predictions_post is None
+    assert result.result.impact_post is None

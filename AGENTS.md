@@ -82,7 +82,7 @@ Notebook **validation** in prek checks nbformat and conventions only; it does **
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
-- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
+- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. **prek does not run this gate** (it is a full-suite coverage pass and stays out of the fast hook path). The local Makefile threshold is `DIFF_COVER_FAIL_UNDER=97`; remote Codecov `patch` uses `target: auto` (typically near project coverage, ~97%), so a pass at an older 95% local threshold could still fail on the PR. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards

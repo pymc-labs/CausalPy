@@ -874,9 +874,9 @@ def test_analyze_persistence_sklearn(datetime_data):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Check persistence ratio is numeric (signed when effects oppose)
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
+    assert np.isfinite(persistence["persistence_ratio"])
     # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
@@ -1019,3 +1019,113 @@ def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
     # Should only have treatment_time line, not treatment_end_time
     assert fig is not None
     assert ax is not None
+
+
+def test_split_post_period_without_treated_units_dim(datetime_data, mock_pymc_sample):
+    """Three-period split uses impact_post directly when treated_units is absent."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    impact = result.result.impact_post
+    if "treated_units" in impact.dims:
+        result.result.impact_post = impact.isel(treated_units=0, drop=True)
+
+    result._split_post_period()
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+
+
+def test_comparison_period_summary_requires_three_period_results(
+    datetime_data, mock_pymc_sample
+):
+    """_comparison_period_summary raises when three-period results are missing."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.intervention_result = None
+
+    with pytest.raises(ValueError, match="three-period results"):
+        result._comparison_period_summary(direction="increase", alpha=0.05)
+
+
+def test_analyze_persistence_requires_three_period_results(
+    datetime_data, mock_pymc_sample
+):
+    """analyze_persistence raises when three-period results are missing."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.intervention_result = None
+
+    with pytest.raises(ValueError, match="three-period intervention results"):
+        result.analyze_persistence()
+
+
+def test_bayesian_plot_title_uses_r2_score_key(datetime_data, mock_pymc_sample):
+    """Bayesian ITS plot titles accept score Series keyed by r2."""
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.result.score = pd.Series({"r2": 0.91, "r2_std": 0.03})
+
+    fig, ax = result.plot(show=False)
+    assert fig is not None
+    assert "0.91" in ax[0].get_title()
+
+
+def test_bayesian_plot_title_handles_broken_score(
+    datetime_data, mock_pymc_sample, monkeypatch
+):
+    """Bayesian ITS plot tolerates score objects that raise on index access."""
+    import builtins
+    from unittest.mock import MagicMock
+
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    broken_score = MagicMock(spec=pd.Series)
+    broken_index = MagicMock()
+    broken_index.__contains__ = MagicMock(side_effect=RuntimeError("bad index"))
+    broken_score.index = broken_index
+
+    real_isinstance = builtins.isinstance
+
+    def isinstance_with_broken_series(obj, classinfo):
+        if obj is broken_score and classinfo is pd.Series:
+            return True
+        return real_isinstance(obj, classinfo)
+
+    monkeypatch.setattr("builtins.isinstance", isinstance_with_broken_series)
+    result.result.score = broken_score
+
+    fig, ax = result.plot(show=False)
+    assert fig is not None
+    assert "Pre-intervention Bayesian" in ax[0].get_title()

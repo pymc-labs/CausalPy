@@ -195,6 +195,39 @@ def test_2sls_fit(iv_data, sample_kwargs):
     assert isinstance(result._prior_calibration.beta_second, list)
 
 
+def test_prior_calibration_2sls_creates_when_missing(iv_data, sample_kwargs):
+    """get_2SLS_fit initializes PriorCalibration when it was cleared."""
+    result = cp.InstrumentalVariable(
+        instruments_data=iv_data["instruments_data"],
+        data=iv_data["data"],
+        instruments_formula=iv_data["instruments_formula"],
+        formula=iv_data["formula"],
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    result._prior_calibration = None
+    result.get_2SLS_fit()
+    assert result._prior_calibration is not None
+    assert result._prior_calibration.first_stage is not None
+
+
+def test_prior_calibration_naive_updates_existing(iv_data, sample_kwargs):
+    """Repeated naive OLS fit updates an existing PriorCalibration."""
+    result = cp.InstrumentalVariable(
+        instruments_data=iv_data["instruments_data"],
+        data=iv_data["data"],
+        instruments_formula=iv_data["instruments_formula"],
+        formula=iv_data["formula"],
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    first_naive = result._prior_calibration.naive
+    result.get_naive_OLS_fit()
+    assert result._prior_calibration.naive is not first_naive
+
+
 # =============================================================================
 # Test Input Validation
 # =============================================================================
