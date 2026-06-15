@@ -50,7 +50,7 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 
 - Full execution (`--full`) uses a long IOPub timeout (default 3600s) so MCMC cells that go quiet between progress updates are not killed by nbclient's 4s default.
 
-- Full execution also includes notebooks listed in `skip_notebooks.yml` (e.g. JAX-based IV examples) so committed outputs can be refreshed locally.
+- Full execution also includes notebooks listed in `skip_notebooks.yml` (e.g. JAX-based IV examples) so committed outputs can be refreshed locally. Install the `docs` extra (`pip install -e ".[docs]"` or `make setup`) so `jax` and `numpyro` are available for `iv_pymc` and `iv_weak_instruments`.
 
 - The CI workflow uses Python 3.12 and installs the same extras.
 
