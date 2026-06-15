@@ -586,7 +586,7 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind").isel(treated_units=0)
+    avg_effect = result.result.impact_post.mean(dim="obs_ind").isel(treated_units=0)
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -1106,11 +1106,19 @@ def test_extract_window_ols_xarray_post_impact_branch():
     """Ensure OLS xarray post_impact path uses numpy conversion safely."""
     import xarray as xr
 
+    from causalpy.experiments._results import CausalResult
     from causalpy.reporting import _extract_window
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_impact=xr.DataArray([1.0, 2.0, 3.0], dims=["obs_ind"]),
+        result=CausalResult(
+            score=None,
+            predictions_pre=None,
+            predictions_post=None,
+            impact_pre=None,
+            impact_post=xr.DataArray([1.0, 2.0, 3.0], dims=["obs_ind"]),
+            impact_post_cumulative=None,
+        ),
         datapost=datapost,
     )
 
@@ -1124,11 +1132,19 @@ def test_extract_counterfactual_ols_xarray_branch():
     """Ensure OLS xarray post_pred branch converts via numpy safely."""
     import xarray as xr
 
+    from causalpy.experiments._results import CausalResult
     from causalpy.reporting import _extract_counterfactual
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_pred=xr.DataArray([5.0, 6.0, 7.0], dims=["obs_ind"]),
+        result=CausalResult(
+            score=None,
+            predictions_pre=None,
+            predictions_post=xr.DataArray([5.0, 6.0, 7.0], dims=["obs_ind"]),
+            impact_pre=None,
+            impact_post=None,
+            impact_post_cumulative=None,
+        ),
         datapost=datapost,
     )
 
@@ -1376,7 +1392,11 @@ def test_extract_window_invalid_type():
 
     # Create a minimal mock result
     class MockResult:
-        post_impact = np.array([1, 2, 3])
+        result = type(
+            "R",
+            (),
+            {"impact_post": np.array([1, 2, 3])},
+        )()
         datapost = pd.DataFrame({"y": [1, 2, 3]}, index=[0, 1, 2])
 
     result = MockResult()
@@ -1565,16 +1585,18 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
     )
 
     # Convert InferenceData to dict format
-    post_pred_dict = {"posterior_predictive": result.post_pred.posterior_predictive}
-    original_post_pred = result.post_pred
-    result.post_pred = post_pred_dict
+    post_pred_dict = {
+        "posterior_predictive": result.result.predictions_post.posterior_predictive
+    }
+    original_post_pred = result.result.predictions_post
+    result.result.predictions_post = post_pred_dict
 
     # Should handle dict format
     window_coords = result.datapost.index[:10]
     counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
 
     # Restore original
-    result.post_pred = original_post_pred
+    result.result.predictions_post = original_post_pred
 
     assert counterfactual is not None
     assert hasattr(counterfactual, "shape")

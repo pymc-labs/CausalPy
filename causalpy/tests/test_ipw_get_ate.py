@@ -223,21 +223,18 @@ class TestGetAteDispatch:
 
 
 class TestDesignInfoAttributes:
-    """Regression for #835: ``_t_design_info`` must hold the treatment design
-    (left-hand side of the formula) and ``_x_design_info`` must hold the
-    covariate design (right-hand side). The previous implementation assigned
-    both to ``_t_design_info``, silently overwriting the treatment side."""
+    """Regression for #835: treatment and covariate design transforms must be distinct."""
 
-    def test_t_design_info_is_treatment_side(self, ipw_result):
+    def test_treatment_design_is_treatment_side(self, ipw_result):
         """The treatment side of ``trt ~ 1 + age + race`` is the lone column ``trt``."""
-        assert ipw_result._t_design_info.column_names == ["trt"]
+        assert ipw_result._treatment_design.labels == ["trt"]
 
-    def test_x_design_info_is_covariate_side(self, ipw_result):
+    def test_covariate_design_is_covariate_side(self, ipw_result):
         """The covariate side mirrors the right-hand side of the formula."""
-        assert hasattr(ipw_result, "_x_design_info")
-        assert "age" in ipw_result._x_design_info.column_names
-        assert "race" in ipw_result._x_design_info.column_names
+        assert hasattr(ipw_result, "_covariate_design")
+        assert "age" in ipw_result._covariate_design.labels
+        assert "race" in ipw_result._covariate_design.labels
 
-    def test_t_and_x_design_info_are_distinct(self, ipw_result):
-        """The two attributes must point to different design objects."""
-        assert ipw_result._t_design_info is not ipw_result._x_design_info
+    def test_treatment_and_covariate_designs_are_distinct(self, ipw_result):
+        """The two transforms must be different objects."""
+        assert ipw_result._treatment_design is not ipw_result._covariate_design

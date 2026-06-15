@@ -659,8 +659,8 @@ def test_sdid(mock_pymc_sample):
     assert "draw" in result.tau_posterior.dims
 
     # post_impact should exist
-    assert hasattr(result, "post_impact")
-    assert hasattr(result, "post_impact_cumulative")
+    assert hasattr(result, "result")
+    assert hasattr(result.result, "impact_post_cumulative")
 
     # summary should run without error
     result.summary()

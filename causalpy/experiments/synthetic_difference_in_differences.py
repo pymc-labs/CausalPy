@@ -27,6 +27,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments._results import CausalResult
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
@@ -483,10 +484,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_inference_data(
+        predictions_pre = self._build_inference_data(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_inference_data(
+        predictions_post = self._build_inference_data(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -496,7 +497,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         pre_impact_vals = y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
         post_impact_vals = y_tr_post[np.newaxis, np.newaxis, :] - sc_post
 
-        self.pre_impact = xr.DataArray(
+        impact_pre = xr.DataArray(
             pre_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -506,7 +507,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact = xr.DataArray(
+        impact_post = xr.DataArray(
             post_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -516,7 +517,15 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
+        impact_post_cumulative = impact_post.cumsum(dim="obs_ind")
+        self.result = CausalResult(
+            score=None,
+            predictions_pre=predictions_pre,
+            predictions_post=predictions_post,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post_cumulative,
+        )
 
     def _build_inference_data(
         self,
@@ -666,10 +675,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # ---- TOP PLOT: Observed vs counterfactual ----
-        pre_pred = self.pre_pred.posterior_predictive["mu"].sel(
+        pre_pred = self.result.predictions_pre.posterior_predictive["mu"].sel(
             treated_units=treated_unit
         )
-        post_pred = self.post_pred.posterior_predictive["mu"].sel(
+        post_pred = self.result.predictions_post.posterior_predictive["mu"].sel(
             treated_units=treated_unit
         )
 
@@ -728,20 +737,20 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         # ---- MIDDLE PLOT: Impact ----
         plot_xY(
             self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
+            self.result.impact_pre.sel(treated_units=treated_unit),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
+            self.result.impact_post.sel(treated_units=treated_unit),
             ax=ax[1],
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"])
+            y1=self.result.impact_post.mean(["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values,
             color="C0",
@@ -754,7 +763,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            self.result.impact_post_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
             plot_hdi_kwargs={"color": "C1"},
         )

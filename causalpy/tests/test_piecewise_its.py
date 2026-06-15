@@ -931,18 +931,18 @@ def test_piecewise_its_post_impact_attributes():
     )
 
     # Check that post_impact and datapost are created
-    assert hasattr(result, "post_impact")
+    assert hasattr(result, "result")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result, "result")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
     # post_impact should have same length as datapost
-    assert len(result.post_impact) == len(result.datapost)
+    assert len(result.result.impact_post) == len(result.datapost)
 
     # post_pred should have same length as datapost
-    assert len(result.post_pred) == len(result.datapost)
+    assert len(result.result.predictions_post) == len(result.datapost)
 
 
 # ==============================================================================
@@ -981,9 +981,9 @@ def test_piecewise_its_instance_attributes():
     assert "obs_ind" in result.design["X"].dims
     assert "coeffs" in result.design["X"].dims
 
-    # Check design info stored
-    assert hasattr(result, "_x_design_info")
-    assert hasattr(result, "_y_design_info")
+    # Check design transform stored
+    assert hasattr(result, "_design")
+    assert result._design.labels == result.labels
 
 
 def test_piecewise_its_float_threshold():
@@ -1137,16 +1137,16 @@ def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
     )
 
     # Check attributes exist
-    assert hasattr(result, "post_impact")
+    assert hasattr(result, "result")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result, "result")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
     # post_pred should be dict-like with posterior_predictive
-    assert "posterior_predictive" in result.post_pred
-    assert "mu" in result.post_pred["posterior_predictive"]
+    assert "posterior_predictive" in result.result.predictions_post
+    assert "mu" in result.result.predictions_post["posterior_predictive"]
 
 
 def test_piecewise_its_datetime_post_intervention_attributes():

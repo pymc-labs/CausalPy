@@ -446,7 +446,7 @@ def extract_lift_for_mmm(
 
     for unit in treated_units:
         # Get posterior samples for this unit's causal impact
-        unit_impact = sc_result.post_impact.sel(treated_units=unit)
+        unit_impact = sc_result.result.impact_post.sel(treated_units=unit)
 
         # Aggregate across time periods using the named method (e.g. "mean", "sum")
         lift_samples = getattr(unit_impact, aggregate)(dim="obs_ind")

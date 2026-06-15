@@ -20,12 +20,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from patsy import dmatrices
 from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments._design import build_patsy_design
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -215,7 +215,6 @@ class PanelRegression(BaseExperiment):
         # Store panel dimensions (after validation confirms columns exist)
         self.n_units = data[unit_fe_variable].nunique()
         self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
-        self._build_design_matrices()
         self._prepare_data()
         self.algorithm()
 
@@ -256,8 +255,8 @@ class PanelRegression(BaseExperiment):
                 "in the formula. The demeaned transformation handles time fixed effects automatically."
             )
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy.
+    def _prepare_data(self) -> None:
+        """Build design matrices from formula and bundle into an ``xr.Dataset``.
 
         For ``fe_method="demeaned"`` this first applies the demeaned
         transformation (de-meaning by unit, and optionally by time) before
@@ -273,23 +272,16 @@ class PanelRegression(BaseExperiment):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = dmatrices(self.formula, data)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
+        self._design, X_raw, y_raw = build_patsy_design(self.formula, data)
+        self.outcome_variable_name = self._design.outcome_name
+        self.labels = self._design.labels
+        n = X_raw.shape[0]
         self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
+            X_raw,
+            y_raw,
             obs_ind=np.arange(n),
             coeffs=self.labels,
         )
-        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit the model."""
@@ -879,18 +871,18 @@ class PanelRegression(BaseExperiment):
                 selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
             elif select == "extreme":
                 # Select units with the largest and smallest mean outcomes
-                unit_means = self.data.groupby(self.unit_fe_variable)[
-                    self.outcome_variable_name
-                ].mean()
+                outcome = self.outcome_variable_name
+                assert outcome is not None
+                unit_means = self.data.groupby(self.unit_fe_variable)[outcome].mean()
                 n_each = max(1, n_sample // 2)
                 top = unit_means.nlargest(n_each).index.tolist()
                 bottom = unit_means.nsmallest(n_sample - n_each).index.tolist()
                 selected_units = top + bottom
             elif select == "high_variance":
                 # Select units with the most within-unit variation
-                unit_var = self.data.groupby(self.unit_fe_variable)[
-                    self.outcome_variable_name
-                ].var()
+                outcome = self.outcome_variable_name
+                assert outcome is not None
+                unit_var = self.data.groupby(self.unit_fe_variable)[outcome].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()
 
         # Create only the subplots we need

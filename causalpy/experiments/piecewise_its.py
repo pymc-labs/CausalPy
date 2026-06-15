@@ -21,11 +21,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
+from causalpy.experiments._design import build_patsy_design
+from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -175,15 +176,9 @@ class PiecewiseITS(BaseExperiment):
         )
 
         # Parse formula with patsy (step and ramp are available in namespace)
-        y, X = dmatrices(formula, self.data)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = list(X.design_info.column_names)
-
-        # Convert to numpy arrays
-        y_array = np.asarray(y)
-        X_array = np.asarray(X)
+        self._design, X_array, y_array = build_patsy_design(formula, self.data)
+        self.outcome_variable_name = self._design.outcome_name
+        self.labels = list(self._design.labels)
 
         n_obs = X_array.shape[0]
 
@@ -349,64 +344,52 @@ class PiecewiseITS(BaseExperiment):
 
     def _create_post_intervention_attributes(self) -> None:
         """
-        Create post_impact, datapost, and post_pred attributes for effect_summary().
-
-        These attributes make PiecewiseITS compatible with the effect_summary()
-        method inherited from BaseExperiment, which expects ITS-like attributes.
+        Build a :class:`CausalResult` for post-intervention effect summaries.
 
         The "post-intervention" portion is defined as all observations at or after
         the first interruption time.
         """
         if not self.interruption_times:
-            # No interruptions - all data is "pre-intervention"
-            # Create empty post-intervention attributes
-            self.datapost = self.data.iloc[0:0]  # Empty DataFrame
+            self.datapost = self.data.iloc[0:0]
+            self.result = CausalResult(
+                score=self.score,
+                predictions_pre=None,
+                predictions_post=None,
+                impact_pre=None,
+                impact_post=None,
+                impact_post_cumulative=None,
+            )
             return
 
-        # Get the first interruption time
         first_interruption = self.interruption_times[0]
         time_col = self.time_col
-
-        # Post-intervention = time >= first_interruption (inclusive)
         post_mask = self.data[time_col] >= first_interruption
-
-        # Create datapost - the post-intervention data
         self.datapost = self.data[post_mask].copy()
         self.datapost.index.name = "obs_ind"
-
-        # Get indices for post-intervention period
         post_indices = np.where(np.asarray(post_mask))[0]
 
-        # Create post_impact - the effects after the first interruption
         if self._model_backend.is_bayesian:
-            # For PyMC models, effect is an xarray.DataArray
-            # Select using obs_ind coordinate
-            self.post_impact = self.effect.isel(obs_ind=post_indices)
-
-            # Create post_pred - counterfactual predictions for post-intervention
-            # This needs to be an InferenceData-like object for extract_counterfactual
+            impact_post = self.effect.isel(obs_ind=post_indices)
             y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
             if "treated_units" in y_cf_mu.dims:
                 y_cf_mu = y_cf_mu.isel(treated_units=0)
-            post_cf_mu = y_cf_mu.isel(obs_ind=post_indices)
-
-            # Update the coordinates to match datapost.index
-            post_cf_mu = post_cf_mu.assign_coords(obs_ind=self.datapost.index)
-
-            # Create an InferenceData-like dict structure
-            self.post_pred = {
-                "posterior_predictive": {"mu": post_cf_mu},
-            }
-
-            # Update post_impact coordinates to match datapost.index
-            self.post_impact = self.post_impact.assign_coords(
+            post_cf_mu = y_cf_mu.isel(obs_ind=post_indices).assign_coords(
                 obs_ind=self.datapost.index
             )
+            predictions_post = {"posterior_predictive": {"mu": post_cf_mu}}
+            impact_post = impact_post.assign_coords(obs_ind=self.datapost.index)
+        else:
+            impact_post = self.effect[post_indices]
+            predictions_post = np.squeeze(self.y_counterfactual)[post_indices]
 
-        elif self._model_backend.is_ols:
-            # For OLS models, effect and counterfactual are numpy arrays
-            self.post_impact = self.effect[post_indices]
-            self.post_pred = np.squeeze(self.y_counterfactual)[post_indices]
+        self.result = CausalResult(
+            score=self.score,
+            predictions_pre=None,
+            predictions_post=predictions_post,
+            impact_pre=None,
+            impact_post=impact_post,
+            impact_post_cumulative=None,
+        )
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.

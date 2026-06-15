@@ -25,11 +25,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments._design import build_patsy_design
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -426,16 +426,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices using patsy."""
-        # Build design matrix for the full data
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-        # Store full design matrix
-        self.X_full = np.asarray(X)
-        self.y_full = np.asarray(y)
+        self._design, self.X_full, self.y_full = build_patsy_design(
+            self.formula, self.data
+        )
+        self.labels = self._design.labels
+        self.outcome_variable_name = self._design.outcome_name
 
         # Get untreated subset for training
         untreated_mask = np.asarray(self.data["_is_untreated"].values, dtype=bool)

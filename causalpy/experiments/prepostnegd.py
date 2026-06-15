@@ -21,12 +21,12 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments._design import build_patsy_design
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -112,28 +112,20 @@ class PrePostNEGD(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.pretreatment_variable_name = pretreatment_variable_name
         self.input_validation()
-        self._build_design_matrices()
         self._prepare_data()
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
     def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
+        """Build design matrices from formula and bundle into an ``xr.Dataset``."""
+        self._design, X_raw, y_raw = build_patsy_design(self.formula, self.data)
+        self.labels = self._design.labels
+        self.outcome_variable_name = self._design.outcome_name
         self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
+            X_raw,
+            y_raw,
             obs_ind=self.data.index,
             coeffs=self.labels,
         )
-        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
@@ -167,10 +159,8 @@ class PrePostNEGD(BaseExperiment):
                 self.group_variable_name: np.zeros(self.pred_xi.shape),
             }
         )
-        (new_x_untreated,) = build_design_matrices(
-            [self._x_design_info], x_pred_untreated
-        )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+        new_x_untreated = self._design.transform_x(x_pred_untreated)
+        self.pred_untreated = self.model.predict(X=new_x_untreated)
         # treated
         x_pred_treated = pd.DataFrame(
             {
@@ -178,8 +168,8 @@ class PrePostNEGD(BaseExperiment):
                 self.group_variable_name: np.ones(self.pred_xi.shape),
             }
         )
-        (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+        new_x_treated = self._design.transform_x(x_pred_treated)
+        self.pred_treated = self.model.predict(X=new_x_treated)
 
         # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(

@@ -168,11 +168,11 @@ def test_naive_ols_fit(iv_data, sample_kwargs):
     )
 
     # Check OLS attributes exist
-    assert hasattr(result, "ols_reg")
-    assert hasattr(result, "ols_beta_params")
-    assert isinstance(result.ols_beta_params, dict)
-    assert "Intercept" in result.ols_beta_params
-    assert "X" in result.ols_beta_params
+    assert result._prior_calibration is not None
+    assert result._prior_calibration.naive is not None
+    assert isinstance(result._prior_calibration.beta_naive, dict)
+    assert "Intercept" in result._prior_calibration.beta_naive
+    assert "X" in result._prior_calibration.beta_naive
 
 
 def test_2sls_fit(iv_data, sample_kwargs):
@@ -188,12 +188,11 @@ def test_2sls_fit(iv_data, sample_kwargs):
     )
 
     # Check 2SLS attributes exist
-    assert hasattr(result, "first_stage_reg")
-    assert hasattr(result, "second_stage_reg")
-    assert hasattr(result, "ols_beta_first_params")
-    assert hasattr(result, "ols_beta_second_params")
-    assert isinstance(result.ols_beta_first_params, list)
-    assert isinstance(result.ols_beta_second_params, list)
+    assert result._prior_calibration is not None
+    assert result._prior_calibration.first_stage is not None
+    assert result._prior_calibration.second_stage is not None
+    assert isinstance(result._prior_calibration.beta_first, list)
+    assert isinstance(result._prior_calibration.beta_second, list)
 
 
 # =============================================================================
