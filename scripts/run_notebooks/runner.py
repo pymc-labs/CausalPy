@@ -46,6 +46,9 @@ from papermill.iorw import load_notebook_node, write_ipynb
 HERE = Path(__file__).parent
 NOTEBOOKS_PATH = Path("docs/source/notebooks")
 KERNEL_NAME = "python3"
+# Papermill sets raise_on_iopub_timeout=True; nbclient defaults iopub_timeout to 4s.
+# Full runs execute real MCMC and can go silent between progress updates for minutes.
+FULL_IOPUB_TIMEOUT = 3600
 
 INJECTED_CODE_FILE = HERE / "injected.py"
 INJECTED_CODE = INJECTED_CODE_FILE.read_text()
@@ -104,7 +107,12 @@ def inject_mock_code(cells: list) -> None:
     )
 
 
-def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
+def run_notebook(
+    notebook_path: Path,
+    *,
+    full: bool = False,
+    iopub_timeout: int | None = None,
+) -> None:
     """Run a notebook, optionally without mock injection and saving outputs in place.
 
     Parameters
@@ -126,6 +134,7 @@ def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
             kernel_name=KERNEL_NAME,
             progress_bar=True,
             cwd=notebook_path.parent,
+            iopub_timeout=iopub_timeout or FULL_IOPUB_TIMEOUT,
         )
         return
 
@@ -163,12 +172,15 @@ def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
 def get_notebooks(
     pattern: str | None = None,
     exclude_patterns: list[str] | None = None,
+    *,
+    include_skipped: bool = False,
 ) -> list[Path]:
     """Get list of notebooks to run, optionally filtered."""
     notebooks = list(NOTEBOOKS_PATH.glob("*.ipynb"))
 
-    # Filter out notebooks that are incompatible with the mock
-    notebooks = [nb for nb in notebooks if nb.name not in SKIP_NOTEBOOKS]
+    if not include_skipped:
+        # Filter out notebooks that are incompatible with the mock
+        notebooks = [nb for nb in notebooks if nb.name not in SKIP_NOTEBOOKS]
 
     if pattern:
         notebooks = [nb for nb in notebooks if Path(nb).match(pattern)]
@@ -207,6 +219,15 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Full execution: skip mock injection and overwrite notebooks with fresh outputs. This can take a long time.",
     )
+    parser.add_argument(
+        "--iopub-timeout",
+        type=int,
+        default=None,
+        help=(
+            "Seconds to wait for notebook kernel output between IOPub messages "
+            f"(full mode only; default: {FULL_IOPUB_TIMEOUT})."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -217,6 +238,7 @@ if __name__ == "__main__":
     notebooks = get_notebooks(
         pattern=args.pattern,
         exclude_patterns=args.exclude_patterns,
+        include_skipped=args.full,
     )
 
     logging.info(f"Found {len(notebooks)} notebooks to run")
@@ -238,10 +260,19 @@ if __name__ == "__main__":
             ) from exc
 
         Parallel(n_jobs=-1)(
-            delayed(run_notebook)(notebook, full=args.full) for notebook in notebooks
+            delayed(run_notebook)(
+                notebook,
+                full=args.full,
+                iopub_timeout=args.iopub_timeout,
+            )
+            for notebook in notebooks
         )
     else:
         for notebook in notebooks:
-            run_notebook(notebook, full=args.full)
+            run_notebook(
+                notebook,
+                full=args.full,
+                iopub_timeout=args.iopub_timeout,
+            )
 
     logging.info("All notebooks completed successfully!")

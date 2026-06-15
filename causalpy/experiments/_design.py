@@ -97,9 +97,7 @@ class PatsyDesignTransform:
         if self._y_design_info is None:
             msg = "No outcome design metadata; transform_y is unavailable."
             raise ValueError(msg)
-        (new_y, _) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], new_data
-        )
+        (new_y,) = build_design_matrices([self._y_design_info], new_data)
         return np.asarray(new_y)
 
 
@@ -115,7 +113,7 @@ def build_patsy_design(
     data : pandas.DataFrame
         Input data used to fit the design metadata.
     """
-    # ponytail: eval_env=1 resolves custom transforms (step/ramp) from the caller's module.
+    # eval_env=1 resolves custom transforms (step/ramp) from the caller's module.
     y, X = dmatrices(formula, data, eval_env=1)
     transform = PatsyDesignTransform(
         _x_design_info=X.design_info,
