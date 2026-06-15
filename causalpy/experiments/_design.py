@@ -115,7 +115,8 @@ def build_patsy_design(
     data : pandas.DataFrame
         Input data used to fit the design metadata.
     """
-    y, X = dmatrices(formula, data)
+    # ponytail: eval_env=1 resolves custom transforms (step/ramp) from the caller's module.
+    y, X = dmatrices(formula, data, eval_env=1)
     transform = PatsyDesignTransform(
         _x_design_info=X.design_info,
         _y_design_info=y.design_info,
@@ -137,7 +138,7 @@ def build_patsy_predictors(
     data : pandas.DataFrame
         Input data used to fit the design metadata.
     """
-    _, X = dmatrices(formula, data)
+    _, X = dmatrices(formula, data, eval_env=1)
     transform = PatsyDesignTransform(
         _x_design_info=X.design_info,
         _y_design_info=None,
@@ -159,7 +160,7 @@ def build_patsy_formula_sides(
     data : pandas.DataFrame
         Input data used to fit the design metadata.
     """
-    lhs, rhs = dmatrices(formula, data)
+    lhs, rhs = dmatrices(formula, data, eval_env=1)
     treatment = PatsyDesignTransform(
         _x_design_info=lhs.design_info,
         _y_design_info=None,

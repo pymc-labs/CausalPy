@@ -148,7 +148,7 @@ class RegressionDiscontinuity(BaseExperiment):
             if filter_desc:
                 msg = (
                     f"Choice of {' and '.join(filter_desc)} parameters has led to only "
-                    f"{len(self.fit_data)} remaining datappoints. "
+                    f"{len(self.fit_data)} remaining datapoints. "
                     f"Consider adjusting these parameters."
                 )
             else:
