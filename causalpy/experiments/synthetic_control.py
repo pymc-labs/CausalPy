@@ -58,6 +58,14 @@ class SyntheticControl(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
+
     Examples
     --------
     >>> import causalpy as cp
@@ -77,14 +85,6 @@ class SyntheticControl(BaseExperiment):
     ...         }
     ...     ),
     ... )
-
-    Notes
-    -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
     """
 
     supports_ols = True

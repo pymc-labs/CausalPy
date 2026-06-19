@@ -66,7 +66,7 @@ class InstrumentalVariable(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import pandas as pd
     >>> import causalpy as cp
