@@ -80,6 +80,37 @@ class PanelRegression(BaseExperiment):
     _group_means : dict
         Stored group means for recovering unit effects (demeaned method only).
 
+    Notes
+    -----
+    The demeaned transformation (de-meaning by group) removes time-invariant
+    confounders but also drops time-invariant covariates from the model. For
+    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    extracted from the coefficients. For the demeaned approach, unit effects
+    can be recovered post-hoc using the stored group means (``_group_means``),
+    which are always computed from the original (pre-demeaning) data.
+
+    This class does not yet implement hierarchical/partial-pooling fixed
+    effects. Those semantics are intentionally kept out of scope here so
+    ``fe_method="dummies"`` remains an accurate label for the current
+    unpooled estimator.
+
+    Two-way fixed effects (unit + time) control for both unit-specific and
+    time-specific unobserved heterogeneity. This is the standard approach in
+    difference-in-differences estimation.
+
+    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
+    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
+    entry/exit, missing waves). When both unit and time fixed effects are
+    requested with ``fe_method="demeaned"``, the sequential demeaning
+    (first by unit, then by time) is algebraically equivalent to the standard
+    two-way demeaned transformation only for balanced panels. For unbalanced
+    panels, iterative alternating demeaning would be needed for exact
+    convergence; the single-pass approximation used here may introduce small
+    biases. Unbalanced panels are common in practice (e.g. firm or worker
+    panels with attrition); for heavily unbalanced data, consider checking
+    sensitivity or using dedicated FE packages that implement iterative
+    two-way demeaning (e.g. reghdfe, pyfixest).
+
     Examples
     --------
     Small panel with dummy variables:
@@ -143,37 +174,6 @@ class PanelRegression(BaseExperiment):
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
     ... )
-
-    Notes
-    -----
-    The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
-
-    This class does not yet implement hierarchical/partial-pooling fixed
-    effects. Those semantics are intentionally kept out of scope here so
-    ``fe_method="dummies"`` remains an accurate label for the current
-    unpooled estimator.
-
-    Two-way fixed effects (unit + time) control for both unit-specific and
-    time-specific unobserved heterogeneity. This is the standard approach in
-    difference-in-differences estimation.
-
-    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
-    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
-    entry/exit, missing waves). When both unit and time fixed effects are
-    requested with ``fe_method="demeaned"``, the sequential demeaning
-    (first by unit, then by time) is algebraically equivalent to the standard
-    two-way demeaned transformation only for balanced panels. For unbalanced
-    panels, iterative alternating demeaning would be needed for exact
-    convergence; the single-pass approximation used here may introduce small
-    biases. Unbalanced panels are common in practice (e.g. firm or worker
-    panels with attrition); for heavily unbalanced data, consider checking
-    sensitivity or using dedicated FE packages that implement iterative
-    two-way demeaning (e.g. reghdfe, pyfixest).
     """
 
     supports_ols = True
