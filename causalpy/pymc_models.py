@@ -90,8 +90,8 @@ class PyMCModel(pm.Model):
         Dictionary of priors for the model. Defaults to ``None``, in which
         case default priors are used.
 
-    Example
-    -------
+    Examples
+    --------
     >>> import causalpy as cp
     >>> import numpy as np
     >>> import pymc as pm
@@ -608,7 +608,7 @@ class LinearRegression(PyMCModel):
         \mu &= X \cdot \beta \\
         y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -685,7 +685,7 @@ class WeightedSumFitter(PyMCModel):
         \mu &= X \cdot \beta \\
         y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -865,7 +865,7 @@ class SoftmaxWeightedSumFitter(PyMCModel):
     the role of the :math:`\ell_2` regularization parameter :math:`\zeta` in the
     frequentist SDiD of Arkhangelsky et al. (2021).
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -1135,7 +1135,7 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 class InstrumentalVariableRegression(PyMCModel):
     """Custom PyMC model for instrumental linear regression.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -1462,7 +1462,7 @@ class PropensityScore(PyMCModel):
         p &= \text{logit}^{-1}(\mu) \\
         t &\sim \mathrm{Bernoulli}(p)
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np

@@ -123,8 +123,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     Unit and observation counts in the summary output are computed without assuming
     balanced panels.
 
-    Example
-    -------
+    References
+    ----------
+    Borusyak, K., Jaravel, X., & Spiess, J. (2024). Revisiting Event Study Designs:
+    Robust and Efficient Estimation. Review of Economic Studies.
+
+    Examples
+    --------
     >>> import causalpy as cp
     >>> from causalpy.data.simulate_data import generate_staggered_did_data
     >>> df = generate_staggered_did_data(n_units=30, n_time_periods=15, seed=42)
@@ -144,11 +149,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     ...         }
     ...     ),
     ... )  # doctest: +SKIP
-
-    References
-    ----------
-    Borusyak, K., Jaravel, X., & Spiess, J. (2024). Revisiting Event Study Designs:
-    Robust and Efficient Estimation. Review of Economic Studies.
     """
 
     supports_ols = True
