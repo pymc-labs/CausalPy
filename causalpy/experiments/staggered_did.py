@@ -48,25 +48,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     as the difference between observed and predicted outcomes for treated
     observations.
 
-    Assumptions
-    -----------
-    This estimator requires the following identifying assumptions:
-
-    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
-       treated in all subsequent periods. Treatment cannot be reversed or
-       temporarily suspended. This is validated at runtime.
-    2. **Parallel trends**: In the absence of treatment, treated and control
-       units would have followed parallel outcome trajectories.
-    3. **No anticipation**: Units do not change their behavior in anticipation
-       of future treatment.
-    4. **Untreated support at each calendar period**: The time fixed effect
-       :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
-       least one unit is untreated in that period. Without never-treated units,
-       post-treatment effects for the last-treated cohort (and any calendar
-       periods where every unit is already treated) are not identified. CausalPy
-       warns when this condition fails and marks the affected ``ATT(g, t)`` and
-       ``ATT(e)`` cells as non-identified in the output tables.
-
     Parameters
     ----------
     data : pd.DataFrame
@@ -115,6 +96,23 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
+    This estimator requires the following identifying assumptions:
+
+    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
+       treated in all subsequent periods. Treatment cannot be reversed or
+       temporarily suspended. This is validated at runtime.
+    2. **Parallel trends**: In the absence of treatment, treated and control
+       units would have followed parallel outcome trajectories.
+    3. **No anticipation**: Units do not change their behavior in anticipation
+       of future treatment.
+    4. **Untreated support at each calendar period**: The time fixed effect
+       :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
+       least one unit is untreated in that period. Without never-treated units,
+       post-treatment effects for the last-treated cohort (and any calendar
+       periods where every unit is already treated) are not identified. CausalPy
+       warns when this condition fails and marks the affected ``ATT(g, t)`` and
+       ``ATT(e)`` cells as non-identified in the output tables.
+
     **Panel Balance**: This implementation supports both balanced and unbalanced panel
     data. While balanced panels (where each unit is observed in every time period) are
     common in staggered DiD applications, the imputation-based approach of Borusyak et

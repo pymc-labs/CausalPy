@@ -265,13 +265,6 @@ class InstrumentalVariable(BaseExperiment):
     ) -> None:
         """Plot the results.
 
-        Notes
-        -----
-        Plotting is not yet implemented for instrumental variable
-        experiments. This stub exists so every experiment subclass
-        offers an explicit, kwarg-only ``plot()`` signature
-        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
-
         Parameters
         ----------
         show : bool
@@ -283,6 +276,13 @@ class InstrumentalVariable(BaseExperiment):
         ------
         NotImplementedError
             Always.
+
+        Notes
+        -----
+        Plotting is not yet implemented for instrumental variable
+        experiments. This stub exists so every experiment subclass
+        offers an explicit, kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
         """
         raise NotImplementedError("Plot method not implemented.")
 
