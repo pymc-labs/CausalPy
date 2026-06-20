@@ -120,12 +120,14 @@ def test_three_period_pymc_datetime_index(datetime_data, mock_pymc_sample):
     # Check all new attributes exist (same for all model types)
     assert hasattr(result, "data_intervention")
     assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+    assert hasattr(result.intervention_result, "predictions_post")
+    assert hasattr(result.post_intervention_result, "predictions_post")
+    assert hasattr(result.intervention_result, "impact_post")
+    assert hasattr(result.post_intervention_result, "impact_post")
+    assert hasattr(result.intervention_result, "impact_post_cumulative")
+    assert hasattr(result.post_intervention_result, "impact_post_cumulative")
 
     # Check data splits
     assert len(result.data_intervention) > 0
@@ -137,11 +139,13 @@ def test_three_period_pymc_datetime_index(datetime_data, mock_pymc_sample):
     import arviz as az
     import xarray as xr
 
-    assert isinstance(result.intervention_pred, az.InferenceData)
-    assert isinstance(result.post_intervention_pred, az.InferenceData)
+    assert isinstance(result.intervention_result.predictions_post, az.InferenceData)
+    assert isinstance(
+        result.post_intervention_result.predictions_post, az.InferenceData
+    )
     # For PyMC models, post_impact is always xarray DataArray
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(result.intervention_result.impact_post, xr.DataArray)
+    assert isinstance(result.post_intervention_result.impact_post, xr.DataArray)
 
 
 @pytest.mark.integration
@@ -163,12 +167,14 @@ def test_three_period_pymc_integer_index(integer_data, mock_pymc_sample):
     # Check all new attributes exist (same for all model types)
     assert hasattr(result, "data_intervention")
     assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+    assert hasattr(result.intervention_result, "predictions_post")
+    assert hasattr(result.post_intervention_result, "predictions_post")
+    assert hasattr(result.intervention_result, "impact_post")
+    assert hasattr(result.post_intervention_result, "impact_post")
+    assert hasattr(result.intervention_result, "impact_post_cumulative")
+    assert hasattr(result.post_intervention_result, "impact_post_cumulative")
 
     # Check data splits
     assert len(result.data_intervention) > 0
@@ -180,11 +186,13 @@ def test_three_period_pymc_integer_index(integer_data, mock_pymc_sample):
     import arviz as az
     import xarray as xr
 
-    assert isinstance(result.intervention_pred, az.InferenceData)
-    assert isinstance(result.post_intervention_pred, az.InferenceData)
+    assert isinstance(result.intervention_result.predictions_post, az.InferenceData)
+    assert isinstance(
+        result.post_intervention_result.predictions_post, az.InferenceData
+    )
     # For PyMC models, post_impact is always xarray DataArray
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(result.intervention_result.impact_post, xr.DataArray)
+    assert isinstance(result.post_intervention_result.impact_post, xr.DataArray)
 
 
 @pytest.mark.integration
@@ -206,12 +214,14 @@ def test_three_period_sklearn_datetime_index(datetime_data):
     # Check all new attributes exist (same for all model types)
     assert hasattr(result, "data_intervention")
     assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+    assert hasattr(result.intervention_result, "predictions_post")
+    assert hasattr(result.post_intervention_result, "predictions_post")
+    assert hasattr(result.intervention_result, "impact_post")
+    assert hasattr(result.post_intervention_result, "impact_post")
+    assert hasattr(result.intervention_result, "impact_post_cumulative")
+    assert hasattr(result.post_intervention_result, "impact_post_cumulative")
 
     # Check data splits
     assert len(result.data_intervention) > 0
@@ -220,13 +230,13 @@ def test_three_period_sklearn_datetime_index(datetime_data):
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
     # Check sklearn-specific types
-    assert isinstance(result.intervention_pred, np.ndarray)
-    assert isinstance(result.post_intervention_pred, np.ndarray)
+    assert isinstance(result.intervention_result.predictions_post, np.ndarray)
+    assert isinstance(result.post_intervention_result.predictions_post, np.ndarray)
     # For sklearn models, post_impact is also xarray DataArray (for consistency)
     import xarray as xr
 
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(result.intervention_result.impact_post, xr.DataArray)
+    assert isinstance(result.post_intervention_result.impact_post, xr.DataArray)
 
 
 @pytest.mark.integration
@@ -248,12 +258,14 @@ def test_three_period_sklearn_integer_index(integer_data):
     # Check all new attributes exist (same for all model types)
     assert hasattr(result, "data_intervention")
     assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+    assert hasattr(result.intervention_result, "predictions_post")
+    assert hasattr(result.post_intervention_result, "predictions_post")
+    assert hasattr(result.intervention_result, "impact_post")
+    assert hasattr(result.post_intervention_result, "impact_post")
+    assert hasattr(result.intervention_result, "impact_post_cumulative")
+    assert hasattr(result.post_intervention_result, "impact_post_cumulative")
 
     # Check data splits
     assert len(result.data_intervention) > 0
@@ -262,13 +274,13 @@ def test_three_period_sklearn_integer_index(integer_data):
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
     # Check sklearn-specific types
-    assert isinstance(result.intervention_pred, np.ndarray)
-    assert isinstance(result.post_intervention_pred, np.ndarray)
+    assert isinstance(result.intervention_result.predictions_post, np.ndarray)
+    assert isinstance(result.post_intervention_result.predictions_post, np.ndarray)
     # For sklearn models, post_impact is also xarray DataArray (for consistency)
     import xarray as xr
 
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(result.intervention_result.impact_post, xr.DataArray)
+    assert isinstance(result.post_intervention_result.impact_post, xr.DataArray)
 
 
 # ==============================================================================
@@ -298,8 +310,8 @@ def test_backward_compatibility_no_treatment_end_time(datetime_data, mock_pymc_s
     # Check existing attributes still work
     assert hasattr(result, "datapre")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
-    assert hasattr(result, "post_impact")
+    assert hasattr(result, "result")
+    assert hasattr(result.result, "impact_post")
 
 
 @pytest.mark.integration
@@ -710,16 +722,16 @@ def test_all_new_attributes_exist(datetime_data, mock_pymc_sample):
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
     # Prediction attributes
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
 
     # Impact attributes
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
+    assert hasattr(result.intervention_result, "impact_post")
+    assert hasattr(result.post_intervention_result, "impact_post")
 
     # Cumulative impact attributes
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    assert hasattr(result.intervention_result, "impact_post_cumulative")
+    assert hasattr(result.post_intervention_result, "impact_post_cumulative")
 
 
 @pytest.mark.integration
@@ -760,12 +772,12 @@ def test_cumulative_impacts_calculated_correctly(datetime_data, mock_pymc_sample
     )
 
     # Cumulative impacts should exist and have correct shape
-    assert result.intervention_impact_cumulative is not None
-    assert result.post_intervention_impact_cumulative is not None
+    assert result.intervention_result.impact_post_cumulative is not None
+    assert result.post_intervention_result.impact_post_cumulative is not None
 
     # For PyMC, check dimensions
-    if hasattr(result.intervention_impact_cumulative, "dims"):
-        assert "obs_ind" in result.intervention_impact_cumulative.dims
+    if hasattr(result.intervention_result.impact_post_cumulative, "dims"):
+        assert "obs_ind" in result.intervention_result.impact_post_cumulative.dims
 
 
 @pytest.mark.integration
@@ -782,11 +794,13 @@ def test_intervention_pred_is_slice_of_post_pred(datetime_data, mock_pymc_sample
     )
 
     # For PyMC models, check that intervention_pred is InferenceData
-    assert hasattr(result.intervention_pred, "posterior_predictive")
+    assert hasattr(result.intervention_result.predictions_post, "posterior_predictive")
 
     # Extract mu from both
-    intervention_mu = result.intervention_pred.posterior_predictive["mu"]
-    post_mu = result.post_pred.posterior_predictive["mu"]
+    intervention_mu = result.intervention_result.predictions_post.posterior_predictive[
+        "mu"
+    ]
+    post_mu = result.result.predictions_post.posterior_predictive["mu"]
 
     # Check that intervention_mu is a subset of post_mu
     intervention_coords = result.data_intervention.index
@@ -860,9 +874,9 @@ def test_analyze_persistence_sklearn(datetime_data):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Check persistence ratio is numeric (signed when effects oppose)
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
+    assert np.isfinite(persistence["persistence_ratio"])
     # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
@@ -1005,3 +1019,113 @@ def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
     # Should only have treatment_time line, not treatment_end_time
     assert fig is not None
     assert ax is not None
+
+
+def test_split_post_period_without_treated_units_dim(datetime_data, mock_pymc_sample):
+    """Three-period split uses impact_post directly when treated_units is absent."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    impact = result.result.impact_post
+    if "treated_units" in impact.dims:
+        result.result.impact_post = impact.isel(treated_units=0, drop=True)
+
+    result._split_post_period()
+    assert result.intervention_result is not None
+    assert result.post_intervention_result is not None
+
+
+def test_comparison_period_summary_requires_three_period_results(
+    datetime_data, mock_pymc_sample
+):
+    """_comparison_period_summary raises when three-period results are missing."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.intervention_result = None
+
+    with pytest.raises(ValueError, match="three-period results"):
+        result._comparison_period_summary(direction="increase", alpha=0.05)
+
+
+def test_analyze_persistence_requires_three_period_results(
+    datetime_data, mock_pymc_sample
+):
+    """analyze_persistence raises when three-period results are missing."""
+    df, treatment_time, treatment_end_time = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.intervention_result = None
+
+    with pytest.raises(ValueError, match="three-period intervention results"):
+        result.analyze_persistence()
+
+
+def test_bayesian_plot_title_uses_r2_score_key(datetime_data, mock_pymc_sample):
+    """Bayesian ITS plot titles accept score Series keyed by r2."""
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    result.result.score = pd.Series({"r2": 0.91, "r2_std": 0.03})
+
+    fig, ax = result.plot(show=False)
+    assert fig is not None
+    assert "0.91" in ax[0].get_title()
+
+
+def test_bayesian_plot_title_handles_broken_score(
+    datetime_data, mock_pymc_sample, monkeypatch
+):
+    """Bayesian ITS plot tolerates score objects that raise on index access."""
+    import builtins
+    from unittest.mock import MagicMock
+
+    df, treatment_time, _ = datetime_data
+
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    broken_score = MagicMock(spec=pd.Series)
+    broken_index = MagicMock()
+    broken_index.__contains__ = MagicMock(side_effect=RuntimeError("bad index"))
+    broken_score.index = broken_index
+
+    real_isinstance = builtins.isinstance
+
+    def isinstance_with_broken_series(obj, classinfo):
+        if obj is broken_score and classinfo is pd.Series:
+            return True
+        return real_isinstance(obj, classinfo)
+
+    monkeypatch.setattr("builtins.isinstance", isinstance_with_broken_series)
+    result.result.score = broken_score
+
+    fig, ax = result.plot(show=False)
+    assert fig is not None
+    assert "Pre-intervention Bayesian" in ax[0].get_title()

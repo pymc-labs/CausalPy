@@ -21,7 +21,8 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from patsy import build_design_matrices, dmatrices
+from causalpy.experiments._design import build_patsy_design
+from causalpy.experiments._results import Scenario
 import xarray as xr
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
@@ -89,42 +90,34 @@ class RegressionKink(BaseExperiment):
         self.epsilon = epsilon
         self.bandwidth = bandwidth
         self.input_validation()
-        self._build_design_matrices()
         self._prepare_data()
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data, applying bandwidth filtering."""
+    def _prepare_data(self) -> None:
+        """Build design matrices from formula and bundle into an ``xr.Dataset``."""
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
-            if len(filtered_data) <= 10:
+            fit_data = self.data.query(f"{fmin} <= x <= {fmax}")
+            if len(fit_data) <= 10:
                 warnings.warn(
-                    f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
+                    f"Choice of bandwidth parameter has lead to only {len(fit_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            fit_data = self.data
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
+        self._design, X_raw, y_raw = build_patsy_design(self.formula, fit_data)
+        self.labels = self._design.labels
+        self.outcome_variable_name = self._design.outcome_name
+        n = X_raw.shape[0]
         self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
+            X_raw,
+            y_raw,
             obs_ind=np.arange(n),
             coeffs=self.labels,
         )
-        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
@@ -147,11 +140,14 @@ class RegressionKink(BaseExperiment):
                 np.max(self.data[self.running_variable_name]),
                 200,
             )
-        self.x_pred = pd.DataFrame(
+        x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self._model_backend.predict(X=np.asarray(new_x))
+        new_x = self._design.transform_x(x_pred)
+        self._pred_grid = Scenario(
+            inputs=x_pred,
+            prediction=self._model_backend.predict(X=new_x),
+        )
 
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
@@ -211,8 +207,8 @@ class RegressionKink(BaseExperiment):
                 "treated": np.array([0, 1, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
+        new_x = self._design.transform_x(x_predict)
+        predicted = self.model.predict(X=new_x)
         # extract predicted mu values
         mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
         mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
@@ -332,8 +328,8 @@ class RegressionKink(BaseExperiment):
 
         # Plot model fit to data
         h_line, h_patch = plot_xY(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self._pred_grid.inputs[self.running_variable_name],
+            self._pred_grid.prediction["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},

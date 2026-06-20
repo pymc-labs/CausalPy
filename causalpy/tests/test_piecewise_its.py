@@ -931,18 +931,18 @@ def test_piecewise_its_post_impact_attributes():
     )
 
     # Check that post_impact and datapost are created
-    assert hasattr(result, "post_impact")
+    assert hasattr(result, "result")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result, "result")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
     # post_impact should have same length as datapost
-    assert len(result.post_impact) == len(result.datapost)
+    assert len(result.result.impact_post) == len(result.datapost)
 
     # post_pred should have same length as datapost
-    assert len(result.post_pred) == len(result.datapost)
+    assert len(result.result.predictions_post) == len(result.datapost)
 
 
 # ==============================================================================
@@ -981,9 +981,9 @@ def test_piecewise_its_instance_attributes():
     assert "obs_ind" in result.design["X"].dims
     assert "coeffs" in result.design["X"].dims
 
-    # Check design info stored
-    assert hasattr(result, "_x_design_info")
-    assert hasattr(result, "_y_design_info")
+    # Check design transform stored
+    assert hasattr(result, "_design")
+    assert result._design.labels == result.labels
 
 
 def test_piecewise_its_float_threshold():
@@ -1137,16 +1137,16 @@ def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
     )
 
     # Check attributes exist
-    assert hasattr(result, "post_impact")
+    assert hasattr(result, "result")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result, "result")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
     # post_pred should be dict-like with posterior_predictive
-    assert "posterior_predictive" in result.post_pred
-    assert "mu" in result.post_pred["posterior_predictive"]
+    assert "posterior_predictive" in result.result.predictions_post
+    assert "mu" in result.result.predictions_post["posterior_predictive"]
 
 
 def test_piecewise_its_datetime_post_intervention_attributes():
@@ -1613,3 +1613,26 @@ def test_ramp_transform_datetime_series():
     result = transform.transform(x, threshold)
     expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
     np.testing.assert_array_equal(result, expected)
+
+
+def test_piecewise_its_empty_interruption_times_datapost():
+    """Empty interruption_times yields an empty datapost and null CausalResult fields."""
+    df, _ = generate_piecewise_its_data(
+        N=50,
+        interruption_times=[25],
+        level_changes=[2.0],
+        slope_changes=[0.1],
+        noise_sigma=0.5,
+        seed=42,
+    )
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + t + step(t, 25) + ramp(t, 25)",
+        model=LinearRegression(),
+    )
+    result.interruption_times = []
+    result._create_post_intervention_attributes()
+
+    assert len(result.datapost) == 0
+    assert result.result.predictions_post is None
+    assert result.result.impact_post is None

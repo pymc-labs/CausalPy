@@ -11,7 +11,7 @@ PACKAGE_DIR = causalpy
 .PHONY: init setup lint check_lint check-exports check-architecture test test-patch-cov uml html cleandocs doctest run_notebooks_full help
 
 DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
-DIFF_COVER_FAIL_UNDER ?= 95
+DIFF_COVER_FAIL_UNDER ?= 97
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps

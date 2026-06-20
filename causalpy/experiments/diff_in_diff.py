@@ -21,7 +21,6 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -29,6 +28,8 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments._design import build_patsy_design
+from causalpy.experiments._results import Scenario
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -122,29 +123,21 @@ class DifferenceInDifferences(BaseExperiment):
         self.group_variable_name = group_variable_name
         self.post_treatment_variable_name = post_treatment_variable_name
         self.input_validation()
-        self._build_design_matrices()
         self._prepare_data()
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
     def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
+        """Build design matrices from formula and bundle into an ``xr.Dataset``."""
+        self._design, X_raw, y_raw = build_patsy_design(self.formula, self.data)
+        self.labels = self._design.labels
+        self.outcome_variable_name = self._design.outcome_name
+        n = X_raw.shape[0]
         self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
+            X_raw,
+            y_raw,
             obs_ind=np.arange(n),
             coeffs=self.labels,
         )
-        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
@@ -158,7 +151,7 @@ class DifferenceInDifferences(BaseExperiment):
         )
 
         # predicted outcome for control group
-        self.x_pred_control = (
+        x_pred_control = (
             self.data
             # just the untreated group
             .query(f"{self.group_variable_name} == 0")
@@ -169,13 +162,16 @@ class DifferenceInDifferences(BaseExperiment):
             .first()
             .reset_index()
         )
-        if self.x_pred_control.empty:
+        if x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self._model_backend.predict(np.asarray(new_x))
+        new_x = self._design.transform_x(x_pred_control)
+        self._control = Scenario(
+            inputs=x_pred_control,
+            prediction=self._model_backend.predict(new_x),
+        )
 
         # predicted outcome for treatment group
-        self.x_pred_treatment = (
+        x_pred_treatment = (
             self.data
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
@@ -186,14 +182,17 @@ class DifferenceInDifferences(BaseExperiment):
             .first()
             .reset_index()
         )
-        if self.x_pred_treatment.empty:
+        if x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self._model_backend.predict(np.asarray(new_x))
+        new_x = self._design.transform_x(x_pred_treatment)
+        self._treatment = Scenario(
+            inputs=x_pred_treatment,
+            prediction=self._model_backend.predict(new_x),
+        )
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
-        self.x_pred_counterfactual = (
+        x_pred_counterfactual = (
             self.data
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
@@ -206,11 +205,10 @@ class DifferenceInDifferences(BaseExperiment):
             .first()
             .reset_index()
         )
-        if self.x_pred_counterfactual.empty:
+        if x_pred_counterfactual.empty:
             raise ValueError("x_pred_counterfactual is empty")
-        (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
-        )
+        new_x = self._design.transform_x(x_pred_counterfactual, return_type="dataframe")
+        assert isinstance(new_x, pd.DataFrame)
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
@@ -219,7 +217,10 @@ class DifferenceInDifferences(BaseExperiment):
                 and self.group_variable_name in label
             ):
                 new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
+        self._counterfactual = Scenario(
+            inputs=x_pred_counterfactual,
+            prediction=self._model_backend.predict(np.asarray(new_x)),
+        )
 
         # calculate causal impact
         if self._model_backend.is_bayesian:
@@ -411,13 +412,15 @@ class DifferenceInDifferences(BaseExperiment):
             """
             # Calculate y values to plot the arrow between
             y_pred_treatment = (
-                results.y_pred_treatment["posterior_predictive"]
+                results._treatment.prediction["posterior_predictive"]
                 .mu.isel({"obs_ind": 1})
                 .mean()
                 .data
             )
             y_pred_counterfactual = (
-                results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+                results._counterfactual.prediction["posterior_predictive"]
+                .mu.mean()
+                .data
             )
             y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
             y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
@@ -426,11 +429,11 @@ class DifferenceInDifferences(BaseExperiment):
             # values
             diff = np.ptp(
                 np.array(
-                    results.x_pred_treatment[results.time_variable_name].values
+                    results._treatment.inputs[results.time_variable_name].values
                 ).astype(float)
             )
             x = (
-                np.max(results.x_pred_treatment[results.time_variable_name].values)
+                np.max(results._treatment.inputs[results.time_variable_name].values)
                 + 0.1 * diff
             )
             # Plot the arrow
@@ -471,10 +474,10 @@ class DifferenceInDifferences(BaseExperiment):
         )
 
         # Plot model fit to control group
-        time_points = self.x_pred_control[self.time_variable_name].values
+        time_points = self._control.inputs[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
+            self._control.prediction["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
@@ -484,10 +487,10 @@ class DifferenceInDifferences(BaseExperiment):
         labels = ["Control group"]
 
         # Plot model fit to treatment group
-        time_points = self.x_pred_control[self.time_variable_name].values
+        time_points = self._treatment.inputs[self.time_variable_name].values
         h_line, h_patch = plot_xY(
             time_points,
-            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
+            self._treatment.prediction["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
@@ -498,10 +501,10 @@ class DifferenceInDifferences(BaseExperiment):
 
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
-        time_points = self.x_pred_counterfactual[self.time_variable_name].values
+        time_points = self._counterfactual.inputs[self.time_variable_name].values
         if len(time_points) == 1:
             y_pred_cf = az.extract(
-                self.y_pred_counterfactual,
+                self._counterfactual.prediction,
                 group="posterior_predictive",
                 var_names="mu",
             )
@@ -514,7 +517,7 @@ class DifferenceInDifferences(BaseExperiment):
             )
             parts = ax.violinplot(
                 violin_data.T,
-                positions=self.x_pred_counterfactual[self.time_variable_name].values,
+                positions=self._counterfactual.inputs[self.time_variable_name].values,
                 showmeans=False,
                 showmedians=False,
                 widths=0.2,
@@ -526,7 +529,7 @@ class DifferenceInDifferences(BaseExperiment):
         else:
             h_line, h_patch = plot_xY(
                 time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu.isel(
+                self._counterfactual.prediction.posterior_predictive.mu.isel(
                     treated_units=0
                 ),
                 ax=ax,
@@ -542,7 +545,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         # formatting
         ax.set(
-            xticks=self.x_pred_treatment[self.time_variable_name].values,
+            xticks=self._treatment.inputs[self.time_variable_name].values,
             title=self._causal_impact_summary_stat(round_to),
         )
         ax.legend(
@@ -583,8 +586,8 @@ class DifferenceInDifferences(BaseExperiment):
         )
         # Plot model fit to control group
         ax.plot(
-            self.x_pred_control[self.time_variable_name],
-            self.y_pred_control,
+            self._control.inputs[self.time_variable_name],
+            self._control.prediction,
             "o",
             c="C0",
             markersize=10,
@@ -592,8 +595,8 @@ class DifferenceInDifferences(BaseExperiment):
         )
         # Plot model fit to treatment group
         ax.plot(
-            self.x_pred_treatment[self.time_variable_name],
-            self.y_pred_treatment,
+            self._treatment.inputs[self.time_variable_name],
+            self._treatment.prediction,
             "o",
             c="C1",
             markersize=10,
@@ -602,14 +605,14 @@ class DifferenceInDifferences(BaseExperiment):
         # Plot counterfactual - post-test for treatment group IF no treatment
         # had occurred.
         ax.plot(
-            self.x_pred_counterfactual[self.time_variable_name],
-            self.y_pred_counterfactual,
+            self._counterfactual.inputs[self.time_variable_name],
+            self._counterfactual.prediction,
             "go",
             markersize=10,
             label="counterfactual",
         )
-        y_pred_counterfactual_scalar = _as_scalar(self.y_pred_counterfactual)
-        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment[1])
+        y_pred_counterfactual_scalar = _as_scalar(self._counterfactual.prediction)
+        y_pred_treatment_post_scalar = _as_scalar(self._treatment.prediction[1])
         # arrow to label the causal impact
         ax.annotate(
             "",

@@ -21,10 +21,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments._design import build_patsy_formula_sides
 from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
@@ -104,11 +104,13 @@ class InversePropensityWeighting(BaseExperiment):
         design matrix (``self.X_outcome``) that includes the treatment indicator,
         for use with doubly-robust outcome modelling.
         """
-        t, X = dmatrices(self.formula, self.data)
-        self._t_design_info = t.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.t, self.X = np.asarray(t), np.asarray(X)
+        (
+            self._treatment_design,
+            self._covariate_design,
+            self.t,
+            self.X,
+        ) = build_patsy_formula_sides(self.formula, self.data)
+        self.labels = self._covariate_design.labels
         self.y = self.data[self.outcome_variable]
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}

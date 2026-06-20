@@ -48,6 +48,12 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 
   provides that kernel (e.g., from `ipykernel` installed via the docs extras).
 
+- Full execution (`--full`) uses a long IOPub timeout (default 3600s) so MCMC cells that go quiet between progress updates are not killed by nbclient's 4s default.
+
+- Full execution also includes notebooks listed in `skip_notebooks.yml` (e.g. JAX-based IV examples) so committed outputs can be refreshed locally. Install the `docs` extra (`pip install -e ".[docs]"` or `make setup`) so `jax` and `numpyro` are available for `iv_pymc` and `iv_weak_instruments`.
+
+- After a successful `--full` run the runner calls `os._exit(0)` so JAX/ipykernel background threads do not leave the process hanging once work is done.
+
 - The CI workflow uses Python 3.12 and installs the same extras.
 
 ## Usage
@@ -64,6 +70,9 @@ python scripts/run_notebooks/runner.py --pattern "*_skl*.ipynb"
 
 # Exclude PyMC and sklearn notebooks (run others)
 python scripts/run_notebooks/runner.py --exclude-pattern _pymc --exclude-pattern _skl
+
+# Full execution: real sampling, save outputs in place (slow; for refreshing committed notebooks)
+python scripts/run_notebooks/runner.py --full --pattern "sc_pymc.ipynb"
 
 # Run notebooks in parallel (requires joblib)
 python scripts/run_notebooks/runner.py --parallel

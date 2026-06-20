@@ -28,6 +28,31 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 - Preference should be given to integration tests, but unit tests are acceptable for core functionality to maintain high code coverage.
 - Tests should remain quick to run. Tests involving MCMC sampling with PyMC should use custom `sample_kwargs` to minimize the computational load.
 
+### Before push (local checks; CI is the safety net)
+
+Run the checks below **locally before opening a PR**. Remote CI should catch anything you miss, not replace local verification. Treat a run as failed unless the command exits **0** — do not assume success from a "N passed" summary when pytest exits non-zero.
+
+**Always before push** (when the change touches tracked Python or notebooks):
+
+- `prek run --all-files`
+- `$CONDA_EXE run -n CausalPy make test-patch-cov` when `causalpy/` source or tests changed
+
+**When changing `causalpy/`** (especially docstring examples or public result attributes):
+
+- `$CONDA_EXE run -n CausalPy make doctest`
+
+**When changing user-facing experiment APIs or `docs/source/notebooks/`**:
+
+- Re-execute affected notebooks with the **CI-style mocked runner** (fast smoke test; does not save outputs): `$CONDA_EXE run -n CausalPy python scripts/run_notebooks/runner.py --pattern 'its_pymc.ipynb'`
+- For broad API refactors, run all notebook splits locally: `$CONDA_EXE run -n CausalPy python scripts/run_notebooks/runner.py` (see `scripts/run_notebooks/README.md`)
+- `make run_notebooks_full` (`runner.py --full`) is for refreshing committed notebook outputs with real sampling — slow, optional, not what CI runs
+
+**Large or cross-cutting PRs** (refactors across experiments, reporting, or checks):
+
+- `$CONDA_EXE run -n CausalPy make test` (full pytest suite)
+
+Notebook **validation** in prek checks nbformat and conventions only; it does **not** execute cells. See issue tracker for discussion of remote notebook CI policy.
+
 ## Sandbox and permissions
 
 - **PyMC/PyTensor require filesystem access** outside the workspace (e.g. `~/.pytensor/compiledir_*` for C compilation cache, `~/.matplotlib` for font cache). The default Cursor sandbox blocks writes to these paths, causing misleading `ValueError` or `PermissionError` failures that look like real test errors but are not.
@@ -57,7 +82,7 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
-- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
+- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. **prek does not run this gate** (it is a full-suite coverage pass and stays out of the fast hook path). The local Makefile threshold is `DIFF_COVER_FAIL_UNDER=97`; remote Codecov `patch` uses `target: auto` (typically near project coverage, ~97%), so a pass at an older 95% local threshold could still fail on the PR. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards

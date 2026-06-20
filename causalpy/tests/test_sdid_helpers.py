@@ -264,15 +264,15 @@ class TestBuildReportingObjects:
 
         # pre_pred / post_pred are InferenceData with a 'mu' variable in
         # the posterior_predictive group.
-        assert isinstance(stub.pre_pred, az.InferenceData)
-        assert isinstance(stub.post_pred, az.InferenceData)
-        assert "mu" in stub.pre_pred.posterior_predictive
-        assert "mu" in stub.post_pred.posterior_predictive
+        assert isinstance(stub.result.predictions_pre, az.InferenceData)
+        assert isinstance(stub.result.predictions_post, az.InferenceData)
+        assert "mu" in stub.result.predictions_pre.posterior_predictive
+        assert "mu" in stub.result.predictions_post.posterior_predictive
 
         # pre_impact / post_impact are xr.DataArrays with the correct dims.
         for impact, expected_len in (
-            (stub.pre_impact, toy_panel.T_pre),
-            (stub.post_impact, toy_panel.T - toy_panel.T_pre),
+            (stub.result.impact_pre, toy_panel.T_pre),
+            (stub.result.impact_post, toy_panel.T - toy_panel.T_pre),
         ):
             assert isinstance(impact, xr.DataArray)
             assert impact.dims == ("chain", "draw", "obs_ind", "treated_units")
@@ -280,8 +280,8 @@ class TestBuildReportingObjects:
 
         # cumulative is cumsum of post_impact along time.
         np.testing.assert_allclose(
-            stub.post_impact_cumulative.to_numpy(),
-            stub.post_impact.cumsum(dim="obs_ind").to_numpy(),
+            stub.result.impact_post_cumulative.to_numpy(),
+            stub.result.impact_post.cumsum(dim="obs_ind").to_numpy(),
         )
 
     def test_impact_values_match_observed_minus_counterfactual(self, toy_panel):
@@ -314,8 +314,12 @@ class TestBuildReportingObjects:
             y_tr_post[np.newaxis, np.newaxis, :] - sc_all[..., toy_panel.T_pre :]
         )
 
-        np.testing.assert_allclose(stub.pre_impact.to_numpy()[..., 0], expected_pre)
-        np.testing.assert_allclose(stub.post_impact.to_numpy()[..., 0], expected_post)
+        np.testing.assert_allclose(
+            stub.result.impact_pre.to_numpy()[..., 0], expected_pre
+        )
+        np.testing.assert_allclose(
+            stub.result.impact_post.to_numpy()[..., 0], expected_post
+        )
 
 
 class TestInputValidation:

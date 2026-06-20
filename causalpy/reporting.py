@@ -303,15 +303,15 @@ def _detect_experiment_type(result):
         return "rkink"  # Regression Kink
     elif hasattr(result, "att_event_time_"):
         return "staggered_did"  # Staggered Difference-in-Differences
-    elif hasattr(result, "causal_impact") and not hasattr(result, "post_impact"):
+    elif hasattr(result, "causal_impact") and not hasattr(result, "result"):
         return "did"  # Difference-in-Differences or ANCOVA/PrePostNEGD
-    elif hasattr(result, "post_impact"):
+    elif hasattr(result, "result"):
         return "its_or_sc"  # ITS or Synthetic Control
     else:
         raise ValueError(
             "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
             "'gradient_change' (Regression Kink), 'att_event_time_' (Staggered DiD), "
-            "'causal_impact' (DiD/ANCOVA), or 'post_impact' (ITS/Synthetic Control) attribute."
+            "'causal_impact' (DiD/ANCOVA), or 'result' (ITS/Synthetic Control)."
         )
 
 
@@ -545,12 +545,12 @@ def _select_treated_unit_numpy(
 def _extract_window(result, window, treated_unit=None):
     """Extract windowed impact data based on window specification.
 
-    Assumes result.post_impact is properly shaped xarray or numpy array.
+    Assumes ``result.result.impact_post`` is properly shaped xarray or numpy array.
 
     Parameters
     ----------
     result
-        Experiment result object with post_impact and datapost attributes
+        Experiment result object with ``result`` (:class:`CausalResult`) and ``datapost``
     window : str, tuple, or slice
         Window specification: "post", (start, end) tuple, or slice object
     treated_unit : str, optional
@@ -562,7 +562,7 @@ def _extract_window(result, window, treated_unit=None):
         (windowed_impact, window_coords) where windowed_impact is the data
         and window_coords is the corresponding index
     """
-    post_impact = result.post_impact
+    post_impact = result.result.impact_post
 
     # Check if PyMC (xarray with chain/draw dims) or OLS
     is_pymc = isinstance(post_impact, xr.DataArray) and (
@@ -666,7 +666,7 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
     Parameters
     ----------
     result
-        Experiment result object with post_pred attribute
+        Experiment result object with ``result`` (:class:`CausalResult`) predictions
     window_coords : pd.Index
         Window coordinates from _extract_window
     treated_unit : str, optional
@@ -677,7 +677,7 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
     xr.DataArray or np.ndarray
         Counterfactual predictions for the window
     """
-    post_pred = result.post_pred
+    post_pred = result.result.predictions_post
 
     # PyMC: Extract from InferenceData
     if hasattr(post_pred, "posterior_predictive"):

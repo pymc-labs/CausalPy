@@ -574,7 +574,7 @@ class PlaceboInTime:
         obtained by summing over ``obs_ind`` and stacking
         ``(chain, draw)``.
         """
-        post_impact = experiment.post_impact  # type: ignore[attr-defined]
+        post_impact = experiment.result.impact_post  # type: ignore[attr-defined]
 
         if "treated_units" in post_impact.dims:
             post_impact = post_impact.isel(treated_units=0)

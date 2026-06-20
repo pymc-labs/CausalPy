@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
@@ -293,27 +294,30 @@ class SyntheticControl(BaseExperiment):
             ),
         )
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self._model_backend.score(
+        score = self._model_backend.score(
             X=self.pre_design["control"],
             y=self.pre_design["treated"],
         )
 
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self._model_backend.predict(X=self.pre_design["control"])
+        predictions_pre = self._model_backend.predict(X=self.pre_design["control"])
 
-        # calculate the counterfactual
-        self.post_pred = self._model_backend.predict(X=self.post_design["control"])
-        self.pre_impact = self.model.calculate_impact(
-            self.pre_design["treated"], self.pre_pred
+        predictions_post = self._model_backend.predict(X=self.post_design["control"])
+        impact_pre = self.model.calculate_impact(
+            self.pre_design["treated"], predictions_pre
         )
 
-        self.post_impact = self.model.calculate_impact(
-            self.post_design["treated"], self.post_pred
+        impact_post = self.model.calculate_impact(
+            self.post_design["treated"], predictions_post
         )
 
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
+        impact_post_cumulative = self.model.calculate_cumulative_impact(impact_post)
+        self.result = CausalResult(
+            score=score,
+            predictions_pre=predictions_pre,
+            predictions_post=predictions_post,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post_cumulative,
         )
 
     def input_validation(
@@ -357,13 +361,13 @@ class SyntheticControl(BaseExperiment):
             )
             if self._model_backend.is_bayesian:
                 predicted = (
-                    self.pre_pred["posterior_predictive"]["mu"]
+                    self.result.predictions_pre["posterior_predictive"]["mu"]
                     .sel(treated_units=unit)
                     .mean(dim=["chain", "draw"])
                     .values.flatten()
                 )
             else:
-                predicted = np.asarray(self.pre_pred).flatten()
+                predicted = np.asarray(self.result.predictions_pre).flatten()
             correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
         return correlations
 
@@ -508,10 +512,10 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
+        pre_pred = self.result.predictions_pre["posterior_predictive"].mu.sel(
             treated_units=treated_unit
         )
-        post_pred = self.post_pred["posterior_predictive"].mu.sel(
+        post_pred = self.result.predictions_post["posterior_predictive"].mu.sel(
             treated_units=treated_unit
         )
 
@@ -568,14 +572,14 @@ class SyntheticControl(BaseExperiment):
         # MIDDLE PLOT -----------------------------------------------
         plot_xY(
             self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
+            self.result.impact_pre.sel(treated_units=treated_unit),
             ax=ax[1],
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
+            self.result.impact_post.sel(treated_units=treated_unit),
             ax=ax[1],
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
@@ -583,7 +587,9 @@ class SyntheticControl(BaseExperiment):
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units=treated_unit),
+            y1=self.result.impact_post.mean(["chain", "draw"]).sel(
+                treated_units=treated_unit
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -594,7 +600,7 @@ class SyntheticControl(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_xY(
             self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            self.result.impact_post_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
@@ -690,17 +696,19 @@ class SyntheticControl(BaseExperiment):
             "k.",
         )
 
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(
+            self.datapre.index, self.result.predictions_pre, c="k", label="model fit"
+        )
         ax[0].plot(
             self.datapost.index,
-            self.post_pred,
+            self.result.predictions_post,
             label=counterfactual_label,
             ls=":",
             c="k",
         )
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
         # Shaded causal effect
-        post_pred_values = np.squeeze(self.post_pred)
+        post_pred_values = np.squeeze(self.result.predictions_post)
 
         ax[0].fill_between(
             self.datapost.index,
@@ -713,24 +721,24 @@ class SyntheticControl(BaseExperiment):
             label="Causal impact",
         )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(self.datapre.index, self.result.impact_pre, "k.")
         ax[1].plot(
             self.datapost.index,
-            self.post_impact,
+            self.result.impact_post,
             "k.",
             label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].plot(self.datapost.index, self.result.impact_post_cumulative, c="k")
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[1].fill_between(
             self.datapost.index,
-            y1=np.squeeze(self.post_impact),
+            y1=np.squeeze(self.result.impact_post),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -768,10 +776,10 @@ class SyntheticControl(BaseExperiment):
         """
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
+        pre_data["prediction"] = self.result.predictions_pre
+        post_data["prediction"] = self.result.predictions_post
+        pre_data["impact"] = self.result.impact_pre
+        post_data["impact"] = self.result.impact_post
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
@@ -816,10 +824,10 @@ class SyntheticControl(BaseExperiment):
 
         # Extract predictions - handle multi-unit case
         pre_pred_vals = az.extract(
-            self.pre_pred, group="posterior_predictive", var_names="mu"
+            self.result.predictions_pre, group="posterior_predictive", var_names="mu"
         ).mean("sample")
         post_pred_vals = az.extract(
-            self.post_pred, group="posterior_predictive", var_names="mu"
+            self.result.predictions_post, group="posterior_predictive", var_names="mu"
         ).mean("sample")
 
         # Extract predictions for the specified treated unit (always has treated_units dimension)
@@ -828,11 +836,15 @@ class SyntheticControl(BaseExperiment):
 
         # HDI intervals for predictions (always use treated_units dimension)
         pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.result.predictions_pre["posterior_predictive"].mu.sel(
+                treated_units=treated_unit
+            ),
             hdi_prob=hdi_prob,
         )
         post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.result.predictions_post["posterior_predictive"].mu.sel(
+                treated_units=treated_unit
+            ),
             hdi_prob=hdi_prob,
         )
 
@@ -845,21 +857,21 @@ class SyntheticControl(BaseExperiment):
 
         # Impact data - always use primary unit for main dataframe
         pre_data["impact"] = (
-            self.pre_impact.mean(dim=["chain", "draw"])
+            self.result.impact_pre.mean(dim=["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values
         )
         post_data["impact"] = (
-            self.post_impact.mean(dim=["chain", "draw"])
+            self.result.impact_post.mean(dim=["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values
         )
         # Impact HDI intervals (always use treated_units dimension)
         pre_impact_hdi = get_hdi_to_df(
-            self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+            self.result.impact_pre.sel(treated_units=treated_unit), hdi_prob=hdi_prob
         )
         post_impact_hdi = get_hdi_to_df(
-            self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+            self.result.impact_post.sel(treated_units=treated_unit), hdi_prob=hdi_prob
         )
 
         # Extract only the lower and upper columns for impact HDI
@@ -877,19 +889,21 @@ class SyntheticControl(BaseExperiment):
         """Generate appropriate score title for the specified treated unit"""
         if self._model_backend.is_bayesian:
             # Bayesian model - get unit-specific R² scores using unified format
+            score = self.result.score
+            assert score is not None
             unit_index = self.treated_units.index(treated_unit)
             r2_val = round_num(
-                self.score[f"unit_{unit_index}_r2"],
+                score[f"unit_{unit_index}_r2"],
                 round_to if round_to is not None else 2,
             )
             r2_std_val = round_num(
-                self.score[f"unit_{unit_index}_r2_std"],
+                score[f"unit_{unit_index}_r2_std"],
                 round_to if round_to is not None else 2,
             )
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to if round_to is not None else 2)}"
+            return f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.result.score), round_to if round_to is not None else 2)}"
 
     def effect_summary(
         self,

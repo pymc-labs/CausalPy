@@ -17,6 +17,8 @@ import warnings  # noqa: I001
 
 import numpy as np
 import pandas as pd
+from causalpy.experiments._design import build_patsy_design
+from causalpy.experiments._results import PriorCalibration
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
@@ -143,29 +145,28 @@ class InstrumentalVariable(BaseExperiment):
 
         # Store user-provided priors (will set defaults in algorithm() if None)
         self.priors = priors
+        self._prior_calibration: PriorCalibration | None = None
 
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+        self._design, self.X, self.y = build_patsy_design(self.formula, self.data)
+        self.labels = self._design.labels
+        self.outcome_variable_name = self._design.outcome_name
 
-        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
-        self._t_design_info = t.design_info
-        self._z_design_info = Z.design_info
-        self.labels_instruments = Z.design_info.column_names
-        self.t, self.Z = np.asarray(t), np.asarray(Z)
-        self.instrument_variable_name = t.design_info.column_names[0]
+        self._instrument_design, self.Z, self.t = build_patsy_design(
+            self.instruments_formula, self.instruments_data
+        )
+        self.labels_instruments = self._instrument_design.labels
+        self.instrument_variable_name = self._instrument_design.outcome_name
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
         self.get_naive_OLS_fit()
         self.get_2SLS_fit()
+        prior_calibration = self._prior_calibration
+        assert prior_calibration is not None  # populated by get_*_fit above
 
         # fit the model to the data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
@@ -175,7 +176,10 @@ class InstrumentalVariable(BaseExperiment):
             if self.binary_treatment:
                 # Different default priors for binary treatment
                 self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "mus": [
+                        prior_calibration.beta_first,
+                        prior_calibration.beta_second,
+                    ],
                     "sigmas": [1, 1],
                     "sigma_U": 1.0,
                     "rho_bounds": [-0.99, 0.99],
@@ -183,7 +187,10 @@ class InstrumentalVariable(BaseExperiment):
             else:
                 # Original continuous treatment priors
                 self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "mus": [
+                        prior_calibration.beta_first,
+                        prior_calibration.beta_second,
+                    ],
                     "sigmas": [1, 1],
                     "eta": 2,
                     "lkj_sd": 1,
@@ -239,10 +246,20 @@ class InstrumentalVariable(BaseExperiment):
         betas_first.insert(0, first_stage_reg.intercept_[0])
         betas_second = list(second_stage_reg.coef_[0][1:])
         betas_second.insert(0, second_stage_reg.intercept_[0])
-        self.ols_beta_first_params = betas_first
-        self.ols_beta_second_params = betas_second
-        self.first_stage_reg = first_stage_reg
-        self.second_stage_reg = second_stage_reg
+        if self._prior_calibration is None:
+            self._prior_calibration = PriorCalibration(
+                first_stage=first_stage_reg,
+                second_stage=second_stage_reg,
+                naive=None,
+                beta_first=betas_first,
+                beta_second=betas_second,
+                beta_naive={},
+            )
+        else:
+            self._prior_calibration.first_stage = first_stage_reg
+            self._prior_calibration.second_stage = second_stage_reg
+            self._prior_calibration.beta_first = betas_first
+            self._prior_calibration.beta_second = betas_second
 
     def get_naive_OLS_fit(self) -> None:
         """Naive Ordinary Least Squares.
@@ -252,10 +269,19 @@ class InstrumentalVariable(BaseExperiment):
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(
-            zip(self._x_design_info.column_names, beta_params, strict=False)
-        )
-        self.ols_reg = ols_reg
+        beta_naive = dict(zip(self._design.labels, beta_params, strict=False))
+        if self._prior_calibration is None:
+            self._prior_calibration = PriorCalibration(
+                first_stage=None,
+                second_stage=None,
+                naive=ols_reg,
+                beta_first=[],
+                beta_second=[],
+                beta_naive=beta_naive,
+            )
+        else:
+            self._prior_calibration.naive = ols_reg
+            self._prior_calibration.beta_naive = beta_naive
 
     def plot(
         self,

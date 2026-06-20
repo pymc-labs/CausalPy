@@ -2,6 +2,6 @@
 #
 # These notebooks are skipped for various reasons documented below.
 
-# Requires JAX which is not installed in the test environment.
+# Requires JAX/numpyro (see pyproject.toml docs extra). Skipped in CI mock runs.
 - iv_pymc.ipynb
 - iv_weak_instruments.ipynb
