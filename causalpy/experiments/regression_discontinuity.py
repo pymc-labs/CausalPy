@@ -14,6 +14,7 @@
 """Regression discontinuity design."""
 
 import warnings  # noqa: I001
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -39,6 +40,41 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _Config:
+    """Container for regression discontinuity configuration parameters."""
+
+    formula: str
+    running_variable_name: str
+    treatment_threshold: float
+    epsilon: float
+    bandwidth: float
+    donut_hole: float
+
+
+@dataclass
+class _DesignMatrices:
+    """Container for design matrix data and metadata."""
+
+    fit_data: pd.DataFrame
+    y_design_info: Any
+    x_design_info: Any
+    labels: list[str]
+    outcome_variable_name: str
+
+
+@dataclass
+class _Results:
+    """Container for algorithm results."""
+
+    score: Any
+    x_pred: pd.DataFrame
+    pred: Any
+    x_discon: pd.DataFrame
+    pred_discon: Any
+    discontinuity_at_threshold: Any
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -95,6 +131,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    expt_type = "Regression Discontinuity"
     _default_model_class = LinearRegression
     _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
@@ -111,67 +148,149 @@ class RegressionDiscontinuity(BaseExperiment):
         **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
-        self.expt_type = "Regression Discontinuity"
         self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.treatment_threshold = treatment_threshold
-        self.epsilon = epsilon
-        self.bandwidth = bandwidth
-        self.donut_hole = donut_hole
+        self.config = _Config(
+            formula=formula,
+            running_variable_name=running_variable_name,
+            treatment_threshold=treatment_threshold,
+            epsilon=epsilon,
+            bandwidth=bandwidth,
+            donut_hole=donut_hole,
+        )
         self.input_validation()
-        self._build_design_matrices()
-        self._prepare_data()
+        y_raw, X_raw = self._build_design_matrices()
+        self._prepare_data(y_raw, X_raw)
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
+    @property
+    def treatment_threshold(self) -> float:
+        """Backward-compatible access to config.treatment_threshold."""
+        return self.config.treatment_threshold
+
+    @property
+    def running_variable_name(self) -> str:
+        """Backward-compatible access to config.running_variable_name."""
+        return self.config.running_variable_name
+
+    @property
+    def formula(self) -> str:
+        """Backward-compatible access to config.formula."""
+        return self.config.formula
+
+    @property
+    def epsilon(self) -> float:
+        """Backward-compatible access to config.epsilon."""
+        return self.config.epsilon
+
+    @property
+    def bandwidth(self) -> float:
+        """Backward-compatible access to config.bandwidth."""
+        return self.config.bandwidth
+
+    @property
+    def donut_hole(self) -> float:
+        """Backward-compatible access to config.donut_hole."""
+        return self.config.donut_hole
+
+    @property
+    def fit_data(self) -> pd.DataFrame:
+        """Backward-compatible access to design_matrices.fit_data."""
+        return self.design_matrices.fit_data
+
+    @property
+    def labels(self) -> list[str]:
+        """Backward-compatible access to design_matrices.labels."""
+        return self.design_matrices.labels
+
+    @labels.setter
+    def labels(self, value: list[str]) -> None:
+        self.design_matrices.labels = value
+
+    @property
+    def outcome_variable_name(self) -> str:
+        """Backward-compatible access to design_matrices.outcome_variable_name."""
+        return self.design_matrices.outcome_variable_name
+
+    @property
+    def score(self) -> Any:
+        """Backward-compatible access to results.score."""
+        return self.results.score
+
+    @property
+    def x_pred(self) -> pd.DataFrame:
+        """Backward-compatible access to results.x_pred."""
+        return self.results.x_pred
+
+    @property
+    def pred(self) -> Any:
+        """Backward-compatible access to results.pred."""
+        return self.results.pred
+
+    @property
+    def x_discon(self) -> pd.DataFrame:
+        """Backward-compatible access to results.x_discon."""
+        return self.results.x_discon
+
+    @property
+    def pred_discon(self) -> Any:
+        """Backward-compatible access to results.pred_discon."""
+        return self.results.pred_discon
+
+    @property
+    def discontinuity_at_threshold(self) -> Any:
+        """Backward-compatible access to results.discontinuity_at_threshold."""
+        return self.results.discontinuity_at_threshold
+
+    def _build_design_matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Build design matrices from formula and data, applying bandwidth and donut hole filtering."""
-        x_vals = self.data[self.running_variable_name]
-        c = self.treatment_threshold
+        x_vals = self.data[self.config.running_variable_name]
+        c = self.config.treatment_threshold
         mask = pd.Series(True, index=self.data.index)
 
-        if self.bandwidth is not np.inf:
-            mask &= np.abs(x_vals - c) <= self.bandwidth
+        if self.config.bandwidth is not np.inf:
+            mask &= np.abs(x_vals - c) <= self.config.bandwidth
 
-        if self.donut_hole > 0:
-            mask &= np.abs(x_vals - c) >= self.donut_hole
+        if self.config.donut_hole > 0:
+            mask &= np.abs(x_vals - c) >= self.config.donut_hole
 
-        self.fit_data = self.data.loc[mask]
+        fit_data = self.data.loc[mask]
 
-        if len(self.fit_data) <= 10:
+        if len(fit_data) <= 10:
             filter_desc = []
-            if self.bandwidth is not np.inf:
-                filter_desc.append(f"bandwidth={self.bandwidth}")
-            if self.donut_hole > 0:
-                filter_desc.append(f"donut_hole={self.donut_hole}")
+            if self.config.bandwidth is not np.inf:
+                filter_desc.append(f"bandwidth={self.config.bandwidth}")
+            if self.config.donut_hole > 0:
+                filter_desc.append(f"donut_hole={self.config.donut_hole}")
             if filter_desc:
                 msg = (
                     f"Choice of {' and '.join(filter_desc)} parameters has led to only "
-                    f"{len(self.fit_data)} remaining datapoints. "
+                    f"{len(fit_data)} remaining datapoints. "
                     f"Consider adjusting these parameters."
                 )
             else:
-                msg = f"Only {len(self.fit_data)} datapoints in the dataset."
+                msg = f"Only {len(fit_data)} datapoints in the dataset."
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        y, X = dmatrices(self.formula, self.fit_data)
+        y, X = dmatrices(self.config.formula, fit_data)
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
-        self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
-            obs_ind=np.arange(n),
-            coeffs=self.labels,
+        self.design_matrices = _DesignMatrices(
+            fit_data=fit_data,
+            y_design_info=y.design_info,
+            x_design_info=X.design_info,
+            labels=X.design_info.column_names,
+            outcome_variable_name=y.design_info.column_names[0],
         )
-        del self._X_raw, self._y_raw
+        return np.asarray(y), np.asarray(X)
+
+    def _prepare_data(self, y_raw: np.ndarray, X_raw: np.ndarray) -> None:
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            X_raw,
+            y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.design_matrices.labels,
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""
@@ -181,57 +300,66 @@ class RegressionDiscontinuity(BaseExperiment):
         self._model_backend.fit(
             X=X,
             y=y,
-            coords=build_coords(self.labels, X.shape[0]),
+            coords=build_coords(self.design_matrices.labels, X.shape[0]),
         )
 
-        self.score = self._model_backend.score(X=X, y=y)
+        score = self._model_backend.score(X=X, y=y)
 
         # get the model predictions of the observed data
-        if self.bandwidth is not np.inf:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
+        if self.config.bandwidth is not np.inf:
+            fmin = self.config.treatment_threshold - self.config.bandwidth
+            fmax = self.config.treatment_threshold + self.config.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
+                np.min(self.data[self.config.running_variable_name]),
+                np.max(self.data[self.config.running_variable_name]),
                 200,
             )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        x_pred = pd.DataFrame(
+            {self.config.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self._model_backend.predict(X=np.asarray(new_x))
+        (new_x,) = build_design_matrices([self.design_matrices.x_design_info], x_pred)
+        pred = self._model_backend.predict(X=np.asarray(new_x))
 
         # calculate discontinuity by evaluating the difference in model expectation on
         # either side of the discontinuity
         # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
         # (not below) the threshold
-        self.x_discon = pd.DataFrame(
+        x_discon = pd.DataFrame(
             {
-                self.running_variable_name: np.array(
+                self.config.running_variable_name: np.array(
                     [
-                        self.treatment_threshold - self.epsilon,
-                        self.treatment_threshold + self.epsilon,
+                        self.config.treatment_threshold - self.config.epsilon,
+                        self.config.treatment_threshold + self.config.epsilon,
                     ]
                 ),
                 "treated": np.array([0, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
+        (new_x,) = build_design_matrices([self.design_matrices.x_design_info], x_discon)
+        pred_discon = self.model.predict(X=np.asarray(new_x))
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
         if self._model_backend.is_bayesian:
-            self.discontinuity_at_threshold = (
-                self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-                - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
+            discontinuity_at_threshold = (
+                pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
+                - pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
             )
         else:
-            self.discontinuity_at_threshold = np.squeeze(
-                self.pred_discon[1]
-            ) - np.squeeze(self.pred_discon[0])
+            discontinuity_at_threshold = np.squeeze(
+                pred_discon[1]
+            ) - np.squeeze(pred_discon[0])
         # ******************************************************************************
+
+        self.results = _Results(
+            score=score,
+            x_pred=x_pred,
+            pred=pred,
+            x_discon=x_discon,
+            pred_discon=pred_discon,
+            discontinuity_at_threshold=discontinuity_at_threshold,
+        )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""

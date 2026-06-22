@@ -30,6 +30,7 @@ import xarray as xr
 
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.experiments.synthetic_difference_in_differences import (
+    _SDiDResults,
     SyntheticDifferenceInDifferences,
 )
 
@@ -246,8 +247,8 @@ class TestComputeTau:
         np.testing.assert_allclose(tau.to_numpy(), 0.0)
 
 
-class TestBuildReportingObjects:
-    """Unit tests for ``_build_reporting_objects``."""
+class TestBuildResults:
+    """Unit tests for ``_build_results``."""
 
     def test_sets_expected_attributes(self, toy_panel):
         stub = _make_experiment_stub(
@@ -259,8 +260,14 @@ class TestBuildReportingObjects:
 
         n_chains, n_draws = 2, 3
         sc_all = np.random.default_rng(4).normal(size=(n_chains, n_draws, toy_panel.T))
+        tau_posterior = xr.DataArray(
+            np.zeros((n_chains, n_draws)),
+            dims=["chain", "draw"],
+        )
 
-        stub._build_reporting_objects(sc_all, toy_panel.T_pre, n_chains, n_draws)
+        stub._results = stub._build_results(
+            sc_all, toy_panel.T_pre, n_chains, n_draws, tau_posterior
+        )
 
         # pre_pred / post_pred are InferenceData with a 'mu' variable in
         # the posterior_predictive group.
@@ -293,8 +300,14 @@ class TestBuildReportingObjects:
         )
         n_chains, n_draws = 1, 2
         sc_all = np.random.default_rng(5).normal(size=(n_chains, n_draws, toy_panel.T))
+        tau_posterior = xr.DataArray(
+            np.zeros((n_chains, n_draws)),
+            dims=["chain", "draw"],
+        )
 
-        stub._build_reporting_objects(sc_all, toy_panel.T_pre, n_chains, n_draws)
+        stub._results = stub._build_results(
+            sc_all, toy_panel.T_pre, n_chains, n_draws, tau_posterior
+        )
 
         y_tr_pre = (
             toy_panel.data.iloc[: toy_panel.T_pre][toy_panel.treated_units]
@@ -373,10 +386,16 @@ class TestSummaryMultiTreated:
             control_units=["c0"],
             treated_units=["t0", "t1"],
         )
-        stub.expt_type = "SyntheticDifferenceInDifferences"
-        stub.tau_posterior = xr.DataArray(
-            np.array([[1.0, 1.5], [0.5, 2.0]]),
-            dims=["chain", "draw"],
+        stub._results = _SDiDResults(
+            tau_posterior=xr.DataArray(
+                np.array([[1.0, 1.5], [0.5, 2.0]]),
+                dims=["chain", "draw"],
+            ),
+            pre_pred=None,  # type: ignore[arg-type]
+            post_pred=None,  # type: ignore[arg-type]
+            pre_impact=None,  # type: ignore[arg-type]
+            post_impact=None,  # type: ignore[arg-type]
+            post_impact_cumulative=None,  # type: ignore[arg-type]
         )
 
         stub.summary()

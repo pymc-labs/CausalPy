@@ -13,6 +13,7 @@
 #   limitations under the License.
 
 import contextlib
+from types import SimpleNamespace
 
 import arviz as az
 import numpy as np
@@ -26,6 +27,22 @@ import causalpy as cp
 from causalpy.tests.conftest import setup_regression_kink_data
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
+
+bsts_sample_kwargs = {
+    "chains": 1,
+    "draws": 100,
+    "tune": 50,
+    "progressbar": False,
+    "random_seed": 42,
+}
+
+ss_sample_kwargs = {
+    "chains": 1,
+    "draws": 50,
+    "tune": 25,
+    "progressbar": False,
+    "random_seed": 42,
+}
 
 
 @pytest.mark.integration
@@ -1069,13 +1086,8 @@ def test_inverse_prop(mock_pymc_sample):
     assert "nu" in idata_student.posterior
 
 
-@pytest.mark.integration
-def test_bayesian_structural_time_series():
-    """Test the BayesianBasisExpansionTimeSeries model."""
-    pytest.importorskip(
-        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
-    )
-    # Generate synthetic data
+@pytest.fixture
+def bsts_data():
     rng = np.random.default_rng(seed=123)
     dates = pd.date_range(start="2020-01-01", end="2021-12-31", freq="D")
     n_obs = len(dates)
@@ -1095,29 +1107,24 @@ def test_bayesian_structural_time_series():
     data_with_x = pd.DataFrame({"y": y_values_with_x, "x1": x1_actual}, index=dates)
     data_no_x = pd.DataFrame({"y": y_values_no_x}, index=dates)
 
-    # Note: day_of_year and time_numeric are not directly passed in coords to build_model anymore
-    # They are derived from datetime_index. They can remain here for clarity or potential future use
-    # in a more complex test setup if needed, but are not strictly necessary for current model.
-    # day_of_year = dates.dayofyear.to_numpy()
-    # time_numeric = (dates - dates[0]).days.to_numpy() / 365.25
+    return SimpleNamespace(dates=dates, data_with_x=data_with_x, data_no_x=data_no_x)
 
-    bsts_sample_kwargs = {
-        "chains": 1,
-        "draws": 100,
-        "tune": 50,
-        "progressbar": False,
-        "random_seed": 42,
-    }
 
-    # --- Test Case 1: Model with exogenous regressor --- #
+@pytest.mark.integration
+def test_bsts_with_exogenous_regressor(bsts_data):
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    dates = bsts_data.dates
+    data_with_x = bsts_data.data_with_x
+
     coords_with_x = {
-        "obs_ind": dates,  # Use dates directly for xarray coords
+        "obs_ind": dates,
         "coeffs": ["x1"],
         "treated_units": ["unit_0"],
         "datetime_index": dates,
     }
 
-    # Create DataArrays for input to match new API
     X_da = xr.DataArray(
         data_with_x[["x1"]].values,
         dims=["obs_ind", "coeffs"],
@@ -1129,181 +1136,197 @@ def test_bayesian_structural_time_series():
         coords={"obs_ind": dates, "treated_units": ["unit_0"]},
     )
 
-    model_with_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+    model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
-    model_with_x.fit(
-        X=X_da,
-        y=y_da,
-        coords=coords_with_x.copy(),  # Pass a copy
-    )
-    assert isinstance(model_with_x.idata, az.InferenceData)
-    assert "posterior" in model_with_x.idata
-    assert "beta" in model_with_x.idata.posterior
-    # PyMC Marketing components might use different internal names, e.g. fourier_beta, delta
-    # Let's check for existence of key components rather than exact pymc_marketing internal names
-    # if specific internal names are not exposed or guaranteed by causalpy's BSTS.
-    # For now, assuming 'fourier_beta' and 'delta' are names exposed by the pymc_marketing components used.
-    assert (
-        "fourier_beta" in model_with_x.idata.posterior
-    )  # Trend/Seasonality component param
-    assert "delta" in model_with_x.idata.posterior  # Trend/Seasonality component param
-    assert "sigma" in model_with_x.idata.posterior
-    assert "mu" in model_with_x.idata.posterior_predictive
-    assert "y_hat" in model_with_x.idata.posterior_predictive
+    model.fit(X=X_da, y=y_da, coords=coords_with_x.copy())
 
-    predictions_with_x = model_with_x.predict(
-        X=X_da,
-        coords=coords_with_x,  # Original coords_with_x is fine here
-    )
-    assert isinstance(predictions_with_x, az.InferenceData)
-    score_with_x = model_with_x.score(
-        X=X_da,
-        y=y_da,
-        coords=coords_with_x,  # Original coords_with_x is fine here
-    )
-    assert isinstance(score_with_x, pd.Series)
+    assert isinstance(model.idata, az.InferenceData)
+    assert "posterior" in model.idata
+    assert "beta" in model.idata.posterior
+    assert "fourier_beta" in model.idata.posterior
+    assert "delta" in model.idata.posterior
+    assert "sigma" in model.idata.posterior
+    assert "mu" in model.idata.posterior_predictive
+    assert "y_hat" in model.idata.posterior_predictive
 
-    # --- Test Case 2: Model without exogenous regressor --- #
+    predictions = model.predict(X=X_da, coords=coords_with_x)
+    assert isinstance(predictions, az.InferenceData)
+
+    score = model.score(X=X_da, y=y_da, coords=coords_with_x)
+    assert isinstance(score, pd.Series)
+
+
+@pytest.mark.integration
+def test_bsts_without_exogenous_regressor(bsts_data):
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    dates = bsts_data.dates
+    data_no_x = bsts_data.data_no_x
+
     coords_no_x = {
         "obs_ind": dates,
         "treated_units": ["unit_0"],
         "datetime_index": dates,
-        # "coeffs": [], # Explicitly empty or omitted if X is None
     }
 
-    y_da_no_x = xr.DataArray(
+    y_da = xr.DataArray(
         data_no_x["y"].values[:, None],
         dims=["obs_ind", "treated_units"],
         coords={"obs_ind": dates, "treated_units": ["unit_0"]},
     )
 
-    # Create X_da_no_x (empty coeffs) to provide time index for predict
-    X_da_no_x = xr.DataArray(
-        np.zeros((len(dates), 0)),  # 0 coeffs
+    X_da = xr.DataArray(
+        np.zeros((len(dates), 0)),
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": dates, "coeffs": []},
     )
 
-    model_no_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+    model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
+    model.fit(X=X_da, y=y_da, coords=coords_no_x.copy())
 
-    model_no_x.fit(
-        X=X_da_no_x,
-        y=y_da_no_x,
-        coords=coords_no_x.copy(),  # Pass a copy
-    )
-    assert isinstance(model_no_x.idata, az.InferenceData)
-    assert "posterior" in model_no_x.idata
-    assert "beta" not in model_no_x.idata.posterior
-    assert "fourier_beta" in model_no_x.idata.posterior
-    assert "delta" in model_no_x.idata.posterior
-    assert "sigma" in model_no_x.idata.posterior
+    assert isinstance(model.idata, az.InferenceData)
+    assert "posterior" in model.idata
+    assert "beta" not in model.idata.posterior
+    assert "fourier_beta" in model.idata.posterior
+    assert "delta" in model.idata.posterior
+    assert "sigma" in model.idata.posterior
 
-    predictions_no_x = model_no_x.predict(
-        X=X_da_no_x,
-        coords=coords_no_x,  # Original coords_no_x is fine
-    )
-    assert isinstance(predictions_no_x, az.InferenceData)
-    score_no_x = model_no_x.score(
-        X=X_da_no_x,
-        y=y_da_no_x,
-        coords=coords_no_x,  # Original coords_no_x is fine
-    )
-    assert isinstance(score_no_x, pd.Series)
+    predictions = model.predict(X=X_da, coords=coords_no_x)
+    assert isinstance(predictions, az.InferenceData)
 
-    # --- Test Case 3: Model with empty exogenous regressor (X has 0 columns) --- #
-    # This is similar to Test Case 2. Model should handle X with 0 columns
-    coords_empty_x = {  # Coords for 0 exog vars
+    score = model.score(X=X_da, y=y_da, coords=coords_no_x)
+    assert isinstance(score, pd.Series)
+
+
+@pytest.mark.integration
+def test_bsts_with_empty_exogenous_regressor(bsts_data):
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    dates = bsts_data.dates
+    data_no_x = bsts_data.data_no_x
+
+    coords_empty_x = {
         "obs_ind": dates,
         "treated_units": ["unit_0"],
         "datetime_index": dates,
-        "coeffs": [],  # Must be empty list if X has 0 columns and 'coeffs' is provided
+        "coeffs": [],
     }
 
-    # Reuse X_da_no_x from Test Case 2 as it has 0 columns and correct coords
-    # Reuse y_da_no_x from Test Case 2
+    y_da = xr.DataArray(
+        data_no_x["y"].values[:, None],
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
 
-    model_empty_x = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+    X_da = xr.DataArray(
+        np.zeros((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
+
+    model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
         n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
     )
-    model_empty_x.fit(
-        X=X_da_no_x,
-        y=y_da_no_x,
-        coords=coords_empty_x.copy(),  # Pass a copy
-    )
-    assert isinstance(model_empty_x.idata, az.InferenceData)
+    model.fit(X=X_da, y=y_da, coords=coords_empty_x.copy())
 
-    predictions_empty_x = model_empty_x.predict(
-        X=X_da_no_x,
-        coords=coords_empty_x,  # Original coords_empty_x is fine
-    )
-    assert isinstance(predictions_empty_x, az.InferenceData)
-    score_empty_x = model_empty_x.score(
-        X=X_da_no_x,
-        y=y_da_no_x,
-        coords=coords_empty_x,  # Original coords_empty_x is fine
-    )
-    assert isinstance(score_empty_x, pd.Series)
+    assert isinstance(model.idata, az.InferenceData)
 
-    # --- Test Case 4: Model with incorrect coord/data setup (ValueErrors) --- #
-    # Test that X must have datetime coordinates
+    predictions = model.predict(X=X_da, coords=coords_empty_x)
+    assert isinstance(predictions, az.InferenceData)
+
+    score = model.score(X=X_da, y=y_da, coords=coords_empty_x)
+    assert isinstance(score, pd.Series)
+
+
+@pytest.mark.integration
+def test_bsts_error_invalid_inputs(bsts_data):
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    dates = bsts_data.dates
+    data_with_x = bsts_data.data_with_x
+
+    coords_with_x = {
+        "obs_ind": dates,
+        "coeffs": ["x1"],
+        "treated_units": ["unit_0"],
+        "datetime_index": dates,
+    }
+
+    X_da = xr.DataArray(
+        data_with_x[["x1"]].values,
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": ["x1"]},
+    )
+    y_da = xr.DataArray(
+        data_with_x["y"].values[:, None],
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
+
+    model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+        n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
+    )
+    model.fit(X=X_da, y=y_da, coords=coords_with_x.copy())
+
+    X_da_no_x = xr.DataArray(
+        np.zeros((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
+
     with pytest.raises(
         ValueError,
         match=r"X\.coords\['obs_ind'\] must contain datetime values",
     ):
-        model_error_idx = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+        bad_model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
             sample_kwargs=bsts_sample_kwargs
         )
-        # Create X with non-datetime obs_ind coordinates
         bad_X = xr.DataArray(
             data_with_x[["x1"]].values,
             dims=["obs_ind", "coeffs"],
             coords={
-                "obs_ind": np.arange(n_obs),
+                "obs_ind": np.arange(len(dates)),
                 "coeffs": ["x1"],
-            },  # integers not datetime
+            },
         )
         bad_y = xr.DataArray(
             data_with_x["y"].values[:, None],
             dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+            coords={"obs_ind": np.arange(len(dates)), "treated_units": ["unit_0"]},
         )
-        model_error_idx.fit(
-            X=bad_X,
-            y=bad_y,
-            coords=coords_with_x.copy(),
-        )
+        bad_model.fit(X=bad_X, y=bad_y, coords=coords_with_x.copy())
 
     with pytest.raises(ValueError, match="Model was built with exogenous variables"):
-        # Pass X with no exogenous vars (X_da_no_x) to model expecting vars (model_with_x)
-        # This checks that we can't predict without supplying the expected exog vars
-        model_with_x.predict(X=X_da_no_x, coords=coords_with_x)
+        model.predict(X=X_da_no_x, coords=coords_with_x)
 
     with pytest.raises(
         ValueError,
         match=r"Exogenous variable names mismatch",
     ):
-        wrong_shape_x_pred_vals = np.hstack(
+        wrong_shape_vals = np.hstack(
             [data_with_x[["x1"]].values, data_with_x[["x1"]].values]
-        )  # 2 columns
-
-        X_wrong_shape = xr.DataArray(
-            wrong_shape_x_pred_vals,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": dates,
-                "coeffs": ["x1", "x2"],  # 2 coeffs
-            },
         )
+        X_wrong_shape = xr.DataArray(
+            wrong_shape_vals,
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": dates, "coeffs": ["x1", "x2"]},
+        )
+        model.predict(X=X_wrong_shape, coords=coords_with_x)
 
-        model_with_x.predict(X=X_wrong_shape, coords=coords_with_x)
 
-    # --- Test Case 5: Custom component validation errors --- #
+@pytest.mark.integration
+def test_bsts_error_custom_component_validation():
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+
     class BadTrendComponent:
-        """Component without apply method"""
-
         pass
 
     with pytest.raises(
@@ -1324,102 +1347,96 @@ def test_bayesian_structural_time_series():
             sample_kwargs=bsts_sample_kwargs,
         )
 
-    # --- Test Case 6: Additional error conditions --- #
-    # Test TypeError for non-xarray X (expecting xarray DataArray)
+
+@pytest.mark.integration
+def test_bsts_error_non_xarray_input(bsts_data):
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    dates = bsts_data.dates
+    data_with_x = bsts_data.data_with_x
+
+    coords_with_x = {
+        "obs_ind": dates,
+        "coeffs": ["x1"],
+        "treated_units": ["unit_0"],
+        "datetime_index": dates,
+    }
+
+    X_da = xr.DataArray(
+        data_with_x[["x1"]].values,
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": ["x1"]},
+    )
+    y_da = xr.DataArray(
+        data_with_x["y"].values[:, None],
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
+
+    model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+        n_order=2, n_changepoints_trend=5, sample_kwargs=bsts_sample_kwargs
+    )
+    model.fit(X=X_da, y=y_da, coords=coords_with_x.copy())
+
     with pytest.raises(TypeError, match="X must be an xarray DataArray"):
-        model_with_x.predict(
-            X=data_with_x[["x1"]].values,  # Pass numpy array instead of xarray
+        model.predict(
+            X=data_with_x[["x1"]].values,
             coords=coords_with_x,
         )
 
-
-@pytest.mark.integration
-def test_state_space_time_series():
-    """
-    Test InterruptedTimeSeries model.
-
-    This test verifies the InterruptedTimeSeries model functionality including:
-    1. Model initialization and parameter validation
-    2. Model fitting with synthetic time series data
-    3. In-sample and out-of-sample prediction
-    4. Model scoring (Bayesian R²)
-    5. Error handling for invalid inputs
-    6. State-space model components and structure
-
-    The InterruptedTimeSeries model uses pymc-extras for state-space modeling,
-    which provides Kalman filtering and smoothing capabilities.
-
-    Note: This test will be skipped if pymc-extras is not available in the environment.
-    The test is designed to be comprehensive but also robust to dependency issues.
-    """
-    # Check if pymc-extras is available
+@pytest.fixture(scope="module")
+def state_space_model():
+    """Fixture providing a fitted StateSpaceTimeSeries model for testing."""
     try:
         from pymc_extras.statespace import structural  # noqa: F401
     except ImportError:
         pytest.skip("pymc-extras is required for InterruptedTimeSeries tests")
 
-    # Generate synthetic time series data with trend and seasonality
     rng = np.random.default_rng(seed=123)
-    dates = pd.date_range(
-        start="2020-01-01", end="2020-03-31", freq="D"
-    )  # Shorter period for faster testing
+    dates = pd.date_range(start="2020-01-01", end="2020-03-31", freq="D")
     n_obs = len(dates)
-
-    # Create synthetic components
-    trend_actual = np.linspace(0, 2, n_obs)  # Linear trend
-    seasonality_actual = 3 * np.sin(2 * np.pi * dates.dayofyear / 365.25) + 2 * np.cos(
+    trend = np.linspace(0, 2, n_obs)
+    seasonality = 3 * np.sin(2 * np.pi * dates.dayofyear / 365.25) + 2 * np.cos(
         4 * np.pi * dates.dayofyear / 365.25
-    )  # Yearly seasonality
-    noise_actual = rng.normal(0, 0.3, n_obs)  # Observation noise
+    )
+    noise = rng.normal(0, 0.3, n_obs)
+    data = pd.DataFrame({"y": trend + seasonality + noise}, index=dates)
 
-    y_values = trend_actual + seasonality_actual + noise_actual
-    data = pd.DataFrame({"y": y_values}, index=dates)
-
-    # Sample configuration for faster testing
-    ss_sample_kwargs = {
-        "chains": 1,
-        "draws": 50,  # Reduced for faster testing
-        "tune": 25,  # Reduced for faster testing
-        "progressbar": False,
-        "random_seed": 42,
-    }
-
-    # Create DataArray for y to support score() which requires xarray
-    # Use dates as obs_ind coordinate (datetime values required by new API)
     y_da = xr.DataArray(
         data["y"].values.reshape(-1, 1),
         dims=["obs_ind", "treated_units"],
         coords={"obs_ind": dates, "treated_units": ["unit_0"]},
     )
-
-    # Initialize model with PyMC mode (more stable than JAX for testing)
     model = cp.pymc_models.StateSpaceTimeSeries(
-        level_order=2,  # Local linear trend (level + slope)
-        seasonal_length=7,  # Weekly seasonality for shorter test period
+        level_order=2,
+        seasonal_length=7,
         sample_kwargs=ss_sample_kwargs,
-        mode="FAST_COMPILE",  # Use PyMC mode instead of JAX for better compatibility
+        mode="FAST_COMPILE",
     )
-
-    # Test the complete workflow
-    # --- Test Case 1: Model fitting --- #
-    # Create dummy X (state-space doesn't use exogenous vars but we pass empty array for API consistency)
     dummy_X = xr.DataArray(
-        np.zeros((len(dates), 0)),
+        np.zeros((n_obs, 0)),
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": dates, "coeffs": []},
     )
-    # StateSpaceTimeSeries extracts datetime from xarray coords, no separate coords dict needed
-    idata = model.fit(
-        X=dummy_X,
-        y=y_da,
+    idata = model.fit(X=dummy_X, y=y_da)
+    return SimpleNamespace(
+        model=model,
+        idata=idata,
+        y_da=y_da,
+        dates=dates,
+        n_obs=n_obs,
+        dummy_X=dummy_X,
     )
 
-    # Verify inference data structure
+
+@pytest.mark.integration
+def test_state_space_fitting(state_space_model):
+    """Test model fitting produces correct inference data."""
+    idata = state_space_model.idata
     assert isinstance(idata, az.InferenceData)
     assert "posterior" in idata
     assert "posterior_predictive" in idata
-
-    # Check for expected state-space parameters
     expected_params = [
         "P0_diag",
         "initial_level_trend",
@@ -1429,102 +1446,109 @@ def test_state_space_time_series():
     ]
     for param in expected_params:
         assert param in idata.posterior, f"Parameter {param} not found in posterior"
-
-    # Check for expected posterior predictive variables
     assert "y_hat" in idata.posterior_predictive
     assert "mu" in idata.posterior_predictive
 
-    # --- Test Case 2: In-sample prediction --- #
-    # Create dummy X for in-sample prediction (state-space doesn't use it but API requires it for consistency)
-    dummy_X_insample = xr.DataArray(
+
+@pytest.mark.integration
+def test_state_space_insample_prediction(state_space_model):
+    """Test in-sample prediction."""
+    model = state_space_model.model
+    dates = state_space_model.dates
+    dummy_X = xr.DataArray(
         np.zeros((len(dates), 0)),
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": dates, "coeffs": []},
     )
-    predictions_in_sample = model.predict(
-        X=dummy_X_insample,
-        out_of_sample=False,
-    )
-    assert isinstance(predictions_in_sample, az.InferenceData)
-    assert "posterior_predictive" in predictions_in_sample
-    assert "y_hat" in predictions_in_sample.posterior_predictive
-    assert "mu" in predictions_in_sample.posterior_predictive
+    predictions = model.predict(X=dummy_X, out_of_sample=False)
+    assert isinstance(predictions, az.InferenceData)
+    assert "posterior_predictive" in predictions
+    assert "y_hat" in predictions.posterior_predictive
+    assert "mu" in predictions.posterior_predictive
 
-    # --- Test Case 3: Out-of-sample prediction (forecasting) --- #
+
+@pytest.mark.integration
+def test_state_space_forecast(state_space_model):
+    """Test out-of-sample prediction (forecasting)."""
+    model = state_space_model.model
     future_dates = pd.date_range(start="2020-04-01", end="2020-04-07", freq="D")
-    # Create dummy X for forecasting (needs time index)
     future_X = xr.DataArray(
         np.zeros((len(future_dates), 0)),
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": future_dates, "coeffs": []},
     )
+    predictions = model.predict(X=future_X, out_of_sample=True)
+    assert isinstance(predictions, az.InferenceData)
+    assert "y_hat" in predictions.posterior_predictive
+    assert "mu" in predictions.posterior_predictive
+    assert predictions.posterior_predictive["y_hat"].shape[-1] == len(future_dates)
 
-    predictions_out_sample = model.predict(
-        X=future_X,
-        out_of_sample=True,
-    )
-    # Note: predict now returns InferenceData, not Dataset!
-    # But let's check what the test expects.
-    # The previous code expected xr.Dataset:
-    # assert isinstance(predictions_out_sample, xr.Dataset)
-    # I updated predict() to return az.InferenceData.
-    # So I should update this assertion too.
 
-    assert isinstance(predictions_out_sample, az.InferenceData)
-    assert "y_hat" in predictions_out_sample.posterior_predictive
-    assert "mu" in predictions_out_sample.posterior_predictive
-
-    # Verify forecast has correct dimensions
-    # y_hat is in posterior_predictive group
-    assert predictions_out_sample.posterior_predictive["y_hat"].shape[-1] == len(
-        future_dates
-    )
-
-    # --- Test Case 4: Model scoring --- #
-    # Create dummy X for score (state-space doesn't use it but API requires it)
-    dummy_X_for_score = xr.DataArray(
+@pytest.mark.integration
+def test_state_space_scoring(state_space_model):
+    """Test model scoring."""
+    model = state_space_model.model
+    dates = state_space_model.dates
+    y_da = state_space_model.y_da
+    dummy_X = xr.DataArray(
         np.zeros((len(dates), 0)),
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": dates, "coeffs": []},
     )
-    score = model.score(
-        X=dummy_X_for_score,
-        y=y_da,
-    )
+    score = model.score(X=dummy_X, y=y_da)
     assert isinstance(score, pd.Series)
     assert "unit_0_r2" in score.index
     assert "unit_0_r2_std" in score.index
-    # R² should be reasonable for synthetic data with clear structure
-    assert score["unit_0_r2"] > 0.0, (
-        "R² should be positive for structured synthetic data"
-    )
+    assert score["unit_0_r2"] > 0.0
 
-    # --- Test Case 5: Model components verification --- #
-    # Test that the model has the expected state-space structure
+
+@pytest.mark.integration
+def test_state_space_model_structure(state_space_model):
+    """Test model structure and components."""
+    model = state_space_model.model
     assert hasattr(model, "ss_mod")
     assert model.ss_mod is not None
     assert hasattr(model, "_train_index")
     assert isinstance(model._train_index, pd.DatetimeIndex)
-
-    # Test conditional inference data
     assert hasattr(model, "conditional_idata")
     assert isinstance(model.conditional_idata, xr.Dataset)
-
-    # Verify model parameters match initialization
     assert model.level_order == 2
     assert model.seasonal_length == 7
     assert model.mode == "FAST_COMPILE"
 
-    # --- Test Case 6: Error handling --- #
-    # Test that y must have datetime coordinates
+
+@pytest.mark.integration
+def test_state_space_error_handling():
+    """Test error handling for invalid inputs."""
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for InterruptedTimeSeries tests")
+
+    rng = np.random.default_rng(seed=123)
+    dates = pd.date_range(start="2020-01-01", end="2020-03-31", freq="D")
+    n_obs = len(dates)
+    data = pd.DataFrame({"y": rng.normal(0, 1, n_obs)}, index=dates)
+    y_da = xr.DataArray(
+        data["y"].values.reshape(-1, 1),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
+    dummy_X = xr.DataArray(
+        np.zeros((n_obs, 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
+    model = cp.pymc_models.StateSpaceTimeSeries(sample_kwargs=ss_sample_kwargs)
+    model.fit(X=dummy_X, y=y_da)
+
     with pytest.raises(
         ValueError,
         match=r"y\.coords\['obs_ind'\] must contain datetime values",
     ):
-        model_error = cp.pymc_models.StateSpaceTimeSeries(
+        bad_model = cp.pymc_models.StateSpaceTimeSeries(
             sample_kwargs=ss_sample_kwargs
         )
-        # Create y with non-datetime coords (integers instead)
         bad_y = xr.DataArray(
             data["y"].values.reshape(-1, 1),
             dims=["obs_ind", "treated_units"],
@@ -1535,23 +1559,17 @@ def test_state_space_time_series():
             dims=["obs_ind", "coeffs"],
             coords={"obs_ind": np.arange(n_obs), "coeffs": []},
         )
-        model_error.fit(
-            X=bad_X,
-            y=bad_y,
-        )
+        bad_model.fit(X=bad_X, y=bad_y)
 
-    # Test prediction with missing X for out-of-sample
     with pytest.raises(
         ValueError,
         match="X must be provided for out-of-sample predictions",
     ):
-        model.predict(
-            X=None,
-            out_of_sample=True,
-        )
+        model.predict(X=None, out_of_sample=True)
 
-    # Test methods before fitting
-    unfitted_model = cp.pymc_models.StateSpaceTimeSeries(sample_kwargs=ss_sample_kwargs)
+    unfitted_model = cp.pymc_models.StateSpaceTimeSeries(
+        sample_kwargs=ss_sample_kwargs
+    )
 
     with pytest.raises(RuntimeError, match="Model must be fit before"):
         unfitted_model._smooth()
@@ -1559,20 +1577,26 @@ def test_state_space_time_series():
     with pytest.raises(RuntimeError, match="Model must be fit before"):
         unfitted_model._forecast(start=dates[0], periods=10)
 
-    # --- Test Case 7: Model initialization with different parameters --- #
-    # Test different level orders
+
+@pytest.mark.integration
+def test_state_space_parameter_variants():
+    """Test model initialization with different parameters."""
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for InterruptedTimeSeries tests")
+
     model_level1 = cp.pymc_models.StateSpaceTimeSeries(
-        level_order=1,  # Local level only (no slope)
+        level_order=1,
         seasonal_length=7,
         sample_kwargs=ss_sample_kwargs,
         mode="FAST_COMPILE",
     )
     assert model_level1.level_order == 1
 
-    # Test different seasonal lengths
     model_monthly = cp.pymc_models.StateSpaceTimeSeries(
         level_order=2,
-        seasonal_length=30,  # Monthly seasonality
+        seasonal_length=30,
         sample_kwargs=ss_sample_kwargs,
         mode="FAST_COMPILE",
     )

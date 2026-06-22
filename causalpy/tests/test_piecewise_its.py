@@ -981,9 +981,9 @@ def test_piecewise_its_instance_attributes():
     assert "obs_ind" in result.design["X"].dims
     assert "coeffs" in result.design["X"].dims
 
-    # Check design info stored
-    assert hasattr(result, "_x_design_info")
-    assert hasattr(result, "_y_design_info")
+    # Check interruption columns tracked
+    assert hasattr(result, "_interruption_cols")
+    assert len(result._interruption_cols) == 2
 
 
 def test_piecewise_its_float_threshold():

@@ -1,0 +1,893 @@
+{
+  "causalpy\\constants.py": {
+    "loc": 28,
+    "lloc": 5,
+    "sloc": 2,
+    "comments": 21,
+    "multi": 3,
+    "blank": 2,
+    "single_comments": 21
+  },
+  "causalpy\\custom_exceptions.py": {
+    "loc": 60,
+    "lloc": 16,
+    "sloc": 12,
+    "comments": 13,
+    "multi": 23,
+    "blank": 12,
+    "single_comments": 13
+  },
+  "causalpy\\date_utils.py": {
+    "loc": 91,
+    "lloc": 25,
+    "sloc": 27,
+    "comments": 15,
+    "multi": 36,
+    "blank": 13,
+    "single_comments": 15
+  },
+  "causalpy\\maketables_adapters.py": {
+    "loc": 432,
+    "lloc": 211,
+    "sloc": 227,
+    "comments": 14,
+    "multi": 113,
+    "blank": 70,
+    "single_comments": 22
+  },
+  "causalpy\\pipeline.py": {
+    "loc": 216,
+    "lloc": 66,
+    "sloc": 57,
+    "comments": 13,
+    "multi": 108,
+    "blank": 38,
+    "single_comments": 13
+  },
+  "causalpy\\plot_utils.py": {
+    "loc": 130,
+    "lloc": 30,
+    "sloc": 52,
+    "comments": 25,
+    "multi": 39,
+    "blank": 18,
+    "single_comments": 21
+  },
+  "causalpy\\pymc_models.py": {
+    "loc": 2669,
+    "lloc": 722,
+    "sloc": 1380,
+    "comments": 155,
+    "multi": 803,
+    "blank": 341,
+    "single_comments": 145
+  },
+  "causalpy\\reporting.py": {
+    "loc": 1723,
+    "lloc": 675,
+    "sloc": 983,
+    "comments": 116,
+    "multi": 339,
+    "blank": 278,
+    "single_comments": 123
+  },
+  "causalpy\\skl_models.py": {
+    "loc": 163,
+    "lloc": 59,
+    "sloc": 57,
+    "comments": 19,
+    "multi": 57,
+    "blank": 27,
+    "single_comments": 22
+  },
+  "causalpy\\transforms.py": {
+    "loc": 289,
+    "lloc": 99,
+    "sloc": 106,
+    "comments": 33,
+    "multi": 105,
+    "blank": 49,
+    "single_comments": 29
+  },
+  "causalpy\\utils.py": {
+    "loc": 469,
+    "lloc": 100,
+    "sloc": 140,
+    "comments": 25,
+    "multi": 220,
+    "blank": 82,
+    "single_comments": 27
+  },
+  "causalpy\\variable_selection_priors.py": {
+    "loc": 600,
+    "lloc": 144,
+    "sloc": 208,
+    "comments": 41,
+    "multi": 254,
+    "blank": 103,
+    "single_comments": 35
+  },
+  "causalpy\\version.py": {
+    "loc": 16,
+    "lloc": 2,
+    "sloc": 1,
+    "comments": 13,
+    "multi": 0,
+    "blank": 1,
+    "single_comments": 14
+  },
+  "causalpy\\__init__.py": {
+    "loc": 80,
+    "lloc": 25,
+    "sloc": 63,
+    "comments": 14,
+    "multi": 0,
+    "blank": 3,
+    "single_comments": 14
+  },
+  "causalpy\\checks\\bandwidth.py": {
+    "loc": 140,
+    "lloc": 53,
+    "sloc": 74,
+    "comments": 13,
+    "multi": 31,
+    "blank": 22,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\base.py": {
+    "loc": 135,
+    "lloc": 39,
+    "sloc": 30,
+    "comments": 13,
+    "multi": 68,
+    "blank": 24,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\convex_hull.py": {
+    "loc": 119,
+    "lloc": 45,
+    "sloc": 65,
+    "comments": 14,
+    "multi": 23,
+    "blank": 18,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\leave_one_out.py": {
+    "loc": 135,
+    "lloc": 54,
+    "sloc": 72,
+    "comments": 13,
+    "multi": 27,
+    "blank": 23,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\mccrary.py": {
+    "loc": 152,
+    "lloc": 50,
+    "sloc": 77,
+    "comments": 16,
+    "multi": 38,
+    "blank": 24,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\outcome_falsification.py": {
+    "loc": 387,
+    "lloc": 123,
+    "sloc": 211,
+    "comments": 13,
+    "multi": 112,
+    "blank": 50,
+    "single_comments": 14
+  },
+  "causalpy\\checks\\persistence.py": {
+    "loc": 141,
+    "lloc": 34,
+    "sloc": 78,
+    "comments": 13,
+    "multi": 32,
+    "blank": 18,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\placebo_in_space.py": {
+    "loc": 152,
+    "lloc": 60,
+    "sloc": 85,
+    "comments": 13,
+    "multi": 29,
+    "blank": 25,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\placebo_in_time.py": {
+    "loc": 1137,
+    "lloc": 406,
+    "sloc": 613,
+    "comments": 29,
+    "multi": 353,
+    "blank": 142,
+    "single_comments": 29
+  },
+  "causalpy\\checks\\pre_treatment_placebo.py": {
+    "loc": 124,
+    "lloc": 37,
+    "sloc": 63,
+    "comments": 14,
+    "multi": 28,
+    "blank": 20,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\prior_sensitivity.py": {
+    "loc": 172,
+    "lloc": 63,
+    "sloc": 95,
+    "comments": 13,
+    "multi": 39,
+    "blank": 25,
+    "single_comments": 13
+  },
+  "causalpy\\checks\\__init__.py": {
+    "loc": 54,
+    "lloc": 15,
+    "sloc": 37,
+    "comments": 13,
+    "multi": 0,
+    "blank": 3,
+    "single_comments": 14
+  },
+  "causalpy\\data\\datasets.py": {
+    "loc": 143,
+    "lloc": 18,
+    "sloc": 55,
+    "comments": 17,
+    "multi": 54,
+    "blank": 17,
+    "single_comments": 17
+  },
+  "causalpy\\data\\simulate_data.py": {
+    "loc": 878,
+    "lloc": 237,
+    "sloc": 429,
+    "comments": 64,
+    "multi": 255,
+    "blank": 128,
+    "single_comments": 66
+  },
+  "causalpy\\data\\__init__.py": {
+    "loc": 18,
+    "lloc": 3,
+    "sloc": 2,
+    "comments": 13,
+    "multi": 0,
+    "blank": 2,
+    "single_comments": 14
+  },
+  "causalpy\\experiments\\base.py": {
+    "loc": 542,
+    "lloc": 178,
+    "sloc": 228,
+    "comments": 26,
+    "multi": 213,
+    "blank": 69,
+    "single_comments": 32
+  },
+  "causalpy\\experiments\\diff_in_diff.py": {
+    "loc": 789,
+    "lloc": 267,
+    "sloc": 511,
+    "comments": 68,
+    "multi": 137,
+    "blank": 72,
+    "single_comments": 69
+  },
+  "causalpy\\experiments\\instrumental_variable.py": {
+    "loc": 480,
+    "lloc": 208,
+    "sloc": 261,
+    "comments": 23,
+    "multi": 137,
+    "blank": 55,
+    "single_comments": 27
+  },
+  "causalpy\\experiments\\interrupted_time_series.py": {
+    "loc": 1885,
+    "lloc": 702,
+    "sloc": 1241,
+    "comments": 64,
+    "multi": 329,
+    "blank": 217,
+    "single_comments": 98
+  },
+  "causalpy\\experiments\\inverse_propensity_weighting.py": {
+    "loc": 1003,
+    "lloc": 343,
+    "sloc": 514,
+    "comments": 29,
+    "multi": 356,
+    "blank": 114,
+    "single_comments": 19
+  },
+  "causalpy\\experiments\\model_adapter.py": {
+    "loc": 453,
+    "lloc": 158,
+    "sloc": 189,
+    "comments": 13,
+    "multi": 161,
+    "blank": 72,
+    "single_comments": 31
+  },
+  "causalpy\\experiments\\panel_regression.py": {
+    "loc": 1143,
+    "lloc": 403,
+    "sloc": 548,
+    "comments": 51,
+    "multi": 369,
+    "blank": 161,
+    "single_comments": 65
+  },
+  "causalpy\\experiments\\piecewise_its.py": {
+    "loc": 1002,
+    "lloc": 346,
+    "sloc": 562,
+    "comments": 70,
+    "multi": 218,
+    "blank": 147,
+    "single_comments": 75
+  },
+  "causalpy\\experiments\\prepostnegd.py": {
+    "loc": 477,
+    "lloc": 170,
+    "sloc": 257,
+    "comments": 24,
+    "multi": 130,
+    "blank": 53,
+    "single_comments": 37
+  },
+  "causalpy\\experiments\\regression_discontinuity.py": {
+    "loc": 688,
+    "lloc": 267,
+    "sloc": 416,
+    "comments": 35,
+    "multi": 135,
+    "blank": 81,
+    "single_comments": 56
+  },
+  "causalpy\\experiments\\regression_kink.py": {
+    "loc": 496,
+    "lloc": 201,
+    "sloc": 303,
+    "comments": 27,
+    "multi": 101,
+    "blank": 62,
+    "single_comments": 30
+  },
+  "causalpy\\experiments\\staggered_did.py": {
+    "loc": 1767,
+    "lloc": 664,
+    "sloc": 1118,
+    "comments": 103,
+    "multi": 320,
+    "blank": 204,
+    "single_comments": 125
+  },
+  "causalpy\\experiments\\synthetic_control.py": {
+    "loc": 1174,
+    "lloc": 417,
+    "sloc": 761,
+    "comments": 54,
+    "multi": 204,
+    "blank": 135,
+    "single_comments": 74
+  },
+  "causalpy\\experiments\\synthetic_difference_in_differences.py": {
+    "loc": 986,
+    "lloc": 283,
+    "sloc": 532,
+    "comments": 34,
+    "multi": 298,
+    "blank": 113,
+    "single_comments": 43
+  },
+  "causalpy\\experiments\\__init__.py": {
+    "loc": 42,
+    "lloc": 14,
+    "sloc": 26,
+    "comments": 13,
+    "multi": 0,
+    "blank": 2,
+    "single_comments": 14
+  },
+  "causalpy\\skills\\__init__.py": {
+    "loc": 20,
+    "lloc": 1,
+    "sloc": 0,
+    "comments": 13,
+    "multi": 5,
+    "blank": 2,
+    "single_comments": 13
+  },
+  "causalpy\\steps\\estimate_effect.py": {
+    "loc": 131,
+    "lloc": 34,
+    "sloc": 41,
+    "comments": 13,
+    "multi": 54,
+    "blank": 22,
+    "single_comments": 14
+  },
+  "causalpy\\steps\\report.py": {
+    "loc": 167,
+    "lloc": 67,
+    "sloc": 84,
+    "comments": 13,
+    "multi": 41,
+    "blank": 27,
+    "single_comments": 15
+  },
+  "causalpy\\steps\\sensitivity.py": {
+    "loc": 221,
+    "lloc": 71,
+    "sloc": 70,
+    "comments": 16,
+    "multi": 95,
+    "blank": 40,
+    "single_comments": 16
+  },
+  "causalpy\\steps\\__init__.py": {
+    "loc": 25,
+    "lloc": 5,
+    "sloc": 9,
+    "comments": 13,
+    "multi": 0,
+    "blank": 2,
+    "single_comments": 14
+  },
+  "causalpy\\tests\\conftest.py": {
+    "loc": 187,
+    "lloc": 95,
+    "sloc": 112,
+    "comments": 22,
+    "multi": 9,
+    "blank": 39,
+    "single_comments": 27
+  },
+  "causalpy\\tests\\test_base_experiment_abc.py": {
+    "loc": 31,
+    "lloc": 10,
+    "sloc": 8,
+    "comments": 13,
+    "multi": 3,
+    "blank": 6,
+    "single_comments": 14
+  },
+  "causalpy\\tests\\test_check_architecture_inventory.py": {
+    "loc": 174,
+    "lloc": 72,
+    "sloc": 125,
+    "comments": 13,
+    "multi": 0,
+    "blank": 26,
+    "single_comments": 23
+  },
+  "causalpy\\tests\\test_check_public_exports.py": {
+    "loc": 85,
+    "lloc": 41,
+    "sloc": 50,
+    "comments": 13,
+    "multi": 0,
+    "blank": 17,
+    "single_comments": 18
+  },
+  "causalpy\\tests\\test_cross_cutting_checks.py": {
+    "loc": 429,
+    "lloc": 245,
+    "sloc": 322,
+    "comments": 34,
+    "multi": 0,
+    "blank": 65,
+    "single_comments": 42
+  },
+  "causalpy\\tests\\test_custom_exceptions.py": {
+    "loc": 34,
+    "lloc": 7,
+    "sloc": 18,
+    "comments": 13,
+    "multi": 0,
+    "blank": 3,
+    "single_comments": 13
+  },
+  "causalpy\\tests\\test_data_loading.py": {
+    "loc": 53,
+    "lloc": 27,
+    "sloc": 22,
+    "comments": 13,
+    "multi": 3,
+    "blank": 11,
+    "single_comments": 17
+  },
+  "causalpy\\tests\\test_date_utils.py": {
+    "loc": 184,
+    "lloc": 103,
+    "sloc": 100,
+    "comments": 24,
+    "multi": 0,
+    "blank": 44,
+    "single_comments": 40
+  },
+  "causalpy\\tests\\test_default_models.py": {
+    "loc": 254,
+    "lloc": 73,
+    "sloc": 202,
+    "comments": 14,
+    "multi": 8,
+    "blank": 26,
+    "single_comments": 18
+  },
+  "causalpy\\tests\\test_deprecated_design_aliases.py": {
+    "loc": 216,
+    "lloc": 81,
+    "sloc": 129,
+    "comments": 34,
+    "multi": 5,
+    "blank": 46,
+    "single_comments": 36
+  },
+  "causalpy\\tests\\test_generate_report.py": {
+    "loc": 229,
+    "lloc": 130,
+    "sloc": 158,
+    "comments": 25,
+    "multi": 0,
+    "blank": 40,
+    "single_comments": 31
+  },
+  "causalpy\\tests\\test_hdi_prob_defaults.py": {
+    "loc": 154,
+    "lloc": 75,
+    "sloc": 85,
+    "comments": 18,
+    "multi": 30,
+    "blank": 25,
+    "single_comments": 14
+  },
+  "causalpy\\tests\\test_hdi_prob_wiring.py": {
+    "loc": 463,
+    "lloc": 228,
+    "sloc": 280,
+    "comments": 36,
+    "multi": 20,
+    "blank": 94,
+    "single_comments": 69
+  },
+  "causalpy\\tests\\test_input_validation.py": {
+    "loc": 1027,
+    "lloc": 367,
+    "sloc": 757,
+    "comments": 78,
+    "multi": 4,
+    "blank": 175,
+    "single_comments": 91
+  },
+  "causalpy\\tests\\test_instrumental_variable.py": {
+    "loc": 481,
+    "lloc": 166,
+    "sloc": 310,
+    "comments": 64,
+    "multi": 3,
+    "blank": 87,
+    "single_comments": 81
+  },
+  "causalpy\\tests\\test_integration_its_new_timeseries.py": {
+    "loc": 319,
+    "lloc": 140,
+    "sloc": 220,
+    "comments": 46,
+    "multi": 3,
+    "blank": 49,
+    "single_comments": 47
+  },
+  "causalpy\\tests\\test_integration_pymc_examples.py": {
+    "loc": 1879,
+    "lloc": 856,
+    "sloc": 1374,
+    "comments": 86,
+    "multi": 165,
+    "blank": 243,
+    "single_comments": 97
+  },
+  "causalpy\\tests\\test_integration_skl_examples.py": {
+    "loc": 352,
+    "lloc": 145,
+    "sloc": 224,
+    "comments": 20,
+    "multi": 61,
+    "blank": 45,
+    "single_comments": 22
+  },
+  "causalpy\\tests\\test_ipw_extreme_ps.py": {
+    "loc": 109,
+    "lloc": 57,
+    "sloc": 59,
+    "comments": 14,
+    "multi": 6,
+    "blank": 20,
+    "single_comments": 24
+  },
+  "causalpy\\tests\\test_ipw_get_ate.py": {
+    "loc": 243,
+    "lloc": 158,
+    "sloc": 136,
+    "comments": 19,
+    "multi": 14,
+    "blank": 51,
+    "single_comments": 42
+  },
+  "causalpy\\tests\\test_its_effect_summary.py": {
+    "loc": 847,
+    "lloc": 385,
+    "sloc": 562,
+    "comments": 84,
+    "multi": 5,
+    "blank": 174,
+    "single_comments": 106
+  },
+  "causalpy\\tests\\test_maketables_plugin.py": {
+    "loc": 820,
+    "lloc": 480,
+    "sloc": 634,
+    "comments": 16,
+    "multi": 0,
+    "blank": 143,
+    "single_comments": 43
+  },
+  "causalpy\\tests\\test_method_specific_checks.py": {
+    "loc": 516,
+    "lloc": 277,
+    "sloc": 412,
+    "comments": 28,
+    "multi": 0,
+    "blank": 65,
+    "single_comments": 39
+  },
+  "causalpy\\tests\\test_misc.py": {
+    "loc": 37,
+    "lloc": 15,
+    "sloc": 13,
+    "comments": 16,
+    "multi": 5,
+    "blank": 3,
+    "single_comments": 16
+  },
+  "causalpy\\tests\\test_model_adapter.py": {
+    "loc": 197,
+    "lloc": 90,
+    "sloc": 147,
+    "comments": 13,
+    "multi": 0,
+    "blank": 34,
+    "single_comments": 16
+  },
+  "causalpy\\tests\\test_model_adapter_normalization.py": {
+    "loc": 108,
+    "lloc": 53,
+    "sloc": 74,
+    "comments": 13,
+    "multi": 0,
+    "blank": 20,
+    "single_comments": 14
+  },
+  "causalpy\\tests\\test_model_experiment_compatability.py": {
+    "loc": 86,
+    "lloc": 30,
+    "sloc": 48,
+    "comments": 16,
+    "multi": 4,
+    "blank": 14,
+    "single_comments": 20
+  },
+  "causalpy\\tests\\test_notebook_validation.py": {
+    "loc": 302,
+    "lloc": 97,
+    "sloc": 224,
+    "comments": 18,
+    "multi": 2,
+    "blank": 57,
+    "single_comments": 19
+  },
+  "causalpy\\tests\\test_outcome_falsification.py": {
+    "loc": 551,
+    "lloc": 282,
+    "sloc": 328,
+    "comments": 57,
+    "multi": 22,
+    "blank": 118,
+    "single_comments": 83
+  },
+  "causalpy\\tests\\test_panel_regression.py": {
+    "loc": 772,
+    "lloc": 303,
+    "sloc": 562,
+    "comments": 66,
+    "multi": 3,
+    "blank": 117,
+    "single_comments": 90
+  },
+  "causalpy\\tests\\test_piecewise_its.py": {
+    "loc": 1615,
+    "lloc": 726,
+    "sloc": 1048,
+    "comments": 145,
+    "multi": 13,
+    "blank": 355,
+    "single_comments": 199
+  },
+  "causalpy\\tests\\test_pipeline.py": {
+    "loc": 341,
+    "lloc": 182,
+    "sloc": 213,
+    "comments": 38,
+    "multi": 0,
+    "blank": 75,
+    "single_comments": 53
+  },
+  "causalpy\\tests\\test_placebo_in_time.py": {
+    "loc": 1381,
+    "lloc": 632,
+    "sloc": 938,
+    "comments": 108,
+    "multi": 21,
+    "blank": 238,
+    "single_comments": 184
+  },
+  "causalpy\\tests\\test_plot_show_parameter.py": {
+    "loc": 432,
+    "lloc": 196,
+    "sloc": 274,
+    "comments": 32,
+    "multi": 59,
+    "blank": 66,
+    "single_comments": 33
+  },
+  "causalpy\\tests\\test_plot_utils.py": {
+    "loc": 97,
+    "lloc": 28,
+    "sloc": 46,
+    "comments": 25,
+    "multi": 11,
+    "blank": 16,
+    "single_comments": 24
+  },
+  "causalpy\\tests\\test_public_plot_signatures.py": {
+    "loc": 244,
+    "lloc": 83,
+    "sloc": 125,
+    "comments": 22,
+    "multi": 70,
+    "blank": 32,
+    "single_comments": 17
+  },
+  "causalpy\\tests\\test_pymc_models.py": {
+    "loc": 1188,
+    "lloc": 609,
+    "sloc": 792,
+    "comments": 124,
+    "multi": 44,
+    "blank": 201,
+    "single_comments": 151
+  },
+  "causalpy\\tests\\test_pymc_models_compat.py": {
+    "loc": 115,
+    "lloc": 65,
+    "sloc": 69,
+    "comments": 20,
+    "multi": 0,
+    "blank": 31,
+    "single_comments": 15
+  },
+  "causalpy\\tests\\test_reporting.py": {
+    "loc": 2862,
+    "lloc": 1280,
+    "sloc": 1983,
+    "comments": 166,
+    "multi": 5,
+    "blank": 610,
+    "single_comments": 264
+  },
+  "causalpy\\tests\\test_sdid_helpers.py": {
+    "loc": 434,
+    "lloc": 233,
+    "sloc": 308,
+    "comments": 25,
+    "multi": 12,
+    "blank": 82,
+    "single_comments": 32
+  },
+  "causalpy\\tests\\test_sensitivity_container.py": {
+    "loc": 333,
+    "lloc": 180,
+    "sloc": 197,
+    "comments": 37,
+    "multi": 0,
+    "blank": 79,
+    "single_comments": 57
+  },
+  "causalpy\\tests\\test_sklearn_clone_fit_intercept.py": {
+    "loc": 42,
+    "lloc": 13,
+    "sloc": 17,
+    "comments": 16,
+    "multi": 0,
+    "blank": 7,
+    "single_comments": 18
+  },
+  "causalpy\\tests\\test_staggered_did.py": {
+    "loc": 1986,
+    "lloc": 675,
+    "sloc": 1409,
+    "comments": 167,
+    "multi": 37,
+    "blank": 344,
+    "single_comments": 196
+  },
+  "causalpy\\tests\\test_synthetic_data.py": {
+    "loc": 81,
+    "lloc": 37,
+    "sloc": 35,
+    "comments": 18,
+    "multi": 15,
+    "blank": 15,
+    "single_comments": 16
+  },
+  "causalpy\\tests\\test_three_period_its.py": {
+    "loc": 1007,
+    "lloc": 445,
+    "sloc": 632,
+    "comments": 122,
+    "multi": 5,
+    "blank": 220,
+    "single_comments": 150
+  },
+  "causalpy\\tests\\test_timeseries_model_coverage.py": {
+    "loc": 570,
+    "lloc": 277,
+    "sloc": 393,
+    "comments": 32,
+    "multi": 19,
+    "blank": 95,
+    "single_comments": 63
+  },
+  "causalpy\\tests\\test_utils.py": {
+    "loc": 458,
+    "lloc": 220,
+    "sloc": 296,
+    "comments": 53,
+    "multi": 3,
+    "blank": 92,
+    "single_comments": 67
+  },
+  "causalpy\\tests\\test_validate_docstring_lists.py": {
+    "loc": 206,
+    "lloc": 61,
+    "sloc": 141,
+    "comments": 13,
+    "multi": 19,
+    "blank": 30,
+    "single_comments": 16
+  },
+  "causalpy\\tests\\test_variable_selection_priors.py": {
+    "loc": 125,
+    "lloc": 67,
+    "sloc": 69,
+    "comments": 17,
+    "multi": 0,
+    "blank": 31,
+    "single_comments": 25
+  },
+  "causalpy\\tests\\__init__.py": {
+    "loc": 13,
+    "lloc": 0,
+    "sloc": 0,
+    "comments": 13,
+    "multi": 0,
+    "blank": 0,
+    "single_comments": 13
+  }
+}

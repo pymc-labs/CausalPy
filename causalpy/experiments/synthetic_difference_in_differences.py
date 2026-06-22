@@ -16,6 +16,7 @@ Synthetic Difference-in-Differences Experiment.
 """
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -32,6 +33,26 @@ from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeig
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _SDiDDesign:
+    """Pre and post intervention design datasets."""
+
+    pre_design: xr.Dataset
+    post_design: xr.Dataset
+
+
+@dataclass
+class _SDiDResults:
+    """Container for SDiD experiment results."""
+
+    tau_posterior: xr.DataArray
+    pre_pred: az.InferenceData
+    post_pred: az.InferenceData
+    pre_impact: xr.DataArray
+    post_impact: xr.DataArray
+    post_impact_cumulative: xr.DataArray
 
 
 class SyntheticDifferenceInDifferences(BaseExperiment):
@@ -109,6 +130,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    expt_type = "SyntheticDifferenceInDifferences"
     _default_model_class = SyntheticDifferenceInDifferencesWeightFitter
     _deprecated_design_aliases = {
         "datapre_control": ("pre_design", "control"),
@@ -135,7 +157,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
-        self.expt_type = "SyntheticDifferenceInDifferences"
         self._prepare_data()
         self.algorithm()
 
@@ -154,6 +175,16 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Post-period: index >= treatment_time
         """
         return self.data[self.data.index >= self.treatment_time]
+
+    @property
+    def pre_design(self) -> xr.Dataset:
+        """Pre-treatment design dataset with control and treated variables."""
+        return self._design.pre_design
+
+    @property
+    def post_design(self) -> xr.Dataset:
+        """Post-treatment design dataset with control and treated variables."""
+        return self._design.post_design
 
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
@@ -187,45 +218,47 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Builds ``pre_design`` / ``post_design`` datasets with ``control`` and
         ``treated`` variables, mirroring :class:`SyntheticControl`.
         """
-        self.pre_design = xr.Dataset(
-            {
-                "control": xr.DataArray(
-                    self.datapre[self.control_units],
-                    dims=["obs_ind", "coeffs"],
-                    coords={
-                        "obs_ind": self.datapre[self.control_units].index,
-                        "coeffs": self.control_units,
-                    },
-                ),
-                "treated": xr.DataArray(
-                    self.datapre[self.treated_units],
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapre[self.treated_units].index,
-                        "treated_units": self.treated_units,
-                    },
-                ),
-            }
-        )
-        self.post_design = xr.Dataset(
-            {
-                "control": xr.DataArray(
-                    self.datapost[self.control_units],
-                    dims=["obs_ind", "coeffs"],
-                    coords={
-                        "obs_ind": self.datapost[self.control_units].index,
-                        "coeffs": self.control_units,
-                    },
-                ),
-                "treated": xr.DataArray(
-                    self.datapost[self.treated_units],
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapost[self.treated_units].index,
-                        "treated_units": self.treated_units,
-                    },
-                ),
-            }
+        self._design = _SDiDDesign(
+            pre_design=xr.Dataset(
+                {
+                    "control": xr.DataArray(
+                        self.datapre[self.control_units],
+                        dims=["obs_ind", "coeffs"],
+                        coords={
+                            "obs_ind": self.datapre[self.control_units].index,
+                            "coeffs": self.control_units,
+                        },
+                    ),
+                    "treated": xr.DataArray(
+                        self.datapre[self.treated_units],
+                        dims=["obs_ind", "treated_units"],
+                        coords={
+                            "obs_ind": self.datapre[self.treated_units].index,
+                            "treated_units": self.treated_units,
+                        },
+                    ),
+                }
+            ),
+            post_design=xr.Dataset(
+                {
+                    "control": xr.DataArray(
+                        self.datapost[self.control_units],
+                        dims=["obs_ind", "coeffs"],
+                        coords={
+                            "obs_ind": self.datapost[self.control_units].index,
+                            "coeffs": self.control_units,
+                        },
+                    ),
+                    "treated": xr.DataArray(
+                        self.datapost[self.treated_units],
+                        dims=["obs_ind", "treated_units"],
+                        coords={
+                            "obs_ind": self.datapost[self.treated_units].index,
+                            "treated_units": self.treated_units,
+                        },
+                    ),
+                }
+            ),
         )
 
     def algorithm(self) -> None:
@@ -264,8 +297,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors()
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
-        self.tau_posterior = self._compute_tau(gaps, lam, T_pre, n_chains, n_draws)
-        self._build_reporting_objects(sc_all, T_pre, n_chains, n_draws)
+        tau_posterior = self._compute_tau(gaps, lam, T_pre, n_chains, n_draws)
+        self._results = self._build_results(sc_all, T_pre, n_chains, n_draws, tau_posterior)
 
     def _build_weight_fitter_inputs(
         self,
@@ -448,16 +481,17 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             },
         )
 
-    def _build_reporting_objects(
+    def _build_results(
         self,
         sc_all: np.ndarray,
         T_pre: int,
         n_chains: int,
         n_draws: int,
-    ) -> None:
+        tau_posterior: xr.DataArray,
+    ) -> _SDiDResults:
         """Build the xarray objects consumed by the reporting helpers.
 
-        Sets the following attributes on ``self``:
+        Returns a ``_SDiDResults`` instance holding:
 
         - ``pre_pred`` / ``post_pred``: ``az.InferenceData`` objects holding
           the synthetic-control predictions in a ``posterior_predictive``
@@ -479,14 +513,21 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Number of MCMC chains.
         n_draws : int
             Number of draws per chain.
+        tau_posterior : xr.DataArray
+            Posterior samples of tau.
+
+        Returns
+        -------
+        _SDiDResults
+            Container with all result attributes.
         """
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_inference_data(
+        pre_pred = self._build_inference_data(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_inference_data(
+        post_pred = self._build_inference_data(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -496,7 +537,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         pre_impact_vals = y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
         post_impact_vals = y_tr_post[np.newaxis, np.newaxis, :] - sc_post
 
-        self.pre_impact = xr.DataArray(
+        pre_impact = xr.DataArray(
             pre_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -506,7 +547,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact = xr.DataArray(
+        post_impact = xr.DataArray(
             post_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -516,7 +557,16 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
+        post_impact_cumulative = post_impact.cumsum(dim="obs_ind")
+
+        return _SDiDResults(
+            tau_posterior=tau_posterior,
+            pre_pred=pre_pred,
+            post_pred=post_pred,
+            pre_impact=pre_impact,
+            post_impact=post_impact,
+            post_impact_cumulative=post_impact_cumulative,
+        )
 
     def _build_inference_data(
         self,
@@ -562,6 +612,36 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
         ds = xr.Dataset({"mu": mu_da})
         return az.InferenceData(posterior_predictive=ds)
+
+    @property
+    def tau_posterior(self) -> xr.DataArray:
+        """Posterior samples of the ATT."""
+        return self._results.tau_posterior
+
+    @property
+    def pre_pred(self) -> az.InferenceData:
+        """Pre-treatment counterfactual predictions."""
+        return self._results.pre_pred
+
+    @property
+    def post_pred(self) -> az.InferenceData:
+        """Post-treatment counterfactual predictions."""
+        return self._results.post_pred
+
+    @property
+    def pre_impact(self) -> xr.DataArray:
+        """Pre-treatment impact (observed minus counterfactual)."""
+        return self._results.pre_impact
+
+    @property
+    def post_impact(self) -> xr.DataArray:
+        """Post-treatment impact (observed minus counterfactual)."""
+        return self._results.post_impact
+
+    @property
+    def post_impact_cumulative(self) -> xr.DataArray:
+        """Cumulative post-treatment impact."""
+        return self._results.post_impact_cumulative
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results.

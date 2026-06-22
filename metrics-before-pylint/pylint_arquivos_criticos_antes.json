@@ -1,0 +1,544 @@
+[
+  {
+    "arquivo": "causalpy\\tests\\__init__.py",
+    "refactor": 215,
+    "total": 215
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_reporting.py",
+    "convention": 114,
+    "total": 173,
+    "warning": 54,
+    "refactor": 5
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_pymc_models.py",
+    "convention": 53,
+    "total": 107,
+    "error": 3,
+    "warning": 50,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\pymc_models.py",
+    "convention": 49,
+    "total": 93,
+    "error": 5,
+    "warning": 20,
+    "refactor": 19
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_maketables_plugin.py",
+    "warning": 24,
+    "total": 80,
+    "refactor": 5,
+    "convention": 51
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_integration_pymc_examples.py",
+    "convention": 26,
+    "total": 78,
+    "warning": 40,
+    "refactor": 8,
+    "error": 4
+  },
+  {
+    "arquivo": "causalpy\\experiments\\interrupted_time_series.py",
+    "convention": 28,
+    "total": 70,
+    "error": 2,
+    "refactor": 13,
+    "warning": 27
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_three_period_its.py",
+    "convention": 9,
+    "total": 70,
+    "error": 1,
+    "warning": 60
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_sdid_helpers.py",
+    "convention": 37,
+    "total": 68,
+    "refactor": 9,
+    "warning": 20,
+    "error": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_placebo_in_time.py",
+    "convention": 3,
+    "total": 54,
+    "warning": 48,
+    "refactor": 3
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_panel_regression.py",
+    "warning": 49,
+    "total": 49
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_sensitivity_container.py",
+    "warning": 20,
+    "total": 47,
+    "convention": 25,
+    "refactor": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_ipw_get_ate.py",
+    "warning": 46,
+    "total": 46
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_its_effect_summary.py",
+    "error": 2,
+    "total": 44,
+    "warning": 42
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_pipeline.py",
+    "warning": 14,
+    "total": 42,
+    "convention": 27,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\reporting.py",
+    "convention": 11,
+    "total": 41,
+    "warning": 3,
+    "refactor": 27
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_instrumental_variable.py",
+    "convention": 7,
+    "total": 40,
+    "warning": 33
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_hdi_prob_wiring.py",
+    "convention": 1,
+    "total": 39,
+    "warning": 38
+  },
+  {
+    "arquivo": "causalpy\\experiments\\staggered_did.py",
+    "convention": 8,
+    "total": 38,
+    "error": 1,
+    "refactor": 17,
+    "warning": 12
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_piecewise_its.py",
+    "convention": 10,
+    "total": 35,
+    "error": 1,
+    "warning": 23,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_timeseries_model_coverage.py",
+    "convention": 17,
+    "total": 35,
+    "refactor": 2,
+    "warning": 16
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_cross_cutting_checks.py",
+    "convention": 29,
+    "total": 33,
+    "warning": 2,
+    "refactor": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\synthetic_difference_in_differences.py",
+    "convention": 16,
+    "total": 29,
+    "refactor": 4,
+    "warning": 7,
+    "error": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\piecewise_its.py",
+    "error": 1,
+    "total": 28,
+    "refactor": 5,
+    "convention": 5,
+    "warning": 17
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_generate_report.py",
+    "convention": 19,
+    "total": 28,
+    "warning": 8,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_utils.py",
+    "convention": 12,
+    "total": 27,
+    "warning": 15
+  },
+  {
+    "arquivo": "causalpy\\experiments\\panel_regression.py",
+    "convention": 7,
+    "total": 26,
+    "warning": 9,
+    "error": 1,
+    "refactor": 9
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_method_specific_checks.py",
+    "convention": 26,
+    "total": 26
+  },
+  {
+    "arquivo": "causalpy\\experiments\\instrumental_variable.py",
+    "error": 1,
+    "total": 25,
+    "convention": 13,
+    "refactor": 4,
+    "warning": 7
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_outcome_falsification.py",
+    "refactor": 1,
+    "total": 25,
+    "warning": 24
+  },
+  {
+    "arquivo": "causalpy\\data\\simulate_data.py",
+    "convention": 10,
+    "total": 24,
+    "warning": 1,
+    "refactor": 13
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_pymc_models_compat.py",
+    "convention": 15,
+    "total": 24,
+    "warning": 3,
+    "refactor": 6
+  },
+  {
+    "arquivo": "causalpy\\experiments\\synthetic_control.py",
+    "convention": 7,
+    "total": 23,
+    "refactor": 9,
+    "warning": 7
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_staggered_did.py",
+    "convention": 3,
+    "total": 23,
+    "warning": 19,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\experiments\\regression_kink.py",
+    "convention": 14,
+    "total": 22,
+    "error": 2,
+    "refactor": 4,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\diff_in_diff.py",
+    "convention": 10,
+    "total": 20,
+    "error": 2,
+    "refactor": 5,
+    "warning": 3
+  },
+  {
+    "arquivo": "causalpy\\experiments\\inverse_propensity_weighting.py",
+    "convention": 12,
+    "total": 19,
+    "error": 1,
+    "refactor": 4,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_model_adapter.py",
+    "convention": 15,
+    "total": 18,
+    "warning": 3
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_ipw_extreme_ps.py",
+    "warning": 14,
+    "total": 17,
+    "convention": 1,
+    "refactor": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\regression_discontinuity.py",
+    "convention": 8,
+    "total": 16,
+    "error": 2,
+    "refactor": 3,
+    "warning": 3
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_default_models.py",
+    "convention": 5,
+    "total": 16,
+    "warning": 11
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_integration_its_new_timeseries.py",
+    "convention": 5,
+    "total": 15,
+    "refactor": 3,
+    "error": 2,
+    "warning": 5
+  },
+  {
+    "arquivo": "causalpy\\maketables_adapters.py",
+    "warning": 10,
+    "total": 14,
+    "refactor": 4
+  },
+  {
+    "arquivo": "causalpy\\variable_selection_priors.py",
+    "convention": 6,
+    "total": 12,
+    "refactor": 6
+  },
+  {
+    "arquivo": "causalpy\\checks\\placebo_in_time.py",
+    "convention": 1,
+    "total": 12,
+    "refactor": 10,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_plot_show_parameter.py",
+    "warning": 12,
+    "total": 12
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_misc.py",
+    "warning": 11,
+    "total": 11
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_variable_selection_priors.py",
+    "convention": 2,
+    "total": 11,
+    "warning": 9
+  },
+  {
+    "arquivo": "causalpy\\tests\\conftest.py",
+    "convention": 8,
+    "total": 10,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_check_architecture_inventory.py",
+    "convention": 1,
+    "total": 10,
+    "warning": 9
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_deprecated_design_aliases.py",
+    "warning": 3,
+    "total": 10,
+    "convention": 7
+  },
+  {
+    "arquivo": "causalpy\\experiments\\base.py",
+    "convention": 6,
+    "total": 9,
+    "warning": 2,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_model_adapter_normalization.py",
+    "convention": 9,
+    "total": 9
+  },
+  {
+    "arquivo": "causalpy\\transforms.py",
+    "warning": 4,
+    "total": 8,
+    "refactor": 2,
+    "error": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\prepostnegd.py",
+    "error": 2,
+    "total": 8,
+    "convention": 3,
+    "refactor": 1,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_notebook_validation.py",
+    "convention": 8,
+    "total": 8
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_input_validation.py",
+    "convention": 5,
+    "total": 7,
+    "warning": 1,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_integration_skl_examples.py",
+    "convention": 4,
+    "total": 7,
+    "refactor": 2,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_hdi_prob_defaults.py",
+    "refactor": 2,
+    "total": 6,
+    "convention": 3,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_synthetic_data.py",
+    "convention": 4,
+    "total": 6,
+    "refactor": 1,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\utils.py",
+    "convention": 4,
+    "total": 5,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_validate_docstring_lists.py",
+    "convention": 1,
+    "total": 5,
+    "warning": 4
+  },
+  {
+    "arquivo": "causalpy\\__init__.py",
+    "refactor": 4,
+    "total": 4
+  },
+  {
+    "arquivo": "causalpy\\plot_utils.py",
+    "convention": 2,
+    "total": 4,
+    "refactor": 2
+  },
+  {
+    "arquivo": "causalpy\\skl_models.py",
+    "convention": 3,
+    "total": 4,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_check_public_exports.py",
+    "convention": 1,
+    "total": 4,
+    "warning": 3
+  },
+  {
+    "arquivo": "causalpy\\pipeline.py",
+    "warning": 2,
+    "total": 3,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\checks\\base.py",
+    "warning": 3,
+    "total": 3
+  },
+  {
+    "arquivo": "causalpy\\checks\\leave_one_out.py",
+    "refactor": 1,
+    "total": 3,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\checks\\placebo_in_space.py",
+    "refactor": 1,
+    "total": 3,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\checks\\prior_sensitivity.py",
+    "refactor": 1,
+    "total": 3,
+    "warning": 2
+  },
+  {
+    "arquivo": "causalpy\\experiments\\model_adapter.py",
+    "convention": 3,
+    "total": 3
+  },
+  {
+    "arquivo": "causalpy\\checks\\bandwidth.py",
+    "warning": 2,
+    "total": 2
+  },
+  {
+    "arquivo": "causalpy\\checks\\convex_hull.py",
+    "refactor": 1,
+    "total": 2,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\checks\\mccrary.py",
+    "refactor": 1,
+    "total": 2,
+    "warning": 1
+  },
+  {
+    "arquivo": "causalpy\\data\\datasets.py",
+    "convention": 1,
+    "total": 2,
+    "refactor": 1
+  },
+  {
+    "arquivo": "causalpy\\steps\\report.py",
+    "warning": 1,
+    "total": 2,
+    "convention": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_base_experiment_abc.py",
+    "convention": 1,
+    "total": 2,
+    "error": 1
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_custom_exceptions.py",
+    "convention": 2,
+    "total": 2
+  },
+  {
+    "arquivo": "causalpy\\tests\\test_model_experiment_compatability.py",
+    "convention": 2,
+    "total": 2
+  },
+  {
+    "arquivo": "causalpy\\checks\\persistence.py",
+    "warning": 1,
+    "total": 1
+  },
+  {
+    "arquivo": "causalpy\\checks\\pre_treatment_placebo.py",
+    "warning": 1,
+    "total": 1
+  },
+  {
+    "arquivo": "causalpy\\steps\\estimate_effect.py",
+    "warning": 1,
+    "total": 1
+  },
+  {
+    "arquivo": "causalpy\\steps\\sensitivity.py",
+    "warning": 1,
+    "total": 1
+  }
+]

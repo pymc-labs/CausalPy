@@ -13,12 +13,14 @@
 #   limitations under the License.
 """Panel Regression with Fixed Effects."""
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from scipy import stats
@@ -32,6 +34,36 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _PanelConfig:
+    """Container for panel configuration parameters."""
+
+    unit_fe_variable: str
+    time_fe_variable: str | None
+    fe_method: Literal["dummies", "demeaned"]
+    n_units: int = 0
+    n_periods: int | None = None
+
+
+@dataclass
+class _DesignInfo:
+    """Container for design-matrix metadata and data."""
+
+    y_design_info: Any
+    x_design_info: Any
+    labels: list[str]
+    outcome_variable_name: str
+    design: xr.Dataset | None = field(default=None)
+
+
+@dataclass
+class _DemeanInfo:
+    """Container for demeaned transformation internals."""
+
+    original_data: pd.DataFrame
+    group_means: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 class PanelRegression(BaseExperiment):
@@ -180,6 +212,46 @@ class PanelRegression(BaseExperiment):
     supports_bayes = True
     _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
+    @property
+    def labels(self) -> list[str]:
+        """Coefficient labels from the design matrix."""
+        return self._design_info.labels
+
+    @property
+    def design(self) -> xr.Dataset:
+        """Design matrix dataset."""
+        return self._design_info.design
+
+    @property
+    def outcome_variable_name(self) -> str:
+        """Name of the outcome variable."""
+        return self._design_info.outcome_variable_name
+
+    @property
+    def unit_fe_variable(self) -> str:
+        """Unit fixed effect variable name."""
+        return self._panel_config.unit_fe_variable
+
+    @property
+    def time_fe_variable(self) -> str | None:
+        """Time fixed effect variable name."""
+        return self._panel_config.time_fe_variable
+
+    @property
+    def fe_method(self) -> str:
+        """Fixed effects method."""
+        return self._panel_config.fe_method
+
+    @property
+    def n_units(self) -> int:
+        """Number of unique units."""
+        return self._panel_config.n_units
+
+    @property
+    def n_periods(self) -> int | None:
+        """Number of unique time periods."""
+        return self._panel_config.n_periods
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -197,99 +269,108 @@ class PanelRegression(BaseExperiment):
         self.data = data
         self.expt_type = "Panel Regression"
         self.formula = formula
-        self.unit_fe_variable = unit_fe_variable
-        self.time_fe_variable = time_fe_variable
-        self.fe_method = fe_method
 
-        # Store a copy of original data for recovering group means in demeaned
-        # transformation.  Other experiment classes don't need this because
-        # they don't demean the data before fitting.
-        self._original_data = data.copy()
+        # Group configuration parameters into a single container
+        # (n_units and n_periods computed after validation)
+        self._panel_config = _PanelConfig(
+            unit_fe_variable=unit_fe_variable,
+            time_fe_variable=time_fe_variable,
+            fe_method=fe_method,
+        )
 
-        # Initialize storage for group means (used in demeaned transformation)
-        self._group_means: dict[str, pd.DataFrame] = {}
+        # Store demeaned transformation state
+        self._demean_info = _DemeanInfo(original_data=data.copy())
 
         # Pipeline (matches pattern of other experiment classes)
         self.input_validation()
 
-        # Store panel dimensions (after validation confirms columns exist)
-        self.n_units = data[unit_fe_variable].nunique()
-        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
-        self._build_design_matrices()
-        self._prepare_data()
+        # Compute panel dimensions now that columns are confirmed valid
+        cfg = self._panel_config
+        cfg.n_units = data[unit_fe_variable].nunique()
+        cfg.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
+
+        design_info, y_raw, X_raw = self._build_design_matrices()
+        self._design_info = design_info
+        self._prepare_data(y_raw, X_raw)
         self.algorithm()
 
     def input_validation(self) -> None:
         """Validate input parameters."""
-        if self.unit_fe_variable not in self.data.columns:
+        cfg = self._panel_config
+        if cfg.unit_fe_variable not in self.data.columns:
             raise DataException(
-                f"unit_fe_variable '{self.unit_fe_variable}' not found in data columns"
+                f"unit_fe_variable '{cfg.unit_fe_variable}' not found in data columns"
             )
 
-        if self.time_fe_variable and self.time_fe_variable not in self.data.columns:
+        if cfg.time_fe_variable and cfg.time_fe_variable not in self.data.columns:
             raise DataException(
-                f"time_fe_variable '{self.time_fe_variable}' not found in data columns"
+                f"time_fe_variable '{cfg.time_fe_variable}' not found in data columns"
             )
 
-        if self.fe_method not in ["dummies", "demeaned"]:
+        if cfg.fe_method not in ["dummies", "demeaned"]:
             raise ValueError(
                 "fe_method must be 'dummies' (unpooled fixed effects) or 'demeaned'"
             )
 
         # Check if formula includes C(unit_var) or C(time_var) when using demeaned method
-        if (
-            self.fe_method == "demeaned"
-            and f"C({self.unit_fe_variable})" in self.formula
-        ):
+        if cfg.fe_method == "demeaned" and f"C({cfg.unit_fe_variable})" in self.formula:
             raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.unit_fe_variable}) "
+                f"When using fe_method='demeaned', do not include C({cfg.unit_fe_variable}) "
                 "in the formula. The demeaned transformation handles unit fixed effects automatically."
             )
 
         if (
-            self.fe_method == "demeaned"
-            and self.time_fe_variable
-            and f"C({self.time_fe_variable})" in self.formula
+            cfg.fe_method == "demeaned"
+            and cfg.time_fe_variable
+            and f"C({cfg.time_fe_variable})" in self.formula
         ):
             raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.time_fe_variable}) "
+                f"When using fe_method='demeaned', do not include C({cfg.time_fe_variable}) "
                 "in the formula. The demeaned transformation handles time fixed effects automatically."
             )
 
-    def _build_design_matrices(self) -> None:
+    def _build_design_matrices(
+        self,
+    ) -> tuple[_DesignInfo, np.ndarray, np.ndarray]:
         """Build design matrices from formula and data using patsy.
 
         For ``fe_method="demeaned"`` this first applies the demeaned
         transformation (de-meaning by unit, and optionally by time) before
         constructing the patsy design matrices.
+
+        Returns
+        -------
+        tuple of (_DesignInfo, y_raw, X_raw)
         """
-        data = self._original_data.copy()
+        cfg = self._panel_config
+        data = self._demean_info.original_data.copy()
 
         # Apply demeaned transformation if requested
-        if self.fe_method == "demeaned":
-            data = self._demean_transform(data, self.unit_fe_variable)
-            if self.time_fe_variable:
+        if cfg.fe_method == "demeaned":
+            data = self._demean_transform(data, cfg.unit_fe_variable)
+            if cfg.time_fe_variable:
                 # TODO: Use iterative alternating demeaning for unbalanced panels
                 # (single-pass is exact only for balanced; see docstring Notes).
-                data = self._demean_transform(data, self.time_fe_variable)
+                data = self._demean_transform(data, cfg.time_fe_variable)
 
         y, X = dmatrices(self.formula, data)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
-        self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
-            obs_ind=np.arange(n),
-            coeffs=self.labels,
+        design_info = _DesignInfo(
+            y_design_info=y.design_info,
+            x_design_info=X.design_info,
+            labels=list(X.design_info.column_names),
+            outcome_variable_name=y.design_info.column_names[0],
         )
-        del self._X_raw, self._y_raw
+        return design_info, np.asarray(y), np.asarray(X)
+
+    def _prepare_data(self, y_raw: np.ndarray, X_raw: np.ndarray) -> None:
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = X_raw.shape[0]
+        self._design_info.design = self._build_design_dataset(
+            X_raw,
+            y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self._design_info.labels,
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit the model."""
@@ -340,9 +421,10 @@ class PanelRegression(BaseExperiment):
         # Boolean columns (e.g. treatment indicators) must be included; pandas
         # select_dtypes(include=[np.number]) excludes bool.
         numeric_cols = data.select_dtypes(include=[np.number, "bool"]).columns.tolist()
-        group_vars_to_exclude = [self.unit_fe_variable]
-        if self.time_fe_variable:
-            group_vars_to_exclude.append(self.time_fe_variable)
+        cfg = self._panel_config
+        group_vars_to_exclude = [cfg.unit_fe_variable]
+        if cfg.time_fe_variable:
+            group_vars_to_exclude.append(cfg.time_fe_variable)
 
         numeric_cols = [c for c in numeric_cols if c not in group_vars_to_exclude]
 
@@ -355,8 +437,9 @@ class PanelRegression(BaseExperiment):
 
         # Store group means from the ORIGINAL data (before any demeaning in
         # prior calls) so that fixed effects can be recovered post-hoc.
-        if group_var not in self._group_means:
-            self._group_means[group_var] = self._original_data.groupby(group_var)[
+        di = self._demean_info
+        if group_var not in di.group_means:
+            di.group_means[group_var] = di.original_data.groupby(group_var)[
                 numeric_cols
             ].mean()
 
@@ -374,18 +457,19 @@ class PanelRegression(BaseExperiment):
         and ``C(time_fe_variable)`` labels.  For ``fe_method="demeaned"`` it
         returns all labels unchanged (there are no dummy columns).
         """
-        coeff_labels = self.labels.copy()
-        if self.fe_method == "dummies":
+        cfg = self._panel_config
+        coeff_labels = self._design_info.labels.copy()
+        if cfg.fe_method == "dummies":
             coeff_labels = [
                 c
                 for c in coeff_labels
-                if not c.startswith(f"C({self.unit_fe_variable})")
+                if not c.startswith(f"C({cfg.unit_fe_variable})")
             ]
-            if self.time_fe_variable:
+            if cfg.time_fe_variable:
                 coeff_labels = [
                     c
                     for c in coeff_labels
-                    if not c.startswith(f"C({self.time_fe_variable})")
+                    if not c.startswith(f"C({cfg.time_fe_variable})")
                 ]
         return coeff_labels
 
@@ -398,19 +482,21 @@ class PanelRegression(BaseExperiment):
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
         """
+        cfg = self._panel_config
+        di = self._design_info
         print(f"\n{self.expt_type}")
         print("=" * 60)
-        print(f"Units: {self.n_units} ({self.unit_fe_variable})")
-        if self.n_periods:
-            print(f"Periods: {self.n_periods} ({self.time_fe_variable})")
-        print(f"FE method: {self.fe_method}")
-        print(f"Observations: {self.design['X'].shape[0]}")
+        print(f"Units: {cfg.n_units} ({cfg.unit_fe_variable})")
+        if cfg.n_periods:
+            print(f"Periods: {cfg.n_periods} ({cfg.time_fe_variable})")
+        print(f"FE method: {cfg.fe_method}")
+        print(f"Observations: {di.design['X'].shape[0]}")
         print("=" * 60)
 
         coeff_labels = self._get_non_fe_labels()
 
-        if self.fe_method == "dummies" and len(coeff_labels) < len(self.labels):
-            n_hidden = len(self.labels) - len(coeff_labels)
+        if cfg.fe_method == "dummies" and len(coeff_labels) < len(di.labels):
+            n_hidden = len(di.labels) - len(coeff_labels)
             print(
                 f"\nNote: {n_hidden} fixed effect coefficients not shown "
                 "(use print_coefficients() to see all)"
@@ -430,7 +516,7 @@ class PanelRegression(BaseExperiment):
             rd = round_to if round_to is not None else 2
             print("Model coefficients:")
             for name in coeff_labels:
-                idx = self.labels.index(name)
+                idx = di.labels.index(name)
                 formatted_name = f"{name:<{max_label_length}}"
                 formatted_val = f"{round_num(coefs[idx], rd):>10}"
                 print(f"  {formatted_name}\t{formatted_val}")
@@ -601,7 +687,7 @@ class PanelRegression(BaseExperiment):
         else:
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
-            coef_indices = [self.labels.index(c) for c in coeff_names]
+            coef_indices = [self._design_info.labels.index(c) for c in coeff_names]
             coefs = self.model.get_coeffs()[coef_indices]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
@@ -637,18 +723,19 @@ class PanelRegression(BaseExperiment):
         else:
             raise ValueError("Model is not a PyMC model")
 
+        cfg = self._panel_config
         plot_data = pd.DataFrame(
             {
                 "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": pred_mean,
                 "y_fitted_lower": pred_lower,
                 "y_fitted_upper": pred_upper,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
+                cfg.unit_fe_variable: self.data[cfg.unit_fe_variable].values,
             }
         )
 
-        if self.time_fe_variable:
-            plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
+        if cfg.time_fe_variable:
+            plot_data[cfg.time_fe_variable] = self.data[cfg.time_fe_variable].values
 
         return plot_data
 
@@ -671,16 +758,17 @@ class PanelRegression(BaseExperiment):
         else:
             raise ValueError("Model is not an OLS model")
 
+        cfg = self._panel_config
         plot_data = pd.DataFrame(
             {
                 "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": y_fitted,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
+                cfg.unit_fe_variable: self.data[cfg.unit_fe_variable].values,
             }
         )
 
-        if self.time_fe_variable:
-            plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
+        if cfg.time_fe_variable:
+            plot_data[cfg.time_fe_variable] = self.data[cfg.time_fe_variable].values
 
         return plot_data
 
@@ -735,7 +823,9 @@ class PanelRegression(BaseExperiment):
         ValueError
             If fe_method is not "dummies"
         """
-        if self.fe_method != "dummies":
+        cfg = self._panel_config
+        di = self._design_info
+        if cfg.fe_method != "dummies":
             raise ValueError(
                 "plot_unit_effects() only available with fe_method='dummies'. "
                 "Use demeaned transformation for large panels."
@@ -743,7 +833,7 @@ class PanelRegression(BaseExperiment):
 
         # Extract unit fixed effects from coefficients
         unit_fe_names = [
-            c for c in self.labels if c.startswith(f"C({self.unit_fe_variable})")
+            c for c in di.labels if c.startswith(f"C({cfg.unit_fe_variable})")
         ]
 
         if not unit_fe_names:
@@ -754,13 +844,13 @@ class PanelRegression(BaseExperiment):
         if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
+            unit_fe_indices = [di.labels.index(name) for name in unit_fe_names]
 
             # Get mean and std for each unit FE
             fe_means = []
             for idx in unit_fe_indices:
                 fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
+                    beta.sel(coeffs=di.labels[idx])
                     .mean(dim=["chain", "draw"])
                     .squeeze("treated_units", drop=True)
                     .item()
@@ -773,7 +863,7 @@ class PanelRegression(BaseExperiment):
 
         else:
             # OLS: get point estimates
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
+            unit_fe_indices = [di.labels.index(name) for name in unit_fe_names]
             coefs = self.model.get_coeffs()
             fe_values = [coefs[idx] for idx in unit_fe_indices]
 
@@ -783,10 +873,132 @@ class PanelRegression(BaseExperiment):
             ax.set_xlabel("Unit Fixed Effect")
 
         ax.set_ylabel("Count")
-        ax.set_title(f"Distribution of Unit Fixed Effects (N={self.n_units})")
+        ax.set_title(f"Distribution of Unit Fixed Effects (N={cfg.n_units})")
         plt.tight_layout()
 
         return fig, ax
+
+    def _select_trajectory_units(
+        self,
+        units: list[str] | None,
+        n_sample: int,
+        select: Literal["random", "extreme", "high_variance"],
+    ) -> np.ndarray | list[str]:
+        """Select units to plot in trajectory visualization."""
+        all_units = self.data[self.unit_fe_variable].unique()
+
+        selected_units: np.ndarray | list[str]
+        if units is not None:
+            selected_units = units
+        elif self.n_units <= n_sample:
+            selected_units = all_units
+        else:
+            if select == "random":
+                rng = np.random.default_rng(42)
+                selected_units = rng.choice(all_units, size=n_sample, replace=False)
+            elif select == "extreme":
+                unit_means = self.data.groupby(self.unit_fe_variable)[
+                    self.outcome_variable_name
+                ].mean()
+                n_each = max(1, n_sample // 2)
+                top = unit_means.nlargest(n_each).index.tolist()
+                bottom = unit_means.nsmallest(n_sample - n_each).index.tolist()
+                selected_units = top + bottom
+            elif select == "high_variance":
+                unit_var = self.data.groupby(self.unit_fe_variable)[
+                    self.outcome_variable_name
+                ].var()
+                selected_units = unit_var.nlargest(n_sample).index.tolist()
+
+        return selected_units
+
+    def _plot_single_trajectory(
+        self,
+        ax: plt.Axes,
+        unit: str,
+        mu: Any,
+        interval_source: Any,
+        is_bayesian: bool,
+        hdi_prob: float,
+    ) -> None:
+        """Plot a single unit's trajectory on the given axes."""
+        unit_mask = self.data[self.unit_fe_variable] == unit
+        unit_obs_indices = np.where(unit_mask)[0]
+
+        time_vals = self.data.loc[unit_mask, self.time_fe_variable].values
+        sort_order = np.argsort(time_vals)
+        sorted_time_vals = time_vals[sort_order]
+        sorted_obs_indices = unit_obs_indices[sort_order]
+
+        y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
+
+        ax.plot(
+            sorted_time_vals,
+            y_actual,
+            "o-",
+            label="Actual",
+            alpha=0.7,
+        )
+
+        if is_bayesian:
+            unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
+            if "treated_units" in unit_mu.dims:
+                unit_mu = unit_mu.squeeze("treated_units", drop=True)
+            unit_interval = interval_source.isel(obs_ind=sorted_obs_indices.tolist())
+            if "treated_units" in unit_interval.dims:
+                unit_interval = unit_interval.squeeze("treated_units", drop=True)
+
+            ax.plot(
+                sorted_time_vals,
+                unit_mu.mean(dim=["chain", "draw"]).values,
+                "s--",
+                label="Fitted",
+                alpha=0.7,
+            )
+
+            az.plot_hdi(
+                sorted_time_vals,
+                unit_interval,
+                hdi_prob=hdi_prob,
+                ax=ax,
+                smooth=False,
+                fill_kwargs={"alpha": 0.2},
+            )
+        else:
+            y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                sorted_obs_indices
+            ]
+            ax.plot(
+                sorted_time_vals,
+                y_fitted,
+                "s--",
+                label="Fitted",
+                alpha=0.7,
+            )
+
+        ax.set_title(f"Unit: {unit}", fontsize=10)
+        ax.set_xlabel(self.time_fe_variable)
+        ax.set_ylabel(self.outcome_variable_name)
+
+    def _prepare_bayesian_interval(
+        self,
+        interval_type: Literal["mean", "predictive"],
+    ) -> tuple[Any, Any]:
+        """Prepare mu and interval_source for Bayesian trajectory plots."""
+        mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
+        if interval_type == "predictive":
+            posterior_predictive = getattr(
+                self.model.idata,
+                "posterior_predictive",
+                None,  # type: ignore[union-attr]
+            )
+            if posterior_predictive is None or "y_hat" not in posterior_predictive:
+                raise ValueError(
+                    "interval_type='predictive' requires posterior predictive "
+                    "samples ('y_hat') in idata.posterior_predictive"
+                )
+            return mu, posterior_predictive["y_hat"]
+        return mu, mu
 
     def plot_trajectories(
         self,
@@ -844,56 +1056,15 @@ class PanelRegression(BaseExperiment):
         if interval_type not in {"mean", "predictive"}:
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
-        # Check if model is Bayesian
         is_bayesian = self._model_backend.is_bayesian
 
-        # Get posterior for HDI plotting (Bayesian only)
+        mu = None
+        interval_source = None
         if is_bayesian:
-            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
-            if interval_type == "predictive":
-                posterior_predictive = getattr(
-                    self.model.idata,
-                    "posterior_predictive",
-                    None,  # type: ignore[union-attr]
-                )
-                if posterior_predictive is None or "y_hat" not in posterior_predictive:
-                    raise ValueError(
-                        "interval_type='predictive' requires posterior predictive "
-                        "samples ('y_hat') in idata.posterior_predictive"
-                    )
-                interval_source = posterior_predictive["y_hat"]
-            else:
-                interval_source = mu
+            mu, interval_source = self._prepare_bayesian_interval(interval_type)
 
-        # Select units to plot
-        all_units = self.data[self.unit_fe_variable].unique()
+        selected_units = self._select_trajectory_units(units, n_sample, select)
 
-        selected_units: np.ndarray | list[str]
-        if units is not None:
-            selected_units = units
-        elif self.n_units <= n_sample:
-            selected_units = all_units  # type: ignore[assignment]
-        else:
-            if select == "random":
-                rng = np.random.default_rng(42)
-                selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
-            elif select == "extreme":
-                # Select units with the largest and smallest mean outcomes
-                unit_means = self.data.groupby(self.unit_fe_variable)[
-                    self.outcome_variable_name
-                ].mean()
-                n_each = max(1, n_sample // 2)
-                top = unit_means.nlargest(n_each).index.tolist()
-                bottom = unit_means.nsmallest(n_sample - n_each).index.tolist()
-                selected_units = top + bottom
-            elif select == "high_variance":
-                # Select units with the most within-unit variation
-                unit_var = self.data.groupby(self.unit_fe_variable)[
-                    self.outcome_variable_name
-                ].var()
-                selected_units = unit_var.nlargest(n_sample).index.tolist()
-
-        # Create only the subplots we need
         n_units_plot = len(selected_units)
         ncols = min(3, n_units_plot)
         nrows = (n_units_plot + ncols - 1) // ncols
@@ -905,78 +1076,11 @@ class PanelRegression(BaseExperiment):
             for idx in range(n_units_plot)
         ]
 
-        # Plot each unit
         for idx, unit in enumerate(selected_units):
             ax = axes[idx]
-
-            # Get indices for this unit in original data order
-            unit_mask = self.data[self.unit_fe_variable] == unit
-            unit_obs_indices = np.where(unit_mask)[0]
-
-            # Get time values and compute sort order
-            time_vals = self.data.loc[unit_mask, self.time_fe_variable].values
-            sort_order = np.argsort(time_vals)
-            sorted_time_vals = time_vals[sort_order]
-            sorted_obs_indices = unit_obs_indices[sort_order]
-
-            # Get actual y values (sorted by time)
-            y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
-
-            # Plot actual
-            ax.plot(
-                sorted_time_vals,
-                y_actual,
-                "o-",
-                label="Actual",
-                alpha=0.7,
+            self._plot_single_trajectory(
+                ax, unit, mu, interval_source, is_bayesian, hdi_prob
             )
-
-            if is_bayesian:
-                # Get posterior mu for this unit's observations in sorted order
-                # Squeeze out treated_units dimension
-                unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
-                if "treated_units" in unit_mu.dims:
-                    unit_mu = unit_mu.squeeze("treated_units", drop=True)
-                unit_interval = interval_source.isel(
-                    obs_ind=sorted_obs_indices.tolist()
-                )
-                if "treated_units" in unit_interval.dims:
-                    unit_interval = unit_interval.squeeze("treated_units", drop=True)
-
-                # Plot fitted mean
-                ax.plot(
-                    sorted_time_vals,
-                    unit_mu.mean(dim=["chain", "draw"]).values,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
-
-                # Plot HDI using az.plot_hdi
-                az.plot_hdi(
-                    sorted_time_vals,
-                    unit_interval,
-                    hdi_prob=hdi_prob,
-                    ax=ax,
-                    smooth=False,
-                    fill_kwargs={"alpha": 0.2},
-                )
-            else:
-                # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
-                    sorted_obs_indices
-                ]  # type: ignore[union-attr]
-                ax.plot(
-                    sorted_time_vals,
-                    y_fitted,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
-
-            ax.set_title(f"Unit: {unit}", fontsize=10)
-            ax.set_xlabel(self.time_fe_variable)
-            ax.set_ylabel(self.outcome_variable_name)
             if idx == 0:
                 ax.legend(fontsize=8)
 

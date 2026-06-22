@@ -542,6 +542,78 @@ def _select_treated_unit_numpy(
         return data[:, 0]
 
 
+def _get_window_coords(result, window):
+    """Extract window coordinates based on window specification.
+
+    Parameters
+    ----------
+    result
+        Experiment result object with datapost attribute
+    window : str, tuple, or slice
+        Window specification: "post", (start, end) tuple, or slice object
+
+    Returns
+    -------
+    pd.Index
+        Window coordinates
+    """
+    if window == "post":
+        return result.datapost.index
+    if isinstance(window, tuple) and len(window) == 2:
+        return _get_tuple_window_coords(result, window)
+    if isinstance(window, slice):
+        return _get_slice_window_coords(result, window)
+    raise ValueError(
+        f"window must be 'post', a tuple (start, end), or a slice. Got {type(window)}"
+    )
+
+
+def _get_tuple_window_coords(result, window):
+    """Extract window coordinates from a (start, end) tuple."""
+    start, end = window
+    if isinstance(result.datapost.index, pd.DatetimeIndex):
+        if not isinstance(start, pd.Timestamp):
+            start = pd.Timestamp(start)
+        if not isinstance(end, pd.Timestamp):
+            end = pd.Timestamp(end)
+        return result.datapost.index[
+            (result.datapost.index >= start) & (result.datapost.index <= end)
+        ]
+    start_val = int(start)
+    end_val = int(end)
+    mask = (result.datapost.index >= start_val) & (result.datapost.index <= end_val)
+    return result.datapost.index[mask]
+
+
+def _get_slice_window_coords(result, window):
+    """Extract window coordinates from a slice object."""
+    if isinstance(result.datapost.index, pd.DatetimeIndex):
+        return result.datapost.index[window]
+    start_val = (
+        int(window.start)
+        if window.start is not None
+        else result.datapost.index.min()
+    )
+    stop_val = (
+        int(window.stop)
+        if window.stop is not None
+        else result.datapost.index.max() + 1
+    )
+    step = int(window.step) if window.step is not None else 1
+    mask = (result.datapost.index >= start_val) & (result.datapost.index < stop_val)
+    return result.datapost.index[mask][::step]
+
+
+def _apply_window_selection(post_impact, window_coords, window, is_pymc, result):
+    """Apply window selection to post_impact data."""
+    if window == "post":
+        return post_impact
+    if is_pymc:
+        return post_impact.sel(obs_ind=window_coords)
+    indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+    return post_impact[indices]
+
+
 def _extract_window(result, window, treated_unit=None):
     """Extract windowed impact data based on window specification.
 
@@ -564,12 +636,10 @@ def _extract_window(result, window, treated_unit=None):
     """
     post_impact = result.post_impact
 
-    # Check if PyMC (xarray with chain/draw dims) or OLS
     is_pymc = isinstance(post_impact, xr.DataArray) and (
         "chain" in post_impact.dims or "draw" in post_impact.dims
     )
 
-    # Handle treated_unit selection using helper functions
     if isinstance(post_impact, xr.DataArray) and "treated_units" in post_impact.dims:
         post_impact = _select_treated_unit(post_impact, treated_unit)
     elif (
@@ -579,79 +649,18 @@ def _extract_window(result, window, treated_unit=None):
     ):
         post_impact = _select_treated_unit_numpy(post_impact, result, treated_unit)
 
-    # Convert OLS xarray to numpy for consistent handling
     if not is_pymc and isinstance(post_impact, xr.DataArray):
         post_impact = np.squeeze(np.asarray(post_impact))
 
-    # Ensure OLS data is numpy array
     if not is_pymc and not isinstance(post_impact, np.ndarray):
         post_impact = np.asarray(post_impact)
 
-    # Extract window coordinates based on window specification
-    if window == "post":
-        # Use all post-treatment time points
-        window_coords = result.datapost.index
-    elif isinstance(window, tuple) and len(window) == 2:
-        # Handle (start, end) tuple
-        start, end = window
-        if isinstance(result.datapost.index, pd.DatetimeIndex):
-            # Datetime index - convert to timestamps if needed
-            if not isinstance(start, pd.Timestamp):
-                start = pd.Timestamp(start)
-            if not isinstance(end, pd.Timestamp):
-                end = pd.Timestamp(end)
-            window_coords = result.datapost.index[
-                (result.datapost.index >= start) & (result.datapost.index <= end)
-            ]
-        else:
-            # Integer index - filter by value
-            start_val = int(start)
-            end_val = int(end)
-            mask = (result.datapost.index >= start_val) & (
-                result.datapost.index <= end_val
-            )
-            window_coords = result.datapost.index[mask]
-    elif isinstance(window, slice):
-        # Handle slice object
-        if isinstance(result.datapost.index, pd.DatetimeIndex):
-            # For datetime, slice works directly
-            window_coords = result.datapost.index[window]
-        else:
-            # For integer indices, convert slice to value-based filtering
-            start_val = (
-                int(window.start)
-                if window.start is not None
-                else result.datapost.index.min()
-            )
-            stop_val = (
-                int(window.stop)
-                if window.stop is not None
-                else result.datapost.index.max() + 1
-            )
-            step = int(window.step) if window.step is not None else 1
-            # Create boolean mask for values in range
-            mask = (result.datapost.index >= start_val) & (
-                result.datapost.index < stop_val
-            )
-            window_coords = result.datapost.index[mask][::step]
-    else:
-        raise ValueError(
-            f"window must be 'post', a tuple (start, end), or a slice. Got {type(window)}"
-        )
+    window_coords = _get_window_coords(result, window)
 
-    # Apply window selection to post_impact
-    if window == "post":
-        # No filtering needed - use all data
-        windowed_impact = post_impact
-    elif is_pymc:
-        # PyMC: use xarray's named dimension selection
-        windowed_impact = post_impact.sel(obs_ind=window_coords)
-    else:
-        # OLS: convert window_coords to integer indices and select from numpy array
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        windowed_impact = post_impact[indices]
+    windowed_impact = _apply_window_selection(
+        post_impact, window_coords, window, is_pymc, result
+    )
 
-    # Validate window is not empty
     if len(window_coords) == 0:
         raise ValueError("Window contains no time points")
 
@@ -730,6 +739,88 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
         return np.squeeze(counterfactual)
 
 
+def _compute_avg_stats(avg_effect, hdi_prob, direction, min_effect):
+    """Compute average effect statistics dict.
+
+    Returns a dict with keys: mean, median, hdi_lower, hdi_upper,
+    tail probabilities, and optionally p_rope.
+    """
+    stats = {
+        "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
+    }
+    hdi_avg = az.hdi(avg_effect, hdi_prob=hdi_prob)
+    stats["hdi_lower"], stats["hdi_upper"] = _extract_hdi_bounds(hdi_avg)
+    stats.update(_compute_tail_probabilities(avg_effect, direction))
+
+    if min_effect is not None:
+        rope_dir = (
+            direction
+            if direction == "two-sided"
+            else ("increase" if stats["mean"] >= 0 else "decrease")
+        )
+        stats["p_rope"] = _compute_rope_probability(avg_effect, min_effect, rope_dir)
+
+    return stats
+
+
+def _compute_cum_stats(impact, time_dim, hdi_prob, direction, min_effect):
+    """Compute cumulative effect statistics dict and the final cumulative value.
+
+    Returns a tuple of (cumulative_stats_dict, cum_final) where cum_final is the
+    last element of the cumulative sum along time_dim.
+    """
+    cum_effect = impact.cumsum(dim=time_dim)
+    cum_final = cum_effect.isel({time_dim: -1})
+
+    stats = {
+        "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(cum_final.median(dim=["chain", "draw"])),
+    }
+    hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
+    stats["hdi_lower"], stats["hdi_upper"] = _extract_hdi_bounds(hdi_cum)
+    stats.update(_compute_tail_probabilities(cum_final, direction))
+
+    if min_effect is not None:
+        rope_dir = (
+            direction
+            if direction == "two-sided"
+            else ("increase" if stats["mean"] >= 0 else "decrease")
+        )
+        stats["p_rope"] = _compute_rope_probability(cum_final, min_effect, rope_dir)
+
+    return stats, cum_final
+
+
+def _add_relative_stats(stats, avg_effect, counterfactual, time_dim, hdi_prob, cumulative, cum_final):
+    """Add relative effect statistics to the stats dict (in-place)."""
+    epsilon = 1e-8
+    counterfactual_mean = counterfactual.mean(dim=time_dim)
+    rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
+
+    stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
+
+    hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
+    stats["avg"]["relative_hdi_lower"], stats["avg"]["relative_hdi_upper"] = _extract_hdi_bounds(
+        hdi_rel_avg
+    )
+
+    if cumulative:
+        counterfactual_cum = counterfactual.cumsum(dim=time_dim).isel(
+            {time_dim: -1}
+        )
+        rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
+
+        stats["cum"]["relative_mean"] = _as_scalar(
+            rel_cum.mean(dim=["chain", "draw"])
+        )
+
+        hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
+        stats["cum"]["relative_hdi_lower"], stats["cum"]["relative_hdi_upper"] = _extract_hdi_bounds(
+            hdi_rel_cum
+        )
+
+
 def _compute_statistics(
     impact,
     counterfactual,
@@ -751,144 +842,17 @@ def _compute_statistics(
     """
     stats = {}
 
-    # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
-    stats["avg"] = {
-        "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
-        "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
-    }
+    stats["avg"] = _compute_avg_stats(avg_effect, hdi_prob, direction, min_effect)
 
-    # HDI for average
-    hdi_avg = az.hdi(avg_effect, hdi_prob=hdi_prob)
-    # Extract lower and upper bounds from HDI Dataset
-    # Handle both Dataset and DataArray returns
-    if isinstance(hdi_avg, xr.Dataset):
-        hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = _as_scalar(hdi_data.sel(hdi="lower"))
-        stats["avg"]["hdi_upper"] = _as_scalar(hdi_data.sel(hdi="higher"))
-    else:
-        # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = _as_scalar(hdi_avg.sel(hdi="lower"))
-        stats["avg"]["hdi_upper"] = _as_scalar(hdi_avg.sel(hdi="higher"))
-
-    # Tail probabilities for average
-    if direction == "increase":
-        stats["avg"]["p_gt_0"] = _as_scalar((avg_effect > 0).mean())
-    elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = _as_scalar((avg_effect < 0).mean())
-    else:  # two-sided
-        p_gt = _as_scalar((avg_effect > 0).mean())
-        p_lt = _as_scalar((avg_effect < 0).mean())
-        p_two_sided = 2 * min(p_gt, p_lt)
-        stats["avg"]["p_two_sided"] = p_two_sided
-        stats["avg"]["prob_of_effect"] = 1 - p_two_sided
-
-    # ROPE for average
-    if min_effect is not None:
-        rope_direction_avg = direction
-        if direction != "two-sided":
-            rope_direction_avg = "increase" if stats["avg"]["mean"] >= 0 else "decrease"
-        stats["avg"]["p_rope"] = _compute_rope_probability(
-            avg_effect, min_effect, rope_direction_avg
-        )
-
-    # Cumulative effect
     if cumulative:
-        # Use cumulative sum over window
-        cum_effect = impact.cumsum(dim=time_dim)
-        # Take final value (cumulative over entire window)
-        cum_final = cum_effect.isel({time_dim: -1})
+        cum_stats, cum_final = _compute_cum_stats(impact, time_dim, hdi_prob, direction, min_effect)
+        stats["cum"] = cum_stats
+    else:
+        cum_final = None
 
-        stats["cum"] = {
-            "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
-            "median": _as_scalar(cum_final.median(dim=["chain", "draw"])),
-        }
-
-        # HDI for cumulative
-        hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
-        if isinstance(hdi_cum, xr.Dataset):
-            hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum_data.sel(hdi="lower"))
-            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum_data.sel(hdi="higher"))
-        else:
-            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum.sel(hdi="lower"))
-            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum.sel(hdi="higher"))
-
-        # Tail probabilities for cumulative
-        if direction == "increase":
-            stats["cum"]["p_gt_0"] = _as_scalar((cum_final > 0).mean())
-        elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = _as_scalar((cum_final < 0).mean())
-        else:  # two-sided
-            p_gt = _as_scalar((cum_final > 0).mean())
-            p_lt = _as_scalar((cum_final < 0).mean())
-            p_two_sided = 2 * min(p_gt, p_lt)
-            stats["cum"]["p_two_sided"] = p_two_sided
-            stats["cum"]["prob_of_effect"] = 1 - p_two_sided
-
-        # ROPE for cumulative
-        if min_effect is not None:
-            rope_direction_cum = direction
-            if direction != "two-sided":
-                rope_direction_cum = (
-                    "increase" if stats["cum"]["mean"] >= 0 else "decrease"
-                )
-            stats["cum"]["p_rope"] = _compute_rope_probability(
-                cum_final, min_effect, rope_direction_cum
-            )
-
-    # Relative effects
     if relative:
-        epsilon = 1e-8  # Guard against division by zero
-        counterfactual_mean = counterfactual.mean(dim=time_dim)
-        rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
-
-        stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
-
-        hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
-        if isinstance(hdi_rel_avg, xr.Dataset):
-            hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = _as_scalar(
-                hdi_rel_avg_data.sel(hdi="lower")
-            )
-            stats["avg"]["relative_hdi_upper"] = _as_scalar(
-                hdi_rel_avg_data.sel(hdi="higher")
-            )
-        else:
-            stats["avg"]["relative_hdi_lower"] = _as_scalar(
-                hdi_rel_avg.sel(hdi="lower")
-            )
-            stats["avg"]["relative_hdi_upper"] = _as_scalar(
-                hdi_rel_avg.sel(hdi="higher")
-            )
-
-        if cumulative:
-            # Relative cumulative: (cumulative effect / cumulative counterfactual) * 100
-            counterfactual_cum = counterfactual.cumsum(dim=time_dim).isel(
-                {time_dim: -1}
-            )
-            rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
-
-            stats["cum"]["relative_mean"] = _as_scalar(
-                rel_cum.mean(dim=["chain", "draw"])
-            )
-
-            hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
-            if isinstance(hdi_rel_cum, xr.Dataset):
-                hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = _as_scalar(
-                    hdi_rel_cum_data.sel(hdi="lower")
-                )
-                stats["cum"]["relative_hdi_upper"] = _as_scalar(
-                    hdi_rel_cum_data.sel(hdi="higher")
-                )
-            else:
-                stats["cum"]["relative_hdi_lower"] = _as_scalar(
-                    hdi_rel_cum.sel(hdi="lower")
-                )
-                stats["cum"]["relative_hdi_upper"] = _as_scalar(
-                    hdi_rel_cum.sel(hdi="higher")
-                )
+        _add_relative_stats(stats, avg_effect, counterfactual, time_dim, hdi_prob, cumulative, cum_final)
 
     return stats
 
@@ -963,6 +927,125 @@ def _generate_table(stats, cumulative=True, relative=True):
     return df
 
 
+def _resolve_prose_direction(stats_avg, direction):
+    """Resolve the probability value and direction text for prose.
+
+    Auto-detects the actual effect sign and adjusts the probability
+    accordingly, so the prose is coherent regardless of the requested
+    direction.
+    """
+    if direction == "two-sided":
+        return stats_avg.get("prob_of_effect", 0.0), "effect"
+
+    p_gt_0 = stats_avg.get("p_gt_0", None)
+    p_lt_0 = stats_avg.get("p_lt_0", None)
+    mean = stats_avg["mean"]
+
+    if mean >= 0:
+        if p_gt_0 is not None:
+            p_val = p_gt_0
+        elif p_lt_0 is not None:
+            p_val = 1.0 - p_lt_0
+        else:
+            p_val = 0.0
+        return p_val, "increase"
+
+    if p_lt_0 is not None:
+        p_val = p_lt_0
+    elif p_gt_0 is not None:
+        p_val = 1.0 - p_gt_0
+    else:
+        p_val = 0.0
+    return p_val, "decrease"
+
+
+def _build_para_observed_vs_counterfactual(
+    observed_avg,
+    counterfactual_avg,
+    prefix,
+    window_str,
+    hdi_pct,
+    avg_mean,
+    avg_lower,
+    avg_upper,
+):
+    if observed_avg is not None and counterfactual_avg is not None:
+        cf_interval_lower = observed_avg - avg_upper
+        cf_interval_upper = observed_avg - avg_lower
+        return (
+            f"During the {prefix} ({window_str}), the response variable had "
+            f"an average value of approx. {_format_number(observed_avg)}. By contrast, in the "
+            f"absence of an intervention, we would have expected an average response of "
+            f"{_format_number(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
+            f"prediction is [{_format_number(cf_interval_lower)}, "
+            f"{_format_number(cf_interval_upper)}]. Subtracting this prediction "
+            f"from the observed response yields an estimate of the causal effect the "
+            f"intervention had on the response variable. This effect is {_format_number(avg_mean)} "
+            f"with a {hdi_pct}% interval of [{_format_number(avg_lower)}, {_format_number(avg_upper)}]."
+        )
+    return (
+        f"During the {prefix} ({window_str}), the estimated average causal "
+        f"effect of the intervention is {_format_number(avg_mean)} "
+        f"({hdi_pct}% HDI [{_format_number(avg_lower)}, {_format_number(avg_upper)}]). "
+        f"This represents the difference between the observed response and the "
+        f"counterfactual prediction of what would have occurred without the intervention."
+    )
+
+
+def _build_para_cumulative(stats, prefix, window_str, hdi_pct, observed_cum, counterfactual_cum):
+    if observed_cum is not None and counterfactual_cum is not None:
+        cum_cf_lower = observed_cum - stats["cum"]["hdi_upper"]
+        cum_cf_upper = observed_cum - stats["cum"]["hdi_lower"]
+        return (
+            f"Summing up the individual data points during the {prefix}, "
+            f"the response variable had an overall value of "
+            f"{_format_number(observed_cum)}. "
+            f"By contrast, had the intervention not taken place, we would have expected "
+            f"a sum of {_format_number(counterfactual_cum)}. The {hdi_pct}% interval of this "
+            f"prediction is [{_format_number(cum_cf_lower)}, "
+            f"{_format_number(cum_cf_upper)}]."
+        )
+    return (
+        f"The cumulative effect over the {prefix} "
+        f"was {_format_number(stats['cum']['mean'])} ({hdi_pct}% HDI "
+        f"[{_format_number(stats['cum']['hdi_lower'])}, "
+        f"{_format_number(stats['cum']['hdi_upper'])}])."
+    )
+
+
+def _build_para_credibility(avg_lower, avg_upper, hdi_pct, direction_text, p_val, stats, relative):
+    hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
+    credibility_parts = []
+    if hdi_excludes_zero:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI of the effect [{_format_number(avg_lower)}, "
+            f"{_format_number(avg_upper)}] does not include zero."
+        )
+    else:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI of the effect [{_format_number(avg_lower)}, "
+            f"{_format_number(avg_upper)}] includes zero."
+        )
+    article = "an" if direction_text[0].lower() in "aeiou" else "a"
+    credibility_parts.append(
+        f"The posterior probability of {article} {direction_text} is "
+        f"{_format_number(p_val, 3)}."
+    )
+    if "p_rope" in stats["avg"]:
+        credibility_parts.append(
+            f"The probability that the {direction_text} exceeds the minimum effect "
+            f"size threshold is {_format_number(stats['avg']['p_rope'], 3)}."
+        )
+    if relative and "relative_mean" in stats["avg"]:
+        credibility_parts.append(
+            f"Relative to the counterfactual, the effect represents a "
+            f"{_format_number(stats['avg']['relative_mean'])}% change "
+            f"({hdi_pct}% HDI [{_format_number(stats['avg']['relative_hdi_lower'])}%, "
+            f"{_format_number(stats['avg']['relative_hdi_upper'])}%])."
+        )
+    return " ".join(credibility_parts)
+
+
 def _generate_prose_detailed(
     stats,
     window_coords,
@@ -1020,147 +1103,40 @@ def _generate_prose_detailed(
     """
     hdi_pct = int((1 - alpha) * 100)
 
-    # Format window string
-    if len(window_coords) > 0:
-        start_str = str(window_coords[0])
-        end_str = str(window_coords[-1])
-        window_str = f"{start_str} to {end_str}"
-    else:
-        window_str = "post-period"
+    window_str = (
+        f"{window_coords[0]} to {window_coords[-1]}"
+        if len(window_coords) > 0
+        else "post-period"
+    )
 
-    # Format numbers
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    # Extract statistics
     avg_mean = stats["avg"]["mean"]
     avg_lower = stats["avg"]["hdi_lower"]
     avg_upper = stats["avg"]["hdi_upper"]
 
-    # Direction-specific probability with auto-detection of effect sign.
-    # When the user requests direction="increase" but the effect is negative
-    # (or vice versa), we flip to the correct tail so the prose is coherent.
-    if direction == "two-sided":
-        p_val = stats["avg"].get("prob_of_effect", 0.0)
-        direction_text = "effect"
-    else:
-        p_gt_0 = stats["avg"].get("p_gt_0", None)
-        p_lt_0 = stats["avg"].get("p_lt_0", None)
+    p_val, direction_text = _resolve_prose_direction(stats["avg"], direction)
 
-        if avg_mean >= 0:
-            if p_gt_0 is not None:
-                p_val = p_gt_0
-            elif p_lt_0 is not None:
-                p_val = 1.0 - p_lt_0
-            else:
-                p_val = 0.0
-            direction_text = "increase"
-        else:
-            if p_lt_0 is not None:
-                p_val = p_lt_0
-            elif p_gt_0 is not None:
-                p_val = 1.0 - p_gt_0
-            else:
-                p_val = 0.0
-            direction_text = "decrease"
-
-    # Paragraph 1: Observed vs counterfactual (average)
     paragraphs = []
 
-    if observed_avg is not None and counterfactual_avg is not None:
-        # Counterfactual interval: since effect = observed - counterfactual,
-        # counterfactual = observed - effect, so the HDI of the counterfactual
-        # is [observed - effect_upper, observed - effect_lower].
-        cf_interval_lower = observed_avg - avg_upper
-        cf_interval_upper = observed_avg - avg_lower
-
-        para1 = (
-            f"During the {prefix} ({window_str}), the response variable had "
-            f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
-            f"absence of an intervention, we would have expected an average response of "
-            f"{fmt_num(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
-            f"prediction is [{fmt_num(cf_interval_lower)}, "
-            f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
-            f"from the observed response yields an estimate of the causal effect the "
-            f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
-            f"with a {hdi_pct}% interval of [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]."
+    paragraphs.append(
+        _build_para_observed_vs_counterfactual(
+            observed_avg, counterfactual_avg, prefix, window_str,
+            hdi_pct, avg_mean, avg_lower, avg_upper,
         )
-    else:
-        para1 = (
-            f"During the {prefix} ({window_str}), the estimated average causal "
-            f"effect of the intervention is {fmt_num(avg_mean)} "
-            f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
-            f"This represents the difference between the observed response and the "
-            f"counterfactual prediction of what would have occurred without the intervention."
-        )
-    paragraphs.append(para1)
-
-    # Paragraph 2: Cumulative effect (if applicable)
-    if cumulative and "cum" in stats:
-        cum_mean = stats["cum"]["mean"]
-        cum_lower = stats["cum"]["hdi_lower"]
-        cum_upper = stats["cum"]["hdi_upper"]
-
-        if observed_cum is not None and counterfactual_cum is not None:
-            cum_cf_lower = observed_cum - cum_upper
-            cum_cf_upper = observed_cum - cum_lower
-
-            para2 = (
-                f"Summing up the individual data points during the {prefix}, "
-                f"the response variable had an overall value of {fmt_num(observed_cum)}. "
-                f"By contrast, had the intervention not taken place, we would have expected "
-                f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_pct}% interval of this "
-                f"prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
-            )
-        else:
-            para2 = (
-                f"The cumulative effect over the {prefix} "
-                f"was {fmt_num(cum_mean)} ({hdi_pct}% HDI [{fmt_num(cum_lower)}, "
-                f"{fmt_num(cum_upper)}])."
-            )
-        paragraphs.append(para2)
-
-    # Paragraph 3: Posterior summary
-    hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
-
-    credibility_parts = []
-    if hdi_excludes_zero:
-        credibility_parts.append(
-            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
-            f"{fmt_num(avg_upper)}] does not include zero."
-        )
-    else:
-        credibility_parts.append(
-            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
-            f"{fmt_num(avg_upper)}] includes zero."
-        )
-
-    article = "an" if direction_text[0].lower() in "aeiou" else "a"
-    credibility_parts.append(
-        f"The posterior probability of {article} {direction_text} is {fmt_num(p_val, 3)}."
     )
 
-    if "p_rope" in stats["avg"]:
-        p_rope = stats["avg"]["p_rope"]
-        credibility_parts.append(
-            f"The probability that the {direction_text} exceeds the minimum effect "
-            f"size threshold is {fmt_num(p_rope, 3)}."
+    if cumulative and "cum" in stats:
+        paragraphs.append(
+            _build_para_cumulative(
+                stats, prefix, window_str, hdi_pct, observed_cum, counterfactual_cum,
+            )
         )
 
-    if relative and "relative_mean" in stats["avg"]:
-        rel_mean = stats["avg"]["relative_mean"]
-        rel_lower = stats["avg"]["relative_hdi_lower"]
-        rel_upper = stats["avg"]["relative_hdi_upper"]
-        credibility_parts.append(
-            f"Relative to the counterfactual, the effect represents a "
-            f"{fmt_num(rel_mean)}% change ({hdi_pct}% HDI [{fmt_num(rel_lower)}%, "
-            f"{fmt_num(rel_upper)}%])."
+    paragraphs.append(
+        _build_para_credibility(
+            avg_lower, avg_upper, hdi_pct, direction_text, p_val, stats, relative,
         )
+    )
 
-    para3 = " ".join(credibility_parts)
-    paragraphs.append(para3)
-
-    # Paragraph 4: Assumptions and guidance
     para4 = _assumptions_text(experiment_type)
     para4 += (
         "We recommend inspecting model fit, examining pre-intervention trends, "

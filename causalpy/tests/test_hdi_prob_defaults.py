@@ -32,6 +32,54 @@ import pytest
 from causalpy.constants import HDI_PROB
 
 
+def _module_candidates(
+    mod,
+    seen: set[int],
+) -> Iterable[tuple[str, Callable[..., Any]]]:
+    """Yield ``(qualified_name, callable)`` for every public callable defined
+    in *mod* whose defining module is the ``causalpy`` package.
+    """
+    for attr_name, attr in vars(mod).items():
+        if attr_name.startswith("_"):
+            continue
+        if not callable(attr):
+            continue
+        if id(attr) in seen:
+            continue
+        seen.add(id(attr))
+
+        attr_module = getattr(attr, "__module__", None)
+        if not isinstance(attr_module, str) or not attr_module.startswith("causalpy"):
+            continue
+        attr_qualname = getattr(attr, "__qualname__", None)
+        if not isinstance(attr_qualname, str):
+            continue  # pragma: no cover
+
+        if inspect.isclass(attr):
+            for member_name, member in vars(attr).items():
+                if member_name.startswith("_"):
+                    continue
+                if not callable(member):
+                    continue
+                yield f"{attr_module}.{attr_qualname}.{member_name}", member
+        else:
+            yield f"{attr_module}.{attr_qualname}", attr
+
+
+def _has_hdi_prob_default(fn: Callable[..., Any]) -> bool:
+    """Check if *fn* accepts ``hdi_prob`` with a non-None default."""
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):  # pragma: no cover
+        return False
+    param = sig.parameters.get("hdi_prob")
+    if param is None:
+        return False
+    if param.default is inspect.Parameter.empty:
+        return False  # pragma: no cover
+    return param.default is not None
+
+
 def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
     """Yield ``(qualified_name, callable)`` for every public function/method
     in ``causalpy`` whose signature has an ``hdi_prob`` parameter with a
@@ -53,11 +101,6 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
 
     seen: set[int] = set()
 
-    # Defensive branches below (private modules, import failures, callables
-    # without a usable signature, etc.) are hit during the walk depending on
-    # which optional dependencies and modules happen to be importable; they
-    # are exempt from coverage so the safety net does not become a CI
-    # liability.
     for module_info in pkgutil.walk_packages(
         causalpy.__path__, prefix=f"{causalpy.__name__}."
     ):
@@ -71,49 +114,8 @@ def _hdi_prob_defaulted_methods() -> Iterable[tuple[str, Callable[..., Any]]]:
         except Exception:  # pragma: no cover
             continue
 
-        for attr_name, attr in vars(mod).items():
-            if attr_name.startswith("_"):
-                continue
-            if not callable(attr):
-                continue
-            if id(attr) in seen:
-                continue
-            seen.add(id(attr))
-
-            attr_module = getattr(attr, "__module__", None)
-            if not isinstance(attr_module, str) or not attr_module.startswith(
-                "causalpy"
-            ):
-                continue
-            attr_qualname = getattr(attr, "__qualname__", None)
-            if not isinstance(attr_qualname, str):
-                continue  # pragma: no cover
-
-            candidates: list[tuple[str, Callable[..., Any]]] = []
-            if inspect.isclass(attr):
-                for member_name, member in vars(attr).items():
-                    if member_name.startswith("_"):
-                        continue
-                    if not callable(member):
-                        continue
-                    candidates.append(
-                        (f"{attr_module}.{attr_qualname}.{member_name}", member)
-                    )
-            else:
-                candidates.append((f"{attr_module}.{attr_qualname}", attr))
-
-            for qualname, fn in candidates:
-                try:
-                    sig = inspect.signature(fn)
-                except (TypeError, ValueError):  # pragma: no cover
-                    continue
-                param = sig.parameters.get("hdi_prob")
-                if param is None:
-                    continue
-                if param.default is inspect.Parameter.empty:
-                    continue  # pragma: no cover
-                if param.default is None:
-                    continue
+        for qualname, fn in _module_candidates(mod, seen):
+            if _has_hdi_prob_default(fn):
                 yield qualname, fn
 
 

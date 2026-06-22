@@ -19,6 +19,7 @@ different units receive treatment at different times.
 """
 
 import warnings
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
@@ -35,6 +36,55 @@ from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _ConfigParams:  # pylint: disable=too-many-instance-attributes
+    """Container for configuration parameters."""
+
+    expt_type: str
+    formula: str
+    unit_variable_name: str
+    time_variable_name: str
+    treated_variable_name: str
+    treatment_time_variable_name: str | None
+    never_treated_value: Any
+    event_window: tuple[int, int] | None
+    reference_event_time: int
+    cohorts: list = field(default_factory=list)
+
+
+@dataclass
+class _DesignMatrices:  # pylint: disable=too-many-instance-attributes
+    """Container for design matrix metadata and data."""
+
+    _y_design_info: Any = None
+    _x_design_info: Any = None
+    labels: list[str] = field(default_factory=list)
+    outcome_variable_name: str = ""
+    X_full: np.ndarray | None = None
+    y_full: np.ndarray | None = None
+    X_train: np.ndarray | None = None
+    y_train: np.ndarray | None = None
+
+
+@dataclass
+class _ATTIdentification:
+    """Container for ATT identification results."""
+
+    non_identified_periods_: set[Any] = field(default_factory=set)
+    non_identified_cohorts_: set[Any] = field(default_factory=set)
+
+
+@dataclass
+class _Results:
+    """Container for model results."""
+
+    y_pred: Any = None
+    data_: pd.DataFrame | None = None
+    att_group_time_: pd.DataFrame | None = None
+    att_event_time_: pd.DataFrame | None = None
+    hdi_prob_: float | None = None
 
 
 class StaggeredDifferenceInDifferences(BaseExperiment):
@@ -155,6 +205,66 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     supports_bayes = True
     _default_model_class = LinearRegression
 
+    @property
+    def expt_type(self) -> str:
+        return self.config.expt_type
+
+    @property
+    def cohorts(self) -> list:
+        return self.config.cohorts
+
+    @cohorts.setter
+    def cohorts(self, value: list) -> None:
+        self.config.cohorts = value
+
+    @property
+    def labels(self) -> list[str]:
+        return self.design.labels
+
+    @property
+    def outcome_variable_name(self) -> str:
+        return self.design.outcome_variable_name
+
+    @property
+    def X_full(self) -> np.ndarray | None:
+        return self.design.X_full
+
+    @property
+    def X_train(self) -> np.ndarray | None:
+        return self.design.X_train
+
+    @property
+    def y_pred(self) -> Any:
+        return self.results.y_pred
+
+    @property
+    def data_(self) -> pd.DataFrame | None:
+        return self.results.data_
+
+    @property
+    def att_group_time_(self) -> pd.DataFrame | None:
+        return self.results.att_group_time_
+
+    @property
+    def att_event_time_(self) -> pd.DataFrame | None:
+        return self.results.att_event_time_
+
+    @property
+    def hdi_prob_(self) -> float | None:
+        return self.results.hdi_prob_
+
+    @property
+    def reference_event_time(self) -> int:
+        return self.config.reference_event_time
+
+    @property
+    def non_identified_periods_(self) -> set[Any]:
+        return self.identification.non_identified_periods_
+
+    @property
+    def non_identified_cohorts_(self) -> set[Any]:
+        return self.identification.non_identified_cohorts_
+
     def __init__(
         self,
         data: pd.DataFrame,
@@ -173,16 +283,23 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # and is intentionally not used inside this constructor.
         super().__init__(model=model)
 
-        # Store parameters
-        self.expt_type = "Staggered Difference in Differences"
-        self.formula = formula
-        self.unit_variable_name = unit_variable_name
-        self.time_variable_name = time_variable_name
-        self.treated_variable_name = treated_variable_name
-        self.treatment_time_variable_name = treatment_time_variable_name
-        self.never_treated_value = never_treated_value
-        self.event_window = event_window
-        self.reference_event_time = reference_event_time
+        # Store parameters in config container
+        self.config = _ConfigParams(
+            expt_type="Staggered Difference in Differences",
+            formula=formula,
+            unit_variable_name=unit_variable_name,
+            time_variable_name=time_variable_name,
+            treated_variable_name=treated_variable_name,
+            treatment_time_variable_name=treatment_time_variable_name,
+            never_treated_value=never_treated_value,
+            event_window=event_window,
+            reference_event_time=reference_event_time,
+        )
+
+        # Initialize empty containers for design and results
+        self.design = _DesignMatrices()
+        self.results = _Results()
+        self.identification = _ATTIdentification()
 
         # Make a copy of data to avoid modifying the original
         data = data.copy()
@@ -227,8 +344,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """Validate the input data and parameters."""
         # Check required columns exist
         required_cols = [
-            self.unit_variable_name,
-            self.time_variable_name,
+            self.config.unit_variable_name,
+            self.config.time_variable_name,
         ]
 
         for col in required_cols:
@@ -236,20 +353,20 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 raise DataException(f"Required column '{col}' not found in data")
 
         # Check treated variable exists (either directly or via treatment_time)
-        if self.treatment_time_variable_name is not None:
-            if self.treatment_time_variable_name not in self.data.columns:
+        if self.config.treatment_time_variable_name is not None:
+            if self.config.treatment_time_variable_name not in self.data.columns:
                 raise DataException(
-                    f"Treatment time column '{self.treatment_time_variable_name}' "
+                    f"Treatment time column '{self.config.treatment_time_variable_name}' "
                     "not found in data"
                 )
-        elif self.treated_variable_name not in self.data.columns:
+        elif self.config.treated_variable_name not in self.data.columns:
             raise DataException(
-                f"Treated column '{self.treated_variable_name}' not found in data. "
+                f"Treated column '{self.config.treated_variable_name}' not found in data. "
                 "Either provide treated_variable_name or treatment_time_variable_name."
             )
 
         # Validate formula contains outcome variable
-        outcome_match = self.formula.split("~")[0].strip()
+        outcome_match = self.config.formula.split("~")[0].strip()
         if outcome_match not in self.data.columns:
             raise FormulaException(
                 f"Outcome variable '{outcome_match}' from formula not found in data"
@@ -260,15 +377,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _validate_absorbing_treatment(self) -> None:
         """Validate that treatment is absorbing (once treated, always treated)."""
-        if self.treated_variable_name not in self.data.columns:
+        if self.config.treated_variable_name not in self.data.columns:
             # Will infer from treatment_time, skip validation here
             return
 
-        for unit in self.data[self.unit_variable_name].unique():
+        for unit in self.data[self.config.unit_variable_name].unique():
             unit_data = self.data[
-                self.data[self.unit_variable_name] == unit
-            ].sort_values(self.time_variable_name)
-            treated_values = unit_data[self.treated_variable_name].values
+                self.data[self.config.unit_variable_name] == unit
+            ].sort_values(self.config.time_variable_name)
+            treated_values = unit_data[self.config.treated_variable_name].values
 
             # Find first treated period
             treated_indices = np.where(treated_values == 1)[0]
@@ -287,47 +404,47 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _compute_treatment_times(self) -> None:
         """Compute treatment time G_i for each unit."""
-        if self.treatment_time_variable_name is not None:
+        if self.config.treatment_time_variable_name is not None:
             # Use provided treatment time column
             # Get unique treatment time per unit
             g_map = (
-                self.data.groupby(self.unit_variable_name)[
-                    self.treatment_time_variable_name
+                self.data.groupby(self.config.unit_variable_name)[
+                    self.config.treatment_time_variable_name
                 ]
                 .first()
                 .to_dict()
             )
-            self.data["G"] = self.data[self.unit_variable_name].map(g_map)
+            self.data["G"] = self.data[self.config.unit_variable_name].map(g_map)
         else:
             # Infer from treated variable: G = min{t : D_it = 1}
             g_map = {}
-            for unit in self.data[self.unit_variable_name].unique():
-                unit_data = self.data[self.data[self.unit_variable_name] == unit]
+            for unit in self.data[self.config.unit_variable_name].unique():
+                unit_data = self.data[self.data[self.config.unit_variable_name] == unit]
                 treated_times = unit_data.loc[
-                    unit_data[self.treated_variable_name] == 1, self.time_variable_name
+                    unit_data[self.config.treated_variable_name] == 1, self.config.time_variable_name
                 ]
                 if len(treated_times) == 0:
-                    g_map[unit] = self.never_treated_value
+                    g_map[unit] = self.config.never_treated_value
                 else:
                     g_map[unit] = treated_times.min()
-            self.data["G"] = self.data[self.unit_variable_name].map(g_map)
+            self.data["G"] = self.data[self.config.unit_variable_name].map(g_map)
 
         # Store unique cohorts (excluding never-treated)
-        self.cohorts = sorted(
-            [g for g in self.data["G"].unique() if g != self.never_treated_value]
+        self.config.cohorts = sorted(
+            [g for g in self.data["G"].unique() if g != self.config.never_treated_value]
         )
 
     def _compute_event_times(self) -> None:
         """Compute event time (t - G) for each observation."""
-        self.data["event_time"] = self.data[self.time_variable_name] - self.data["G"]
+        self.data["event_time"] = self.data[self.config.time_variable_name] - self.data["G"]
         # Set event_time to NaN for never-treated units
-        self.data.loc[self.data["G"] == self.never_treated_value, "event_time"] = np.nan
+        self.data.loc[self.data["G"] == self.config.never_treated_value, "event_time"] = np.nan
 
     def _identify_untreated_observations(self) -> None:
         """Identify untreated observations for the training set."""
         # Untreated if: (t < G) OR (never-treated)
-        is_never_treated = self.data["G"] == self.never_treated_value
-        is_pre_treatment = self.data[self.time_variable_name] < self.data["G"]
+        is_never_treated = self.data["G"] == self.config.never_treated_value
+        is_pre_treatment = self.data[self.config.time_variable_name] < self.data["G"]
         self.data["_is_untreated"] = is_never_treated | is_pre_treatment
 
         # Verify we have some training data
@@ -341,15 +458,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def _get_periods_without_untreated_support(self) -> set[Any]:
         """Return calendar periods with zero untreated observations."""
         untreated_periods = set(
-            self.data.loc[self.data["_is_untreated"], self.time_variable_name].unique()
+            self.data.loc[self.data["_is_untreated"], self.config.time_variable_name].unique()
         )
-        all_periods = set(self.data[self.time_variable_name].unique())
+        all_periods = set(self.data[self.config.time_variable_name].unique())
         return all_periods - untreated_periods
 
     def _get_non_identified_cohorts(self, periods: set[Any]) -> set[Any]:
         """Return cohorts with post-treatment cells in non-identified periods."""
         non_identified_cohorts: set[Any] = set()
-        for cohort in self.cohorts:
+        for cohort in self.config.cohorts:
             for period in periods:
                 if period >= cohort:
                     non_identified_cohorts.add(cohort)
@@ -358,16 +475,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _check_att_identification(self) -> None:
         """Detect non-identified ATT cells and warn when untreated support is missing."""
-        self.non_identified_periods_ = self._get_periods_without_untreated_support()
-        self.non_identified_cohorts_ = self._get_non_identified_cohorts(
-            self.non_identified_periods_
+        self.identification.non_identified_periods_ = self._get_periods_without_untreated_support()
+        self.identification.non_identified_cohorts_ = self._get_non_identified_cohorts(
+            self.identification.non_identified_periods_
         )
 
-        if not self.non_identified_periods_:
+        if not self.identification.non_identified_periods_:
             return
 
-        periods_str = ", ".join(str(p) for p in sorted(self.non_identified_periods_))
-        cohorts_str = ", ".join(str(c) for c in sorted(self.non_identified_cohorts_))
+        periods_str = ", ".join(str(p) for p in sorted(self.identification.non_identified_periods_))
+        cohorts_str = ", ".join(str(c) for c in sorted(self.identification.non_identified_cohorts_))
         warnings.warn(
             "No untreated observations in calendar period(s) "
             f"{{{periods_str}}}; treatment effects for cohort(s) "
@@ -381,15 +498,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _is_calendar_period_identified(self, period: Any) -> bool:
         """Return whether calendar period ``period`` has untreated support."""
-        return period not in self.non_identified_periods_
+        return period not in self.identification.non_identified_periods_
 
     def _is_event_time_att_identified(self, event_time: int) -> bool:
         """Return whether aggregated ATT(e) is identified."""
-        for cohort in self.cohorts:
+        for cohort in self.config.cohorts:
             period = cohort + event_time
             has_contributing_obs = (
                 (self.data["G"] == cohort)
-                & (self.data[self.time_variable_name] == period)
+                & (self.data[self.config.time_variable_name] == period)
                 & (self.data["event_time"] == event_time)
             ).any()
             if has_contributing_obs and not self._is_calendar_period_identified(period):
@@ -427,78 +544,78 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices using patsy."""
         # Build design matrix for the full data
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.outcome_variable_name = y.design_info.column_names[0]
+        y, X = dmatrices(self.config.formula, self.data)
+        self.design._y_design_info = y.design_info
+        self.design._x_design_info = X.design_info
+        self.design.labels = X.design_info.column_names
+        self.design.outcome_variable_name = y.design_info.column_names[0]
 
         # Store full design matrix
-        self.X_full = np.asarray(X)
-        self.y_full = np.asarray(y)
+        self.design.X_full = np.asarray(X)
+        self.design.y_full = np.asarray(y)
 
         # Get untreated subset for training
         untreated_mask = np.asarray(self.data["_is_untreated"].values, dtype=bool)
-        self.X_train = self.X_full[untreated_mask]
-        self.y_train = self.y_full[untreated_mask]
+        self.design.X_train = self.design.X_full[untreated_mask]
+        self.design.y_train = self.design.y_full[untreated_mask]
 
     def _fit_model(self) -> None:
         """Fit the model on untreated observations only."""
-        n_train = self.X_train.shape[0]
+        n_train = self.design.X_train.shape[0]
         X_train_xr = xr.DataArray(
-            self.X_train,
+            self.design.X_train,
             dims=["obs_ind", "coeffs"],
             coords={
                 "obs_ind": np.arange(n_train),
-                "coeffs": self.labels,
+                "coeffs": self.design.labels,
             },
         )
         y_train_xr = xr.DataArray(
-            self.y_train,
+            self.design.y_train,
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
         )
         self._model_backend.fit(
             X=X_train_xr,
             y=y_train_xr,
-            coords=build_coords(self.labels, n_train),
+            coords=build_coords(self.design.labels, n_train),
         )
 
     def _predict_counterfactuals(self) -> None:
         """Predict counterfactual outcomes for all observations."""
-        n_full = self.X_full.shape[0]
+        n_full = self.design.X_full.shape[0]
         X_full_xr = xr.DataArray(
-            self.X_full,
+            self.design.X_full,
             dims=["obs_ind", "coeffs"],
             coords={
                 "obs_ind": np.arange(n_full),
-                "coeffs": self.labels,
+                "coeffs": self.design.labels,
             },
         )
-        self.y_pred = self._model_backend.predict(X=X_full_xr)
+        self.results.y_pred = self._model_backend.predict(X=X_full_xr)
 
         if self._model_backend.is_bayesian:
             y_hat0_mean = (
-                self.y_pred["posterior_predictive"]
+                self.results.y_pred["posterior_predictive"]
                 .mu.mean(dim=["chain", "draw"])
                 .isel(treated_units=0)
                 .values
             )
             self.data["y_hat0"] = y_hat0_mean
         else:
-            self.data["y_hat0"] = np.squeeze(self.y_pred)
+            self.data["y_hat0"] = np.squeeze(self.results.y_pred)
 
     def _compute_treatment_effects(self) -> None:
         """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
         self.data["tau_hat"] = np.nan  # Initialize with NaN
         treated_mask = ~self.data["_is_untreated"]
         self.data.loc[treated_mask, "tau_hat"] = (
-            self.data.loc[treated_mask, self.outcome_variable_name]
+            self.data.loc[treated_mask, self.design.outcome_variable_name]
             - self.data.loc[treated_mask, "y_hat0"]
         )
 
         # Store augmented data
-        self.data_ = self.data.copy()
+        self.results.data_ = self.data.copy()
 
     def _aggregate_effects(self) -> None:
         """Aggregate effects to group-time and event-time ATTs.
@@ -521,7 +638,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Also get pre-treatment data for eventually-treated units (placebo check)
         # These are observations where: G != never_treated_value AND event_time < 0
-        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_eventually_treated = self.data["G"] != self.config.never_treated_value
         is_pre_treatment = self.data["event_time"] < 0
         pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
 
@@ -550,15 +667,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         # Store the HDI probability used for interval computation
-        self.hdi_prob_ = hdi_prob
+        self.results.hdi_prob_ = hdi_prob
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.results.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
         # Get observed y for all observations
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = np.asarray(self.data[self.design.outcome_variable_name].values)
 
         # Compute tau draws for all observations
         # tau_draws has shape (chain, draw, obs_ind)
@@ -572,7 +689,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         event_time_treated = np.asarray(treated_data["event_time"].values)
 
         # --- Group-time ATTs (post-treatment only) ---
-        gt_groups = treated_data.groupby(["G", self.time_variable_name]).groups
+        gt_groups = treated_data.groupby(["G", self.config.time_variable_name]).groups
         att_gt_rows: list[dict] = []
         for key, idx in gt_groups.items():
             g_val = key[0]  # type: ignore[index]
@@ -589,7 +706,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "att_upper": float(np.percentile(tau_gt, upper_pct)),
                 }
             )
-        self.att_group_time_ = self._mark_non_identified_att_rows(
+        self.results.att_group_time_ = self._mark_non_identified_att_rows(
             pd.DataFrame(att_gt_rows)
         )
 
@@ -609,10 +726,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 event_time_pretreat[~np.isnan(event_time_pretreat)]
             )
             # Apply event window filter if specified
-            if self.event_window is not None:
+            if self.config.event_window is not None:
                 event_times_pre = event_times_pre[
-                    (event_times_pre >= self.event_window[0])
-                    & (event_times_pre <= self.event_window[1])
+                    (event_times_pre >= self.config.event_window[0])
+                    & (event_times_pre <= self.config.event_window[1])
                 ]
 
             for e in sorted(event_times_pre):
@@ -633,10 +750,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Post-treatment effects (event_time >= 0)
         event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
-        if self.event_window is not None:
+        if self.config.event_window is not None:
             event_times_post = event_times_post[
-                (event_times_post >= self.event_window[0])
-                & (event_times_post <= self.event_window[1])
+                (event_times_post >= self.config.event_window[0])
+                & (event_times_post <= self.config.event_window[1])
             ]
 
         for e in sorted(event_times_post):
@@ -655,7 +772,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 }
             )
 
-        self.att_event_time_ = self._mark_non_identified_att_rows(
+        self.results.att_event_time_ = self._mark_non_identified_att_rows(
             pd.DataFrame(att_et_rows)
         )
 
@@ -674,19 +791,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """
         # --- Group-time ATTs (post-treatment only) ---
         att_gt = (
-            treated_data.groupby(["G", self.time_variable_name])["tau_hat"]
+            treated_data.groupby(["G", self.config.time_variable_name])["tau_hat"]
             .agg(["mean", "std", "count"])
             .reset_index()
         )
         att_gt.columns = ["cohort", "time", "att", "att_std", "n_obs"]
-        self.att_group_time_ = self._mark_non_identified_att_rows(att_gt)
+        self.results.att_group_time_ = self._mark_non_identified_att_rows(att_gt)
 
         # --- Event-time ATTs (including pre-treatment placebo) ---
         # Compute tau_hat for pre-treatment observations (residuals)
         if len(pretreatment_data) > 0:
             pretreatment_data = pretreatment_data.copy()
             pretreatment_data["tau_hat"] = (
-                pretreatment_data[self.outcome_variable_name]
+                pretreatment_data[self.design.outcome_variable_name]
                 - pretreatment_data["y_hat0"]
             )
 
@@ -694,10 +811,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         event_data = pd.concat([pretreatment_data, treated_data], ignore_index=True)
 
         # Apply event window filter if specified
-        if self.event_window is not None:
+        if self.config.event_window is not None:
             event_data = event_data[
-                (event_data["event_time"] >= self.event_window[0])
-                & (event_data["event_time"] <= self.event_window[1])
+                (event_data["event_time"] >= self.config.event_window[0])
+                & (event_data["event_time"] <= self.config.event_window[1])
             ]
 
         att_et = (
@@ -707,7 +824,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         )
         att_et.columns = ["event_time", "att", "att_std", "n_obs"]
         att_et["event_time"] = att_et["event_time"].astype(int)
-        self.att_event_time_ = self._mark_non_identified_att_rows(att_et)
+        self.results.att_event_time_ = self._mark_non_identified_att_rows(att_et)
 
     def summary(
         self, round_to: int | None = 2, include_group_time: bool = False
@@ -723,17 +840,17 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             ``ATT(g, t)`` table after the event-time estimates. Defaults to
             ``False``.
         """
-        print(f"{self.expt_type:=^80}")
-        print(f"Formula: {self.formula}")
-        print(f"Number of units: {self.data[self.unit_variable_name].nunique()}")
-        print(f"Number of time periods: {self.data[self.time_variable_name].nunique()}")
-        print(f"Treatment cohorts: {self.cohorts}")
+        print(f"{self.config.expt_type:=^80}")
+        print(f"Formula: {self.config.formula}")
+        print(f"Number of units: {self.data[self.config.unit_variable_name].nunique()}")
+        print(f"Number of time periods: {self.data[self.config.time_variable_name].nunique()}")
+        print(f"Treatment cohorts: {self.config.cohorts}")
         n_never_treated = self.data.loc[
-            self.data["G"] == self.never_treated_value, self.unit_variable_name
+            self.data["G"] == self.config.never_treated_value, self.config.unit_variable_name
         ].nunique()
         print(f"Never-treated units: {n_never_treated}")
         print("\nEvent-time estimates:")
-        att_et = self.att_event_time_.copy()
+        att_et = self.results.att_event_time_.copy()
         # Add indicator column for clarity
         att_et["type"] = att_et["event_time"].apply(
             lambda x: "placebo" if x < 0 else "ATT"
@@ -745,7 +862,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print(att_et[cols].to_string(index=False))
         if include_group_time:
             print("\nGroup-time estimates:")
-            print(self.att_group_time_.to_string(index=False))
+            print(self.results.att_group_time_.to_string(index=False))
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
@@ -911,11 +1028,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
-        if hdi_prob is not None and hdi_prob != self.hdi_prob_:
+        if hdi_prob is not None and hdi_prob != self.results.hdi_prob_:
             raise ValueError(
                 "StaggeredDiD HDI bounds are computed during effect "
                 "aggregation, not at plot time. The cached HDI probability "
-                f"is {self.hdi_prob_}, but plot() received hdi_prob="
+                f"is {self.results.hdi_prob_}, but plot() received hdi_prob="
                 f"{hdi_prob}. To plot at a different HDI probability, "
                 "re-fit the experiment so that aggregation uses the desired "
                 "value, or omit hdi_prob to use the cached value."
@@ -932,7 +1049,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-        att_et = self.att_event_time_.copy()
+        att_et = self.results.att_event_time_.copy()
 
         # Separate pre-treatment (placebo) and post-treatment (ATT)
         pre_treatment = att_et[att_et["event_time"] < 0]
@@ -953,7 +1070,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 markersize=7,
                 color="gray",
                 alpha=0.7,
-                label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
+                label=f"Placebo estimate ({int(self.results.hdi_prob_ * 100)}% HDI)",
             )
 
         # Plot post-treatment ATT estimates
@@ -970,7 +1087,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 capthick=2,
                 markersize=8,
                 color="C0",
-                label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
+                label=f"ATT estimate ({int(self.results.hdi_prob_ * 100)}% HDI)",
             )
 
         # Add horizontal line at zero
@@ -1110,7 +1227,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-        att_et = self.att_event_time_.copy()
+        att_et = self.results.att_event_time_.copy()
 
         # Separate pre-treatment (placebo) and post-treatment (ATT)
         pre_treatment = att_et[att_et["event_time"] < 0]
@@ -1266,7 +1383,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if x_axis not in {"event_time", "calendar_time"}:
             raise ValueError("x_axis must be 'event_time' or 'calendar_time'")
 
-        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        att_gt = self.results.att_group_time_.sort_values(["cohort", "time"]).copy()
         att_gt["type"] = "ATT"
         if include_placebo:
             att_gt = pd.concat(
@@ -1297,7 +1414,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _get_group_time_placebo_observations(self) -> pd.DataFrame:
         """Return pre-treatment observations for eventually-treated units."""
-        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_eventually_treated = self.data["G"] != self.config.never_treated_value
         is_pre_treatment = self.data["event_time"] < 0
         return self.data[is_eventually_treated & is_pre_treatment].copy()
 
@@ -1310,12 +1427,12 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        mu_draws = self.results.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        y_observed = np.asarray(self.data[self.design.outcome_variable_name].values)
         tau_draws_all = y_observed - mu_draws.values
 
         att_gt_rows: list[dict[str, Any]] = []
-        gt_groups = pretreatment_data.groupby(["G", self.time_variable_name]).groups
+        gt_groups = pretreatment_data.groupby(["G", self.config.time_variable_name]).groups
         for key, idx in gt_groups.items():
             g_val = key[0]  # type: ignore[index]
             t_val = key[1]  # type: ignore[index]
@@ -1341,10 +1458,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             return pd.DataFrame()
 
         pretreatment_data["tau_hat"] = (
-            pretreatment_data[self.outcome_variable_name] - pretreatment_data["y_hat0"]
+            pretreatment_data[self.design.outcome_variable_name] - pretreatment_data["y_hat0"]
         )
         att_gt = (
-            pretreatment_data.groupby(["G", self.time_variable_name])["tau_hat"]
+            pretreatment_data.groupby(["G", self.config.time_variable_name])["tau_hat"]
             .agg(["mean", "std", "count"])
             .reset_index()
         )
@@ -1513,17 +1630,17 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # return the pre-computed results
         stored_hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         if np.isclose(hdi_prob, stored_hdi_prob):
-            return self.att_event_time_.copy()
+            return self.results.att_event_time_.copy()
 
         # Recompute intervals with the requested hdi_prob
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.results.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
         # Get observed y for all observations
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = np.asarray(self.data[self.design.outcome_variable_name].values)
 
         # Compute tau draws for all observations
         tau_draws_all = y_observed - mu_draws.values
@@ -1531,7 +1648,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_et_rows: list[dict] = []
 
         # Pre-treatment placebo effects (eventually-treated units, event_time < 0)
-        is_eventually_treated = self.data["G"] != self.never_treated_value
+        is_eventually_treated = self.data["G"] != self.config.never_treated_value
         is_pre_treatment = self.data["event_time"] < 0
         pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
 
@@ -1546,10 +1663,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             event_times_pre = np.unique(
                 event_time_pretreat[~np.isnan(event_time_pretreat)]
             )
-            if self.event_window is not None:
+            if self.config.event_window is not None:
                 event_times_pre = event_times_pre[
-                    (event_times_pre >= self.event_window[0])
-                    & (event_times_pre <= self.event_window[1])
+                    (event_times_pre >= self.config.event_window[0])
+                    & (event_times_pre <= self.config.event_window[1])
                 ]
 
             for e in sorted(event_times_pre):
@@ -1578,10 +1695,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         event_time_treated = np.asarray(treated_data["event_time"].values)
 
         event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
-        if self.event_window is not None:
+        if self.config.event_window is not None:
             event_times_post = event_times_post[
-                (event_times_post >= self.event_window[0])
-                & (event_times_post <= self.event_window[1])
+                (event_times_post >= self.config.event_window[0])
+                & (event_times_post <= self.config.event_window[1])
             ]
 
         for e in sorted(event_times_post):
@@ -1610,7 +1727,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         pd.DataFrame
             DataFrame with event_time, att, att_std, n_obs columns.
         """
-        return self.att_event_time_.copy()
+        return self.results.att_event_time_.copy()
 
     def effect_summary(
         self,

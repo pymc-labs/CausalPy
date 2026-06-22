@@ -14,6 +14,7 @@
 """Piecewise Interrupted Time Series Analysis (Segmented Regression)."""
 
 import re
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import arviz as az
@@ -142,10 +143,76 @@ class PiecewiseITS(BaseExperiment):
     ... )  # doctest: +SKIP
     """
 
+    expt_type = "Piecewise Interrupted Time Series"
+
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
     _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
+
+    # -- Public API properties (forward to internal containers) --
+
+    @property
+    def formula(self) -> str:
+        return self._internal.formula
+
+    @property
+    def time_col(self) -> str:
+        return self._internal.time_col
+
+    @property
+    def interruption_times(self) -> list:
+        return self._internal.interruption_times
+
+    @property
+    def outcome_variable_name(self) -> str:
+        return self._internal.outcome_variable_name
+
+    @property
+    def labels(self) -> list[str]:
+        return self._internal.labels
+
+    @property
+    def design(self):
+        return self._internal.design
+
+    @property
+    def _interruption_cols(self):
+        return self._internal.interruption_cols
+
+    @property
+    def y_pred(self):
+        return self._results.y_pred
+
+    @property
+    def score(self):
+        return self._results.score
+
+    @property
+    def y_counterfactual(self):
+        return self._results.y_counterfactual
+
+    @property
+    def effect(self):
+        return self._results.effect
+
+    @property
+    def cumulative_effect(self):
+        return self._results.cumulative_effect
+
+    @property
+    def datapost(self):
+        return self._post_data.datapost
+
+    @property
+    def post_impact(self):
+        return self._post_data.post_impact
+
+    @property
+    def post_pred(self):
+        return self._post_data.post_pred
+
+    # ----------------------------------------------------------------
 
     def __init__(
         self,
@@ -156,30 +223,35 @@ class PiecewiseITS(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
 
-        # Store configuration
-        self.expt_type = "Piecewise Interrupted Time Series"
-        self.formula = formula
         self.data = data.copy()
 
         # Rename the index to "obs_ind" for consistency
         self.data.index.name = "obs_ind"
 
         # Input validation
-        self._validate_inputs()
+        self._validate_inputs(formula)
 
         # Parse and validate step/ramp terms before any downstream logic.
-        self._step_ramp_terms = self._parse_step_ramp_terms()
-        self.time_col = self._extract_time_column(self._step_ramp_terms)
-        self.interruption_times = self._extract_and_canonicalize_interruption_times(
-            self._step_ramp_terms, self.time_col
+        step_ramp_terms = self._parse_step_ramp_terms(formula)
+        self._internal = SimpleNamespace(
+            formula=formula,
+            time_col=self._extract_time_column(step_ramp_terms),
+            interruption_times=[],
+            outcome_variable_name="",
+            labels=[],
+            design=None,
+            interruption_cols=[],
+        )
+        self._internal.interruption_times = (
+            self._extract_and_canonicalize_interruption_times(
+                step_ramp_terms, self._internal.time_col
+            )
         )
 
         # Parse formula with patsy (step and ramp are available in namespace)
         y, X = dmatrices(formula, self.data)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = list(X.design_info.column_names)
+        self._internal.outcome_variable_name = y.design_info.column_names[0]
+        self._internal.labels = list(X.design_info.column_names)
 
         # Convert to numpy arrays
         y_array = np.asarray(y)
@@ -188,44 +260,62 @@ class PiecewiseITS(BaseExperiment):
         n_obs = X_array.shape[0]
 
         # Bundle into xr.Dataset
-        self.design = self._build_design_dataset(
+        self._internal.design = self._build_design_dataset(
             X_array,
             y_array,
             obs_ind=np.arange(n_obs),
-            coeffs=self.labels,
+            coeffs=self._internal.labels,
         )
 
         # Track which columns are interruption-related (for counterfactual)
-        self._interruption_cols = self._get_interruption_column_indices()
+        self._internal.interruption_cols = self._get_interruption_column_indices()
 
-        X = self.design["X"]
-        y = self.design["y"]
+        X_design = self._internal.design["X"]
+        y_design = self._internal.design["y"]
 
         self._model_backend.fit(
-            X=X,
-            y=y,
-            coords=build_coords(self.labels, X.shape[0]),
+            X=X_design,
+            y=y_design,
+            coords=build_coords(self._internal.labels, X_design.shape[0]),
         )
 
-        self.y_pred = self._model_backend.predict(X=X)
-        self.score = self._model_backend.score(X=X, y=y)
+        y_pred = self._model_backend.predict(X=X_design)
+        score = self._model_backend.score(X=X_design, y=y_design)
 
-        # Compute counterfactual and effects
+        self._results = SimpleNamespace(
+            y_pred=y_pred,
+            score=score,
+            y_counterfactual=None,
+            effect=None,
+            cumulative_effect=None,
+        )
+
+        self._post_data = SimpleNamespace(
+            datapost=None,
+            post_impact=None,
+            post_pred=None,
+        )
+
+        # Compute counterfactual, effects, and post-intervention data
         self._compute_counterfactual_and_effects()
 
-    def _validate_inputs(self) -> None:
+        # Lazily-populated attribute
+        self.plot_data = None
+
+    def _validate_inputs(self, formula: str) -> None:
         """Validate input data and formula."""
         # Check formula contains at least one step() or ramp() term
-        if "step(" not in self.formula and "ramp(" not in self.formula:
+        if "step(" not in formula and "ramp(" not in formula:
             raise FormulaException(
                 "Formula must contain at least one step() or ramp() term. "
                 "Example: 'y ~ 1 + t + step(t, 50) + ramp(t, 50)'"
             )
 
-    def _parse_step_ramp_terms(self) -> list[dict[str, str]]:
+    def _parse_step_ramp_terms(self, formula: str | None = None) -> list[dict[str, str]]:
         """Parse step/ramp terms into structured metadata."""
+        f = formula if formula is not None else self.formula
         pattern = r"(step|ramp)\s*\(\s*(\w+)\s*,\s*([^)]+?)\s*\)"
-        matches = re.findall(pattern, self.formula)
+        matches = re.findall(pattern, f)
         return [
             {"transform": transform, "variable": variable, "raw_threshold": threshold}
             for transform, variable, threshold in matches
@@ -316,11 +406,11 @@ class PiecewiseITS(BaseExperiment):
 
         # Compute counterfactual predictions
         if self._model_backend.is_bayesian:
-            self.y_counterfactual = self._model_backend.predict(X=X_cf)
+            self._results.y_counterfactual = self._model_backend.predict(X=X_cf)
 
             # Extract mu for fitted and counterfactual
             y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
+            y_cf_mu = self._results.y_counterfactual["posterior_predictive"]["mu"]
 
             # Handle treated_units dimension if present
             if "treated_units" in y_pred_mu.dims:
@@ -329,19 +419,19 @@ class PiecewiseITS(BaseExperiment):
                 y_cf_mu = y_cf_mu.isel(treated_units=0)
 
             # Compute effect as fitted - counterfactual
-            self.effect = y_pred_mu - y_cf_mu
+            self._results.effect = y_pred_mu - y_cf_mu
 
             # Cumulative effect
-            self.cumulative_effect = self.effect.cumsum(dim="obs_ind")
+            self._results.cumulative_effect = self._results.effect.cumsum(dim="obs_ind")
 
         elif self._model_backend.is_ols:
-            self.y_counterfactual = self._model_backend.predict(X=X_cf)
+            self._results.y_counterfactual = self._model_backend.predict(X=X_cf)
 
             # Compute effect
-            self.effect = np.squeeze(self.y_pred) - np.squeeze(self.y_counterfactual)
+            self._results.effect = np.squeeze(self.y_pred) - np.squeeze(self._results.y_counterfactual)
 
             # Cumulative effect
-            self.cumulative_effect = np.cumsum(self.effect)
+            self._results.cumulative_effect = np.cumsum(self._results.effect)
 
         # Create compatibility attributes for effect_summary() from BaseExperiment
         # These represent the post-intervention portion (after the first interruption)
@@ -360,7 +450,7 @@ class PiecewiseITS(BaseExperiment):
         if not self.interruption_times:
             # No interruptions - all data is "pre-intervention"
             # Create empty post-intervention attributes
-            self.datapost = self.data.iloc[0:0]  # Empty DataFrame
+            self._post_data.datapost = self.data.iloc[0:0]  # Empty DataFrame
             return
 
         # Get the first interruption time
@@ -371,8 +461,8 @@ class PiecewiseITS(BaseExperiment):
         post_mask = self.data[time_col] >= first_interruption
 
         # Create datapost - the post-intervention data
-        self.datapost = self.data[post_mask].copy()
-        self.datapost.index.name = "obs_ind"
+        self._post_data.datapost = self.data[post_mask].copy()
+        self._post_data.datapost.index.name = "obs_ind"
 
         # Get indices for post-intervention period
         post_indices = np.where(np.asarray(post_mask))[0]
@@ -381,32 +471,32 @@ class PiecewiseITS(BaseExperiment):
         if self._model_backend.is_bayesian:
             # For PyMC models, effect is an xarray.DataArray
             # Select using obs_ind coordinate
-            self.post_impact = self.effect.isel(obs_ind=post_indices)
+            self._post_data.post_impact = self._results.effect.isel(obs_ind=post_indices)
 
             # Create post_pred - counterfactual predictions for post-intervention
             # This needs to be an InferenceData-like object for extract_counterfactual
-            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
+            y_cf_mu = self._results.y_counterfactual["posterior_predictive"]["mu"]
             if "treated_units" in y_cf_mu.dims:
                 y_cf_mu = y_cf_mu.isel(treated_units=0)
             post_cf_mu = y_cf_mu.isel(obs_ind=post_indices)
 
             # Update the coordinates to match datapost.index
-            post_cf_mu = post_cf_mu.assign_coords(obs_ind=self.datapost.index)
+            post_cf_mu = post_cf_mu.assign_coords(obs_ind=self._post_data.datapost.index)
 
             # Create an InferenceData-like dict structure
-            self.post_pred = {
+            self._post_data.post_pred = {
                 "posterior_predictive": {"mu": post_cf_mu},
             }
 
             # Update post_impact coordinates to match datapost.index
-            self.post_impact = self.post_impact.assign_coords(
-                obs_ind=self.datapost.index
+            self._post_data.post_impact = self._post_data.post_impact.assign_coords(
+                obs_ind=self._post_data.datapost.index
             )
 
         elif self._model_backend.is_ols:
             # For OLS models, effect and counterfactual are numpy arrays
-            self.post_impact = self.effect[post_indices]
-            self.post_pred = np.squeeze(self.y_counterfactual)[post_indices]
+            self._post_data.post_impact = self._results.effect[post_indices]
+            self._post_data.post_pred = np.squeeze(self._results.y_counterfactual)[post_indices]
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.

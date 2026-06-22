@@ -14,6 +14,7 @@
 """Inverse propensity weighting."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -29,6 +30,31 @@ from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _Config:
+    """Container for inverse propensity weighting configuration parameters."""
+
+    data: pd.DataFrame
+    formula: str
+    outcome_variable: str
+    weighting_scheme: str
+    expt_type: str = "Inverse Propensity Score Weighting"
+
+
+@dataclass
+class _DesignMatrices:  # pylint: disable=too-many-instance-attributes
+    """Container for design matrix data and metadata."""
+
+    t: np.ndarray
+    X: np.ndarray
+    y: pd.Series
+    labels: list[str]
+    t_design_info: Any
+    x_design_info: Any
+    coords: dict
+    X_outcome: pd.DataFrame
 
 
 class InversePropensityWeighting(BaseExperiment):
@@ -87,14 +113,69 @@ class InversePropensityWeighting(BaseExperiment):
         **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
-        self.expt_type = "Inverse Propensity Score Weighting"
-        self.data = data
-        self.formula = formula
-        self.outcome_variable = outcome_variable
-        self.weighting_scheme = weighting_scheme
+        self._config = _Config(
+            data=data,
+            formula=formula,
+            outcome_variable=outcome_variable,
+            weighting_scheme=weighting_scheme,
+        )
         self.input_validation()
         self._build_design_matrices()
         self.algorithm()
+
+    # -- Config properties
+    @property
+    def expt_type(self) -> str:
+        return self._config.expt_type
+
+    @property
+    def data(self) -> pd.DataFrame:
+        return self._config.data
+
+    @property
+    def formula(self) -> str:
+        return self._config.formula
+
+    @property
+    def outcome_variable(self) -> str:
+        return self._config.outcome_variable
+
+    @property
+    def weighting_scheme(self) -> str:
+        return self._config.weighting_scheme
+
+    # -- Design-matrix properties
+    @property
+    def t(self) -> np.ndarray:
+        return self._design.t
+
+    @property
+    def X(self) -> np.ndarray:
+        return self._design.X
+
+    @property
+    def y(self) -> pd.Series:
+        return self._design.y
+
+    @property
+    def labels(self) -> list[str]:
+        return self._design.labels
+
+    @property
+    def coords(self) -> dict:
+        return self._design.coords
+
+    @property
+    def X_outcome(self) -> pd.DataFrame:
+        return self._design.X_outcome
+
+    @property
+    def _t_design_info(self):
+        return self._design.t_design_info
+
+    @property
+    def _x_design_info(self):
+        return self._design.x_design_info
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for the propensity score model.
@@ -105,17 +186,29 @@ class InversePropensityWeighting(BaseExperiment):
         for use with doubly-robust outcome modelling.
         """
         t, X = dmatrices(self.formula, self.data)
-        self._t_design_info = t.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.t, self.X = np.asarray(t), np.asarray(X)
-        self.y = self.data[self.outcome_variable]
+        labels = X.design_info.column_names
+        t_arr, X_arr = np.asarray(t), np.asarray(X)
+        y = self.data[self.outcome_variable]
 
-        COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
-        self.coords = COORDS
-        self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
-        self.X_outcome["trt"] = self.t
-        self.coords["outcome_coeffs"] = self.X_outcome.columns
+        X_outcome = pd.DataFrame(X_arr, columns=labels)
+        X_outcome["trt"] = t_arr
+
+        coords = {
+            "obs_ind": list(range(X_arr.shape[0])),
+            "coeffs": labels,
+            "outcome_coeffs": X_outcome.columns,
+        }
+
+        self._design = _DesignMatrices(
+            t=t_arr,
+            X=X_arr,
+            y=y,
+            labels=labels,
+            t_design_info=t.design_info,
+            x_design_info=X.design_info,
+            coords=coords,
+            X_outcome=X_outcome,
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm by fitting the propensity score model.
@@ -545,6 +638,57 @@ class InversePropensityWeighting(BaseExperiment):
             "plot_balance_ecdf() for the covariate-balance ECDF."
         )
 
+    @staticmethod
+    def _plot_weights(bins, top0, top1, ax, color="population"):
+        colors_dict = {
+            "population": ["orange", "skyblue", 0.6],
+            "pseudo_population": ["grey", "grey", 0.1],
+        }
+        ax.axhline(0, c="gray", linewidth=1)
+        bars0 = ax.bar(
+            bins[:-1] + 0.025,
+            top0,
+            width=0.04,
+            facecolor=colors_dict[color][0],
+            alpha=colors_dict[color][2],
+        )
+        bars1 = ax.bar(
+            bins[:-1] + 0.025,
+            -top1,
+            width=0.04,
+            facecolor=colors_dict[color][1],
+            alpha=colors_dict[color][2],
+        )
+        for bars in (bars0, bars1):
+            for bar in bars:
+                bar.set_edgecolor("black")
+
+    def _make_hists(self, idata, i, axs, method):
+        p_i = self._prepare_ps(az.extract(idata)["p"][:, i].values)
+        if method == "raw":
+            weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
+            weight1 = 1 / (p_i[self.t.flatten() == 1])
+        elif method == "overlap":
+            t = self.t.flatten()
+            weight1 = (1 - p_i[t == 1]) * t[t == 1]
+            weight0 = p_i[t == 0] * (1 - t[t == 0])
+        else:
+            t = self.t.flatten()
+            p_of_t = np.mean(t)
+            weight1 = p_of_t / p_i[t == 1]
+            weight0 = (1 - p_of_t) / (1 - p_i[t == 0])
+        bins = np.arange(0.025, 0.99, 0.005)
+        top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
+        top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
+        self._plot_weights(bins, top0, top1, axs[0])
+        top0, _ = np.histogram(
+            p_i[self.t.flatten() == 0], bins=bins, weights=weight0
+        )
+        top1, _ = np.histogram(
+            p_i[self.t.flatten() == 1], bins=bins, weights=weight1
+        )
+        self._plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
+
     def plot_ate(
         self,
         idata: az.InferenceData | None = None,
@@ -593,58 +737,6 @@ class InversePropensityWeighting(BaseExperiment):
         if method is None:
             method = self.weighting_scheme
 
-        def _plot_weights(bins, top0, top1, ax, color="population"):
-            colors_dict = {
-                "population": ["orange", "skyblue", 0.6],
-                "pseudo_population": ["grey", "grey", 0.1],
-            }
-
-            ax.axhline(0, c="gray", linewidth=1)
-            bars0 = ax.bar(
-                bins[:-1] + 0.025,
-                top0,
-                width=0.04,
-                facecolor=colors_dict[color][0],
-                alpha=colors_dict[color][2],
-            )
-            bars1 = ax.bar(
-                bins[:-1] + 0.025,
-                -top1,
-                width=0.04,
-                facecolor=colors_dict[color][1],
-                alpha=colors_dict[color][2],
-            )
-
-            for bars in (bars0, bars1):
-                for bar in bars:
-                    bar.set_edgecolor("black")
-
-        def _make_hists(idata, i, axs, method=method):
-            p_i = self._prepare_ps(az.extract(idata)["p"][:, i].values)
-            if method == "raw":
-                weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
-                weight1 = 1 / (p_i[self.t.flatten() == 1])
-            elif method == "overlap":
-                t = self.t.flatten()
-                weight1 = (1 - p_i[t == 1]) * t[t == 1]
-                weight0 = p_i[t == 0] * (1 - t[t == 0])
-            else:
-                t = self.t.flatten()
-                p_of_t = np.mean(t)
-                weight1 = p_of_t / p_i[t == 1]
-                weight0 = (1 - p_of_t) / (1 - p_i[t == 0])
-            bins = np.arange(0.025, 0.99, 0.005)
-            top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
-            top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
-            _plot_weights(bins, top0, top1, axs[0])
-            top0, _ = np.histogram(
-                p_i[self.t.flatten() == 0], bins=bins, weights=weight0
-            )
-            top1, _ = np.histogram(
-                p_i[self.t.flatten() == 1], bins=bins, weights=weight1
-            )
-            _plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
-
         mosaic = """AAAAAA
                     BBBBCC"""
 
@@ -674,7 +766,7 @@ class InversePropensityWeighting(BaseExperiment):
             ["Treatment PS", "Control PS", "Weighted Pseudo Population", "Extreme PS"],
         )
 
-        [_make_hists(idata, i, axs) for i in range(prop_draws)]
+        [self._make_hists(idata, i, axs, method) for i in range(prop_draws)]
         ate_df = pd.DataFrame(
             [self.get_ate(i, idata, method=method) for i in range(ate_draws)],
             columns=["ATE", "Y(1)", "Y(0)"],

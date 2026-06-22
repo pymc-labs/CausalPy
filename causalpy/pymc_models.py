@@ -15,6 +15,7 @@
 
 import inspect
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -1715,6 +1716,21 @@ class PropensityScore(PyMCModel):
         return idata_outcome, model_outcome
 
 
+@dataclass
+class _BasisExpansionConfig:
+    n_order: int = 3
+    n_changepoints_trend: int = 10
+    prior_sigma: float = 5
+    custom_trend_component: Any | None = None
+    custom_seasonality_component: Any | None = None
+
+
+@dataclass
+class _BasisExpansionFitState:
+    first_fit_timestamp: pd.Timestamp | None = None
+    exog_var_names: list[str] | None = None
+
+
 class BayesianBasisExpansionTimeSeries(PyMCModel):
     r"""
     Bayesian Structural Time Series Model.
@@ -1774,30 +1790,24 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             stacklevel=2,
         )
 
-        # Store original configuration parameters
-        self.n_order = n_order
-        self.n_changepoints_trend = n_changepoints_trend
-        self.prior_sigma = prior_sigma
-        self._first_fit_timestamp: pd.Timestamp | None = None
-        self._exog_var_names: list[str] | None = None
-
-        # Store custom components (fix the bug where they were swapped)
-        self._custom_trend_component = trend_component
-        self._custom_seasonality_component = seasonality_component
-
-        # Initialize and validate components
-        self._trend_component = None
-        self._seasonality_component = None
+        self.config = _BasisExpansionConfig(
+            n_order=n_order,
+            n_changepoints_trend=n_changepoints_trend,
+            prior_sigma=prior_sigma,
+            custom_trend_component=trend_component,
+            custom_seasonality_component=seasonality_component,
+        )
+        self.state = _BasisExpansionFitState()
         self._validate_and_initialize_components()
 
     def _clone(self) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration."""
         return type(self)(
-            n_order=self.n_order,
-            n_changepoints_trend=self.n_changepoints_trend,
-            prior_sigma=self.prior_sigma,
-            trend_component=self._custom_trend_component,
-            seasonality_component=self._custom_seasonality_component,
+            n_order=self.config.n_order,
+            n_changepoints_trend=self.config.n_changepoints_trend,
+            prior_sigma=self.config.prior_sigma,
+            trend_component=self.config.custom_trend_component,
+            seasonality_component=self.config.custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
             priors=self._user_priors,
         )
@@ -1808,16 +1818,16 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         when default components are actually needed.
         """
         # Validate custom components have required methods
-        if self._custom_trend_component is not None and not hasattr(
-            self._custom_trend_component, "apply"
+        if self.config.custom_trend_component is not None and not hasattr(
+            self.config.custom_trend_component, "apply"
         ):
             raise ValueError(
                 "Custom trend_component must have an 'apply' method that accepts time data "
                 "and returns a PyMC tensor."
             )
 
-        if self._custom_seasonality_component is not None and not hasattr(
-            self._custom_seasonality_component, "apply"
+        if self.config.custom_seasonality_component is not None and not hasattr(
+            self.config.custom_seasonality_component, "apply"
         ):
             raise ValueError(
                 "Custom seasonality_component must have an 'apply' method that accepts time data "
@@ -1826,39 +1836,72 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def _get_trend_component(self):
         """Get the trend component, creating default if needed."""
-        if self._custom_trend_component is not None:
-            return self._custom_trend_component
+        if self.config.custom_trend_component is not None:
+            return self.config.custom_trend_component
 
-        # Create default trend component (lazy import of pymc-marketing)
-        if self._trend_component is None:
-            try:
-                from pymc_marketing.mmm import LinearTrend
-            except ImportError as err:
-                raise ImportError(
-                    "BayesianBasisExpansionTimeSeries requires pymc-marketing when default trend "
-                    "component is used. Install it with `pip install pymc-marketing`."
-                ) from err
-            self._trend_component = LinearTrend(
-                n_changepoints=self.n_changepoints_trend
-            )
-        return self._trend_component
+        try:
+            from pymc_marketing.mmm import LinearTrend
+        except ImportError as err:
+            raise ImportError(
+                "BayesianBasisExpansionTimeSeries requires pymc-marketing when default trend "
+                "component is used. Install it with `pip install pymc-marketing`."
+            ) from err
+        return LinearTrend(n_changepoints=self.config.n_changepoints_trend)
 
     def _get_seasonality_component(self):
         """Get the seasonality component, creating default if needed."""
-        if self._custom_seasonality_component is not None:
-            return self._custom_seasonality_component
+        if self.config.custom_seasonality_component is not None:
+            return self.config.custom_seasonality_component
 
-        # Create default seasonality component (lazy import of pymc-marketing)
-        if self._seasonality_component is None:
-            try:
-                from pymc_marketing.mmm import YearlyFourier
-            except ImportError as err:
-                raise ImportError(
-                    "BayesianBasisExpansionTimeSeries requires pymc-marketing when default seasonality "
-                    "component is used. Install it with `pip install pymc-marketing`."
-                ) from err
-            self._seasonality_component = YearlyFourier(n_order=self.n_order)
-        return self._seasonality_component
+        try:
+            from pymc_marketing.mmm import YearlyFourier
+        except ImportError as err:
+            raise ImportError(
+                "BayesianBasisExpansionTimeSeries requires pymc-marketing when default seasonality "
+                "component is used. Install it with `pip install pymc-marketing`."
+            ) from err
+        return YearlyFourier(n_order=self.config.n_order)
+
+    def _validate_and_extract_X(
+        self, X: xr.DataArray | None
+    ) -> tuple[pd.DatetimeIndex, list[str], int]:
+        """Validate X and extract datetime index, exog names, and observation count."""
+        if X is None:
+            raise ValueError(
+                "X cannot be None. Pass an empty DataArray if no exog vars."
+            )
+        if not isinstance(X, xr.DataArray):
+            raise TypeError("X must be an xarray DataArray.")
+        if "obs_ind" not in X.coords:
+            raise ValueError("X must have 'obs_ind' coordinate.")
+
+        obs_ind_vals = X.coords["obs_ind"].values
+        if len(obs_ind_vals) == 0:
+            raise ValueError("X must have at least one observation.")
+        if not isinstance(obs_ind_vals[0], (np.datetime64, pd.Timestamp)):
+            raise ValueError(
+                "X.coords['obs_ind'] must contain datetime values (np.datetime64 or pd.Timestamp)."
+            )
+
+        datetime_index = pd.DatetimeIndex(obs_ind_vals)
+        num_obs = len(datetime_index)
+
+        exog_names: list[str] = []
+        if "coeffs" in X.coords:
+            coeffs_vals = X.coords["coeffs"].values
+            if len(coeffs_vals) > 0:
+                exog_names = list(coeffs_vals)
+
+        if X.shape[0] != num_obs:
+            raise ValueError(
+                f"Shape mismatch: X has {X.shape[0]} rows but datetime_index has {num_obs} entries."
+            )
+        if X.shape[1] != len(exog_names):
+            raise ValueError(
+                f"Mismatch: X has {X.shape[1]} columns, but {len(exog_names)} coefficient names provided."
+            )
+
+        return datetime_index, exog_names, num_obs
 
     def _prepare_time_and_exog_features(
         self,
@@ -1884,77 +1927,34 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             - X_for_pymc: xarray DataArray for exogenous vars, or None if no exog vars
             - num_obs: number of observations
         """
-        if X is None:
-            raise ValueError(
-                "X cannot be None. Pass an empty DataArray if no exog vars."
-            )
+        datetime_index, exog_names, num_obs = self._validate_and_extract_X(X)
 
-        if not isinstance(X, xr.DataArray):
-            raise TypeError("X must be an xarray DataArray.")
-
-        # Extract datetime index from X coordinates
-        if "obs_ind" not in X.coords:
-            raise ValueError("X must have 'obs_ind' coordinate.")
-
-        obs_ind_vals = X.coords["obs_ind"].values
-        if len(obs_ind_vals) == 0:
-            raise ValueError("X must have at least one observation.")
-
-        # Check if obs_ind contains datetime values
-        if not isinstance(obs_ind_vals[0], (np.datetime64, pd.Timestamp)):
-            raise ValueError(
-                "X.coords['obs_ind'] must contain datetime values (np.datetime64 or pd.Timestamp)."
-            )
-
-        datetime_index = pd.DatetimeIndex(obs_ind_vals)
-        num_obs = len(datetime_index)
-
-        # Extract coefficient names from X coordinates
-        exog_names: list[str] = []
-        if "coeffs" in X.coords:
-            coeffs_vals = X.coords["coeffs"].values
-            if len(coeffs_vals) > 0:
-                exog_names = list(coeffs_vals)
-
-        # Validate dimensions
-        if X.shape[0] != num_obs:
-            raise ValueError(
-                f"Shape mismatch: X has {X.shape[0]} rows but datetime_index has {num_obs} entries."
-            )
-
-        if X.shape[1] != len(exog_names):
-            raise ValueError(
-                f"Mismatch: X has {X.shape[1]} columns, but {len(exog_names)} coefficient names provided."
-            )
-
-        # Set or validate self._exog_var_names
+        # Set or validate self.state.exog_var_names
         if X.shape[1] > 0:
-            if self._exog_var_names is None:
-                self._exog_var_names = exog_names
-            elif self._exog_var_names != exog_names:
+            if self.state.exog_var_names is None:
+                self.state.exog_var_names = exog_names
+            elif self.state.exog_var_names != exog_names:
                 raise ValueError(
-                    f"Exogenous variable names mismatch. Model fit with {self._exog_var_names}, "
+                    f"Exogenous variable names mismatch. Model fit with {self.state.exog_var_names}, "
                     f"but current call provides {exog_names}."
                 )
-        elif self._exog_var_names is None:
-            # No exog vars in this call, and none set before
-            self._exog_var_names = []
+        elif self.state.exog_var_names is None:
+            self.state.exog_var_names = []
 
         # Set first fit timestamp if not set
-        if self._first_fit_timestamp is None:
-            self._first_fit_timestamp = datetime_index[0]
+        if self.state.first_fit_timestamp is None:
+            self.state.first_fit_timestamp = datetime_index[0]
 
         # Compute time features (these are numpy arrays)
         time_for_trend = (
-            (datetime_index - self._first_fit_timestamp).days / 365.25
+            (datetime_index - self.state.first_fit_timestamp).days / 365.25
         ).values
         time_for_seasonality = datetime_index.dayofyear.values
 
         # Determine X to use for PyMC (return as xarray or None)
         X_for_pymc: xr.DataArray | None = None
-        if self._exog_var_names and X.shape[1] > 0:
-            X_for_pymc = X  # Keep as xarray
-        # else: no exog vars, return None
+        if self.state.exog_var_names and X.shape[1] > 0:
+            X_for_pymc = X
 
         return time_for_trend, time_for_seasonality, X_for_pymc, num_obs
 
@@ -1991,8 +1991,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         }
 
         # Add coeffs coordinate if we have exogenous variables
-        if self._exog_var_names:
-            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
+        if self.state.exog_var_names:
+            model_coords["coeffs"] = self.state.exog_var_names  # type: ignore[assignment]
 
         with self:
             self.add_coords(model_coords)
@@ -2048,7 +2048,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
             # Likelihood - also with treated_units dimension
             # Use xarray directly with pm.Data
-            sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma, dims="treated_units")
+            sigma = pm.HalfNormal(
+                "sigma", sigma=self.config.prior_sigma, dims="treated_units"
+            )
             y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             pm.Normal(
                 "y_hat",
@@ -2126,7 +2128,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         # Handle exogenous variables
         if "X" in self.named_vars:
-            if X_for_pymc is None and self._exog_var_names:
+            if X_for_pymc is None and self.state.exog_var_names:
                 raise ValueError(
                     "Model was built with exogenous variables. "
                     "New X data must provide these."
@@ -2228,6 +2230,23 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         return super().score(X, y, coords=coords, **kwargs)
 
 
+@dataclass
+class _StateSpaceConfig:
+    level_order: int = 2
+    seasonal_length: int = 12
+    mode: str | None = None
+    custom_trend_component: Any | None = None
+    custom_seasonality_component: Any | None = None
+
+
+@dataclass
+class _StateSpaceFitState:
+    ss_mod: Any = None
+    second_model: pm.Model | None = None
+    train_index: pd.DatetimeIndex | None = None
+    conditional_idata: xr.Dataset | None = None
+
+
 class StateSpaceTimeSeries(PyMCModel):
     """
     State-space time series model using :class:`pymc-extras.statespace.structural`.
@@ -2271,24 +2290,25 @@ class StateSpaceTimeSeries(PyMCModel):
             stacklevel=2,
         )
 
-        self._custom_trend_component = trend_component
-        self._custom_seasonality_component = seasonality_component
-        self.level_order = level_order
-        self.seasonal_length = seasonal_length
-        self.mode = mode
-        self.ss_mod: Any = None
-        self.second_model: pm.Model | None = None  # Created in build_model()
+        self.config = _StateSpaceConfig(
+            level_order=level_order,
+            seasonal_length=seasonal_length,
+            mode=mode,
+            custom_trend_component=trend_component,
+            custom_seasonality_component=seasonality_component,
+        )
+        self.state = _StateSpaceFitState()
         self._validate_and_initialize_components()
 
     def _clone(self) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration."""
         return type(self)(
-            level_order=self.level_order,
-            seasonal_length=self.seasonal_length,
-            trend_component=self._custom_trend_component,
-            seasonality_component=self._custom_seasonality_component,
+            level_order=self.config.level_order,
+            seasonal_length=self.config.seasonal_length,
+            trend_component=self.config.custom_trend_component,
+            seasonality_component=self.config.custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
-            mode=self.mode,
+            mode=self.config.mode,
             priors=self._user_priors,
         )
 
@@ -2298,16 +2318,16 @@ class StateSpaceTimeSeries(PyMCModel):
         when default components are actually needed.
         """
         # Validate custom components have required methods
-        if self._custom_trend_component is not None and not hasattr(
-            self._custom_trend_component, "apply"
+        if self.config.custom_trend_component is not None and not hasattr(
+            self.config.custom_trend_component, "apply"
         ):
             raise ValueError(
                 "Custom trend_component must have an 'apply' method that accepts time data "
                 "and returns a PyMC tensor."
             )
 
-        if self._custom_seasonality_component is not None and not hasattr(
-            self._custom_seasonality_component, "apply"
+        if self.config.custom_seasonality_component is not None and not hasattr(
+            self.config.custom_seasonality_component, "apply"
         ):
             raise ValueError(
                 "Custom seasonality_component must have an 'apply' method that accepts time data "
@@ -2320,8 +2340,8 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def _get_trend_component(self):
         """Get the trend component, creating default if needed."""
-        if self._custom_trend_component is not None:
-            return self._custom_trend_component
+        if self.config.custom_trend_component is not None:
+            return self.config.custom_trend_component
 
         # Create default trend component (lazy import of pymc-extras)
         if self._trend_component is None:
@@ -2332,13 +2352,15 @@ class StateSpaceTimeSeries(PyMCModel):
                     "StateSpaceTimeSeries requires pymc-extras when default trend component is used. "
                     "Install it with `conda/mamba/micromamba install -c conda-forge pymc-extras`."
                 ) from err
-            self._trend_component = st.LevelTrendComponent(order=self.level_order)
+            self._trend_component = st.LevelTrendComponent(
+                order=self.config.level_order
+            )
         return self._trend_component
 
     def _get_seasonality_component(self):
         """Get the seasonality component, creating default if needed."""
-        if self._custom_seasonality_component is not None:
-            return self._custom_seasonality_component
+        if self.config.custom_seasonality_component is not None:
+            return self.config.custom_seasonality_component
 
         # Create default seasonality component (lazy import of pymc-extras)
         if self._seasonality_component is None:
@@ -2350,7 +2372,7 @@ class StateSpaceTimeSeries(PyMCModel):
                     "Install it with `conda/mamba/micromamba install -c conda-forge pymc-extras`."
                 ) from err
             self._seasonality_component = st.FrequencySeasonality(
-                season_length=self.seasonal_length, name="freq"
+                season_length=self.config.seasonal_length, name="freq"
             )
         return self._seasonality_component
 
@@ -2404,23 +2426,23 @@ class StateSpaceTimeSeries(PyMCModel):
                 "coords must contain 'datetime_index' (pd.DatetimeIndex)."
             )
 
-        self._train_index = datetime_index
+        self.state.train_index = datetime_index
 
         # Instantiate components and build state-space object
         trend = self._get_trend_component()
         season = self._get_seasonality_component()
         combined = trend + season
-        self.ss_mod = combined.build()
+        self.state.ss_mod = combined.build()
 
         # Extract parameter dims (order: initial_trend, sigma_trend, seasonal, P0)
-        if self.ss_mod is None:
+        if self.state.ss_mod is None:
             raise RuntimeError("State space model not initialized")
         initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
-            self.ss_mod.param_dims.values()
+            self.state.ss_mod.param_dims.values()
         )
 
         # Build coordinates for the model
-        coordinates = self.ss_mod.coords.copy()
+        coordinates = self.state.ss_mod.coords.copy()
         if coords:
             # Merge with user-provided coords (excluding datetime_index and obs_ind which are handled separately)
             coords_copy = coords.copy()
@@ -2431,7 +2453,7 @@ class StateSpaceTimeSeries(PyMCModel):
             coordinates.update(coords_copy)
 
         # Build model
-        with pm.Model(coords=coordinates) as self.second_model:
+        with pm.Model(coords=coordinates) as self.state.second_model:
             # Add coords for statespace (includes 'time' and 'state' dims)
             P0_diag = pm.Gamma("P0_diag", alpha=2, beta=1, dims=P0_dims[0])
             _P0 = pm.Deterministic("P0", pt.diag(P0_diag), dims=P0_dims)
@@ -2455,8 +2477,10 @@ class StateSpaceTimeSeries(PyMCModel):
                 else y.values
             )
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
-            if self.ss_mod is not None:
-                self.ss_mod.build_statespace_graph(df[["y"]], mode=self.mode)
+            if self.state.ss_mod is not None:
+                self.state.ss_mod.build_statespace_graph(
+                    df[["y"]], mode=self.config.mode
+                )
 
     def fit(
         self,
@@ -2486,9 +2510,9 @@ class StateSpaceTimeSeries(PyMCModel):
         if y is None:
             raise ValueError("y must be provided for StateSpaceTimeSeries.fit()")
         self.build_model(X, y, coords)
-        if self.second_model is None:
+        if self.state.second_model is None:
             raise RuntimeError("Model not built. Call build_model() first.")
-        with self.second_model:
+        with self.state.second_model:
             self.idata = pm.sample(**self.sample_kwargs)
             if self.idata is not None:
                 self.idata.extend(
@@ -2496,7 +2520,7 @@ class StateSpaceTimeSeries(PyMCModel):
                         self.idata,
                     )
                 )
-        self.conditional_idata = self._smooth()
+        self.state.conditional_idata = self._smooth()
         return self._prepare_idata()
 
     def _prepare_idata(self) -> az.InferenceData:
@@ -2506,7 +2530,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         new_idata = self.idata.copy()
         # Get smoothed posterior and sum over state dimension
-        smoothed = self.conditional_idata.isel(observed_state=0).rename(
+        smoothed = self.state.conditional_idata.isel(observed_state=0).rename(
             {"smoothed_posterior_observed": "y_hat"}
         )
         y_hat_summed = smoothed.y_hat.copy()
@@ -2532,7 +2556,7 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         if self.idata is None:
             raise RuntimeError("Model must be fit before smoothing.")
-        return self.ss_mod.sample_conditional_posterior(self.idata)
+        return self.state.ss_mod.sample_conditional_posterior(self.idata)
 
     def _forecast(self, start: pd.Timestamp, periods: int) -> xr.Dataset:
         """
@@ -2542,9 +2566,9 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         if self.idata is None:
             raise RuntimeError("Model must be fit before forecasting.")
-        if self.ss_mod is None:
+        if self.state.ss_mod is None:
             raise RuntimeError("State space model not initialized")
-        return self.ss_mod.forecast(self.idata, start=start, periods=periods)
+        return self.state.ss_mod.forecast(self.idata, start=start, periods=periods)
 
     def predict(
         self,
@@ -2595,7 +2619,9 @@ class StateSpaceTimeSeries(PyMCModel):
                 raise ValueError("X 'obs_ind' coordinate must contain datetime values")
 
             idx = pd.DatetimeIndex(obs_ind_vals)
-            last = self._train_index[-1]  # start forecasting after the last observed
+            last = self.state.train_index[
+                -1
+            ]  # start forecasting after the last observed
             forecast_data = self._forecast(start=last, periods=len(idx))
             forecast_copy = forecast_data.copy()
 

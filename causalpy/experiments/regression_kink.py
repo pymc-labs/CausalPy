@@ -15,6 +15,7 @@
 """Regression kink design."""
 
 import warnings  # noqa: I001
+from dataclasses import dataclass
 
 
 from matplotlib import pyplot as plt
@@ -38,6 +39,37 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+
+
+@dataclass
+class _Config:
+    """Container for regression kink configuration parameters."""
+
+    formula: str
+    running_variable_name: str
+    kink_point: float
+    epsilon: float
+    bandwidth: float
+
+
+@dataclass
+class _DesignMatrices:
+    """Container for design matrix data and metadata."""
+
+    y_design_info: Any
+    x_design_info: Any
+    labels: list[str]
+    outcome_variable_name: str
+
+
+@dataclass
+class _Results:
+    """Container for algorithm results."""
+
+    score: Any
+    x_pred: pd.DataFrame
+    pred: Any
+    gradient_change: xr.DataArray
 
 
 class RegressionKink(BaseExperiment):
@@ -66,6 +98,7 @@ class RegressionKink(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    expt_type = "Regression Kink"
     _default_model_class = LinearRegression
     _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
@@ -81,23 +114,72 @@ class RegressionKink(BaseExperiment):
         **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
-        self.expt_type = "Regression Kink"
         self.data = data
-        self.formula = formula
-        self.running_variable_name = running_variable_name
-        self.kink_point = kink_point
-        self.epsilon = epsilon
-        self.bandwidth = bandwidth
+        self.config = _Config(
+            formula=formula,
+            running_variable_name=running_variable_name,
+            kink_point=kink_point,
+            epsilon=epsilon,
+            bandwidth=bandwidth,
+        )
         self.input_validation()
-        self._build_design_matrices()
-        self._prepare_data()
+        y_raw, X_raw = self._build_design_matrices()
+        self._prepare_data(X_raw, y_raw)
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
+    @property
+    def formula(self) -> str:
+        return self.config.formula
+
+    @property
+    def kink_point(self) -> float:
+        return self.config.kink_point
+
+    @property
+    def running_variable_name(self) -> str:
+        return self.config.running_variable_name
+
+    @property
+    def epsilon(self) -> float:
+        return self.config.epsilon
+
+    @property
+    def bandwidth(self) -> float:
+        return self.config.bandwidth
+
+    @property
+    def labels(self) -> list[str]:
+        return self.design_matrices.labels
+
+    @labels.setter
+    def labels(self, value: list[str]) -> None:
+        self.design_matrices.labels = value
+
+    @property
+    def outcome_variable_name(self) -> str:
+        return self.design_matrices.outcome_variable_name
+
+    @property
+    def score(self) -> Any:
+        return self.results.score
+
+    @property
+    def x_pred(self) -> pd.DataFrame:
+        return self.results.x_pred
+
+    @property
+    def pred(self) -> Any:
+        return self.results.pred
+
+    @property
+    def gradient_change(self) -> xr.DataArray:
+        return self.results.gradient_change
+
+    def _build_design_matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Build design matrices from formula and data, applying bandwidth filtering."""
-        if self.bandwidth is not np.inf:
-            fmin = self.kink_point - self.bandwidth
-            fmax = self.kink_point + self.bandwidth
+        if self.config.bandwidth is not np.inf:
+            fmin = self.config.kink_point - self.config.bandwidth
+            fmax = self.config.kink_point + self.config.bandwidth
             filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
             if len(filtered_data) <= 10:
                 warnings.warn(
@@ -105,58 +187,66 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
+            y, X = dmatrices(self.config.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = dmatrices(self.config.formula, self.data)
 
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        n = self._X_raw.shape[0]
-        self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
-            obs_ind=np.arange(n),
-            coeffs=self.labels,
+        self.design_matrices = _DesignMatrices(
+            y_design_info=y.design_info,
+            x_design_info=X.design_info,
+            labels=X.design_info.column_names,
+            outcome_variable_name=y.design_info.column_names[0],
         )
-        del self._X_raw, self._y_raw
+        return np.asarray(y), np.asarray(X)
+
+    def _prepare_data(self, X_raw: np.ndarray, y_raw: np.ndarray) -> None:
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            X_raw,
+            y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.design_matrices.labels,
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
         X = self.design["X"]
         y = self.design["y"]
 
-        COORDS = build_coords(self.labels, X.shape[0])
+        COORDS = build_coords(self.design_matrices.labels, X.shape[0])
         self._model_backend.fit(X=X, y=y, coords=COORDS)
 
-        self.score = self._model_backend.score(X=X, y=y)
+        score = self._model_backend.score(X=X, y=y)
 
         # get the model predictions of the observed data
-        if self.bandwidth is not np.inf:
-            fmin = self.kink_point - self.bandwidth
-            fmax = self.kink_point + self.bandwidth
+        if self.config.bandwidth is not np.inf:
+            fmin = self.config.kink_point - self.config.bandwidth
+            fmax = self.config.kink_point + self.config.bandwidth
             xi = np.linspace(fmin, fmax, 200)
         else:
             xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
+                np.min(self.data[self.config.running_variable_name]),
+                np.max(self.data[self.config.running_variable_name]),
                 200,
             )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        x_pred = pd.DataFrame(
+            {self.config.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self._model_backend.predict(X=np.asarray(new_x))
+        (new_x,) = build_design_matrices([self.design_matrices.x_design_info], x_pred)
+        pred = self._model_backend.predict(X=np.asarray(new_x))
 
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
-        self.gradient_change = self._eval_gradient_change(
-            mu_kink_left, mu_kink, mu_kink_right, self.epsilon
+        gradient_change = self._eval_gradient_change(
+            mu_kink_left, mu_kink, mu_kink_right, self.config.epsilon
+        )
+
+        self.results = _Results(
+            score=score,
+            x_pred=x_pred,
+            pred=pred,
+            gradient_change=gradient_change,
         )
 
     def input_validation(self) -> None:
@@ -211,7 +301,7 @@ class RegressionKink(BaseExperiment):
                 "treated": np.array([0, 1, 1]),
             }
         )
-        (new_x,) = build_design_matrices([self._x_design_info], x_predict)
+        (new_x,) = build_design_matrices([self.design_matrices.x_design_info], x_predict)
         predicted = self.model.predict(X=np.asarray(new_x))
         # extract predicted mu values
         mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]

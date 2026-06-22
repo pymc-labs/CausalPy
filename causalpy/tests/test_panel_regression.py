@@ -135,8 +135,8 @@ def test_panel_regression_pymc_demeaned(mock_pymc_sample, large_panel_data):
     assert result.fe_method == "demeaned"
 
     # Check that group means were stored
-    assert "unit" in result._group_means
-    assert "time" in result._group_means
+    assert "unit" in result._demean_info.group_means
+    assert "time" in result._demean_info.group_means
 
     # Check plotting works
     fig, ax = result.plot()
@@ -452,8 +452,8 @@ def test_panel_regression_one_way_fe(large_panel_data):
     assert result.time_fe_variable is None
 
     # Check that only unit demeaning was applied
-    assert "unit" in result._group_means
-    assert "time" not in result._group_means
+    assert "unit" in result._demean_info.group_means
+    assert "time" not in result._demean_info.group_means
 
 
 def test_panel_regression_two_way_fe(large_panel_data):
@@ -471,8 +471,8 @@ def test_panel_regression_two_way_fe(large_panel_data):
     assert result.n_periods == 10
 
     # Check that both unit and time demeaning were applied
-    assert "unit" in result._group_means
-    assert "time" in result._group_means
+    assert "unit" in result._demean_info.group_means
+    assert "time" in result._demean_info.group_means
 
 
 def test_demean_transform_boolean_treatment():
@@ -641,7 +641,7 @@ def test_group_means_from_original_data(large_panel_data):
         ["y", "treatment", "x1"]
     ].mean()
     pd.testing.assert_frame_equal(
-        result._group_means["unit"].sort_index(),
+        result._demean_info.group_means["unit"].sort_index(),
         original_unit_means.sort_index(),
         check_names=False,
         check_like=True,
@@ -653,7 +653,7 @@ def test_group_means_from_original_data(large_panel_data):
         ["y", "treatment", "x1"]
     ].mean()
     pd.testing.assert_frame_equal(
-        result._group_means["time"].sort_index(),
+        result._demean_info.group_means["time"].sort_index(),
         original_time_means.sort_index(),
         check_names=False,
         check_like=True,

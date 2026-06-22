@@ -14,6 +14,7 @@
 """Synthetic Control Experiment."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -33,6 +34,37 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _SCConfig:
+    """Configuration parameters for SyntheticControl."""
+
+    treatment_time: int | float | pd.Timestamp
+    control_units: list[str]
+    treated_units: list[str]
+    min_donor_correlation: float
+
+
+@dataclass
+class _SCDesign:
+    """Pre and post intervention design datasets."""
+
+    pre_design: xr.Dataset
+    post_design: xr.Dataset
+
+
+@dataclass
+class _SCResults:
+    """Container for SyntheticControl experiment results."""
+
+    score: Any
+    pre_pred: Any
+    post_pred: Any
+    pre_impact: Any
+    post_impact: Any
+    post_impact_cumulative: Any
+    plot_data: Any = None
 
 
 class SyntheticControl(BaseExperiment):
@@ -112,10 +144,12 @@ class SyntheticControl(BaseExperiment):
         data.index.name = "obs_ind"
         self.data = data
         self.input_validation(data, treatment_time)
-        self.treatment_time = treatment_time
-        self.control_units = control_units
-        self.labels = control_units
-        self.treated_units = treated_units
+        self._config = _SCConfig(
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            min_donor_correlation=min_donor_correlation,
+        )
         if self._model_backend.is_ols and len(treated_units) > 1:
             raise ValueError(
                 "OLS/sklearn synthetic control supports only a single treated "
@@ -128,12 +162,85 @@ class SyntheticControl(BaseExperiment):
                 f"min_donor_correlation must be between -1 and 1, "
                 f"got {min_donor_correlation}."
             )
-        self.min_donor_correlation = min_donor_correlation
         self.expt_type = "SyntheticControl"
         self._prepare_data()
         self._check_donor_correlations()
         self._check_convex_hull()
         self.algorithm()
+
+    @property
+    def treatment_time(self) -> int | float | pd.Timestamp:
+        """Treatment time reference point."""
+        return self._config.treatment_time
+
+    @property
+    def control_units(self) -> list[str]:
+        """Names of control/donor units."""
+        return self._config.control_units
+
+    @property
+    def treated_units(self) -> list[str]:
+        """Names of treated units."""
+        return self._config.treated_units
+
+    @property
+    def min_donor_correlation(self) -> float:
+        """Minimum acceptable donor correlation threshold."""
+        return self._config.min_donor_correlation
+
+    @property
+    def labels(self) -> list[str]:
+        """Alias for control_units, used for coefficient display."""
+        return self._config.control_units
+
+    @property
+    def pre_design(self) -> xr.Dataset:
+        """Pre-intervention design dataset."""
+        return self._design.pre_design
+
+    @property
+    def post_design(self) -> xr.Dataset:
+        """Post-intervention design dataset."""
+        return self._design.post_design
+
+    @property
+    def score(self) -> Any:
+        """Model score (e.g. Bayesian R²)."""
+        return self._results.score
+
+    @property
+    def pre_pred(self) -> Any:
+        """Predictions for the pre-intervention period."""
+        return self._results.pre_pred
+
+    @property
+    def post_pred(self) -> Any:
+        """Predictions for the post-intervention period."""
+        return self._results.post_pred
+
+    @property
+    def pre_impact(self) -> Any:
+        """Causal impact for the pre-intervention period."""
+        return self._results.pre_impact
+
+    @property
+    def post_impact(self) -> Any:
+        """Causal impact for the post-intervention period."""
+        return self._results.post_impact
+
+    @property
+    def post_impact_cumulative(self) -> Any:
+        """Cumulative causal impact for the post-intervention period."""
+        return self._results.post_impact_cumulative
+
+    @property
+    def plot_data(self) -> Any:
+        """Cached plot data frame."""
+        return self._results.plot_data
+
+    @plot_data.setter
+    def plot_data(self, value: Any) -> None:
+        self._results.plot_data = value
 
     def _check_convex_hull(self) -> None:
         """Check convex hull assumption and warn if violated."""
@@ -239,45 +346,47 @@ class SyntheticControl(BaseExperiment):
 
     def _prepare_data(self) -> None:
         """Bundle control and treated data into ``xr.Dataset`` objects per period."""
-        self.pre_design = xr.Dataset(
-            {
-                "control": xr.DataArray(
-                    self.datapre[self.control_units],
-                    dims=["obs_ind", "coeffs"],
-                    coords={
-                        "obs_ind": self.datapre[self.control_units].index,
-                        "coeffs": self.control_units,
-                    },
-                ),
-                "treated": xr.DataArray(
-                    self.datapre[self.treated_units],
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapre[self.treated_units].index,
-                        "treated_units": self.treated_units,
-                    },
-                ),
-            }
-        )
-        self.post_design = xr.Dataset(
-            {
-                "control": xr.DataArray(
-                    self.datapost[self.control_units],
-                    dims=["obs_ind", "coeffs"],
-                    coords={
-                        "obs_ind": self.datapost[self.control_units].index,
-                        "coeffs": self.control_units,
-                    },
-                ),
-                "treated": xr.DataArray(
-                    self.datapost[self.treated_units],
-                    dims=["obs_ind", "treated_units"],
-                    coords={
-                        "obs_ind": self.datapost[self.treated_units].index,
-                        "treated_units": self.treated_units,
-                    },
-                ),
-            }
+        self._design = _SCDesign(
+            pre_design=xr.Dataset(
+                {
+                    "control": xr.DataArray(
+                        self.datapre[self.control_units],
+                        dims=["obs_ind", "coeffs"],
+                        coords={
+                            "obs_ind": self.datapre[self.control_units].index,
+                            "coeffs": self.control_units,
+                        },
+                    ),
+                    "treated": xr.DataArray(
+                        self.datapre[self.treated_units],
+                        dims=["obs_ind", "treated_units"],
+                        coords={
+                            "obs_ind": self.datapre[self.treated_units].index,
+                            "treated_units": self.treated_units,
+                        },
+                    ),
+                }
+            ),
+            post_design=xr.Dataset(
+                {
+                    "control": xr.DataArray(
+                        self.datapost[self.control_units],
+                        dims=["obs_ind", "coeffs"],
+                        coords={
+                            "obs_ind": self.datapost[self.control_units].index,
+                            "coeffs": self.control_units,
+                        },
+                    ),
+                    "treated": xr.DataArray(
+                        self.datapost[self.treated_units],
+                        dims=["obs_ind", "treated_units"],
+                        coords={
+                            "obs_ind": self.datapost[self.treated_units].index,
+                            "treated_units": self.treated_units,
+                        },
+                    ),
+                }
+            ),
         )
 
     def algorithm(self) -> None:
@@ -294,26 +403,35 @@ class SyntheticControl(BaseExperiment):
         )
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self._model_backend.score(
+        score = self._model_backend.score(
             X=self.pre_design["control"],
             y=self.pre_design["treated"],
         )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self._model_backend.predict(X=self.pre_design["control"])
+        pre_pred = self._model_backend.predict(X=self.pre_design["control"])
 
         # calculate the counterfactual
-        self.post_pred = self._model_backend.predict(X=self.post_design["control"])
-        self.pre_impact = self.model.calculate_impact(
-            self.pre_design["treated"], self.pre_pred
+        post_pred = self._model_backend.predict(X=self.post_design["control"])
+        pre_impact = self.model.calculate_impact(
+            self.pre_design["treated"], pre_pred
         )
 
-        self.post_impact = self.model.calculate_impact(
-            self.post_design["treated"], self.post_pred
+        post_impact = self.model.calculate_impact(
+            self.post_design["treated"], post_pred
         )
 
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
+        post_impact_cumulative = self.model.calculate_cumulative_impact(
+            post_impact
+        )
+
+        self._results = _SCResults(
+            score=score,
+            pre_pred=pre_pred,
+            post_pred=post_pred,
+            pre_impact=pre_impact,
+            post_impact=post_impact,
+            post_impact_cumulative=post_impact_cumulative,
         )
 
     def input_validation(

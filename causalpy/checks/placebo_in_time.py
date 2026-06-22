@@ -93,13 +93,13 @@ class PlaceboFoldResult:
 
 
 @dataclass
-class AssuranceResult:
-    """Bayesian operating characteristics from design-level simulation.
+class ConfusionRates:
+    """Rate metrics from the assurance confusion matrix.
 
     Attributes
     ----------
     true_positive_rate : float
-        P(decide "positive" | alternative true).  This *is* the assurance.
+        P(decide "positive" | alternative true).
     false_positive_rate : float
         P(decide "positive" | null true).
     true_negative_rate : float
@@ -110,10 +110,6 @@ class AssuranceResult:
         P(decide "indeterminate" | null true).
     alt_indeterminate_rate : float
         P(decide "indeterminate" | alternative true).
-    null_decisions : np.ndarray
-        Raw decision strings under the null scenario.
-    alt_decisions : np.ndarray
-        Raw decision strings under the alternative scenario.
     """
 
     true_positive_rate: float
@@ -122,8 +118,81 @@ class AssuranceResult:
     false_negative_rate: float
     null_indeterminate_rate: float
     alt_indeterminate_rate: float
+
+
+@dataclass
+class AssuranceResult:
+    """Bayesian operating characteristics from design-level simulation.
+
+    Usage
+    -----
+    For backward compatibility, rate attributes are forwarded via
+    ``__getattr__`` so that ``result.true_positive_rate`` still works
+    (equivalent to ``result.rates.true_positive_rate``).
+
+    Attributes
+    ----------
+    rates : ConfusionRates
+        Rate metrics grouped in a nested dataclass.
+    null_decisions : np.ndarray
+        Raw decision strings under the null scenario.
+    alt_decisions : np.ndarray
+        Raw decision strings under the alternative scenario.
+    """
+
+    rates: ConfusionRates
     null_decisions: np.ndarray = field(repr=False)
     alt_decisions: np.ndarray = field(repr=False)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.rates, name)
+
+
+@dataclass
+class FoldSelectionConfig:
+    """Configuration for placebo fold selection.
+
+    Attributes
+    ----------
+    n_folds : int
+        Number of placebo folds.
+    selection_method : str
+        How to choose placebo windows ("sequential" or "random").
+    min_training_pct : float
+        Minimum fraction of training data before each fold (random mode).
+    min_gap : int
+        Minimum gap between folds in observations (random mode).
+    allow_overlap : bool
+        Whether folds can overlap (random mode).
+    exclude_periods : set[str] | None
+        Period labels to exclude (random mode).
+    """
+
+    n_folds: int = 3
+    selection_method: Literal["sequential", "random"] = "sequential"
+    min_training_pct: float = 0.30
+    min_gap: int = 1
+    allow_overlap: bool = False
+    exclude_periods: set[str] | None = None
+
+
+@dataclass
+class AssuranceConfig:
+    """Configuration for Bayesian assurance analysis.
+
+    Attributes
+    ----------
+    expected_effect_prior : Any, optional
+        Prior belief about the true total effect.
+    rope_half_width : float, optional
+        Half-width of the ROPE interval.
+    n_design_replications : int, optional
+        Number of simulation replications.
+    """
+
+    expected_effect_prior: Any | None = None
+    rope_half_width: float | None = None
+    n_design_replications: int | None = None
 
 
 class PlaceboInTime:
@@ -274,19 +343,23 @@ class PlaceboInTime:
                 "provided.  Specify the ROPE half-width that defines "
                 "practical significance."
             )
-        self.n_folds = n_folds
-        self.selection_method = selection_method
-        self.min_training_pct = min_training_pct
-        self.min_gap = min_gap
-        self.allow_overlap = allow_overlap
-        self.exclude_periods = exclude_periods
+        self.fold_selection = FoldSelectionConfig(
+            n_folds=n_folds,
+            selection_method=selection_method,
+            min_training_pct=min_training_pct,
+            min_gap=min_gap,
+            allow_overlap=allow_overlap,
+            exclude_periods=exclude_periods,
+        )
+        self.assurance = AssuranceConfig(
+            expected_effect_prior=expected_effect_prior,
+            rope_half_width=rope_half_width,
+            n_design_replications=n_design_replications,
+        )
         self.experiment_factory = experiment_factory
         self.sample_kwargs = {**_DEFAULT_SAMPLE_KWARGS, **(sample_kwargs or {})}
         self.threshold = threshold
         self.prior_scale = prior_scale
-        self.expected_effect_prior = expected_effect_prior
-        self.rope_half_width = rope_half_width
-        self.n_design_replications = n_design_replications
         self.random_seed = random_seed
 
     def validate(self, experiment: BaseExperiment) -> None:
@@ -361,8 +434,8 @@ class PlaceboInTime:
     ) -> list[Any]:
         """Compute pseudo-treatment times for each fold (sequential mode)."""
         return [
-            treatment_time - (self.n_folds - fold) * intervention_length
-            for fold in range(self.n_folds)
+            treatment_time - (self.fold_selection.n_folds - fold) * intervention_length
+            for fold in range(self.fold_selection.n_folds)
         ]
 
     def _compute_random_fold_treatment_times(
@@ -432,8 +505,8 @@ class PlaceboInTime:
 
         all_indices = pre_data.index.sort_values()
         n_total = len(all_indices)
-        min_training = int(np.ceil(self.min_training_pct * n_total))
-        exclude = self.exclude_periods or set()
+        min_training = int(np.ceil(self.fold_selection.min_training_pct * n_total))
+        exclude = self.fold_selection.exclude_periods or set()
 
         # Each candidate carries its position in ``all_indices`` so
         # ``min_gap`` can be enforced as an observation-count distance
@@ -456,10 +529,10 @@ class PlaceboInTime:
 
             candidates.append((pos, idx_val))
 
-        if len(candidates) < self.n_folds:
+        if len(candidates) < self.fold_selection.n_folds:
             raise ValueError(
                 f"Only {len(candidates)} eligible candidate periods found, "
-                f"but {self.n_folds} folds requested.  Reduce n_folds, "
+                f"but {self.fold_selection.n_folds} folds requested.  Reduce n_folds, "
                 f"lower min_training_pct, or relax exclude_periods."
             )
 
@@ -484,8 +557,8 @@ class PlaceboInTime:
                 continue
 
         raise ValueError(
-            f"Cannot select {self.n_folds} folds with min_gap="
-            f"{self.min_gap} and allow_overlap={self.allow_overlap} "
+            f"Cannot select {self.fold_selection.n_folds} folds with min_gap="
+            f"{self.fold_selection.min_gap} and allow_overlap={self.fold_selection.allow_overlap} "
             f"after {MAX_RANDOM_SELECTION_RETRIES} greedy attempts with "
             f"deterministic sub-seeds.  Relax constraints "
             f"(smaller min_gap, set allow_overlap=True, or reduce "
@@ -512,17 +585,17 @@ class PlaceboInTime:
         pool = list(range(len(candidates)))
         selected: list[int] = []
 
-        for _ in range(self.n_folds):
+        for _ in range(self.fold_selection.n_folds):
             valid: list[int] = []
             for i in pool:
                 pos_i, idx_val_i = candidates[i]
                 ok = True
                 for s in selected:
                     pos_s, idx_val_s = candidates[s]
-                    if abs(pos_i - pos_s) < self.min_gap:
+                    if abs(pos_i - pos_s) < self.fold_selection.min_gap:
                         ok = False
                         break
-                    if not self.allow_overlap and self._windows_overlap(
+                    if not self.fold_selection.allow_overlap and self._windows_overlap(
                         idx_val_i, idx_val_s, intervention_length
                     ):
                         ok = False
@@ -717,7 +790,7 @@ class PlaceboInTime:
         np.ndarray
             Samples from the expected-effect prior.
         """
-        prior = self.expected_effect_prior
+        prior = self.assurance.expected_effect_prior
         if prior is None:
             raise ValueError("expected_effect_prior is not set.")
         if isinstance(prior, np.ndarray):
@@ -761,12 +834,12 @@ class PlaceboInTime:
         AssuranceResult
         """
         expected_samples = self._draw_expected_effect_samples(len(theta_new_samples))
-        n_reps = self.n_design_replications
+        n_reps = self.assurance.n_design_replications
         if n_reps is None:
             n_reps = min(len(theta_new_samples), len(expected_samples))
 
         rng = np.random.default_rng(self.random_seed)
-        rope = self.rope_half_width
+        rope = self.assurance.rope_half_width
         if rope is None:
             raise ValueError(
                 "rope_half_width must be set for assurance."
@@ -803,12 +876,14 @@ class PlaceboInTime:
         alt_arr = np.array(alt_decisions)
 
         return AssuranceResult(
-            true_positive_rate=float((alt_arr == "positive").mean()),
-            false_positive_rate=float((null_arr == "positive").mean()),
-            true_negative_rate=float((null_arr == "null").mean()),
-            false_negative_rate=float((alt_arr == "null").mean()),
-            null_indeterminate_rate=float((null_arr == "indeterminate").mean()),
-            alt_indeterminate_rate=float((alt_arr == "indeterminate").mean()),
+            rates=ConfusionRates(
+                true_positive_rate=float((alt_arr == "positive").mean()),
+                false_positive_rate=float((null_arr == "positive").mean()),
+                true_negative_rate=float((null_arr == "null").mean()),
+                false_negative_rate=float((alt_arr == "null").mean()),
+                null_indeterminate_rate=float((null_arr == "indeterminate").mean()),
+                alt_indeterminate_rate=float((alt_arr == "indeterminate").mean()),
+            ),
             null_decisions=null_arr,
             alt_decisions=alt_arr,
         )
@@ -858,7 +933,7 @@ class PlaceboInTime:
         actual_cumulative = self._extract_cumulative_impact(experiment)
         actual_cumulative_mean = float(actual_cumulative.mean().values)
 
-        if self.selection_method == "random":
+        if self.fold_selection.selection_method == "random":
             fold_treatment_times = self._compute_random_fold_treatment_times(
                 data, treatment_time, intervention_length
             )
@@ -876,7 +951,7 @@ class PlaceboInTime:
             logger.info(
                 "PlaceboInTime fold %d/%d: pseudo_treatment_time=%s",
                 fold_num,
-                self.n_folds,
+                self.fold_selection.n_folds,
                 pseudo_tt,
             )
 
@@ -944,12 +1019,29 @@ class PlaceboInTime:
                 text="\n".join(parts),
                 metadata={
                     "fold_results": fold_results,
-                    "rope_half_width": self.rope_half_width,
+                    "rope_half_width": self.assurance.rope_half_width,
                     "threshold": self.threshold,
-                    "expected_effect_prior": self.expected_effect_prior,
+                    "expected_effect_prior": self.assurance.expected_effect_prior,
                 },
             )
 
+        return self._build_run_output(
+            fold_results,
+            fold_summaries,
+            n_skipped,
+            actual_cumulative,
+            actual_cumulative_mean,
+        )
+
+    def _build_run_output(
+        self,
+        fold_results: list[PlaceboFoldResult],
+        fold_summaries: list[str],
+        n_skipped: int,
+        actual_cumulative: xr.DataArray,
+        actual_cumulative_mean: float,
+    ) -> CheckResult:
+        """Build the final CheckResult from completed placebo folds."""
         fold_means = np.array([fr.fold_mean for fr in fold_results])
         fold_sds = np.array([fr.fold_sd for fr in fold_results])
 
@@ -960,11 +1052,12 @@ class PlaceboInTime:
         )
         passed = p_outside > self.threshold
 
+        n_completed = len(fold_results)
         mu_post_mean = float(idata.posterior["mu_status_quo"].mean().values)
         tau_post_mean = float(idata.posterior["tau_status_quo"].mean().values)
 
         parts = [
-            f"Placebo-in-time analysis: {n_completed} of {self.n_folds} folds completed"
+            f"Placebo-in-time analysis: {n_completed} of {self.fold_selection.n_folds} folds completed"
         ]
         if n_skipped:
             parts[0] += f" ({n_skipped} skipped)"
@@ -993,14 +1086,14 @@ class PlaceboInTime:
             "null_samples": theta_new_samples,
             "actual_cumulative_mean": actual_cumulative_mean,
             "p_effect_outside_null": p_outside,
-            "rope_half_width": self.rope_half_width,
+            "rope_half_width": self.assurance.rope_half_width,
             "threshold": self.threshold,
-            "expected_effect_prior": self.expected_effect_prior,
+            "expected_effect_prior": self.assurance.expected_effect_prior,
         }
 
         n_posterior_samples = len(actual_cumulative.values)
 
-        if self.expected_effect_prior is not None:
+        if self.assurance.expected_effect_prior is not None:
             assurance_result = self._compute_assurance(
                 theta_new_samples, fold_sds, n_posterior_samples
             )
@@ -1034,11 +1127,11 @@ class PlaceboInTime:
 
     def __repr__(self) -> str:
         """Return a string representation of the check."""
-        parts = [f"n_folds={self.n_folds}"]
-        if self.selection_method != "sequential":
-            parts.append(f"selection_method={self.selection_method!r}")
-        if self.allow_overlap:
+        parts = [f"n_folds={self.fold_selection.n_folds}"]
+        if self.fold_selection.selection_method != "sequential":
+            parts.append(f"selection_method={self.fold_selection.selection_method!r}")
+        if self.fold_selection.allow_overlap:
             parts.append("allow_overlap=True")
-        if self.expected_effect_prior is not None:
+        if self.assurance.expected_effect_prior is not None:
             parts.append("assurance=True")
         return f"PlaceboInTime({', '.join(parts)})"

@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Pretest/posttest nonequivalent group design."""
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import arviz as az
@@ -34,6 +35,34 @@ from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
+
+
+@dataclass
+class _VariableNames:
+    """Container for column-name configuration parameters."""
+
+    group_variable_name: str
+    pretreatment_variable_name: str
+
+
+@dataclass
+class _DesignInfo:
+    """Container for design-matrix metadata and data."""
+
+    y_design_info: Any
+    x_design_info: Any
+    labels: list[str]
+    outcome_variable_name: str
+    design: xr.Dataset | None = field(default=None)
+
+
+@dataclass
+class _PredictionResult:
+    """Container for prediction results."""
+
+    pred_xi: np.ndarray
+    pred_untreated: az.InferenceData
+    pred_treated: az.InferenceData
 
 
 class PrePostNEGD(BaseExperiment):
@@ -103,42 +132,53 @@ class PrePostNEGD(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
-        self.pred_xi: np.ndarray
-        self.pred_untreated: az.InferenceData
-        self.pred_treated: az.InferenceData
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
-        self.group_variable_name = group_variable_name
-        self.pretreatment_variable_name = pretreatment_variable_name
+        self._variable_names = _VariableNames(
+            group_variable_name=group_variable_name,
+            pretreatment_variable_name=pretreatment_variable_name,
+        )
         self.input_validation()
-        self._build_design_matrices()
-        self._prepare_data()
+        design_info, y_raw, X_raw = self._build_design_matrices()
+        self._design_info = design_info
+        self._prepare_data(y_raw, X_raw)
         self.algorithm()
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
+    def _build_design_matrices(
+        self,
+    ) -> tuple[_DesignInfo, np.ndarray, np.ndarray]:
+        """Build design matrices from formula and data using patsy.
 
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into an ``xr.Dataset``."""
-        self.design = self._build_design_dataset(
-            self._X_raw,
-            self._y_raw,
-            obs_ind=self.data.index,
-            coeffs=self.labels,
+        Returns
+        -------
+        Tuple of (_DesignInfo, y_raw, X_raw).
+        """
+        y, X = dmatrices(self.formula, self.data)
+        y_raw, X_raw = np.asarray(y), np.asarray(X)
+        design_info = _DesignInfo(
+            y_design_info=y.design_info,
+            x_design_info=X.design_info,
+            labels=list(X.design_info.column_names),
+            outcome_variable_name=y.design_info.column_names[0],
         )
-        del self._X_raw, self._y_raw
+        return design_info, y_raw, X_raw
+
+    def _prepare_data(self, y_raw: np.ndarray, X_raw: np.ndarray) -> None:
+        """Bundle design matrices into an ``xr.Dataset``."""
+        self._design_info.design = self._build_design_dataset(
+            X_raw,
+            y_raw,
+            obs_ind=self.data.index,
+            coeffs=self._design_info.labels,
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        X = self.design["X"]
-        y = self.design["y"]
+        di = self._design_info
+        vn = self._variable_names
+        X = di.design["X"]
+        y = di.design["y"]
 
         if self._model_backend.is_ols:
             raise NotImplementedError("Not implemented for OLS model")
@@ -148,43 +188,76 @@ class PrePostNEGD(BaseExperiment):
         self._model_backend.fit(
             X=X,
             y=y,
-            coords=build_coords(self.labels, X.shape[0]),
+            coords=build_coords(di.labels, X.shape[0]),
         )
 
         assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data
-        self.pred_xi = np.linspace(
-            np.min(self.data[self.pretreatment_variable_name]),
-            np.max(self.data[self.pretreatment_variable_name]),
+        pred_xi = np.linspace(
+            np.min(self.data[vn.pretreatment_variable_name]),
+            np.max(self.data[vn.pretreatment_variable_name]),
             200,
         )
         # untreated
         x_pred_untreated = pd.DataFrame(
             {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.zeros(self.pred_xi.shape),
+                vn.pretreatment_variable_name: pred_xi,
+                vn.group_variable_name: np.zeros(pred_xi.shape),
             }
         )
         (new_x_untreated,) = build_design_matrices(
-            [self._x_design_info], x_pred_untreated
+            [di.x_design_info], x_pred_untreated
         )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+        pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
         # treated
         x_pred_treated = pd.DataFrame(
             {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.ones(self.pred_xi.shape),
+                vn.pretreatment_variable_name: pred_xi,
+                vn.group_variable_name: np.ones(pred_xi.shape),
             }
         )
-        (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+        (new_x_treated,) = build_design_matrices([di.x_design_info], x_pred_treated)
+        pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+
+        self.predictions = _PredictionResult(
+            pred_xi=pred_xi,
+            pred_untreated=pred_untreated,
+            pred_treated=pred_treated,
+        )
 
         # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )
+
+    # -- Properties for backward compatibility --
+
+    @property
+    def group_variable_name(self) -> str:
+        """Name of the data column for the group variable."""
+        return self._variable_names.group_variable_name
+
+    @property
+    def pretreatment_variable_name(self) -> str:
+        """Name of the data column for the pretreatment variable."""
+        return self._variable_names.pretreatment_variable_name
+
+    @property
+    def labels(self) -> list[str]:
+        """Coefficient labels from the design matrix."""
+        return self._design_info.labels
+
+    @property
+    def outcome_variable_name(self) -> str:
+        """Name of the outcome variable."""
+        return self._design_info.outcome_variable_name
+
+    @property
+    def design(self) -> xr.Dataset:
+        """Design matrix as an ``xr.Dataset``."""
+        return self._design_info.design
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -203,7 +276,7 @@ class PrePostNEGD(BaseExperiment):
         the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
         then we want `C(group)[T.1]`.
         """
-        for label in self.labels:
+        for label in self._design_info.labels:
             if (self.group_variable_name in label) & (":" not in label):
                 return label
 
@@ -327,9 +400,10 @@ class PrePostNEGD(BaseExperiment):
         ax[0].set(xlabel="Pretest", ylabel="Posttest")
 
         # plot posterior predictive of untreated
+        preds = self.predictions
         h_line, h_patch = plot_xY(
-            self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
+            preds.pred_xi,
+            preds.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
@@ -340,8 +414,8 @@ class PrePostNEGD(BaseExperiment):
 
         # plot posterior predictive of treated
         h_line, h_patch = plot_xY(
-            self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
+            preds.pred_xi,
+            preds.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
             hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},

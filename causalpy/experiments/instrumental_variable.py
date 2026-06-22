@@ -25,7 +25,51 @@ from causalpy.pymc_models import InstrumentalVariableRegression
 
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
+from dataclasses import dataclass
 from typing import Any, Literal
+
+
+@dataclass
+class _Config:
+    """Container for instrumental variable configuration parameters."""
+
+    data: pd.DataFrame
+    instruments_data: pd.DataFrame
+    formula: str
+    instruments_formula: str
+    vs_prior_type: Any = None
+    vs_hyperparams: dict | None = None
+    binary_treatment: bool = False
+
+
+@dataclass
+class _DesignMatrices:  # pylint: disable=too-many-instance-attributes
+    """Container for design matrix data and metadata."""
+
+    y: np.ndarray
+    X: np.ndarray
+    t: np.ndarray
+    Z: np.ndarray
+    labels: list[str]
+    labels_instruments: list[str]
+    y_design_info: Any
+    x_design_info: Any
+    t_design_info: Any
+    z_design_info: Any
+    outcome_variable_name: str
+    instrument_variable_name: str
+
+
+@dataclass
+class _StageResults:
+    """Container for OLS and 2SLS regression results."""
+
+    ols_reg: Any = None
+    ols_beta_params: dict | None = None
+    first_stage_reg: Any = None
+    second_stage_reg: Any = None
+    ols_beta_first_params: list | None = None
+    ols_beta_second_params: list | None = None
 
 
 class InstrumentalVariable(BaseExperiment):
@@ -130,37 +174,120 @@ class InstrumentalVariable(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
-        self.data = data
-        self.instruments_data = instruments_data
-        self.formula = formula
-        self.instruments_formula = instruments_formula
-        self.vs_prior_type = vs_prior_type
-        self.vs_hyperparams = vs_hyperparams or {}
-        self.binary_treatment = binary_treatment
-        self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
+        self._config = _Config(
+            data=data,
+            instruments_data=instruments_data,
+            formula=formula,
+            instruments_formula=instruments_formula,
+            vs_prior_type=vs_prior_type,
+            vs_hyperparams=vs_hyperparams or {},
+            binary_treatment=binary_treatment,
+        )
+        self._results = _StageResults()
+        self.priors = priors
         self.input_validation()
         self._build_design_matrices()
-
-        # Store user-provided priors (will set defaults in algorithm() if None)
-        self.priors = priors
-
         self.algorithm()
+
+    # -- Config properties
+    @property
+    def formula(self) -> str:
+        return self._config.formula
+
+    @property
+    def instruments_formula(self) -> str:
+        return self._config.instruments_formula
+
+    @property
+    def vs_prior_type(self):
+        return self._config.vs_prior_type
+
+    @property
+    def data(self) -> pd.DataFrame:
+        return self._config.data
+
+    @property
+    def instruments_data(self) -> pd.DataFrame:
+        return self._config.instruments_data
+
+    # -- Design-matrix properties
+    @property
+    def y(self) -> np.ndarray:
+        return self._design.y
+
+    @property
+    def X(self) -> np.ndarray:
+        return self._design.X
+
+    @property
+    def t(self) -> np.ndarray:
+        return self._design.t
+
+    @property
+    def Z(self) -> np.ndarray:
+        return self._design.Z
+
+    @property
+    def labels(self) -> list[str]:
+        return self._design.labels
+
+    @property
+    def labels_instruments(self) -> list[str]:
+        return self._design.labels_instruments
+
+    @property
+    def outcome_variable_name(self) -> str:
+        return self._design.outcome_variable_name
+
+    @property
+    def instrument_variable_name(self) -> str:
+        return self._design.instrument_variable_name
+
+    # -- Stage-result properties
+    @property
+    def ols_reg(self):
+        return self._results.ols_reg
+
+    @property
+    def ols_beta_params(self):
+        return self._results.ols_beta_params
+
+    @property
+    def first_stage_reg(self):
+        return self._results.first_stage_reg
+
+    @property
+    def second_stage_reg(self):
+        return self._results.second_stage_reg
+
+    @property
+    def ols_beta_first_params(self):
+        return self._results.ols_beta_first_params
+
+    @property
+    def ols_beta_second_params(self):
+        return self._results.ols_beta_second_params
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
-        y, X = dmatrices(self.formula, self.data)
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
-        self.outcome_variable_name = y.design_info.column_names[0]
-
-        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
-        self._t_design_info = t.design_info
-        self._z_design_info = Z.design_info
-        self.labels_instruments = Z.design_info.column_names
-        self.t, self.Z = np.asarray(t), np.asarray(Z)
-        self.instrument_variable_name = t.design_info.column_names[0]
+        y, X = dmatrices(self._config.formula, self._config.data)
+        t, Z = dmatrices(
+            self._config.instruments_formula, self._config.instruments_data
+        )
+        self._design = _DesignMatrices(
+            y=np.asarray(y),
+            X=np.asarray(X),
+            t=np.asarray(t),
+            Z=np.asarray(Z),
+            labels=X.design_info.column_names,
+            labels_instruments=Z.design_info.column_names,
+            y_design_info=y.design_info,
+            x_design_info=X.design_info,
+            t_design_info=t.design_info,
+            z_design_info=Z.design_info,
+            outcome_variable_name=y.design_info.column_names[0],
+            instrument_variable_name=t.design_info.column_names[0],
+        )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
@@ -168,14 +295,20 @@ class InstrumentalVariable(BaseExperiment):
         self.get_2SLS_fit()
 
         # fit the model to the data
-        COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
+        COORDS = {
+            "instruments": self._design.labels_instruments,
+            "covariates": self._design.labels,
+        }
         self.coords = COORDS
         # Only set default priors if user didn't provide custom priors
         if self.priors is None:
-            if self.binary_treatment:
+            if self._config.binary_treatment:
                 # Different default priors for binary treatment
                 self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "mus": [
+                        self._results.ols_beta_first_params,
+                        self._results.ols_beta_second_params,
+                    ],
                     "sigmas": [1, 1],
                     "sigma_U": 1.0,
                     "rho_bounds": [-0.99, 0.99],
@@ -183,28 +316,31 @@ class InstrumentalVariable(BaseExperiment):
             else:
                 # Original continuous treatment priors
                 self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "mus": [
+                        self._results.ols_beta_first_params,
+                        self._results.ols_beta_second_params,
+                    ],
                     "sigmas": [1, 1],
                     "eta": 2,
                     "lkj_sd": 1,
                 }
         self.model.fit(  # type: ignore[call-arg,union-attr]
-            X=self.X,
-            Z=self.Z,
-            y=self.y,
-            t=self.t,
+            X=self._design.X,
+            Z=self._design.Z,
+            y=self._design.y,
+            t=self._design.t,
             coords=COORDS,
             priors=self.priors,
-            vs_prior_type=self.vs_prior_type,
-            vs_hyperparams=self.vs_hyperparams,
-            binary_treatment=self.binary_treatment,
+            vs_prior_type=self._config.vs_prior_type,
+            vs_hyperparams=self._config.vs_hyperparams,
+            binary_treatment=self._config.binary_treatment,
         )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
-        treatment = self.instruments_formula.split("~")[0]
-        test = treatment.strip() in self.instruments_data.columns
-        test = test & (treatment.strip() in self.data.columns)
+        treatment = self._config.instruments_formula.split("~")[0]
+        test = treatment.strip() in self._config.instruments_data.columns
+        test = test & (treatment.strip() in self._config.data.columns)
         if not test:
             raise DataException(
                 f"""
@@ -213,7 +349,7 @@ class InstrumentalVariable(BaseExperiment):
                 as an outcome variable and in the data object to be used as a covariate.
                 """
             )
-        Z = self.data[treatment.strip()]
+        Z = self._config.data[treatment.strip()]
         check_binary = len(np.unique(Z)) > 2
         if check_binary:
             warnings.warn(
@@ -229,33 +365,33 @@ class InstrumentalVariable(BaseExperiment):
         This function is called by the experiment, results are used for
         priors if none are provided.
         """
-        first_stage_reg = sk_lin_reg().fit(self.Z, self.t)
-        fitted_Z_values = first_stage_reg.predict(self.Z)
-        X2 = self.data.copy(deep=True)
-        X2[self.instrument_variable_name] = fitted_Z_values
-        _, X2 = dmatrices(self.formula, X2)
-        second_stage_reg = sk_lin_reg().fit(X=X2, y=self.y)
+        first_stage_reg = sk_lin_reg().fit(self._design.Z, self._design.t)
+        fitted_Z_values = first_stage_reg.predict(self._design.Z)
+        X2 = self._config.data.copy(deep=True)
+        X2[self._design.instrument_variable_name] = fitted_Z_values
+        _, X2 = dmatrices(self._config.formula, X2)
+        second_stage_reg = sk_lin_reg().fit(X=X2, y=self._design.y)
         betas_first = list(first_stage_reg.coef_[0][1:])
         betas_first.insert(0, first_stage_reg.intercept_[0])
         betas_second = list(second_stage_reg.coef_[0][1:])
         betas_second.insert(0, second_stage_reg.intercept_[0])
-        self.ols_beta_first_params = betas_first
-        self.ols_beta_second_params = betas_second
-        self.first_stage_reg = first_stage_reg
-        self.second_stage_reg = second_stage_reg
+        self._results.ols_beta_first_params = betas_first
+        self._results.ols_beta_second_params = betas_second
+        self._results.first_stage_reg = first_stage_reg
+        self._results.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self) -> None:
         """Naive Ordinary Least Squares.
 
         This function is called by the experiment.
         """
-        ols_reg = sk_lin_reg().fit(self.X, self.y)
+        ols_reg = sk_lin_reg().fit(self._design.X, self._design.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(
-            zip(self._x_design_info.column_names, beta_params, strict=False)
+        self._results.ols_beta_params = dict(
+            zip(self._design.x_design_info.column_names, beta_params, strict=False)
         )
-        self.ols_reg = ols_reg
+        self._results.ols_reg = ols_reg
 
     def plot(
         self,
