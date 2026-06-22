@@ -20,8 +20,12 @@ import pandas as pd
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
+import arviz as az
+
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.pymc_models import InstrumentalVariableRegression
+from causalpy.utils import round_num
 
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
@@ -286,7 +290,7 @@ class InstrumentalVariable(BaseExperiment):
         """
         raise NotImplementedError("Plot method not implemented.")
 
-    def summary(self, round_to: int | None = None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
         Parameters
@@ -295,7 +299,41 @@ class InstrumentalVariable(BaseExperiment):
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
         """
-        raise NotImplementedError("Summary method not implemented.")
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print(f"Instruments formula: {self.instruments_formula}")
+
+        print("\nNaive OLS coefficients:")
+        for name, val in self.ols_beta_params.items():
+            print(f"  {name: <20}  {round_num(val, round_to)}")
+
+        print("\n2SLS coefficients:")
+        print("  First stage:")
+        for name, val in zip(
+            self.labels_instruments, self.ols_beta_first_params, strict=False
+        ):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+        print("  Second stage:")
+        for name, val in zip(self.labels, self.ols_beta_second_params, strict=False):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+
+        print("\nBayesian coefficients:")
+        posterior = self.idata.posterior  # type: ignore[union-attr]
+        for var, dim, labels, stage in [
+            ("beta_t", "instruments", self.labels_instruments, "Instrument stage"),
+            ("beta_z", "covariates", self.labels, "Outcome stage"),
+        ]:
+            print(f"  {stage}:")
+            coeffs = az.extract(posterior, var_names=var)
+            for name in labels:
+                samples = coeffs.sel({dim: name})
+                lo = samples.quantile((1 - HDI_PROB) / 2).item()
+                hi = samples.quantile(1 - (1 - HDI_PROB) / 2).item()
+                print(
+                    f"    {name: <20}  {round_num(samples.mean().item(), round_to)}, "
+                    f"{HDI_PROB * 100:.0f}% HDI [{round_num(lo, round_to)}, "
+                    f"{round_num(hi, round_to)}]"
+                )
 
     def effect_summary(
         self,
