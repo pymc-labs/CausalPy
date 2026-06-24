@@ -20,9 +20,9 @@
 
 <!-- docs-start -->
 
-# Causal Inference for Quasi-Experiments
+# CausalPy — Open-Source Bayesian Causal Inference for Python
 
-**Research-grade causal inference workflows** for quasi-experimental designs in Python.
+**Research-grade causal inference workflows** for quasi-experimental designs.
 
 CausalPy helps you estimate causal effects with transparent assumptions, uncertainty-aware modeling, and reproducible outputs:
 
@@ -148,6 +148,8 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 - **Uncertainty quantification:** Bayesian models report HDI (Highest Density Intervals); OLS models report confidence intervals
 - **Practical significance:** ROPE (Region of Practical Equivalence) analysis to assess whether effects exceed meaningful thresholds
 - **Direction testing:** Tail probabilities (e.g., P(effect > 0)) for directional inference
+
+<!-- docs-end -->
 
 ## Citing CausalPy
 
