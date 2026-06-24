@@ -117,7 +117,7 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 ### {doc}`PreTreatmentPlaceboCheck <../api/generated/causalpy.checks.pre_treatment_placebo.PreTreatmentPlaceboCheck>`
 
-`PreTreatmentPlaceboCheck` examines pre-treatment event-study effects in staggered DiD. If negative event times are far from zero, the parallel trends story is harder to defend and the treatment effect may be biased {cite:p}`goodman2021difference,borusyak2024revisiting`.
+`PreTreatmentPlaceboCheck` examines pre-treatment event-study effects in staggered DiD. If negative event times are far from zero, the parallel trends story is harder to defend and the treatment effect may be biased {cite:p}`goodmanbacon2021difference,borusyak2024revisiting`.
 
 ## Working with check results
 
@@ -176,4 +176,10 @@ For the pipeline mechanics, see {doc}`pipeline_workflow`. For HTML reporting of 
 - {doc}`rkink_pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting
 
+:::
+
+## References
+
+:::{bibliography}
+:filter: docname in docnames
 :::
