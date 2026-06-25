@@ -1,0 +1,223 @@
+"""Validate Jupyter notebooks against schema and docs conventions."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Any
+
+import nbformat
+from nbformat import NotebookNode
+from nbformat.validator import NotebookValidationError
+
+# Notebooks under this directory are rendered into the Sphinx docs index. Each
+# top-level (`#`) markdown heading inside such a notebook becomes a separate
+# `toctree` entry, so we enforce exactly one per notebook to keep the sidebar
+# clean. The check is intentionally not applied to scratch / dev notebooks
+# elsewhere in the repo.
+DOCS_NOTEBOOKS_DIR = Path("docs/source/notebooks")
+
+
+def _leading_space_count(line: str) -> int:
+    """Return the number of leading literal spaces in a line."""
+    return len(line) - len(line.lstrip(" "))
+
+
+def _extract_path_index(path_segments: list[Any], segment_name: str) -> int | None:
+    """Return the integer index that follows a path segment name."""
+    for i, segment in enumerate(path_segments[:-1]):
+        if segment == segment_name and isinstance(path_segments[i + 1], int):
+            return path_segments[i + 1]
+    return None
+
+
+def _get_output_type(
+    notebook: NotebookNode,
+    cell_index: int | None,
+    output_index: int | None,
+) -> str | None:
+    """Return output_type for the failing output object if available."""
+    if cell_index is None or output_index is None:
+        return None
+
+    try:
+        output = notebook["cells"][cell_index]["outputs"][output_index]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+    if isinstance(output, dict):
+        return output.get("output_type")
+    return None
+
+
+def _format_validation_error(
+    notebook_path: Path,
+    notebook: NotebookNode,
+    error: NotebookValidationError,
+) -> str:
+    """Format a NotebookValidationError into actionable stderr output."""
+    path_segments = list(getattr(error, "absolute_path", []))
+    cell_index = _extract_path_index(path_segments, "cells")
+    output_index = _extract_path_index(path_segments, "outputs")
+    output_type = _get_output_type(notebook, cell_index, output_index)
+
+    details = [f"{notebook_path}: notebook schema validation failed"]
+
+    location_parts = []
+    if cell_index is not None:
+        location_parts.append(f"cell[{cell_index}]")
+    if output_index is not None:
+        location_parts.append(f"output[{output_index}]")
+    if output_type is not None:
+        location_parts.append(f"type={output_type}")
+    if location_parts:
+        details.append(f"  location: {' '.join(location_parts)}")
+
+    if path_segments:
+        details.append(f"  path: {'/'.join(str(segment) for segment in path_segments)}")
+
+    details.append(f"  error: {error.message}")
+    return "\n".join(details)
+
+
+def _count_h1_headings(notebook: NotebookNode) -> list[tuple[int, str]]:
+    """Return ``(cell_index, heading_text)`` for every level-1 markdown heading.
+
+    Only markdown cells are inspected. Within markdown cells, lines inside
+    CommonMark fenced code blocks (``` or ~~~) are skipped so that Python
+    comments embedded in code samples do not register as headings.
+    """
+    h1s: list[tuple[int, str]] = []
+    for cell_index, cell in enumerate(notebook.get("cells", [])):
+        if cell.get("cell_type") != "markdown":
+            continue
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+        fence_marker: str | None = None
+        fence_length = 0
+        for line in source.splitlines():
+            leading_spaces = _leading_space_count(line)
+            content = line[leading_spaces:]
+            if leading_spaces <= 3 and content.startswith(("```", "~~~")):
+                marker = content[0]
+                marker_count = len(content) - len(content.lstrip(marker))
+                if marker_count >= 3:
+                    if fence_marker is None:
+                        fence_marker = marker
+                        fence_length = marker_count
+                    elif (
+                        marker == fence_marker
+                        and marker_count >= fence_length
+                        and not content[marker_count:].strip()
+                    ):
+                        fence_marker = None
+                        fence_length = 0
+                continue
+            if fence_marker is not None:
+                continue
+            if leading_spaces <= 3 and content.startswith("#"):
+                marker_count = len(content) - len(content.lstrip("#"))
+                rest = content[marker_count:]
+                if marker_count == 1 and (not rest or rest[0].isspace()):
+                    h1s.append((cell_index, rest.strip()))
+    return h1s
+
+
+def _is_docs_notebook(notebook_path: Path) -> bool:
+    """Return True if the notebook lives under ``docs/source/notebooks/``."""
+    try:
+        resolved = notebook_path.resolve()
+    except OSError:
+        resolved = notebook_path
+    parts = resolved.parts
+    target = DOCS_NOTEBOOKS_DIR.parts
+    if len(parts) < len(target):
+        return False
+    for window_start in range(len(parts) - len(target) + 1):
+        if parts[window_start : window_start + len(target)] == target:
+            return True
+    return False
+
+
+def _format_h1_violation(
+    notebook_path: Path,
+    h1s: list[tuple[int, str]],
+) -> str:
+    """Format a human-readable error for a single-H1 violation."""
+    if h1s:
+        locations = "\n".join(
+            f"  cell {cell_index}: {text}" for cell_index, text in h1s
+        )
+    else:
+        locations = "  (no top-level # headings found)"
+    return (
+        f"{notebook_path}: expected exactly one top-level (#) markdown "
+        f"heading, found {len(h1s)}.\n"
+        f"{locations}\n"
+        f"  Each docs notebook must have exactly one top-level (#) heading. "
+        f"Demote the others to ## (or below) so the docs sidebar stays clean."
+    )
+
+
+def validate_notebook(notebook_path: Path) -> tuple[bool, str | None]:
+    """Validate a single notebook and return (is_valid, error_message)."""
+    try:
+        with notebook_path.open(encoding="utf-8") as f:
+            notebook = nbformat.read(f, as_version=4)
+    except Exception as error:  # noqa: BLE001
+        return False, f"{notebook_path}: failed to read notebook: {error}"
+
+    try:
+        nbformat.validate(notebook)
+    except NotebookValidationError as error:
+        return False, _format_validation_error(notebook_path, notebook, error)
+
+    if _is_docs_notebook(notebook_path):
+        h1s = _count_h1_headings(notebook)
+        if len(h1s) != 1:
+            return False, _format_h1_violation(notebook_path, h1s)
+
+    return True, None
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Validate Jupyter notebooks against schema and docs conventions.",
+    )
+    parser.add_argument(
+        "notebooks",
+        nargs="*",
+        type=Path,
+        help="Notebook files to validate.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Run validation for all provided notebook paths."""
+    args = parse_args()
+    if not args.notebooks:
+        return 0
+
+    invalid_count = 0
+    for notebook_path in args.notebooks:
+        is_valid, error_message = validate_notebook(notebook_path)
+        if is_valid:
+            continue
+        invalid_count += 1
+        if error_message is not None:
+            print(error_message, file=sys.stderr)
+
+    if invalid_count == 0:
+        return 0
+
+    notebook_word = "notebook" if invalid_count == 1 else "notebooks"
+    print(f"Validation failed for {invalid_count} {notebook_word}.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -31,6 +31,10 @@ def notebook_to_markdown(pattern: str, output_dir: str) -> None:
     """
     Utility to convert jupyter notebook to markdown files.
 
+    Cell outputs are stripped before conversion so that codespell only
+    checks source code and markdown prose, not generated content like
+    base64 images or HTML reports.
+
     :param pattern:
         str that is a glob appropriate pattern to search
     :param output_dir:
@@ -39,6 +43,10 @@ def notebook_to_markdown(pattern: str, output_dir: str) -> None:
     for f_name in glob(pattern, recursive=True):
         with open(f_name, encoding="utf-8") as f:
             nb = nbformat.read(f, as_version=4)
+
+        for cell in nb.cells:
+            if cell.cell_type == "code":
+                cell.outputs = []
 
         markdown_exporter = MarkdownExporter()
         (body, _) = markdown_exporter.from_notebook_node(nb)

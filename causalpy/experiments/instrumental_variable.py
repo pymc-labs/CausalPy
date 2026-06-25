@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Instrumental variable regression
-"""
+"""Instrumental variable regression."""
 
 import warnings  # noqa: I001
 
@@ -23,6 +21,8 @@ from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import InstrumentalVariableRegression
+
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
 from typing import Any, Literal
@@ -46,8 +46,8 @@ class InstrumentalVariable(BaseExperiment):
     formula : str
         A statistical model formula for the focal regression,
         e.g. ``y ~ 1 + t + x1 + x2 + x3``.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : InstrumentalVariableRegression, optional
+        A PyMC model. Defaults to InstrumentalVariableRegression.
     priors : dict, optional
         Dictionary of priors for the mus and sigmas of both regressions.
         If priors are not specified we will substitute MLE estimates for
@@ -63,8 +63,10 @@ class InstrumentalVariable(BaseExperiment):
         A indicator for whether the treatment to be modelled is binary or not.
         Determines which PyMC model we use to model the joint outcome and
         treatment.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import pandas as pd
     >>> import causalpy as cp
@@ -111,6 +113,7 @@ class InstrumentalVariable(BaseExperiment):
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = InstrumentalVariableRegression
 
     def __init__(
         self,
@@ -118,12 +121,12 @@ class InstrumentalVariable(BaseExperiment):
         data: pd.DataFrame,
         instruments_formula: str,
         formula: str,
-        model: BaseExperiment | None = None,
+        model: InstrumentalVariableRegression | None = None,
         priors: dict | None = None,
         vs_prior_type=None,
         vs_hyperparams=None,
         binary_treatment=False,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
@@ -131,7 +134,6 @@ class InstrumentalVariable(BaseExperiment):
         self.instruments_data = instruments_data
         self.formula = formula
         self.instruments_formula = instruments_formula
-        self.model = model
         self.vs_prior_type = vs_prior_type
         self.vs_hyperparams = vs_hyperparams or {}
         self.binary_treatment = binary_treatment
@@ -199,7 +201,7 @@ class InstrumentalVariable(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns
         test = test & (treatment.strip() in self.data.columns)
@@ -222,8 +224,7 @@ class InstrumentalVariable(BaseExperiment):
             )
 
     def get_2SLS_fit(self) -> None:
-        """
-        Two Stage Least Squares Fit
+        """Two Stage Least Squares Fit.
 
         This function is called by the experiment, results are used for
         priors if none are provided.
@@ -244,8 +245,7 @@ class InstrumentalVariable(BaseExperiment):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self) -> None:
-        """
-        Naive Ordinary Least Squares
+        """Naive Ordinary Least Squares.
 
         This function is called by the experiment.
         """
@@ -257,20 +257,43 @@ class InstrumentalVariable(BaseExperiment):
         )
         self.ols_reg = ols_reg
 
-    def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
-        """
-        Plot the results
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+
+        Notes
+        -----
+        Plotting is not yet implemented for instrumental variable
+        experiments. This stub exists so every experiment subclass
+        offers an explicit, kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
         """
         raise NotImplementedError("Plot method not implemented.")
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         raise NotImplementedError("Summary method not implemented.")
 
@@ -292,6 +315,29 @@ class InstrumentalVariable(BaseExperiment):
         Generate a decision-ready summary of causal effects.
 
         Note: effect_summary is not yet implemented for InstrumentalVariable experiments.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (unused for InstrumentalVariable).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            For multi-unit experiments, the unit to analyse.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
         """
         raise NotImplementedError(
             "effect_summary is not yet implemented for InstrumentalVariable experiments."

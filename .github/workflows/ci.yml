@@ -9,26 +9,98 @@ on:
 permissions: {}
 
 jobs:
+
+  prek:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Run prek on changed files in PRs
+        if: github.event_name == 'pull_request'
+        uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
+        with:
+          extra-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
+      - name: Run prek on all files on pushes
+        if: github.event_name != 'pull_request'
+        uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
+        with:
+          extra-args: --all-files
+
+  check-environment-yml:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      # Run only the pyproject2conda-yaml prek hook so that the pin (rev),
+      # the argument list, and the output path all come from a single source
+      # of truth (.pre-commit-config.yaml). This eliminates the dual-pin /
+      # duplicated-args drift surface that previously lived in this job.
+      - name: Run pyproject2conda via prek hook
+        uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
+        with:
+          extra-args: pyproject2conda-yaml --all-files
+      - name: Check environment.yml is in sync with pyproject.toml
+        run: |
+          if ! git diff --exit-code -- environment.yml; then
+            echo "::error::environment.yml is out of sync with pyproject.toml." >&2
+            echo "Run 'prek run pyproject2conda-yaml --all-files' locally and commit the regenerated environment.yml." >&2
+            exit 1
+          fi
+          echo "environment.yml is in sync with pyproject.toml"
+
   test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    defaults:
+      run:
+        # Required so the conda env activated by setup-micromamba persists across steps.
+        shell: bash -el {0}
     strategy:
       matrix:
         python-version: ["3.11", "3.14"]
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Setup micromamba environment
+        uses: mamba-org/setup-micromamba@d7c9bd84e824b79d2af72a2d4196c7f4300d3476 # v3.0.0
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Update pip and setuptools
-        run: pip install --upgrade pip setuptools
-      - name: Setup environment
-        run: pip install -e .[test]
+          environment-file: environment.yml
+          environment-name: CausalPy
+          # Pin python to the matrix version. All other deps (including
+          # test-only ones) come from environment.yml, regenerated from
+          # pyproject.toml's `dev` + `test` extras via pyproject2conda.
+          create-args: >-
+            python=${{ matrix.python-version }}
+          cache-environment: true
+      - name: Install package
+        # --no-deps so pip does not pull pip-built pymc/pytensor on top of the
+        # conda-forge ones. Runtime deps come from environment.yml.
+        run: pip install --no-deps -e .
+      - name: Show environment
+        run: |
+          micromamba list
+          python -c "import pymc, pytensor; print('pymc', pymc.__version__); print('blas_ldflags=', pytensor.config.blas__ldflags)"
       - name: Run doctests
         run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
       - name: Run extra tests
@@ -40,7 +112,7 @@ jobs:
           python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
           codespell
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
           name: ${{ matrix.python-version }}

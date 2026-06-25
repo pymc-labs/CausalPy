@@ -60,7 +60,7 @@ def _relaxed_bernoulli_transform(
 
 
 class SpikeAndSlabPrior:
-    """
+    r"""
     Spike-and-slab prior using pymc-extras Prior class.
 
     Creates a mixture prior with a point mass at zero (spike) and a diffuse
@@ -84,8 +84,8 @@ class SpikeAndSlabPrior:
     dims : str or tuple, optional
         Dimension names for the coefficient vector
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import SpikeAndSlabPrior
     >>> spike_slab = SpikeAndSlabPrior(dims="features")
@@ -141,7 +141,7 @@ class SpikeAndSlabPrior:
 
 
 class HorseshoePrior:
-    """
+    r"""
     Regularized horseshoe prior using pymc-extras Prior class.
 
     Provides continuous shrinkage with heavy tails, allowing strong signals
@@ -164,8 +164,8 @@ class HorseshoePrior:
     dims : str or tuple, optional
         Dimension names for the coefficient vector
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import HorseshoePrior
     >>> horseshoe = HorseshoePrior(dims="features")
@@ -238,6 +238,7 @@ class VariableSelectionPrior:
     Built on top of pymc-extras Prior class for consistency and interoperability.
 
     Supported prior types:
+
     - 'spike_and_slab': Mixture prior with near-zero spike and diffuse slab
     - 'horseshoe': Continuous shrinkage with adaptive regularization
     - 'normal': Standard normal prior (no selection, for comparison)
@@ -250,23 +251,26 @@ class VariableSelectionPrior:
         Hyperparameters specific to the chosen prior type. If None, defaults are used.
 
         For 'spike_and_slab':
+
             - pi_alpha: float (default=2) - Beta prior alpha for selection probability
             - pi_beta: float (default=2) - Beta prior beta for selection probability
             - slab_sigma: float (default=2) - SD of slab (non-zero) component
             - temperature: float (default=0.1) - Relaxation parameter for binary approximation
 
         For 'horseshoe':
+
             - tau0: float (default=None) - Global shrinkage, auto-computed if None
             - nu: float (default=3) - Degrees of freedom for half-t prior on tau
             - c2_alpha: float (default=2) - InverseGamma alpha for regularization
             - c2_beta: float (default=2) - InverseGamma beta for regularization
 
         For 'normal':
+
             - mu: float or array (default=0) - Prior mean
             - sigma: float or array (default=1) - Prior SD
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import VariableSelectionPrior
     >>> # Create spike-and-slab prior
@@ -375,8 +379,8 @@ class VariableSelectionPrior:
         PyMC variable
             The coefficient vector with the specified prior
 
-        Example
-        -------
+        Examples
+        --------
         >>> import pymc as pm
         >>> import pandas as pd
         >>> from causalpy.variable_selection_priors import VariableSelectionPrior
@@ -445,6 +449,7 @@ class VariableSelectionPrior:
         -------
         dict
             Dictionary with keys:
+
             - 'probabilities': Array of inclusion probabilities per coefficient
             - 'selected': Boolean array indicating which are selected
             - 'gamma_mean': Mean of gamma (indicator) variables
@@ -509,6 +514,7 @@ class VariableSelectionPrior:
         -------
         dict
             Dictionary with keys:
+
             - 'shrinkage_factors': Array of shrinkage factors per coefficient
             - 'tau': Global shrinkage parameter
             - 'lambda_tilde': Regularized local shrinkage parameters

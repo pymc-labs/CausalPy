@@ -1,24 +1,38 @@
 name: Welcome New Contributors
 
 on:
-  pull_request:
+  # zizmor: ignore[dangerous-triggers]
+  # pull_request_target is required so this workflow can comment and label on
+  # PRs from forks (the read-only pull_request token cannot write). Safe here:
+  # we never check out or execute PR contents, only call SHA-pinned actions,
+  # and the only user-controlled value (github.actor) is hoisted to env and
+  # used in a Markdown body, never in a shell or expression context.
+  pull_request_target:
     types: [opened]
   issues:
     types: [opened]
 
-permissions:
-  issues: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   welcome:
     runs-on: ubuntu-latest
+    # Skip automated accounts (pre-commit-ci, dependabot, etc.) — see contributors.yml BOT_PATTERN.
+    if: >-
+      !contains(github.actor, '[bot]') &&
+      !contains(github.actor, 'dependabot') &&
+      !contains(github.actor, 'renovate')
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      ACTOR: ${{ github.actor }}
     steps:
       - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           issue_message: |
-            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
 
             Thank you for opening your first issue! We appreciate you taking the time to post this.
 
@@ -30,13 +44,13 @@ jobs:
             A maintainer will take a look soon. Thanks for being part of the CausalPy community! 🎉
 
           pr_message: |
-            👋 **Welcome to CausalPy, @${{ github.actor }}!**
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
 
             Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
 
             Here are a few tips to help your PR get merged smoothly:
             - ✅ Make sure all CI checks pass (tests, linting, type checking)
-            - 📝 Run `pre-commit run --all-files` locally before pushing
+            - 📝 Run `prek run --all-files` locally before pushing
             - 📖 Check our [Contributing Guide](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md) for more details
 
             A maintainer will review your changes soon. Thanks for helping make CausalPy better! 🚀
@@ -49,8 +63,8 @@ jobs:
       # FIRST_TIMER: never contributed to any GitHub repo
       # FIRST_TIME_CONTRIBUTOR: contributed elsewhere but not to this repo
       - name: Add first-time-contributor label
-        if: github.event_name == 'pull_request' && (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' || github.event.pull_request.author_association == 'FIRST_TIMER')
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        if: github.event_name == 'pull_request_target' && (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' || github.event.pull_request.author_association == 'FIRST_TIMER')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.addLabels({

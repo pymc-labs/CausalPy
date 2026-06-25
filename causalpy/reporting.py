@@ -32,6 +32,9 @@ import pandas as pd
 import xarray as xr
 from scipy.stats import t
 
+from causalpy.constants import HDI_PROB
+from causalpy.utils import _as_scalar
+
 
 @dataclass
 class EffectSummary:
@@ -42,7 +45,9 @@ class EffectSummary:
     table : pd.DataFrame
         DataFrame containing summary statistics (mean, median, HDI, tail probabilities)
     text : str
-        Formatted prose summary of the effect
+        Detailed multi-paragraph narrative report with
+        observed vs counterfactual breakdown, statistical credibility assessment,
+        and assumptions/guidance.
     """
 
     table: pd.DataFrame
@@ -75,11 +80,11 @@ def _extract_hdi_bounds(
     """
     if isinstance(hdi_result, xr.Dataset):
         hdi_data = list(hdi_result.data_vars.values())[0]
-        lower = float(hdi_data.sel(hdi="lower").values)
-        upper = float(hdi_data.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_data.sel(hdi="lower"))
+        upper = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
-        lower = float(hdi_result.sel(hdi="lower").values)
-        upper = float(hdi_result.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_result.sel(hdi="lower"))
+        upper = _as_scalar(hdi_result.sel(hdi="higher"))
     return lower, upper
 
 
@@ -101,12 +106,12 @@ def _compute_tail_probabilities(
         Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
     """
     if direction == "increase":
-        return {"p_gt_0": float((effect > 0).mean().values)}
+        return {"p_gt_0": _as_scalar((effect > 0).mean())}
     elif direction == "decrease":
-        return {"p_lt_0": float((effect < 0).mean().values)}
+        return {"p_lt_0": _as_scalar((effect < 0).mean())}
     else:  # two-sided
-        p_gt = float((effect > 0).mean().values)
-        p_lt = float((effect < 0).mean().values)
+        p_gt = _as_scalar((effect > 0).mean())
+        p_lt = _as_scalar((effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
 
@@ -133,11 +138,11 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return float((np.abs(effect) > min_effect).mean().values)
+        return _as_scalar((np.abs(effect) > min_effect).mean())
     elif direction == "increase":
-        return float((effect > min_effect).mean().values)
+        return _as_scalar((effect > min_effect).mean())
     elif direction == "decrease":
-        return float((effect < -min_effect).mean().values)
+        return _as_scalar((effect < -min_effect).mean())
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
@@ -190,8 +195,8 @@ def _compute_statistics_scalar(
         Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
     """
     stats = {
-        "mean": float(effect.mean(dim=["chain", "draw"]).values),
-        "median": float(effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(effect.median(dim=["chain", "draw"])),
     }
 
     # HDI using helper
@@ -377,6 +382,10 @@ def _effect_summary_staggered_did(
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
     post_treatment = att_et[att_et["event_time"] >= 0]
+    if "identified" in post_treatment.columns:
+        post_treatment = post_treatment[post_treatment["identified"]]
+    if "identified" in pre_treatment.columns:
+        pre_treatment = pre_treatment[pre_treatment["identified"]]
 
     # Build summary table with all event-time effects
     table = att_et.copy()
@@ -572,7 +581,7 @@ def _extract_window(result, window, treated_unit=None):
 
     # Convert OLS xarray to numpy for consistent handling
     if not is_pymc and isinstance(post_impact, xr.DataArray):
-        post_impact = np.squeeze(post_impact.values)
+        post_impact = np.squeeze(np.asarray(post_impact))
 
     # Ensure OLS data is numpy array
     if not is_pymc and not isinstance(post_impact, np.ndarray):
@@ -704,7 +713,7 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
         # Convert window_coords to integer indices for isel
         indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred.isel(obs_ind=indices).values
+        counterfactual = np.asarray(post_pred.isel(obs_ind=indices))
         return np.squeeze(counterfactual)
     else:
         # OLS with numpy array
@@ -724,21 +733,29 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 def _compute_statistics(
     impact,
     counterfactual,
-    hdi_prob=0.95,
+    hdi_prob=HDI_PROB,
     direction="increase",
     cumulative=True,
     relative=True,
     min_effect=None,
     time_dim="obs_ind",
 ):
-    """Compute all summary statistics from posterior draws."""
+    """Compute all summary statistics from posterior draws.
+
+    Notes
+    -----
+    All in-tree callers pass ``hdi_prob`` explicitly (typically derived from
+    ``effect_summary``'s ``alpha`` as ``hdi_prob = 1 - alpha``), so this
+    default is effectively unused; it is set to :data:`HDI_PROB` to keep the
+    project-wide convention consistent.
+    """
     stats = {}
 
     # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
     stats["avg"] = {
-        "mean": float(avg_effect.mean(dim=["chain", "draw"]).values),
-        "median": float(avg_effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
     }
 
     # HDI for average
@@ -747,33 +764,33 @@ def _compute_statistics(
     # Handle both Dataset and DataArray returns
     if isinstance(hdi_avg, xr.Dataset):
         hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_data.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
         # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = float(hdi_avg.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_avg.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_avg.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_avg.sel(hdi="higher"))
 
     # Tail probabilities for average
     if direction == "increase":
-        stats["avg"]["p_gt_0"] = float((avg_effect > 0).mean().values)
+        stats["avg"]["p_gt_0"] = _as_scalar((avg_effect > 0).mean())
     elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = float((avg_effect < 0).mean().values)
+        stats["avg"]["p_lt_0"] = _as_scalar((avg_effect < 0).mean())
     else:  # two-sided
-        p_gt = float((avg_effect > 0).mean().values)
-        p_lt = float((avg_effect < 0).mean().values)
+        p_gt = _as_scalar((avg_effect > 0).mean())
+        p_lt = _as_scalar((avg_effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         stats["avg"]["p_two_sided"] = p_two_sided
         stats["avg"]["prob_of_effect"] = 1 - p_two_sided
 
     # ROPE for average
     if min_effect is not None:
-        if direction == "two-sided":
-            stats["avg"]["p_rope"] = float(
-                (np.abs(avg_effect) > min_effect).mean().values
-            )
-        else:
-            stats["avg"]["p_rope"] = float((avg_effect > min_effect).mean().values)
+        rope_direction_avg = direction
+        if direction != "two-sided":
+            rope_direction_avg = "increase" if stats["avg"]["mean"] >= 0 else "decrease"
+        stats["avg"]["p_rope"] = _compute_rope_probability(
+            avg_effect, min_effect, rope_direction_avg
+        )
 
     # Cumulative effect
     if cumulative:
@@ -783,40 +800,42 @@ def _compute_statistics(
         cum_final = cum_effect.isel({time_dim: -1})
 
         stats["cum"] = {
-            "mean": float(cum_final.mean(dim=["chain", "draw"]).values),
-            "median": float(cum_final.median(dim=["chain", "draw"]).values),
+            "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
+            "median": _as_scalar(cum_final.median(dim=["chain", "draw"])),
         }
 
         # HDI for cumulative
         hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
         if isinstance(hdi_cum, xr.Dataset):
             hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = float(hdi_cum_data.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum_data.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum_data.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum_data.sel(hdi="higher"))
         else:
-            stats["cum"]["hdi_lower"] = float(hdi_cum.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum.sel(hdi="higher"))
 
         # Tail probabilities for cumulative
         if direction == "increase":
-            stats["cum"]["p_gt_0"] = float((cum_final > 0).mean().values)
+            stats["cum"]["p_gt_0"] = _as_scalar((cum_final > 0).mean())
         elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = float((cum_final < 0).mean().values)
+            stats["cum"]["p_lt_0"] = _as_scalar((cum_final < 0).mean())
         else:  # two-sided
-            p_gt = float((cum_final > 0).mean().values)
-            p_lt = float((cum_final < 0).mean().values)
+            p_gt = _as_scalar((cum_final > 0).mean())
+            p_lt = _as_scalar((cum_final < 0).mean())
             p_two_sided = 2 * min(p_gt, p_lt)
             stats["cum"]["p_two_sided"] = p_two_sided
             stats["cum"]["prob_of_effect"] = 1 - p_two_sided
 
         # ROPE for cumulative
         if min_effect is not None:
-            if direction == "two-sided":
-                stats["cum"]["p_rope"] = float(
-                    (np.abs(cum_final) > min_effect).mean().values
+            rope_direction_cum = direction
+            if direction != "two-sided":
+                rope_direction_cum = (
+                    "increase" if stats["cum"]["mean"] >= 0 else "decrease"
                 )
-            else:
-                stats["cum"]["p_rope"] = float((cum_final > min_effect).mean().values)
+            stats["cum"]["p_rope"] = _compute_rope_probability(
+                cum_final, min_effect, rope_direction_cum
+            )
 
     # Relative effects
     if relative:
@@ -824,25 +843,23 @@ def _compute_statistics(
         counterfactual_mean = counterfactual.mean(dim=time_dim)
         rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
 
-        stats["avg"]["relative_mean"] = float(
-            rel_avg.mean(dim=["chain", "draw"]).values
-        )
+        stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
 
         hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
         if isinstance(hdi_rel_avg, xr.Dataset):
             hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg_data.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg_data.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="higher")
             )
         else:
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="higher")
             )
 
         if cumulative:
@@ -852,25 +869,25 @@ def _compute_statistics(
             )
             rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
 
-            stats["cum"]["relative_mean"] = float(
-                rel_cum.mean(dim=["chain", "draw"]).values
+            stats["cum"]["relative_mean"] = _as_scalar(
+                rel_cum.mean(dim=["chain", "draw"])
             )
 
             hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
             if isinstance(hdi_rel_cum, xr.Dataset):
                 hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum_data.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum_data.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="higher")
                 )
             else:
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="higher")
                 )
 
     return stats
@@ -946,7 +963,7 @@ def _generate_table(stats, cumulative=True, relative=True):
     return df
 
 
-def _generate_prose(
+def _generate_prose_detailed(
     stats,
     window_coords,
     alpha=0.05,
@@ -954,8 +971,53 @@ def _generate_prose(
     cumulative=True,
     relative=True,
     prefix="Post-period",
+    observed_avg: float | None = None,
+    counterfactual_avg: float | None = None,
+    observed_cum: float | None = None,
+    counterfactual_cum: float | None = None,
+    experiment_type: str | None = None,
 ):
-    """Generate prose summary from statistics."""
+    """Generate detailed multi-paragraph narrative report.
+
+    This function produces a comprehensive plain-language interpretation of the
+    causal effect, including observed vs counterfactual values, statistical
+    credibility assessment, assumptions, and guidance on interpretation.
+
+    Parameters
+    ----------
+    stats : dict
+        Statistics dictionary from _compute_statistics()
+    window_coords : pd.Index
+        Window coordinates for the analysis period
+    alpha : float, default=0.05
+        Significance level for HDI interval
+    direction : {"increase", "decrease", "two-sided"}, default="increase"
+        Direction for tail probability interpretation. When "increase" or
+        "decrease", the function auto-detects the actual effect sign and
+        adjusts the probability accordingly.
+    cumulative : bool, default=True
+        Whether cumulative effects were computed
+    relative : bool, default=True
+        Whether relative effects were computed
+    prefix : str, default="Post-period"
+        Prefix describing the analysis window
+    observed_avg : float, optional
+        Average observed response in the analysis window
+    counterfactual_avg : float, optional
+        Average counterfactual prediction in the analysis window
+    observed_cum : float, optional
+        Cumulative observed response in the analysis window
+    counterfactual_cum : float, optional
+        Cumulative counterfactual prediction in the analysis window
+    experiment_type : str, optional
+        Type of experiment ("its", "sc", "piecewise_its") for tailored
+        assumptions text
+
+    Returns
+    -------
+    str
+        Detailed multi-paragraph narrative report
+    """
     hdi_pct = int((1 - alpha) * 100)
 
     # Format window string
@@ -966,63 +1028,350 @@ def _generate_prose(
     else:
         window_str = "post-period"
 
-    # Average effect prose
+    # Format numbers
+    def fmt_num(x, decimals=2):
+        return f"{x:.{decimals}f}"
+
+    # Extract statistics
     avg_mean = stats["avg"]["mean"]
     avg_lower = stats["avg"]["hdi_lower"]
     avg_upper = stats["avg"]["hdi_upper"]
+
+    # Direction-specific probability with auto-detection of effect sign.
+    # When the user requests direction="increase" but the effect is negative
+    # (or vice versa), we flip to the correct tail so the prose is coherent.
+    if direction == "two-sided":
+        p_val = stats["avg"].get("prob_of_effect", 0.0)
+        direction_text = "effect"
+    else:
+        p_gt_0 = stats["avg"].get("p_gt_0", None)
+        p_lt_0 = stats["avg"].get("p_lt_0", None)
+
+        if avg_mean >= 0:
+            if p_gt_0 is not None:
+                p_val = p_gt_0
+            elif p_lt_0 is not None:
+                p_val = 1.0 - p_lt_0
+            else:
+                p_val = 0.0
+            direction_text = "increase"
+        else:
+            if p_lt_0 is not None:
+                p_val = p_lt_0
+            elif p_gt_0 is not None:
+                p_val = 1.0 - p_gt_0
+            else:
+                p_val = 0.0
+            direction_text = "decrease"
+
+    # Paragraph 1: Observed vs counterfactual (average)
+    paragraphs = []
+
+    if observed_avg is not None and counterfactual_avg is not None:
+        # Counterfactual interval: since effect = observed - counterfactual,
+        # counterfactual = observed - effect, so the HDI of the counterfactual
+        # is [observed - effect_upper, observed - effect_lower].
+        cf_interval_lower = observed_avg - avg_upper
+        cf_interval_upper = observed_avg - avg_lower
+
+        para1 = (
+            f"During the {prefix} ({window_str}), the response variable had "
+            f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
+            f"absence of an intervention, we would have expected an average response of "
+            f"{fmt_num(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
+            f"prediction is [{fmt_num(cf_interval_lower)}, "
+            f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
+            f"from the observed response yields an estimate of the causal effect the "
+            f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
+            f"with a {hdi_pct}% interval of [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]."
+        )
+    else:
+        para1 = (
+            f"During the {prefix} ({window_str}), the estimated average causal "
+            f"effect of the intervention is {fmt_num(avg_mean)} "
+            f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"This represents the difference between the observed response and the "
+            f"counterfactual prediction of what would have occurred without the intervention."
+        )
+    paragraphs.append(para1)
+
+    # Paragraph 2: Cumulative effect (if applicable)
+    if cumulative and "cum" in stats:
+        cum_mean = stats["cum"]["mean"]
+        cum_lower = stats["cum"]["hdi_lower"]
+        cum_upper = stats["cum"]["hdi_upper"]
+
+        if observed_cum is not None and counterfactual_cum is not None:
+            cum_cf_lower = observed_cum - cum_upper
+            cum_cf_upper = observed_cum - cum_lower
+
+            para2 = (
+                f"Summing up the individual data points during the {prefix}, "
+                f"the response variable had an overall value of {fmt_num(observed_cum)}. "
+                f"By contrast, had the intervention not taken place, we would have expected "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_pct}% interval of this "
+                f"prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
+            )
+        else:
+            para2 = (
+                f"The cumulative effect over the {prefix} "
+                f"was {fmt_num(cum_mean)} ({hdi_pct}% HDI [{fmt_num(cum_lower)}, "
+                f"{fmt_num(cum_upper)}])."
+            )
+        paragraphs.append(para2)
+
+    # Paragraph 3: Posterior summary
+    hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
+
+    credibility_parts = []
+    if hdi_excludes_zero:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] does not include zero."
+        )
+    else:
+        credibility_parts.append(
+            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] includes zero."
+        )
+
+    article = "an" if direction_text[0].lower() in "aeiou" else "a"
+    credibility_parts.append(
+        f"The posterior probability of {article} {direction_text} is {fmt_num(p_val, 3)}."
+    )
+
+    if "p_rope" in stats["avg"]:
+        p_rope = stats["avg"]["p_rope"]
+        credibility_parts.append(
+            f"The probability that the {direction_text} exceeds the minimum effect "
+            f"size threshold is {fmt_num(p_rope, 3)}."
+        )
+
+    if relative and "relative_mean" in stats["avg"]:
+        rel_mean = stats["avg"]["relative_mean"]
+        rel_lower = stats["avg"]["relative_hdi_lower"]
+        rel_upper = stats["avg"]["relative_hdi_upper"]
+        credibility_parts.append(
+            f"Relative to the counterfactual, the effect represents a "
+            f"{fmt_num(rel_mean)}% change ({hdi_pct}% HDI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_upper)}%])."
+        )
+
+    para3 = " ".join(credibility_parts)
+    paragraphs.append(para3)
+
+    # Paragraph 4: Assumptions and guidance
+    para4 = _assumptions_text(experiment_type)
+    para4 += (
+        "We recommend inspecting model fit, examining pre-intervention trends, "
+        "and conducting sensitivity analyses (e.g., placebo tests) to support "
+        "any causal conclusions drawn from this analysis."
+    )
+    paragraphs.append(para4)
+
+    return "\n\n".join(paragraphs)
+
+
+def _assumptions_text(experiment_type: str | None = None) -> str:
+    """Return the assumptions preamble tailored to the experiment type.
+
+    Parameters
+    ----------
+    experiment_type : str, optional
+        One of "its", "sc", "piecewise_its", or None for a generic default.
+
+    Returns
+    -------
+    str
+        Assumptions preamble (ends with a trailing space for appending guidance).
+    """
+    if experiment_type == "its":
+        return (
+            "This analysis assumes that the relationship between the time-based "
+            "predictors and the response observed during the pre-intervention period "
+            "remains stable throughout the post-intervention period. If the formula "
+            "includes external covariates, it further assumes they were not themselves "
+            "affected by the intervention. "
+        )
+    elif experiment_type == "sc":
+        return (
+            "This analysis assumes that the control units used to construct the "
+            "synthetic counterfactual were not themselves affected by the intervention, "
+            "and that the pre-treatment relationship between control and treated units "
+            "remains stable throughout the post-treatment period. "
+        )
+    else:
+        return (
+            "This analysis assumes that the covariates used to construct the "
+            "counterfactual were not themselves affected by the intervention. It also "
+            "assumes that the relationship between the covariates and the response "
+            "observed during the pre-intervention period remains stable throughout "
+            "the post-intervention period. "
+        )
+
+
+def _generate_prose_detailed_ols(
+    stats,
+    window_coords,
+    alpha=0.05,
+    cumulative=True,
+    relative=True,
+    prefix="Post-period",
+    observed_avg: float | None = None,
+    counterfactual_avg: float | None = None,
+    observed_cum: float | None = None,
+    counterfactual_cum: float | None = None,
+    experiment_type: str | None = None,
+):
+    """Generate detailed multi-paragraph narrative report for OLS models.
+
+    This function produces a comprehensive plain-language interpretation of the
+    causal effect from OLS models, including observed vs counterfactual values,
+    statistical significance assessment, assumptions, and guidance on interpretation.
+
+    Parameters
+    ----------
+    stats : dict
+        Statistics dictionary from _compute_statistics_ols()
+    window_coords : pd.Index
+        Window coordinates for the analysis period
+    alpha : float, default=0.05
+        Significance level for CI interval
+    cumulative : bool, default=True
+        Whether cumulative effects were computed
+    relative : bool, default=True
+        Whether relative effects were computed
+    prefix : str, default="Post-period"
+        Prefix describing the analysis window
+    observed_avg : float, optional
+        Average observed response in the analysis window
+    counterfactual_avg : float, optional
+        Average counterfactual prediction in the analysis window
+    observed_cum : float, optional
+        Cumulative observed response in the analysis window
+    counterfactual_cum : float, optional
+        Cumulative counterfactual prediction in the analysis window
+    experiment_type : str, optional
+        Type of experiment ("its", "sc", "piecewise_its") for tailored
+        assumptions text
+
+    Returns
+    -------
+    str
+        Detailed multi-paragraph narrative report
+    """
+    ci_pct = int((1 - alpha) * 100)
+
+    # Format window string
+    if len(window_coords) > 0:
+        start_str = str(window_coords[0])
+        end_str = str(window_coords[-1])
+        window_str = f"{start_str} to {end_str}"
+    else:
+        window_str = "post-period"
 
     # Format numbers
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
 
-    # Tail probability text
-    if direction == "increase":
-        p_val = stats["avg"].get("p_gt_0", 0.0)
-        direction_text = "increase"
-    elif direction == "decrease":
-        p_val = stats["avg"].get("p_lt_0", 0.0)
-        direction_text = "decrease"
-    else:  # two-sided
-        p_val = stats["avg"].get("prob_of_effect", 0.0)
-        direction_text = "effect"
+    # Extract statistics
+    avg_mean = stats["avg"]["mean"]
+    avg_lower = stats["avg"]["ci_lower"]
+    avg_upper = stats["avg"]["ci_upper"]
+    p_val = stats["avg"]["p_value"]
 
-    prose_parts = [
-        f"{prefix} ({window_str}), the average effect was {fmt_num(avg_mean)} "
-        f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]), "
-        f"with a posterior probability of an {direction_text} of {fmt_num(p_val, 3)}."
-    ]
+    # Paragraph 1: Average effect description
+    paragraphs = []
 
-    # Cumulative effect prose
-    if cumulative:
+    if observed_avg is not None and counterfactual_avg is not None:
+        cf_interval_lower = observed_avg - avg_upper
+        cf_interval_upper = observed_avg - avg_lower
+
+        para1 = (
+            f"During the {prefix} ({window_str}), the response variable had "
+            f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
+            f"absence of an intervention, we would have expected an average response of "
+            f"{fmt_num(counterfactual_avg)}. The {ci_pct}% confidence interval of this "
+            f"counterfactual prediction is [{fmt_num(cf_interval_lower)}, "
+            f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
+            f"from the observed response yields an estimate of the causal effect the "
+            f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
+            f"with a {ci_pct}% confidence interval of [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}]."
+        )
+    else:
+        para1 = (
+            f"During the {prefix} ({window_str}), the estimated average causal "
+            f"effect of the intervention is {fmt_num(avg_mean)} "
+            f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"This represents the difference between the observed response and the "
+            f"counterfactual prediction of what would have occurred without the intervention."
+        )
+    paragraphs.append(para1)
+
+    # Paragraph 2: Cumulative effect (if applicable)
+    if cumulative and "cum" in stats:
         cum_mean = stats["cum"]["mean"]
-        cum_lower = stats["cum"]["hdi_lower"]
-        cum_upper = stats["cum"]["hdi_upper"]
+        cum_lower = stats["cum"]["ci_lower"]
+        cum_upper = stats["cum"]["ci_upper"]
 
-        if direction == "increase":
-            cum_p_val = stats["cum"].get("p_gt_0", 0.0)
-        elif direction == "decrease":
-            cum_p_val = stats["cum"].get("p_lt_0", 0.0)
-        else:  # two-sided
-            cum_p_val = stats["cum"].get("prob_of_effect", 0.0)
+        if observed_cum is not None and counterfactual_cum is not None:
+            cum_cf_lower = observed_cum - cum_upper
+            cum_cf_upper = observed_cum - cum_lower
 
-        prose_parts.append(
-            f"The cumulative effect was {fmt_num(cum_mean)} "
-            f"({hdi_pct}% HDI [{fmt_num(cum_lower)}, {fmt_num(cum_upper)}]); "
-            f"probability of an {direction_text} {fmt_num(cum_p_val, 3)}."
+            para2 = (
+                f"Summing up the individual data points during the {prefix}, "
+                f"the response variable had an overall value of {fmt_num(observed_cum)}. "
+                f"By contrast, had the intervention not taken place, we would have expected "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_pct}% confidence interval "
+                f"of this prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
+            )
+        else:
+            para2 = (
+                f"The cumulative effect over the {prefix} "
+                f"was {fmt_num(cum_mean)} ({ci_pct}% CI [{fmt_num(cum_lower)}, "
+                f"{fmt_num(cum_upper)}])."
+            )
+        paragraphs.append(para2)
+
+    # Paragraph 3: Statistical summary
+    ci_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
+
+    significance_parts = []
+    if ci_excludes_zero:
+        significance_parts.append(
+            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] does not include zero (p-value {fmt_num(p_val, 3)})."
+        )
+    else:
+        significance_parts.append(
+            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"{fmt_num(avg_upper)}] includes zero (p-value {fmt_num(p_val, 3)})."
         )
 
-    # Relative effect prose
     if relative and "relative_mean" in stats["avg"]:
         rel_mean = stats["avg"]["relative_mean"]
-        rel_lower = stats["avg"]["relative_hdi_lower"]
-        rel_upper = stats["avg"]["relative_hdi_upper"]
-
-        prose_parts.append(
-            f"Relative to the counterfactual, this equals {fmt_num(rel_mean)}% on average "
-            f"({hdi_pct}% HDI [{fmt_num(rel_lower)}%, {fmt_num(rel_upper)}%])."
+        rel_lower = stats["avg"]["relative_ci_lower"]
+        rel_upper = stats["avg"]["relative_ci_upper"]
+        significance_parts.append(
+            f"Relative to the counterfactual, the effect represents a "
+            f"{fmt_num(rel_mean)}% change ({ci_pct}% CI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_upper)}%])."
         )
 
-    return " ".join(prose_parts)
+    para3 = " ".join(significance_parts)
+    paragraphs.append(para3)
+
+    # Paragraph 4: Assumptions and guidance
+    para4 = _assumptions_text(experiment_type)
+    para4 += (
+        "We recommend inspecting model fit, examining pre-intervention trends, "
+        "and conducting sensitivity analyses (e.g., placebo tests) to support "
+        "any causal conclusions drawn from this analysis."
+    )
+    paragraphs.append(para4)
+
+    return "\n\n".join(paragraphs)
 
 
 def _compute_statistics_ols(
@@ -1142,10 +1491,12 @@ def _compute_statistics_did_ols(
 
     # Calculate standard error from model residuals
     # Get fitted values and residuals
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the interaction term coefficient index
@@ -1161,8 +1512,7 @@ def _compute_statistics_did_ols(
     if coeff_idx is None:
         raise ValueError(f"Could not find interaction term {interaction_term} in model")
 
-    # Calculate standard error for this coefficient
-    X = result.X
+    X = X_da
     try:
         # Try to get X as numpy array
         if hasattr(X, "values"):
@@ -1236,68 +1586,6 @@ def _generate_table_ols(stats, cumulative=True, relative=True):
     return df
 
 
-def _generate_prose_ols(
-    stats,
-    window_coords,
-    alpha=0.05,
-    cumulative=True,
-    relative=True,
-    prefix="Post-period",
-):
-    """Generate prose summary for OLS models."""
-    ci_pct = int((1 - alpha) * 100)
-
-    # Format window string
-    if len(window_coords) > 0:
-        start_str = str(window_coords[0])
-        end_str = str(window_coords[-1])
-        window_str = f"{start_str} to {end_str}"
-    else:
-        window_str = "post-period"
-
-    # Format numbers
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    # Average effect prose
-    avg_mean = stats["avg"]["mean"]
-    avg_lower = stats["avg"]["ci_lower"]
-    avg_upper = stats["avg"]["ci_upper"]
-    p_val = stats["avg"]["p_value"]
-
-    prose_parts = [
-        f"{prefix} ({window_str}), the average effect was {fmt_num(avg_mean)} "
-        f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]), "
-        f"with a p-value of {fmt_num(p_val, 3)}."
-    ]
-
-    # Cumulative effect prose
-    if cumulative:
-        cum_mean = stats["cum"]["mean"]
-        cum_lower = stats["cum"]["ci_lower"]
-        cum_upper = stats["cum"]["ci_upper"]
-        cum_p_val = stats["cum"]["p_value"]
-
-        prose_parts.append(
-            f"The cumulative effect was {fmt_num(cum_mean)} "
-            f"({ci_pct}% CI [{fmt_num(cum_lower)}, {fmt_num(cum_upper)}]); "
-            f"p-value {fmt_num(cum_p_val, 3)}."
-        )
-
-    # Relative effect prose
-    if relative and "relative_mean" in stats["avg"]:
-        rel_mean = stats["avg"]["relative_mean"]
-        rel_lower = stats["avg"]["relative_ci_lower"]
-        rel_upper = stats["avg"]["relative_ci_upper"]
-
-        prose_parts.append(
-            f"Relative to the counterfactual, this equals {fmt_num(rel_mean)}% on average "
-            f"({ci_pct}% CI [{fmt_num(rel_lower)}%, {fmt_num(rel_upper)}%])."
-        )
-
-    return " ".join(prose_parts)
-
-
 def _generate_table_did_ols(stats):
     """Generate summary table for DiD with OLS model."""
     row = {
@@ -1336,10 +1624,12 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     discontinuity = result.discontinuity_at_threshold  # scalar
 
     # Calculate standard error from model
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the treated coefficient index
@@ -1350,11 +1640,9 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
             break
 
     if coeff_idx is None:
-        # Fallback: use simple approximation
         se = np.std(residuals) / np.sqrt(n)
     else:
-        # Calculate standard error for this coefficient
-        X = result.X
+        X = X_da
         try:
             if hasattr(X, "values"):
                 X = X.values
@@ -1449,68 +1737,11 @@ def _effect_summary_rkink(
             direction=direction,
         )
     else:
-        # OLS model: Not currently supported for RegressionKink, but structure is here
-        stats = _compute_statistics_rkink_ols(result, alpha=alpha)
-        table = _generate_table_rkink_ols(stats)
-        text = _generate_prose_rkink_ols(stats, alpha=alpha)
+        raise NotImplementedError(
+            "OLS models are not currently supported for Regression Kink experiments. "
+            "Please use a PyMC model for full statistical inference. "
+            "If OLS support is needed, see _compute_statistics_rd_ols() "
+            "for the implementation pattern."
+        )
 
     return EffectSummary(table=table, text=text)
-
-
-def _compute_statistics_rkink_ols(result, alpha=0.05):
-    """Compute statistics for Regression Kink scalar effect with OLS model.
-
-    TODO: Implement OLS support for Regression Kink
-    - Extract gradient change coefficient from model
-    - Calculate standard error from regression
-    - Compute confidence intervals and p-values
-    - Follow pattern from _compute_statistics_rd_ols()
-    """
-    raise NotImplementedError(
-        "OLS models are not currently supported for Regression Kink experiments. "
-        "Please use a PyMC model for full statistical inference. "
-        "If OLS support is needed, see _compute_statistics_rd_ols() for implementation pattern."
-    )
-
-
-def _generate_table_rkink_ols(stats):
-    """Generate DataFrame table for Regression Kink with OLS model.
-
-    TODO: This is a placeholder implementation.
-    Will be used when _compute_statistics_rkink_ols() is implemented.
-    """
-    # Placeholder for future OLS support
-    data = {
-        "metric": ["gradient_change"],
-        "mean": [stats["mean"]],
-        "CI_lower": [stats["ci_lower"]],
-        "CI_upper": [stats["ci_upper"]],
-        "p_value": [stats["p_value"]],
-    }
-    return pd.DataFrame(data)
-
-
-def _generate_prose_rkink_ols(stats, alpha=0.05):
-    """Generate prose summary for Regression Kink with OLS model.
-
-    TODO: This is a placeholder implementation.
-    Will be used when _compute_statistics_rkink_ols() is implemented.
-    """
-    # Placeholder for future OLS support
-    ci_pct = int((1 - alpha) * 100)
-
-    def fmt_num(x, decimals=2):
-        return f"{x:.{decimals}f}"
-
-    mean = stats["mean"]
-    lower = stats["ci_lower"]
-    upper = stats["ci_upper"]
-    p_val = stats["p_value"]
-
-    prose = (
-        f"The change in gradient at the kink point was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
-        f"with a p-value of {fmt_num(p_val, 3)}."
-    )
-
-    return prose

@@ -26,13 +26,15 @@ from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
+from causalpy.constants import HDI_PROB
+
 
 def plot_xY(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
     ax: plt.Axes,
     plot_hdi_kwargs: dict[str, Any] | None = None,
-    hdi_prob: float = 0.94,
+    hdi_prob: float = HDI_PROB,
     label: str | None = None,
 ) -> tuple[Line2D, PolyCollection]:
     """Plot HDI intervals.
@@ -48,7 +50,8 @@ def plot_xY(
     plot_hdi_kwargs : dict, optional
         Dictionary of keyword arguments passed to ax.plot().
     hdi_prob : float, optional
-        The size of the HDI. Default is 0.94.
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
     label : str, optional
         The plot label.
 
@@ -93,7 +96,7 @@ def plot_xY(
 
 def get_hdi_to_df(
     x: xr.DataArray,
-    hdi_prob: float = 0.94,
+    hdi_prob: float = HDI_PROB,
 ) -> pd.DataFrame:
     """Calculate and recover HDI intervals.
 
@@ -102,7 +105,8 @@ def get_hdi_to_df(
     x : xr.DataArray
         Xarray data array.
     hdi_prob : float, optional
-        The size of the HDI. Default is 0.94.
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
     Returns
     -------

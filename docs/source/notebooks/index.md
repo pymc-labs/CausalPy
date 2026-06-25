@@ -10,12 +10,20 @@ ancova_pymc.ipynb
 :::
 
 :::{toctree}
+:caption: Panel Fixed Effects
+:maxdepth: 1
+
+panel_fixed_effects.ipynb
+:::
+
+:::{toctree}
 :caption: Synthetic Control
 :maxdepth: 1
 
 sc_skl.ipynb
 sc_pymc.ipynb
 sc_pymc_brexit.ipynb
+sdid_pymc.ipynb
 its_causalpy_vs_causalimpact.ipynb
 :::
 
@@ -46,6 +54,7 @@ its_pymc.ipynb
 its_post_intervention_analysis.ipynb
 its_covid.ipynb
 its_lift_test.ipynb
+its_placebo_in_time_analysis.ipynb
 :::
 
 :::{toctree}
@@ -53,6 +62,13 @@ its_lift_test.ipynb
 :maxdepth: 1
 
 its_pymc_comparative.ipynb
+:::
+
+:::{toctree}
+:caption: Piecewise Interrupted Time Series
+:maxdepth: 1
+
+piecewise_its_pymc.ipynb
 :::
 
 ## Cross-sectional methods
@@ -64,6 +80,8 @@ its_pymc_comparative.ipynb
 rd_skl.ipynb
 rd_pymc.ipynb
 rd_pymc_drinking.ipynb
+rd_skl_drinking.ipynb
+rd_donut_pymc.ipynb
 :::
 
 :::{toctree}
@@ -88,4 +106,27 @@ iv_vs_priors.ipynb
 
 inv_prop_pymc.ipynb
 inv_prop_latent.ipynb
+:::
+
+## Workflow
+
+:::{toctree}
+:caption: Pipeline
+:maxdepth: 1
+
+pipeline_workflow.ipynb
+:::
+
+:::{toctree}
+:caption: Sensitivity Checks
+:maxdepth: 1
+
+sensitivity_checks.md
+:::
+
+:::{toctree}
+:caption: Reporting
+:maxdepth: 1
+
+report_demo.ipynb
 :::
