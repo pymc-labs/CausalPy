@@ -24,6 +24,7 @@ sc_skl.ipynb
 sc_pymc.ipynb
 sc_pymc_brexit.ipynb
 sdid_pymc.ipynb
+its_causalpy_vs_causalimpact.ipynb
 :::
 
 :::{toctree}
