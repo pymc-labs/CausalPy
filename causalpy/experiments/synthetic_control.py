@@ -60,10 +60,10 @@ class SyntheticControl(BaseExperiment):
         If ``True`` (default) and the model is a ``WeightedSumFitter`` whose
         ``y_hat`` prior has not been explicitly overridden, the
         ``sigma ~ HalfNormal(1)`` default prior is replaced by
-        ``sigma ~ Exponential(2/s)`` where *s* is the standard deviation of the
-        pre-treatment treated-unit data. This keeps the prior well-calibrated
-        regardless of the outcome's scale. Set to ``False`` to use the original
-        ``HalfNormal(1)`` default.
+        ``sigma ~ Exponential(2/s)``. The scale is computed per treated unit,
+        with *s* the standard deviation of that unit's pre-treatment data, so
+        units on different scales are each calibrated separately. Set to
+        ``False`` to use the original ``HalfNormal(1)`` default.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
@@ -302,10 +302,22 @@ class SyntheticControl(BaseExperiment):
                 or "y_hat" not in self.model._user_priors
             )
         ):
-            y_std = float(self.pre_design["treated"].std(dim="obs_ind", ddof=1).mean())
+            # Per-unit pre-treatment standard deviation of the treated series, so
+            # each treated unit gets a sigma prior scaled to its own outcome.
+            y_std = self.pre_design["treated"].std(dim="obs_ind", ddof=1)
+            if not np.all(np.isfinite(y_std.values)) or np.any(y_std.values == 0):
+                raise ValueError(
+                    "Cannot auto-scale the sigma prior: the pre-treatment standard "
+                    "deviation of one or more treated units is zero or undefined "
+                    "(e.g. a constant pre-treatment series, or only a single "
+                    "pre-treatment observation). Pass auto_scale_sigma=False or "
+                    "supply an explicit y_hat prior on the model."
+                )
             self.model.priors["y_hat"] = Prior(
                 "Normal",
-                sigma=Prior("Exponential", lam=2 / y_std, dims=["treated_units"]),
+                sigma=Prior(
+                    "Exponential", lam=(2 / y_std).values, dims=["treated_units"]
+                ),
                 dims=["obs_ind", "treated_units"],
             )
 
