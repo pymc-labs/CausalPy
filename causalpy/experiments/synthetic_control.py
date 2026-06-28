@@ -29,7 +29,11 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
-from causalpy.pymc_models import PyMCModel, WeightedSumFitter
+from causalpy.pymc_models import (
+    PyMCModel,
+    SoftmaxWeightedSumFitter,
+    WeightedSumFitter,
+)
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
 
@@ -57,13 +61,14 @@ class SyntheticControl(BaseExperiment):
         threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
         negatively correlated donors).
     auto_scale_sigma : bool, default True
-        If ``True`` (default) and the model is a ``WeightedSumFitter`` whose
-        ``y_hat`` prior has not been explicitly overridden, the
-        ``sigma ~ HalfNormal(1)`` default prior is replaced by
-        ``sigma ~ Exponential(2/s)``. The scale is computed per treated unit,
-        with *s* the standard deviation of that unit's pre-treatment data, so
-        units on different scales are each calibrated separately. Set to
-        ``False`` to use the original ``HalfNormal(1)`` default.
+        If ``True`` (default) and the model is a ``WeightedSumFitter`` or
+        ``SoftmaxWeightedSumFitter`` whose ``y_hat`` prior has not been
+        explicitly overridden, the ``sigma ~ HalfNormal(1)`` default prior is
+        replaced by ``sigma ~ Exponential(2/s)``. The scale is computed per
+        treated unit, with *s* the standard deviation of that unit's
+        pre-treatment data, so units on different scales are each calibrated
+        separately. Set to ``False`` to use the original ``HalfNormal(1)``
+        default.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
@@ -296,7 +301,7 @@ class SyntheticControl(BaseExperiment):
         # Auto-scale the sigma prior if the user didn't customize it
         if (
             self.auto_scale_sigma
-            and isinstance(self.model, WeightedSumFitter)
+            and isinstance(self.model, (WeightedSumFitter, SoftmaxWeightedSumFitter))
             and (
                 self.model._user_priors is None
                 or "y_hat" not in self.model._user_priors

@@ -27,9 +27,13 @@ import pytest
 from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import WeightedSumFitter
+from causalpy.pymc_models import SoftmaxWeightedSumFitter, WeightedSumFitter
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
+
+# Both weighted-sum fitters share the same per-treated-unit ``y_hat`` sigma prior,
+# so auto-scaling must behave identically for each.
+FITTERS = [WeightedSumFitter, SoftmaxWeightedSumFitter]
 
 
 def _make_data(treated_scales, n=60, treatment_time=45, seed=42):
@@ -62,8 +66,8 @@ def _sigma_prior(result):
     return result.model.priors["y_hat"].parameters["sigma"]
 
 
-def _fitter():
-    return WeightedSumFitter(sample_kwargs={**sample_kwargs, "random_seed": 1})
+def _fitter(cls=WeightedSumFitter, **kwargs):
+    return cls(sample_kwargs={**sample_kwargs, "random_seed": 1}, **kwargs)
 
 
 def _expected_lam(df, treatment_time, treated_units):
@@ -75,11 +79,18 @@ def _expected_lam(df, treatment_time, treated_units):
 
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
-def test_auto_scale_sets_exponential_prior_matching_2_over_s(mock_pymc_sample):
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_auto_scale_sets_exponential_prior_matching_2_over_s(
+    mock_pymc_sample, fitter_cls
+):
     """After fit, the y_hat sigma prior is Exponential with lam = 2/s."""
     df, tt, treated = _make_data([1.0])
     result = cp.SyntheticControl(
-        df, tt, control_units=["a", "b", "c"], treated_units=treated, model=_fitter()
+        df,
+        tt,
+        control_units=["a", "b", "c"],
+        treated_units=treated,
+        model=_fitter(fitter_cls),
     )
     sigma = _sigma_prior(result)
     assert sigma.distribution == "Exponential"
@@ -90,7 +101,8 @@ def test_auto_scale_sets_exponential_prior_matching_2_over_s(mock_pymc_sample):
 
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
-def test_auto_scale_false_preserves_halfnormal_default(mock_pymc_sample):
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_auto_scale_false_preserves_halfnormal_default(mock_pymc_sample, fitter_cls):
     """auto_scale_sigma=False leaves the HalfNormal(1) default untouched."""
     df, tt, treated = _make_data([1.0])
     result = cp.SyntheticControl(
@@ -98,7 +110,7 @@ def test_auto_scale_false_preserves_halfnormal_default(mock_pymc_sample):
         tt,
         control_units=["a", "b", "c"],
         treated_units=treated,
-        model=_fitter(),
+        model=_fitter(fitter_cls),
         auto_scale_sigma=False,
     )
     sigma = _sigma_prior(result)
@@ -108,7 +120,8 @@ def test_auto_scale_false_preserves_halfnormal_default(mock_pymc_sample):
 
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
-def test_user_supplied_y_hat_prior_is_respected(mock_pymc_sample):
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_user_supplied_y_hat_prior_is_respected(mock_pymc_sample, fitter_cls):
     """An explicit y_hat prior disables auto-scaling (guard not triggered)."""
     df, tt, treated = _make_data([1.0])
     custom = Prior(
@@ -116,9 +129,7 @@ def test_user_supplied_y_hat_prior_is_respected(mock_pymc_sample):
         sigma=Prior("HalfNormal", sigma=42, dims=["treated_units"]),
         dims=["obs_ind", "treated_units"],
     )
-    model = WeightedSumFitter(
-        sample_kwargs={**sample_kwargs, "random_seed": 1}, priors={"y_hat": custom}
-    )
+    model = _fitter(fitter_cls, priors={"y_hat": custom})
     result = cp.SyntheticControl(
         df, tt, control_units=["a", "b", "c"], treated_units=treated, model=model
     )
@@ -130,12 +141,17 @@ def test_user_supplied_y_hat_prior_is_respected(mock_pymc_sample):
 
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
-def test_multiple_treated_units_get_per_unit_lam(mock_pymc_sample):
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_multiple_treated_units_get_per_unit_lam(mock_pymc_sample, fitter_cls):
     """With multiple treated units on different scales, lam is a per-unit vector
     of 2/s_i — not a single broadcast scalar."""
     df, tt, treated = _make_data([1.0, 100.0])  # two units, ~100x apart in scale
     result = cp.SyntheticControl(
-        df, tt, control_units=["a", "b", "c"], treated_units=treated, model=_fitter()
+        df,
+        tt,
+        control_units=["a", "b", "c"],
+        treated_units=treated,
+        model=_fitter(fitter_cls),
     )
     lam = np.asarray(_sigma_prior(result).parameters["lam"])
     assert lam.shape == (2,)
@@ -147,7 +163,8 @@ def test_multiple_treated_units_get_per_unit_lam(mock_pymc_sample):
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_constant_pre_treatment_series_raises(mock_pymc_sample):
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_constant_pre_treatment_series_raises(mock_pymc_sample, fitter_cls):
     """A zero/undefined per-unit std raises a clear error rather than producing
     an infinite Exponential rate."""
     df, tt, treated = _make_data([1.0, 1.0])
@@ -158,5 +175,5 @@ def test_constant_pre_treatment_series_raises(mock_pymc_sample):
             tt,
             control_units=["a", "b", "c"],
             treated_units=treated,
-            model=_fitter(),
+            model=_fitter(fitter_cls),
         )
