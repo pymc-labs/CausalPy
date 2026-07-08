@@ -268,6 +268,21 @@ def fitted_staggered_ols():
     )
 
 
+@pytest.fixture(scope="module")
+def fitted_sdid():
+    """Fit a SyntheticDifferenceInDifferences once for reuse across wiring tests."""
+    df = cp.load_data("sc")
+    return cp.SyntheticDifferenceInDifferences(
+        df,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-class wiring tests. Each verifies that user-supplied ``hdi_prob`` reaches
 # the underlying HDI primitives, and that the canonical default is forwarded
@@ -474,6 +489,28 @@ def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
         "Expected a FutureWarning when hdi_prob is passed to plot()"
     )
     _assert_threads(recorded, 0.75)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "fitted_did",
+        "fitted_rd",
+        "fitted_rkink",
+        "fitted_prepost",
+        "fitted_piecewise",
+        "fitted_sc",
+        "fitted_sdid",
+    ],
+)
+def test_deprecated_hdi_prob_alias_emits_futurewarning(
+    mock_pymc_sample, request, fixture_name
+):
+    """hdi_prob deprecated alias emits FutureWarning on all migrated experiment classes."""
+    fitted = request.getfixturevalue(fixture_name)
+    with pytest.warns(FutureWarning, match="hdi_prob is deprecated"):
+        fitted.plot(hdi_prob=0.75)
 
 
 # ---------------------------------------------------------------------------

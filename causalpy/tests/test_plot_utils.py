@@ -532,3 +532,23 @@ def test_plot_xY_ribbon_fill_kwargs_eti(synthetic_posterior_data):
     assert isinstance(h_line, plt.Line2D)
     assert h_patch is not None
     plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_warns_ci_kind_ignored_for_non_ribbon(synthetic_posterior_data):
+    """ci_kind is ignored for histogram/spaghetti; a UserWarning must be raised."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="ci_kind.*ignored"):
+        plot_xY(x, Y, ax=ax, kind="histogram", ci_kind="eti")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_xY_warns_num_samples_ignored_for_non_spaghetti(synthetic_posterior_data):
+    """num_samples is ignored for ribbon/histogram; a UserWarning must be raised."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="num_samples.*ignored"):
+        plot_xY(x, Y, ax=ax, kind="ribbon", num_samples=100)
+    plt.close(fig)
