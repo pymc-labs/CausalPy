@@ -221,6 +221,38 @@ We recommend that your contribution complies with the following guidelines befor
 
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 
+### Adding a new example notebook
+
+When adding a new example notebook to the documentation gallery:
+
+1. **Place the notebook** in `docs/source/notebooks/` following the naming convention `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`).
+
+2. **Ensure the notebook has at least one plot/figure** in its outputs. The gallery generation script (`scripts/generate_gallery.py`) will automatically extract the first PNG image from the notebook outputs to create a thumbnail. If the notebook has no outputs, the script will attempt to execute it to generate the thumbnail.
+
+3. **Add the notebook to `docs/source/notebooks/gallery.yaml`** under the appropriate category:
+   - `title`: card title for the gallery grid
+   - `notebook`: filename stem without extension
+   - optional `thumbnail: false` when there is no plot (e.g. `sensitivity_checks.md`)
+   - optional category `intro` text when adding a new method section
+
+4. **Regenerate the gallery** (updates `index.md`, sidebar toctrees, and thumbnails):
+
+   ```bash
+   make gallery
+   ```
+
+   Thumbnails are gitignored (`docs/source/_static/thumbnails/`) and are also generated during `make html` / Read the Docs builds.
+
+5. **Build and test the documentation** to verify the notebook appears correctly in the gallery:
+
+   ```bash
+   make html
+   ```
+
+   Then open `docs/_build/notebooks/index.html` in your browser to see the gallery and confirm the left sidebar lists the new notebook.
+
+**Note**: `gallery.yaml` is the source of truth; `index.md` is generated. The `gallery-in-sync` prek hook enforces that they stay in sync.
+
 - If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
 
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.

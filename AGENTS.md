@@ -54,6 +54,21 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
   - **Issue drafts**: Create issue draft markdown files in `.scratch/issue_summaries/` (untracked).
 - **No hard line wrapping in prose-like text**: Do not hard-wrap lines in any prose context — Markdown files, long comments in code (TOML/YAML/Python/etc.), commit-message bodies, PR descriptions, issue descriptions, or GitHub comments. One paragraph = one line; rely on the viewer/editor to re-wrap. Hard wraps look ragged at different widths, make diffs noisy on every reflow, and mangle when copied or quoted. Code itself, code blocks inside Markdown, ASCII tables, and structured config values are exempt — those need their literal line structure.
 
+### Adding new notebooks to the gallery
+
+When creating a new example notebook:
+
+1. **Place it** in `docs/source/notebooks/` with naming pattern `{method}_{model}.ipynb`
+2. **Include at least one plot** in the notebook outputs (the first PNG image will be used as the thumbnail)
+3. **Add an entry to `docs/source/notebooks/gallery.yaml`** in the appropriate category:
+   - `title`: card title shown in the gallery grid
+   - `notebook`: stem without extension (e.g. `did_pymc`)
+   - `thumbnail: false` for non-notebook pages such as `sensitivity_checks.md`
+4. **Regenerate the gallery index** with `make gallery`. This updates `index.md`, hidden toctrees for the left sidebar, and thumbnails.
+5. **Test locally** with `make html` and check `docs/_build/notebooks/index.html`
+
+**Important**: `gallery.yaml` is the source of truth. `index.md` is generated — do not edit it by hand. The `gallery-in-sync` prek hook fails if `gallery.yaml`, notebooks, and `index.md` drift apart.
+
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)

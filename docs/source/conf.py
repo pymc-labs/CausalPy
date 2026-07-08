@@ -11,11 +11,40 @@
 
 import os
 import sys
+from pathlib import Path
 
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
+
+
+# Generate gallery before building docs
+# This runs after dependencies are installed but before Sphinx processes files
+def generate_gallery():
+    """Generate example gallery from notebooks."""
+    try:
+        # Import here to avoid errors if dependencies aren't available
+        import subprocess
+
+        repo_root = Path(__file__).parent.parent.parent
+        script_path = repo_root / "scripts" / "generate_gallery.py"
+
+        if script_path.exists():
+            result = subprocess.run(
+                [sys.executable, str(script_path)],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                print(f"Warning: Gallery generation failed: {result.stderr}")
+    except Exception as e:
+        print(f"Warning: Could not generate gallery: {e}")
+
+
+# Generate gallery during Sphinx setup
+generate_gallery()
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
@@ -94,6 +123,13 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".codespell"]
 master_doc = "index"
 
+# Suppress warnings for notebooks linked from gallery (not in toctree)
+suppress_warnings = [
+    "toc.not_included",  # Safety net for notebooks linked only from prose elsewhere
+    "bibtex.duplicate_label",  # BibTeX duplicate labels (less critical)
+    "bibtex.duplicate_citation",  # BibTeX duplicate citations (less critical)
+]
+
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
 bibtex_default_style = "alpha"
@@ -156,7 +192,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["custom.css", "gallery.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -169,6 +205,7 @@ html_theme_options = {
     },
     "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
 }
+
 html_context = {
     "github_user": "pymc-labs",
     "github_repo": "CausalPy",
