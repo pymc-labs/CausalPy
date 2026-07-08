@@ -16,7 +16,7 @@ Run only sklearn notebooks:
 
 Exclude PyMC and sklearn notebooks (run others):
 
-    python scripts/run_notebooks/runner.py --exclude-pattern -pymc --exclude-pattern -sklearn
+    python scripts/run_notebooks/runner.py --exclude-pattern pymc --exclude-pattern sklearn
 
 Full execution (no mock, saves outputs in place):
 

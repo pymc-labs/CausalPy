@@ -63,7 +63,7 @@ python scripts/run_notebooks/runner.py --pattern "*-pymc.ipynb"
 python scripts/run_notebooks/runner.py --pattern "*-sklearn.ipynb"
 
 # Exclude PyMC and sklearn notebooks (run others)
-python scripts/run_notebooks/runner.py --exclude-pattern -pymc --exclude-pattern -sklearn
+python scripts/run_notebooks/runner.py --exclude-pattern pymc --exclude-pattern sklearn
 
 # Run notebooks in parallel (requires joblib)
 python scripts/run_notebooks/runner.py --parallel
