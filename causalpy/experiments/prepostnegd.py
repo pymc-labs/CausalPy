@@ -22,12 +22,12 @@ import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
-from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -56,7 +56,7 @@ class PrePostNEGD(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("anova1")
@@ -140,17 +140,16 @@ class PrePostNEGD(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             raise NotImplementedError("Not implemented for OLS model")
-        else:
+        if not self._model_backend.is_bayesian:
             raise ValueError("Model type not recognized")
+
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an

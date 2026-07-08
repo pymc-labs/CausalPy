@@ -30,6 +30,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -46,25 +47,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     counterfactual outcomes for all observations. Treatment effects are computed
     as the difference between observed and predicted outcomes for treated
     observations.
-
-    Assumptions
-    -----------
-    This estimator requires the following identifying assumptions:
-
-    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
-       treated in all subsequent periods. Treatment cannot be reversed or
-       temporarily suspended. This is validated at runtime.
-    2. **Parallel trends**: In the absence of treatment, treated and control
-       units would have followed parallel outcome trajectories.
-    3. **No anticipation**: Units do not change their behavior in anticipation
-       of future treatment.
-    4. **Untreated support at each calendar period**: The time fixed effect
-       :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
-       least one unit is untreated in that period. Without never-treated units,
-       post-treatment effects for the last-treated cohort (and any calendar
-       periods where every unit is already treated) are not identified. CausalPy
-       warns when this condition fails and marks the affected ``ATT(g, t)`` and
-       ``ATT(e)`` cells as non-identified in the output tables.
 
     Parameters
     ----------
@@ -114,6 +96,23 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
+    This estimator requires the following identifying assumptions:
+
+    1. **Absorbing treatment**: Once a unit receives treatment, it must remain
+       treated in all subsequent periods. Treatment cannot be reversed or
+       temporarily suspended. This is validated at runtime.
+    2. **Parallel trends**: In the absence of treatment, treated and control
+       units would have followed parallel outcome trajectories.
+    3. **No anticipation**: Units do not change their behavior in anticipation
+       of future treatment.
+    4. **Untreated support at each calendar period**: The time fixed effect
+       :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
+       least one unit is untreated in that period. Without never-treated units,
+       post-treatment effects for the last-treated cohort (and any calendar
+       periods where every unit is already treated) are not identified. CausalPy
+       warns when this condition fails and marks the affected ``ATT(g, t)`` and
+       ``ATT(e)`` cells as non-identified in the output tables.
+
     **Panel Balance**: This implementation supports both balanced and unbalanced panel
     data. While balanced panels (where each unit is observed in every time period) are
     common in staggered DiD applications, the imputation-based approach of Borusyak et
@@ -122,8 +121,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     Unit and observation counts in the summary output are computed without assuming
     balanced panels.
 
-    Example
-    -------
+    References
+    ----------
+    Borusyak, K., Jaravel, X., & Spiess, J. (2024). Revisiting Event Study Designs:
+    Robust and Efficient Estimation. Review of Economic Studies.
+
+    Examples
+    --------
     >>> import causalpy as cp
     >>> from causalpy.data.simulate_data import generate_staggered_did_data
     >>> df = generate_staggered_did_data(n_units=30, n_time_periods=15, seed=42)
@@ -143,11 +147,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     ...         }
     ...     ),
     ... )  # doctest: +SKIP
-
-    References
-    ----------
-    Borusyak, K., Jaravel, X., & Spiess, J. (2024). Revisiting Event Study Designs:
-    Robust and Efficient Estimation. Review of Economic Studies.
     """
 
     supports_ols = True
@@ -443,50 +442,40 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _fit_model(self) -> None:
         """Fit the model on untreated observations only."""
-        # Convert to xarray for PyMC models
         n_train = self.X_train.shape[0]
-
-        if isinstance(self.model, PyMCModel):
-            X_train_xr = xr.DataArray(
-                self.X_train,
-                dims=["obs_ind", "coeffs"],
-                coords={
-                    "obs_ind": np.arange(n_train),
-                    "coeffs": self.labels,
-                },
-            )
-            y_train_xr = xr.DataArray(
-                self.y_train,
-                dims=["obs_ind", "treated_units"],
-                coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
-            )
-            COORDS = {
-                "coeffs": self.labels,
+        X_train_xr = xr.DataArray(
+            self.X_train,
+            dims=["obs_ind", "coeffs"],
+            coords={
                 "obs_ind": np.arange(n_train),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=X_train_xr, y=y_train_xr, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=self.X_train, y=self.y_train)
-        else:
-            raise ValueError("Model type not recognized")
+                "coeffs": self.labels,
+            },
+        )
+        y_train_xr = xr.DataArray(
+            self.y_train,
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
+        )
+        self._model_backend.fit(
+            X=X_train_xr,
+            y=y_train_xr,
+            coords=build_coords(self.labels, n_train),
+        )
 
     def _predict_counterfactuals(self) -> None:
         """Predict counterfactual outcomes for all observations."""
         n_full = self.X_full.shape[0]
+        X_full_xr = xr.DataArray(
+            self.X_full,
+            dims=["obs_ind", "coeffs"],
+            coords={
+                "obs_ind": np.arange(n_full),
+                "coeffs": self.labels,
+            },
+        )
+        self.y_pred = self._model_backend.predict(X=X_full_xr)
 
-        if isinstance(self.model, PyMCModel):
-            X_full_xr = xr.DataArray(
-                self.X_full,
-                dims=["obs_ind", "coeffs"],
-                coords={
-                    "obs_ind": np.arange(n_full),
-                    "coeffs": self.labels,
-                },
-            )
-            self.y_pred = self.model.predict(X=X_full_xr)
-
-            # Extract posterior mean for y_hat0
+        if self._model_backend.is_bayesian:
             y_hat0_mean = (
                 self.y_pred["posterior_predictive"]
                 .mu.mean(dim=["chain", "draw"])
@@ -494,11 +483,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 .values
             )
             self.data["y_hat0"] = y_hat0_mean
-        elif isinstance(self.model, RegressorMixin):
-            self.y_pred = self.model.predict(self.X_full)
-            self.data["y_hat0"] = np.squeeze(self.y_pred)
         else:
-            raise ValueError("Model type not recognized")
+            self.data["y_hat0"] = np.squeeze(self.y_pred)
 
     def _compute_treatment_effects(self) -> None:
         """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
@@ -537,7 +523,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         is_pre_treatment = self.data["event_time"] < 0
         pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self._aggregate_effects_bayesian(treated_data, pretreatment_data)
         else:
             self._aggregate_effects_ols(treated_data, pretreatment_data)
@@ -1303,7 +1289,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _get_group_time_placebo_data(self) -> pd.DataFrame:
         """Return cohort-time placebo estimates for eventually-treated units."""
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             return self._get_group_time_placebo_data_bayesian()
         return self._get_group_time_placebo_data_ols()
 

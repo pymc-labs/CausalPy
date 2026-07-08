@@ -52,7 +52,7 @@ class InversePropensityWeighting(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("nhefs")
@@ -516,16 +516,6 @@ class InversePropensityWeighting(BaseExperiment):
     ) -> None:
         """Plot the results.
 
-        Notes
-        -----
-        Inverse propensity weighting does not expose a unified ``plot()``
-        view; instead, use the dedicated diagnostics
-        :meth:`plot_ate` (treatment-effect distribution) and
-        :meth:`plot_balance_ecdf` (covariate-balance ECDF). This stub
-        exists so every experiment subclass offers an explicit,
-        kwarg-only ``plot()`` signature
-        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
-
         Parameters
         ----------
         show : bool
@@ -538,6 +528,16 @@ class InversePropensityWeighting(BaseExperiment):
         NotImplementedError
             Always; call :meth:`plot_ate` or :meth:`plot_balance_ecdf`
             instead.
+
+        Notes
+        -----
+        Inverse propensity weighting does not expose a unified ``plot()``
+        view; instead, use the dedicated diagnostics
+        :meth:`plot_ate` (treatment-effect distribution) and
+        :meth:`plot_balance_ecdf` (covariate-balance ECDF). This stub
+        exists so every experiment subclass offers an explicit,
+        kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
         """
         raise NotImplementedError(
             "InversePropensityWeighting does not implement a unified plot(). "

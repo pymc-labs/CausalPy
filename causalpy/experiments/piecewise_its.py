@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -200,24 +201,14 @@ class PiecewiseITS(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
-            COORDS: dict[str, Any] = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=X, y=y.isel(treated_units=0))
-        else:
-            raise ValueError("Model type not recognized")
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
-        self.y_pred = self.model.predict(X=X)
-
-        if isinstance(self.model, PyMCModel):
-            self.score = self.model.score(X=X, y=y)
-        elif isinstance(self.model, RegressorMixin):
-            self.score = self.model.score(X=X, y=y.isel(treated_units=0))
+        self.y_pred = self._model_backend.predict(X=X)
+        self.score = self._model_backend.score(X=X, y=y)
 
         # Compute counterfactual and effects
         self._compute_counterfactual_and_effects()
@@ -324,8 +315,8 @@ class PiecewiseITS(BaseExperiment):
             X_cf[:, idx] = 0
 
         # Compute counterfactual predictions
-        if isinstance(self.model, PyMCModel):
-            self.y_counterfactual = self.model.predict(X=X_cf)
+        if self._model_backend.is_bayesian:
+            self.y_counterfactual = self._model_backend.predict(X=X_cf)
 
             # Extract mu for fitted and counterfactual
             y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
@@ -343,8 +334,8 @@ class PiecewiseITS(BaseExperiment):
             # Cumulative effect
             self.cumulative_effect = self.effect.cumsum(dim="obs_ind")
 
-        elif isinstance(self.model, RegressorMixin):
-            self.y_counterfactual = self.model.predict(X=X_cf)
+        elif self._model_backend.is_ols:
+            self.y_counterfactual = self._model_backend.predict(X=X_cf)
 
             # Compute effect
             self.effect = np.squeeze(self.y_pred) - np.squeeze(self.y_counterfactual)
@@ -387,7 +378,7 @@ class PiecewiseITS(BaseExperiment):
         post_indices = np.where(np.asarray(post_mask))[0]
 
         # Create post_impact - the effects after the first interruption
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # For PyMC models, effect is an xarray.DataArray
             # Select using obs_ind coordinate
             self.post_impact = self.effect.isel(obs_ind=post_indices)
@@ -412,7 +403,7 @@ class PiecewiseITS(BaseExperiment):
                 obs_ind=self.datapost.index
             )
 
-        elif isinstance(self.model, RegressorMixin):
+        elif self._model_backend.is_ols:
             # For OLS models, effect and counterfactual are numpy arrays
             self.post_impact = self.effect[post_indices]
             self.post_pred = np.squeeze(self.y_counterfactual)[post_indices]
@@ -852,7 +843,7 @@ class PiecewiseITS(BaseExperiment):
             self, window_coords, treated_unit=treated_unit
         )
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             hdi_prob = 1 - alpha
             stats = _compute_statistics(
                 windowed_impact,

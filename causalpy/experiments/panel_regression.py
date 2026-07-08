@@ -26,6 +26,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -78,6 +79,37 @@ class PanelRegression(BaseExperiment):
         The fixed effects method used ("dummies" or "demeaned").
     _group_means : dict
         Stored group means for recovering unit effects (demeaned method only).
+
+    Notes
+    -----
+    The demeaned transformation (de-meaning by group) removes time-invariant
+    confounders but also drops time-invariant covariates from the model. For
+    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    extracted from the coefficients. For the demeaned approach, unit effects
+    can be recovered post-hoc using the stored group means (``_group_means``),
+    which are always computed from the original (pre-demeaning) data.
+
+    This class does not yet implement hierarchical/partial-pooling fixed
+    effects. Those semantics are intentionally kept out of scope here so
+    ``fe_method="dummies"`` remains an accurate label for the current
+    unpooled estimator.
+
+    Two-way fixed effects (unit + time) control for both unit-specific and
+    time-specific unobserved heterogeneity. This is the standard approach in
+    difference-in-differences estimation.
+
+    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
+    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
+    entry/exit, missing waves). When both unit and time fixed effects are
+    requested with ``fe_method="demeaned"``, the sequential demeaning
+    (first by unit, then by time) is algebraically equivalent to the standard
+    two-way demeaned transformation only for balanced panels. For unbalanced
+    panels, iterative alternating demeaning would be needed for exact
+    convergence; the single-pass approximation used here may introduce small
+    biases. Unbalanced panels are common in practice (e.g. firm or worker
+    panels with attrition); for heavily unbalanced data, consider checking
+    sensitivity or using dedicated FE packages that implement iterative
+    two-way demeaning (e.g. reghdfe, pyfixest).
 
     Examples
     --------
@@ -142,37 +174,6 @@ class PanelRegression(BaseExperiment):
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
     ... )
-
-    Notes
-    -----
-    The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
-
-    This class does not yet implement hierarchical/partial-pooling fixed
-    effects. Those semantics are intentionally kept out of scope here so
-    ``fe_method="dummies"`` remains an accurate label for the current
-    unpooled estimator.
-
-    Two-way fixed effects (unit + time) control for both unit-specific and
-    time-specific unobserved heterogeneity. This is the standard approach in
-    difference-in-differences estimation.
-
-    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
-    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
-    entry/exit, missing waves). When both unit and time fixed effects are
-    requested with ``fe_method="demeaned"``, the sequential demeaning
-    (first by unit, then by time) is algebraically equivalent to the standard
-    two-way demeaned transformation only for balanced panels. For unbalanced
-    panels, iterative alternating demeaning would be needed for exact
-    convergence; the single-pass approximation used here may introduce small
-    biases. Unbalanced panels are common in practice (e.g. firm or worker
-    panels with attrition); for heavily unbalanced data, consider checking
-    sensitivity or using dedicated FE packages that implement iterative
-    two-way demeaning (e.g. reghdfe, pyfixest).
     """
 
     supports_ols = True
@@ -295,15 +296,11 @@ class PanelRegression(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=X, y=y)
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply demeaned transformation (demean by group).
@@ -420,7 +417,7 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # PyMC print_coefficients uses coordinate-based lookup so a
             # filtered label list works correctly.
             self.model.print_coefficients(coeff_labels, round_to)
@@ -589,7 +586,7 @@ class PanelRegression(BaseExperiment):
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: use az.plot_forest directly
             axes = az.plot_forest(
                 self.model.idata,
@@ -632,7 +629,7 @@ class PanelRegression(BaseExperiment):
             DataFrame with fitted values and credible intervals
         """
         # Get posterior predictions
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
@@ -669,7 +666,7 @@ class PanelRegression(BaseExperiment):
         pd.DataFrame
             DataFrame with fitted values
         """
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             y_fitted = np.squeeze(self.model.predict(self.design["X"]))
         else:
             raise ValueError("Model is not an OLS model")
@@ -754,7 +751,7 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
@@ -848,7 +845,7 @@ class PanelRegression(BaseExperiment):
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
         # Check if model is Bayesian
-        is_bayesian = isinstance(self.model, PyMCModel)
+        is_bayesian = self._model_backend.is_bayesian
 
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
@@ -1007,7 +1004,7 @@ class PanelRegression(BaseExperiment):
             Figure and axes objects
         """
         # Get plot data
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             plot_data = self.get_plot_data_bayesian()
         else:
             plot_data = self.get_plot_data_ols()

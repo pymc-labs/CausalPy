@@ -60,27 +60,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     **kwargs : dict
         Additional keyword arguments (currently unused).
 
-    Examples
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> result = cp.SyntheticDifferenceInDifferences(
-    ...     df,
-    ...     treatment_time,
-    ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
-    ...     treated_units=["actual"],
-    ...     model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
-    ...         sample_kwargs={
-    ...             "tune": 20,
-    ...             "draws": 20,
-    ...             "chains": 2,
-    ...             "cores": 2,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... )
-
     Notes
     -----
     This implements Bayesian SDiD method. The model fits two weight modules via
@@ -105,6 +84,27 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     .. [1] Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
        Wager, S. (2021). Synthetic Difference-in-Differences. *American
        Economic Review*, 111(12), 4088-4118.
+
+    Examples
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> result = cp.SyntheticDifferenceInDifferences(
+    ...     df,
+    ...     treatment_time,
+    ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
+    ...     treated_units=["actual"],
+    ...     model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+    ...         sample_kwargs={
+    ...             "tune": 20,
+    ...             "draws": 20,
+    ...             "chains": 2,
+    ...             "cores": 2,
+    ...             "progressbar": False,
+    ...         }
+    ...     ),
+    ... )
     """
 
     supports_ols = True
@@ -247,7 +247,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         6. :meth:`_build_reporting_objects` constructs the xarray objects
            required by the reporting helpers.
         """
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             raise NotImplementedError(
                 "OLS estimation for SyntheticDifferenceInDifferences is not yet "
                 "implemented. Please use a PyMC model."
@@ -258,7 +258,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         T_pre = self.datapre.shape[0]
 
         X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
-        self.model.fit(X=X, y=y, coords=coords)
+        self._model_backend.fit(X=X, y=y, coords=coords)
         if self.model.idata is None:
             raise AttributeError("Model fitting failed to produce idata")
 

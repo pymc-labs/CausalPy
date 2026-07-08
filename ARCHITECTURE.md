@@ -23,18 +23,23 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two sta
 
 ## Two-Backend Model
 
-Dispatch is via `isinstance` checks throughout `BaseExperiment` and experiment subclasses:
+Backend dispatch is centralized in `causalpy/experiments/model_adapter.py`. `BaseExperiment.__init__` calls `make_model_adapter()`, which handles sklearn coercion (`clone`/`deepcopy`, `create_causalpy_compatible_class()`, `fit_intercept=False` warning), default-model instantiation, and `supports_bayes`/`supports_ols` validation. Each experiment stores `self._model_backend` (private) and keeps `self.model` as the public handle.
+
+Standard regression experiments call `self._model_backend.fit(X, y, coords=build_coords(...))` unconditionally. `build_coords()` assembles the PyMC `coeffs` / `obs_ind` / `treated_units` dict; sklearn backends ignore `coords`. `SklearnModelAdapter` normalizes inputs before delegating to sklearn: xarray `DataArray` values become numpy arrays, and a single-column `treated_units` outcome is squeezed to 1D so call sites do not need per-experiment `.isel(treated_units=0)` branches.
 
 ```python
-if isinstance(self.model, PyMCModel):
-    # Bayesian path — xarray DataArrays, InferenceData
-elif isinstance(self.model, RegressorMixin):
-    # OLS path — numpy arrays
+from causalpy.experiments.model_adapter import build_coords
+
+self._model_backend.fit(
+    X=X,
+    y=y,
+    coords=build_coords(self.labels, X.shape[0]),
+)
 ```
 
-`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` (mutates the instance in place).
+Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization.
 
-Every experiment declares `supports_ols` and `supports_bayes`; `BaseExperiment.__init__` validates the model type. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
+`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
 
 ## Experiment Lifecycle
 
@@ -77,7 +82,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
 | **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
 | **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
-| **create_causalpy_compatible_class** | Mutates the passed sklearn instance in place; does not return a new object. |
+| **create_causalpy_compatible_class** | Applied during `make_model_adapter()` for sklearn backends; clones the user instance before patching. |
 
 ## Adding New Code
 

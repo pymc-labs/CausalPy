@@ -18,7 +18,6 @@ Base class for quasi experimental designs.
 from __future__ import annotations
 
 import contextlib
-import copy
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -29,12 +28,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from sklearn.base import RegressorMixin, clone
+from sklearn.base import RegressorMixin
 
+from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.skl_models import create_causalpy_compatible_class
 
 
 def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
@@ -185,46 +184,17 @@ class BaseExperiment(ABC):
             }
         )
 
+    _model_backend: ModelAdapter
+
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
-        # Ensure we've made any provided Scikit Learn model (as identified as being type
-        # RegressorMixin) compatible with CausalPy by appending our custom methods.
-        if isinstance(model, RegressorMixin):
-            # Clone to avoid mutating the caller's estimator instance (#664).
-            try:
-                model = clone(model)
-            except TypeError:
-                # Models without get_params() can't be sklearn-cloned;
-                # fall back to a deep copy.
-                model = copy.deepcopy(model)
-            model = create_causalpy_compatible_class(model)
-            # Patsy includes the intercept as a design-matrix column, so
-            # sklearn models must not add their own intercept.
-            if getattr(model, "fit_intercept", False):
-                warnings.warn(
-                    f"{type(model).__name__} had fit_intercept=True, but CausalPy "
-                    "requires fit_intercept=False because the intercept is already "
-                    "included in the design matrix by patsy. A cloned copy of the "
-                    "model with fit_intercept=False will be used; the original "
-                    "instance is unchanged.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                model.fit_intercept = False
-
-        if model is None and self._default_model_class is not None:
-            model = self._default_model_class()
-
-        if model is not None:
-            self.model = model
-
-        if getattr(self, "model", None) is None:
-            raise ValueError("model not set or passed.")
-
-        if isinstance(self.model, PyMCModel) and not self.supports_bayes:
-            raise ValueError("Bayesian models not supported.")
-
-        if isinstance(self.model, RegressorMixin) and not self.supports_ols:
-            raise ValueError("OLS models not supported.")
+        adapter = make_model_adapter(
+            model,
+            default_model_class=self._default_model_class,
+            supports_bayes=self.supports_bayes,
+            supports_ols=self.supports_ols,
+        )
+        self._model_backend = adapter
+        self.model = adapter.model
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
         """Fit the underlying model.
@@ -250,7 +220,7 @@ class BaseExperiment(ABC):
     @property
     def idata(self) -> az.InferenceData:
         """Return the InferenceData object of the model. Only relevant for PyMC models."""
-        return self.model.idata
+        return self._model_backend.idata
 
     def print_coefficients(self, round_to: int | None = None) -> None:
         """Ask the model to print its coefficients.
@@ -261,7 +231,7 @@ class BaseExperiment(ABC):
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
         """
-        self.model.print_coefficients(self.labels, round_to)
+        self._model_backend.print_coefficients(self.labels, round_to)
 
     def set_maketables_options(self, *, hdi_prob: float | None = None) -> None:
         """Set optional maketables rendering options for this experiment.
@@ -370,9 +340,9 @@ class BaseExperiment(ABC):
             ``_bayesian_plot`` / ``_ols_plot``.
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            if isinstance(self.model, PyMCModel):
+            if self._model_backend.is_bayesian:
                 fig, ax = self._bayesian_plot(**draw_kwargs)
-            elif isinstance(self.model, RegressorMixin):
+            elif self._model_backend.is_ols:
                 fig, ax = self._ols_plot(**draw_kwargs)
             else:
                 raise ValueError("Unsupported model type")
@@ -425,12 +395,11 @@ class BaseExperiment(ABC):
         **kwargs
             Keyword arguments forwarded to the model-specific implementation.
         """
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             return self.get_plot_data_bayesian(*args, **kwargs)
-        elif isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             return self.get_plot_data_ols(*args, **kwargs)
-        else:
-            raise ValueError("Unsupported model type")
+        raise ValueError("Unsupported model type")
 
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Return plot data for Bayesian models. Override in subclasses that support Bayesian.

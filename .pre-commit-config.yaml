@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
+    rev: v0.15.20
     hooks:
       # Run the linter
       - id: ruff
@@ -56,7 +56,7 @@ repos:
   # public API surface). Private members are excluded via the config-level
   # regex in ``pyproject.toml``.
   - repo: https://github.com/numpy/numpydoc
-    rev: v1.10.0
+    rev: v1.11.0rc0
     hooks:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
@@ -75,7 +75,7 @@ repos:
   # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
   # generated docs build are intentionally out of scope.
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.37
+    rev: v0.9.38
     hooks:
       - id: pymarkdown
         args: [scan]
@@ -86,7 +86,7 @@ repos:
   # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
   # (see check-environment-yml job in .github/workflows/ci.yml).
   - repo: https://github.com/usnistgov/pyproject2conda
-    rev: v0.22.1
+    rev: v0.23.1
     hooks:
       - id: pyproject2conda-yaml
         name: Sync environment.yml from pyproject.toml

@@ -26,3 +26,4 @@ docs/source/api/generated/
 
 # Local scratch space (not tracked)
 .scratch/
+coverage.xml

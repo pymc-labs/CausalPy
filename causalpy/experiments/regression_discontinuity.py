@@ -22,6 +22,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -72,7 +73,7 @@ class RegressionDiscontinuity(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("rd")
@@ -177,19 +178,13 @@ class RegressionDiscontinuity(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=X, y=y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(X=X, y=y)
-        else:
-            raise ValueError("Model type not recognized")
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
-        self.score = self.model.score(X=X, y=y)
+        self.score = self._model_backend.score(X=X, y=y)
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
@@ -206,7 +201,7 @@ class RegressionDiscontinuity(BaseExperiment):
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
+        self.pred = self._model_backend.predict(X=np.asarray(new_x))
 
         # calculate discontinuity by evaluating the difference in model expectation on
         # either side of the discontinuity
@@ -227,7 +222,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self.pred_discon = self.model.predict(X=np.asarray(new_x))
 
         # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self.discontinuity_at_threshold = (
                 self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
                 - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
