@@ -238,7 +238,7 @@ When adding a new example notebook to the documentation gallery:
 4. **Regenerate the gallery** (updates `index.md`, sidebar toctrees, and thumbnails):
 
    ```bash
-   python scripts/generate_gallery.py
+   make gallery
    ```
 
    Thumbnails are gitignored (`docs/source/_static/thumbnails/`) and are also generated during `make html` / Read the Docs builds.

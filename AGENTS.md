@@ -64,7 +64,7 @@ When creating a new example notebook:
    - `title`: card title shown in the gallery grid
    - `notebook`: stem without extension (e.g. `did_pymc`)
    - `thumbnail: false` for non-notebook pages such as `sensitivity_checks.md`
-4. **Regenerate the gallery index** with `python scripts/generate_gallery.py` (or `make gallery`). This updates `index.md`, hidden toctrees for the left sidebar, and thumbnails.
+4. **Regenerate the gallery index** with `make gallery`. This updates `index.md`, hidden toctrees for the left sidebar, and thumbnails.
 5. **Test locally** with `make html` and check `docs/_build/notebooks/index.html`
 
 **Important**: `gallery.yaml` is the source of truth. `index.md` is generated — do not edit it by hand. The `gallery-in-sync` prek hook fails if `gallery.yaml`, notebooks, and `index.md` drift apart.
