@@ -107,7 +107,7 @@ def _render_hidden_toctree(caption: str, cards: list[dict[str, Any]]) -> list[st
         return []
 
     block = [
-        "::{toctree}",
+        ":::{toctree}",
         ":hidden:",
         f":caption: {caption}",
         ":maxdepth: 1",

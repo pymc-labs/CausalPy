@@ -386,7 +386,7 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 
 <!-- Hidden toctrees feed the left Section Navigation sidebar. -->
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: ANCOVA
 :maxdepth: 1
@@ -394,7 +394,7 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 ancova_pymc.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Panel Fixed Effects
 :maxdepth: 1
@@ -402,7 +402,7 @@ ancova_pymc.ipynb
 panel_fixed_effects.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Synthetic Control
 :maxdepth: 1
@@ -414,7 +414,7 @@ sdid_pymc.ipynb
 its_causalpy_vs_causalimpact.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Geographical lift testing
 :maxdepth: 1
@@ -423,7 +423,7 @@ geolift1.ipynb
 multi_cell_geolift.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Difference in Differences
 :maxdepth: 1
@@ -434,7 +434,7 @@ did_pymc_banks.ipynb
 staggered_did_pymc.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Interrupted Time Series
 :maxdepth: 1
@@ -447,7 +447,7 @@ its_lift_test.ipynb
 its_placebo_in_time_analysis.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Comparative Interrupted Time Series
 :maxdepth: 1
@@ -455,7 +455,7 @@ its_placebo_in_time_analysis.ipynb
 its_pymc_comparative.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Piecewise Interrupted Time Series
 :maxdepth: 1
@@ -463,7 +463,7 @@ its_pymc_comparative.ipynb
 piecewise_its_pymc.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Regression Discontinuity
 :maxdepth: 1
@@ -475,7 +475,7 @@ rd_pymc_drinking.ipynb
 rd_donut_pymc.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Regression Kink Design
 :maxdepth: 1
@@ -483,7 +483,7 @@ rd_donut_pymc.ipynb
 rkink_pymc.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Instrumental Variables Regression
 :maxdepth: 1
@@ -493,7 +493,7 @@ iv_weak_instruments.ipynb
 iv_vs_priors.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Inverse Propensity Score Weighting
 :maxdepth: 1
@@ -502,7 +502,7 @@ inv_prop_pymc.ipynb
 inv_prop_latent.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Pipeline
 :maxdepth: 1
@@ -510,7 +510,7 @@ inv_prop_latent.ipynb
 pipeline_workflow.ipynb
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Sensitivity Checks
 :maxdepth: 1
@@ -518,7 +518,7 @@ pipeline_workflow.ipynb
 sensitivity_checks.md
 :::
 
-::{toctree}
+:::{toctree}
 :hidden:
 :caption: Reporting
 :maxdepth: 1
