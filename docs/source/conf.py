@@ -118,9 +118,11 @@ rediraffe_redirects = {
     "notebooks/geolift1": "notebooks/geolift-single-cell",
     "notebooks/inv_prop_latent": "notebooks/inverse-propensity-latent",
     "notebooks/inv_prop_pymc": "notebooks/inverse-propensity-pymc",
+    "notebooks/its_causalpy_vs_causalimpact": "notebooks/interrupted-time-series-causalpy-vs-causalimpact",
     "notebooks/its_covid": "notebooks/interrupted-time-series-covid",
     "notebooks/its_lift_test": "notebooks/interrupted-time-series-lift-test",
     "notebooks/its_post_intervention_analysis": "notebooks/interrupted-time-series-post-intervention-analysis",
+    "notebooks/its_placebo_in_time_analysis": "notebooks/interrupted-time-series-placebo-in-time-analysis",
     "notebooks/its_pymc": "notebooks/interrupted-time-series-pymc",
     "notebooks/its_pymc_comparative": "notebooks/interrupted-time-series-comparative-pymc",
     "notebooks/its_skl": "notebooks/interrupted-time-series-sklearn",
@@ -141,6 +143,7 @@ rediraffe_redirects = {
     "notebooks/sc_pymc": "notebooks/synthetic-control-pymc",
     "notebooks/sc_pymc_brexit": "notebooks/synthetic-control-brexit-pymc",
     "notebooks/sc_skl": "notebooks/synthetic-control-sklearn",
+    "notebooks/sdid_pymc": "notebooks/synthetic-difference-in-differences-pymc",
     "notebooks/staggered_did_pymc": "notebooks/staggered-difference-in-differences-pymc",
 }
 rediraffe_branch = "main"
