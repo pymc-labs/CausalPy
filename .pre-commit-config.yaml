@@ -12,6 +12,7 @@ repos:
           - --author=The PyMC Labs Developers
           - --exclude=docs/
           - --exclude=scripts/
+          - --exclude=Terminal.sh
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
