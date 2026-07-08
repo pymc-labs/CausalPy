@@ -56,6 +56,13 @@ def test_index_md_is_in_sync_with_gallery_yaml(gallery_module) -> None:
     assert rendered == on_disk
 
 
+def test_index_md_uses_myst_toctree_directives(gallery_module) -> None:
+    rendered = gallery_module.render_index_md()
+    toctree_lines = [line for line in rendered.splitlines() if "{toctree}" in line]
+    assert toctree_lines
+    assert all(line.startswith(":::{toctree}") for line in toctree_lines)
+
+
 def test_generate_gallery_check_passes() -> None:
     result = subprocess.run(
         [sys.executable, str(GENERATOR_SCRIPT), "--check", "--no-thumbnails"],
