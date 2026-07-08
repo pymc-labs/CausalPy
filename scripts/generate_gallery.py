@@ -33,9 +33,10 @@ def _find_image_in_notebook(nb) -> str | None:
     for cell in nb.cells:
         if cell.cell_type == "code" and hasattr(cell, "outputs") and cell.outputs:
             for output in cell.outputs:
-                if output.output_type in ("display_data", "execute_result"):
-                    if image_data := output.get("data", {}).get("image/png"):
-                        return image_data
+                if output.output_type in ("display_data", "execute_result") and (
+                    image_data := output.get("data", {}).get("image/png")
+                ):
+                    return image_data
     return None
 
 
@@ -80,18 +81,18 @@ def _save_thumbnail(
         thumbnail_name = f"{notebook_path.stem}.png"
         thumbnail_path = output_dir / thumbnail_name
 
-        # Decode and process image in memory
-        img = Image.open(io.BytesIO(base64.b64decode(image_data)))
+        # Decode and center-crop to a fixed 16:10 thumbnail (no letterboxing)
+        img = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
         target_size = (400, 250)
-        img.thumbnail(target_size, Image.Resampling.LANCZOS)
-
-        # Create padded image and save
-        new_img = Image.new("RGB", target_size, (255, 255, 255))
-        new_img.paste(
-            img,
-            ((target_size[0] - img.size[0]) // 2, (target_size[1] - img.size[1]) // 2),
+        target_w, target_h = target_size
+        scale = max(target_w / img.width, target_h / img.height)
+        resized = img.resize(
+            (int(img.width * scale), int(img.height * scale)),
+            Image.Resampling.LANCZOS,
         )
-        new_img.save(thumbnail_path)
+        left = (resized.width - target_w) // 2
+        top = (resized.height - target_h) // 2
+        resized.crop((left, top, left + target_w, top + target_h)).save(thumbnail_path)
 
         # Path relative to document location (notebooks/)
         # Need to go up one level to source/, then into _static/thumbnails/

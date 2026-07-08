@@ -192,10 +192,9 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["custom.css", "gallery.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
-html_css_files = ["gallery.css"]
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
@@ -205,12 +204,6 @@ html_theme_options = {
         "image_dark": "_static/flat_logo_darkmode.png",
     },
     "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
-}
-
-# Configure sidebars: show local TOC ("On this page") in left sidebar
-# This moves "On this page" navigation from right sidebar to left sidebar
-html_sidebars = {
-    "**": ["localtoc.html"],  # Show "On this page" navigation in left sidebar
 }
 
 html_context = {

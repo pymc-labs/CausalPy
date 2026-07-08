@@ -1,8 +1,10 @@
-# Examples
+# How-to
+
+On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
 ## Panel data methods
 
-On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
+Causal methods for longitudinal data where the same units are observed over multiple time periods.
 
 ## ANCOVA
 
@@ -204,6 +206,8 @@ Piecewise interrupted time series (segmented regression) models the outcome with
 
 ## Cross-sectional methods
 
+Quasi-experimental designs that identify causal effects from cross-sectional assignment rules, instruments, or weighting.
+
 ## Regression Discontinuity
 
 A quasi-experimental design where treatment assignment is determined by a cutoff point along a running variable (e.g., test score, age, income). The treatment effect is estimated by comparing outcomes just above and below the cutoff, assuming units near the cutoff are similar except for treatment status.
@@ -307,6 +311,8 @@ A method for estimating causal effects by weighting observations by the inverse 
 ::::
 
 ## Workflow
+
+End-to-end workflows for running analyses, sensitivity checks, and reporting results.
 
 ## Pipeline
 
