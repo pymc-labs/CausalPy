@@ -12,13 +12,18 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Regression tests verifying that ``hdi_prob`` is wired through Bayesian plot
-methods so that user-supplied values actually change the rendered HDI bands.
+Regression tests verifying that ``ci_prob`` (and its deprecated alias
+``hdi_prob``) is wired through Bayesian plot methods so that user-supplied
+values actually change the rendered credible-interval bands.
 
 These tests guard against the regression described in GitHub issue
 `pymc-labs/CausalPy#890`_, where ``result.plot(hdi_prob=...)`` was silently
 swallowed by ``**kwargs`` rather than reaching the underlying
 :func:`causalpy.plot_utils.plot_xY` (and equivalent) calls.
+
+``hdi_prob`` was the original parameter name. It was renamed to ``ci_prob``
+when ETI support was added (since the parameter controls the *credible interval*
+width, not only HDI). ``hdi_prob`` remains accepted with a ``FutureWarning``.
 
 .. _pymc-labs/CausalPy#890: https://github.com/pymc-labs/CausalPy/issues/890
 """
@@ -44,8 +49,8 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # Each entry maps a "spy target" (dotted import path of the callable used by
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
-# All current targets happen to use the same kwarg name (``hdi_prob``) but the
-# indirection keeps the helper future-proof.
+# ``plot_xY`` targets use ``"ci_prob"`` (the canonical name); other callables
+# such as ``az.plot_posterior`` and ``az.plot_forest`` use ``"hdi_prob"``.
 _SpyTarget = tuple[str, str]
 
 
@@ -100,7 +105,7 @@ def _record_hdi_prob_calls(
 
 
 def _assert_threads(recorded: list[float | None], expected: float) -> None:
-    """Assert that every recorded ``hdi_prob`` value equals ``expected``."""
+    """Assert that every recorded ``ci_prob`` value equals ``expected``."""
     assert len(recorded) > 0, "no spied call sites were exercised"
     assert all(value == expected for value in recorded), (
         f"Expected every spied call to receive hdi_prob={expected}, "
@@ -273,15 +278,27 @@ def fitted_staggered_ols():
 _PARAMS = [0.50, 0.75, 0.99]
 
 
-def _check_threading(fitted, targets: list[_SpyTarget], hdi_prob: float) -> None:
-    """Call ``fitted.plot(hdi_prob=...)`` and assert ``hdi_prob`` reaches every target."""
+def _check_threading(
+    fitted,
+    targets: list[_SpyTarget],
+    ci_prob: float,
+    plot_kwarg: str = "ci_prob",
+) -> None:
+    """Call ``fitted.plot(ci_prob=...)`` and assert ``ci_prob`` reaches every target.
+
+    ``plot_kwarg`` controls the kwarg name used to call ``plot()`` — use
+    ``"hdi_prob"`` for classes not yet migrated to ``ci_prob``.
+    """
     stack, recorded = _record_hdi_prob_calls(targets)
     with stack:
-        fitted.plot(hdi_prob=hdi_prob)
-    _assert_threads(recorded, hdi_prob)
+        fitted.plot(**{plot_kwarg: ci_prob})
+    _assert_threads(recorded, ci_prob)
 
 
-def _check_default(fitted, targets: list[_SpyTarget]) -> None:
+def _check_default(
+    fitted,
+    targets: list[_SpyTarget],
+) -> None:
     """Call ``fitted.plot()`` (no kwarg) and assert every target gets HDI_PROB or None."""
     stack, recorded = _record_hdi_prob_calls(targets)
     with stack:
@@ -297,26 +314,26 @@ def _check_default(fitted, targets: list[_SpyTarget]) -> None:
 
 
 _ITS_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.interrupted_time_series.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.interrupted_time_series.plot_xY", "ci_prob"),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.synthetic_control.plot_xY", "ci_prob"),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.diff_in_diff.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.diff_in_diff.plot_xY", "ci_prob"),
 ]
 _RD_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_discontinuity.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.regression_discontinuity.plot_xY", "ci_prob"),
 ]
 _RKINK_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_kink.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.regression_kink.plot_xY", "ci_prob"),
 ]
 _PREPOST_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.prepostnegd.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.prepostnegd.plot_xY", "ci_prob"),
     ("causalpy.experiments.prepostnegd.az.plot_posterior", "hdi_prob"),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.piecewise_its.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.piecewise_its.plot_xY", "ci_prob"),
 ]
 _PANEL_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.panel_regression.az.plot_forest", "hdi_prob"),
@@ -324,107 +341,139 @@ _PANEL_TARGETS: list[_SpyTarget] = [
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_its_plot_threads_hdi_prob(mock_pymc_sample, fitted_its, hdi_prob):
-    """ITS ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_its, _ITS_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_its_plot_threads_ci_prob(mock_pymc_sample, fitted_its, ci_prob):
+    """ITS ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_its, _ITS_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_its_plot_default_hdi_prob(mock_pymc_sample, fitted_its):
-    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_xY`` call."""
+def test_its_plot_default_ci_prob(mock_pymc_sample, fitted_its):
+    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_xY`` call (as ``ci_prob``)."""
     _check_default(fitted_its, _ITS_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_sc_plot_threads_hdi_prob(mock_pymc_sample, fitted_sc, hdi_prob):
-    """Synthetic Control ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_sc, _SC_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
+    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_sc, _SC_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_sc_plot_default_hdi_prob(mock_pymc_sample, fitted_sc):
-    """Synthetic Control default ``plot()`` forwards ``HDI_PROB``."""
+def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
+    """Synthetic Control default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_sc, _SC_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_did_plot_threads_hdi_prob(mock_pymc_sample, fitted_did, hdi_prob):
-    """DiD ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_did, _DID_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_did_plot_threads_ci_prob(mock_pymc_sample, fitted_did, ci_prob):
+    """DiD ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_did, _DID_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_did_plot_default_hdi_prob(mock_pymc_sample, fitted_did):
-    """DiD default ``plot()`` forwards ``HDI_PROB``."""
+def test_did_plot_default_ci_prob(mock_pymc_sample, fitted_did):
+    """DiD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_did, _DID_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_rd_plot_threads_hdi_prob(mock_pymc_sample, fitted_rd, hdi_prob):
-    """RD ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_rd, _RD_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_rd_plot_threads_ci_prob(mock_pymc_sample, fitted_rd, ci_prob):
+    """RD ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_rd, _RD_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_rd_plot_default_hdi_prob(mock_pymc_sample, fitted_rd):
-    """RD default ``plot()`` forwards ``HDI_PROB``."""
+def test_rd_plot_default_ci_prob(mock_pymc_sample, fitted_rd):
+    """RD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_rd, _RD_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_rkink_plot_threads_hdi_prob(mock_pymc_sample, fitted_rkink, hdi_prob):
-    """Regression Kink ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_rkink, _RKINK_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_rkink_plot_threads_ci_prob(mock_pymc_sample, fitted_rkink, ci_prob):
+    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_rkink, _RKINK_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_rkink_plot_default_hdi_prob(mock_pymc_sample, fitted_rkink):
-    """Regression Kink default ``plot()`` forwards ``HDI_PROB``."""
+def test_rkink_plot_default_ci_prob(mock_pymc_sample, fitted_rkink):
+    """Regression Kink default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_rkink, _RKINK_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_prepost_plot_threads_hdi_prob(mock_pymc_sample, fitted_prepost, hdi_prob):
-    """PrePostNEGD ``plot(hdi_prob=...)`` reaches ``plot_xY`` and ``az.plot_posterior``."""
-    _check_threading(fitted_prepost, _PREPOST_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_prepost_plot_threads_ci_prob(mock_pymc_sample, fitted_prepost, ci_prob):
+    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``plot_xY`` and ``az.plot_posterior``."""
+    _check_threading(fitted_prepost, _PREPOST_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_prepost_plot_default_hdi_prob(mock_pymc_sample, fitted_prepost):
-    """PrePostNEGD default ``plot()`` forwards ``HDI_PROB``."""
+def test_prepost_plot_default_ci_prob(mock_pymc_sample, fitted_prepost):
+    """PrePostNEGD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_prepost, _PREPOST_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_piecewise_plot_threads_hdi_prob(mock_pymc_sample, fitted_piecewise, hdi_prob):
-    """PiecewiseITS ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_piecewise_plot_threads_ci_prob(mock_pymc_sample, fitted_piecewise, ci_prob):
+    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_piecewise_plot_default_hdi_prob(mock_pymc_sample, fitted_piecewise):
-    """PiecewiseITS default ``plot()`` forwards ``HDI_PROB``."""
+def test_piecewise_plot_default_ci_prob(mock_pymc_sample, fitted_piecewise):
+    """PiecewiseITS default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_piecewise, _PIECEWISE_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_panel_plot_threads_hdi_prob(mock_pymc_sample, fitted_panel, hdi_prob):
-    """PanelRegression ``plot(hdi_prob=...)`` reaches ``az.plot_forest``."""
-    _check_threading(fitted_panel, _PANEL_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
+    """PanelRegression ``plot(hdi_prob=...)`` reaches ``az.plot_forest``.
+
+    PanelRegression has not yet been migrated to ``ci_prob`` (it does not
+    support ETI/spaghetti/histogram), so we call ``plot(hdi_prob=...)`` here.
+    """
+    _check_threading(fitted_panel, _PANEL_TARGETS, ci_prob, plot_kwarg="hdi_prob")
 
 
 @pytest.mark.integration
-def test_panel_plot_default_hdi_prob(mock_pymc_sample, fitted_panel):
-    """PanelRegression default ``plot()`` forwards ``HDI_PROB``."""
+def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
+    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to ``az.plot_forest``."""
     _check_default(fitted_panel, _PANEL_TARGETS)
+
+
+# ---------------------------------------------------------------------------
+# Deprecated hdi_prob alias: verify it still works with a FutureWarning.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
+    """``plot(hdi_prob=...)`` still reaches ``plot_xY`` via the deprecated alias.
+
+    Ensures that existing user code does not silently break after the rename
+    to ``ci_prob``. The deprecated alias must emit a ``FutureWarning`` and
+    forward the value to ``plot_xY`` as ``ci_prob``.
+    """
+    stack, recorded = _record_hdi_prob_calls(
+        [("causalpy.experiments.interrupted_time_series.plot_xY", "ci_prob")]
+    )
+    import warnings
+
+    with stack, warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fitted_its.plot(hdi_prob=0.75)
+
+    assert any(issubclass(w.category, FutureWarning) for w in caught), (
+        "Expected a FutureWarning when hdi_prob is passed to plot()"
+    )
+    _assert_threads(recorded, 0.75)
 
 
 # ---------------------------------------------------------------------------

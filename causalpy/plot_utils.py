@@ -15,7 +15,8 @@
 Plotting utility functions.
 """
 
-from typing import Any, Literal
+import warnings
+from typing import Any, Literal, TypedDict
 
 import arviz as az
 import matplotlib.dates as mdates
@@ -28,6 +29,15 @@ from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
 from causalpy.constants import HDI_PROB
+
+
+class _PlotXYStyle(TypedDict):
+    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_xY`` call."""
+
+    ci_prob: float
+    kind: Literal["ribbon", "histogram", "spaghetti"]
+    ci_kind: Literal["hdi", "eti"]
+    num_samples: int
 
 
 def plot_xY(
@@ -90,6 +100,21 @@ def plot_xY(
     # Handle backward compatibility: hdi_prob was in original API
     if hdi_prob is not None:
         ci_prob = hdi_prob
+
+    if kind != "ribbon" and ci_kind != "hdi":
+        warnings.warn(
+            f"ci_kind={ci_kind!r} is ignored when kind={kind!r}. "
+            "ci_kind only applies to kind='ribbon'.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if kind != "spaghetti" and num_samples != 50:
+        warnings.warn(
+            f"num_samples={num_samples} is ignored when kind={kind!r}. "
+            "num_samples only applies to kind='spaghetti'.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     if kind == "ribbon":
         return _plot_ribbon(x, Y, ax, plot_hdi_kwargs, ci_prob, label, ci_kind)
