@@ -245,6 +245,7 @@ When adding a new example notebook to the documentation gallery:
    - The `:img-top:` path should reference `../_static/thumbnails/{notebook_name}.png` (the thumbnail will be generated automatically)
    - The `:link:` should be the notebook name without the `.ipynb` extension
    - Cards are arranged in a 3-column grid layout
+   - Add the notebook to the matching hidden `toctree` block at the bottom of `index.md` (same caption group as on `main`) so the left Section Navigation sidebar lists it
 
 4. **Generate thumbnails locally** (optional, for testing):
 
@@ -260,7 +261,7 @@ When adding a new example notebook to the documentation gallery:
    make html
    ```
 
-   Then open `docs/_build/html/notebooks/index.html` in your browser to see the gallery.
+   Then open `docs/_build/html/notebooks/index.html` in your browser to see the gallery and confirm the left sidebar lists the new notebook.
 
 **Note**: The gallery generation script (`scripts/generate_gallery.py`) runs automatically during the Sphinx build process (configured in `docs/source/conf.py`), so thumbnails will be generated on Read the Docs builds without needing to commit them.
 

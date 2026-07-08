@@ -67,6 +67,7 @@ When creating a new example notebook:
      - `:link: {notebook_name_without_extension}` (notebook name without `.ipynb`)
      - `:link-type: doc`
    - Cards are arranged in 3-column grids using `sphinx-design`
+   - Add the notebook to the matching **hidden toctree** block at the bottom of `index.md` so the left Section Navigation sidebar stays populated
 4. **Thumbnails are generated automatically** during the build process by `scripts/generate_gallery.py` (runs via `conf.py` during Sphinx setup)
 5. **Test locally** with `make html` and check `docs/_build/html/notebooks/index.html`
 

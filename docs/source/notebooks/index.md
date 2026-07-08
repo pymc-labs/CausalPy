@@ -357,3 +357,146 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 :link-type: doc
 :::
 ::::
+
+<!-- Hidden toctrees feed the left "Section Navigation" sidebar (see main's index.md).
+     The gallery cards above are the visual layout; these links are not rendered. -->
+
+:::{toctree}
+:hidden:
+:caption: ANCOVA
+:maxdepth: 1
+
+ancova_pymc.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Panel Fixed Effects
+:maxdepth: 1
+
+panel_fixed_effects.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Synthetic Control
+:maxdepth: 1
+
+sc_skl.ipynb
+sc_pymc.ipynb
+sc_pymc_brexit.ipynb
+sdid_pymc.ipynb
+its_causalpy_vs_causalimpact.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Geographical lift testing
+:maxdepth: 1
+
+geolift1.ipynb
+multi_cell_geolift.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Difference in Differences
+:maxdepth: 1
+
+did_skl.ipynb
+did_pymc.ipynb
+did_pymc_banks.ipynb
+staggered_did_pymc.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Interrupted Time Series
+:maxdepth: 1
+
+its_skl.ipynb
+its_pymc.ipynb
+its_post_intervention_analysis.ipynb
+its_covid.ipynb
+its_lift_test.ipynb
+its_placebo_in_time_analysis.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Comparative Interrupted Time Series
+:maxdepth: 1
+
+its_pymc_comparative.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Piecewise Interrupted Time Series
+:maxdepth: 1
+
+piecewise_its_pymc.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Regression Discontinuity
+:maxdepth: 1
+
+rd_skl.ipynb
+rd_pymc.ipynb
+rd_pymc_drinking.ipynb
+rd_skl_drinking.ipynb
+rd_donut_pymc.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Regression Kink Design
+:maxdepth: 1
+
+rkink_pymc.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Instrumental Variables Regression
+:maxdepth: 1
+
+iv_pymc.ipynb
+iv_weak_instruments.ipynb
+iv_vs_priors.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Inverse Propensity Score Weighting
+:maxdepth: 1
+
+inv_prop_pymc.ipynb
+inv_prop_latent.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Pipeline
+:maxdepth: 1
+
+pipeline_workflow.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Sensitivity Checks
+:maxdepth: 1
+
+sensitivity_checks.md
+:::
+
+:::{toctree}
+:hidden:
+:caption: Reporting
+:maxdepth: 1
+
+report_demo.ipynb
+:::

@@ -125,7 +125,7 @@ master_doc = "index"
 
 # Suppress warnings for notebooks linked from gallery (not in toctree)
 suppress_warnings = [
-    "toc.not_included",  # Notebooks are linked from gallery, not toctree
+    "toc.not_included",  # Safety net for notebooks linked only from prose elsewhere
     "bibtex.duplicate_label",  # BibTeX duplicate labels (less critical)
     "bibtex.duplicate_citation",  # BibTeX duplicate citations (less critical)
 ]
