@@ -39,7 +39,13 @@ class ConvexHullCheck:
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment is a SyntheticControl instance."""
+        """Verify the experiment is a SyntheticControl instance.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment, SyntheticControl):
             raise TypeError("ConvexHullCheck requires a SyntheticControl experiment.")
 
@@ -48,10 +54,20 @@ class ConvexHullCheck:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Run the convex hull violation check on pre-treatment data."""
+        """Run the convex hull violation check on pre-treatment data.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted SyntheticControl experiment.
+        context : PipelineContext
+            Pipeline context (unused; required by the check protocol).
+        """
+        self.validate(experiment)
+        assert isinstance(experiment, SyntheticControl)  # narrows type for mypy
         sc = experiment
-        datapre_control = sc.datapre_control  # type: ignore[attr-defined]
-        datapre_treated = sc.datapre_treated  # type: ignore[attr-defined]
+        datapre_control = sc.pre_design["control"]
+        datapre_treated = sc.pre_design["treated"]
 
         all_results = []
         total_violations = 0
@@ -68,7 +84,7 @@ class ConvexHullCheck:
         rows = []
         treated_units = getattr(
             sc, "treated_units", [f"unit_{i}" for i in range(len(all_results))]
-        )  # type: ignore[attr-defined]
+        )
         for unit_name, res in zip(treated_units, all_results, strict=True):
             rows.append(
                 {

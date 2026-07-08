@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Utility functions
-"""
+"""Utility functions."""
 
 from __future__ import annotations
 
@@ -188,7 +186,8 @@ def get_interaction_terms(formula: str) -> list[str]:
 
 
 def check_convex_hull_violation(
-    treated_series: np.ndarray, control_matrix: np.ndarray
+    treated_series: np.ndarray | xr.DataArray,
+    control_matrix: np.ndarray | xr.DataArray,
 ) -> dict:
     """
     Check if treated series values fall within the range of control series.
@@ -199,17 +198,21 @@ def check_convex_hull_violation(
     This is a necessary (but not sufficient) condition for the treated unit
     to lie within the convex hull of control units.
 
+    Both arguments accept either ``np.ndarray`` or ``xr.DataArray`` inputs;
+    only positional (axis-based) operations are used internally.
+
     Parameters
     ----------
-    treated_series : np.ndarray
+    treated_series : np.ndarray or xr.DataArray
         1D array of treated unit values (shape: n_timepoints)
-    control_matrix : np.ndarray
+    control_matrix : np.ndarray or xr.DataArray
         2D array of control unit values (shape: n_timepoints x n_controls)
 
     Returns
     -------
     dict
         Dictionary with keys:
+
         - 'passes': bool - whether the check passes
         - 'n_violations': int - number of time points with violations
         - 'pct_above': float - percentage of points where treated > max(controls)
@@ -381,11 +384,6 @@ def extract_lift_for_mmm(
         If the model is not a Bayesian (PyMC) model, as uncertainty quantification
         requires posterior samples.
 
-    See Also
-    --------
-    PyMC-Marketing lift test calibration :
-        https://www.pymc-marketing.io/en/stable/notebooks/mmm/mmm_lift_test.html
-
     Notes
     -----
     This function is designed for integration with PyMC-Marketing's MMM calibration
@@ -394,7 +392,9 @@ def extract_lift_for_mmm(
     with experimental evidence.
 
     For more information on lift test calibration in MMMs, see the PyMC-Marketing
-    documentation: https://github.com/pymc-labs/pymc-marketing
+    documentation: https://github.com/pymc-labs/pymc-marketing.
+    Reference workflow:
+    https://www.pymc-marketing.io/en/stable/notebooks/mmm/mmm_lift_test.html
 
     Examples
     --------

@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Difference in differences
-"""
+"""Difference in differences."""
 
 from typing import Any, Literal
 
@@ -26,11 +24,12 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -74,8 +73,10 @@ class DifferenceInDifferences(BaseExperiment):
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
         A PyMC model for difference in differences. Defaults to LinearRegression.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("did")
@@ -98,6 +99,7 @@ class DifferenceInDifferences(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -130,44 +132,30 @@ class DifferenceInDifferences(BaseExperiment):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
-        )
+        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        # fit model
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
-            # Ensure the intercept is part of the coefficients array rather than
-            # a separate intercept_ attribute.  See #664 / PR #693 for
-            # centralising this in BaseExperiment.
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
-            self.model.fit(X=self.X, y=self.y)
-        else:
-            raise ValueError("Model type not recognized")
+        X = self.design["X"]
+        y = self.design["y"]
+
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         # predicted outcome for control group
         self.x_pred_control = (
@@ -184,7 +172,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self.model.predict(np.asarray(new_x))
+        self.y_pred_control = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = (
@@ -201,7 +189,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self.model.predict(np.asarray(new_x))
+        self.y_pred_treatment = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
@@ -231,10 +219,10 @@ class DifferenceInDifferences(BaseExperiment):
                 and self.group_variable_name in label
             ):
                 new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self.model.predict(np.asarray(new_x))
+        self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
         # calculate causal impact
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             assert self.model.idata is not None
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
@@ -246,10 +234,12 @@ class DifferenceInDifferences(BaseExperiment):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
-        elif isinstance(self.model, RegressorMixin):
+        elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
             # Store the coefficient into dictionary {intercept:value}
-            coef_map = dict(zip(self.labels, self.model.get_coeffs(), strict=False))
+            coef_map = dict(
+                zip(self.labels, self._model_backend.coefficients(), strict=False)
+            )
             # Create and find the interaction term based on the values user provided
             interaction_term = (
                 f"{self.group_variable_name}:{self.post_treatment_variable_name}"
@@ -261,7 +251,7 @@ class DifferenceInDifferences(BaseExperiment):
             raise ValueError("Model type not recognized")
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
         # Check if post_treatment_variable_name is in formula
@@ -320,8 +310,11 @@ class DifferenceInDifferences(BaseExperiment):
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -333,14 +326,82 @@ class DifferenceInDifferences(BaseExperiment):
         """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the difference-in-differences results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title. Defaults to ``None``, in which case 2 significant figures
+            are used.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control, treatment, and
+            counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
+            OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
-        self, round_to: int | None = None, **kwargs: Any
+        self,
+        round_to: int | None = None,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """
-        Plot the results
+        Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control, treatment, and
+            counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
         """
 
         def _plot_causal_impact_arrow(results, ax):
@@ -395,7 +456,7 @@ class DifferenceInDifferences(BaseExperiment):
                 va="center",
             )
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.scatterplot(
@@ -415,6 +476,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -427,6 +489,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -467,6 +530,7 @@ class DifferenceInDifferences(BaseExperiment):
                     treated_units=0
                 ),
                 ax=ax,
+                hdi_prob=hdi_prob,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
             )
@@ -489,10 +553,22 @@ class DifferenceInDifferences(BaseExperiment):
         return fig, ax
 
     def _ols_plot(
-        self, round_to: int | None = 2, **kwargs: Any
+        self,
+        round_to: int | None = 2,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for difference-in-differences"""
-        fig, ax = plt.subplots()
+        """Generate plot for difference-in-differences.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
+        """
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.lineplot(
@@ -588,15 +664,16 @@ class DifferenceInDifferences(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        from causalpy.pymc_models import PyMCModel
-
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         if is_pymc:
             return _effect_summary_did(

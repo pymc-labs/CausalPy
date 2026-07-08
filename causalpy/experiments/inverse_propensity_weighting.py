@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Inverse propensity weighting
-"""
+"""Inverse propensity weighting."""
 
 import warnings
 from typing import Any, Literal
@@ -51,8 +49,10 @@ class InversePropensityWeighting(BaseExperiment):
         of these weighting schemes.
     model : PropensityScore, optional
         A PyMC model. Defaults to PropensityScore.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("nhefs")
@@ -106,7 +106,7 @@ class InversePropensityWeighting(BaseExperiment):
         """
         t, X = dmatrices(self.formula, self.data)
         self._t_design_info = t.design_info
-        self._t_design_info = X.design_info
+        self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.t, self.X = np.asarray(t), np.asarray(X)
         self.y = self.data[self.outcome_variable]
@@ -361,6 +361,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -390,6 +391,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -419,6 +421,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -448,6 +451,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -485,6 +489,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         list[float]
             A list of [ate, trt, ntrt] where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -502,6 +507,43 @@ class InversePropensityWeighting(BaseExperiment):
         ate, trt, ntrt = compute_fn(ps)
 
         return [ate, trt, ntrt]
+
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
+
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always; call :meth:`plot_ate` or :meth:`plot_balance_ecdf`
+            instead.
+
+        Notes
+        -----
+        Inverse propensity weighting does not expose a unified ``plot()``
+        view; instead, use the dedicated diagnostics
+        :meth:`plot_ate` (treatment-effect distribution) and
+        :meth:`plot_balance_ecdf` (covariate-balance ECDF). This stub
+        exists so every experiment subclass offers an explicit,
+        kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
+        """
+        raise NotImplementedError(
+            "InversePropensityWeighting does not implement a unified plot(). "
+            "Use plot_ate() for the treatment-effect distribution or "
+            "plot_balance_ecdf() for the covariate-balance ECDF."
+        )
 
     def plot_ate(
         self,
@@ -551,7 +593,7 @@ class InversePropensityWeighting(BaseExperiment):
         if method is None:
             method = self.weighting_scheme
 
-        def plot_weights(bins, top0, top1, ax, color="population"):
+        def _plot_weights(bins, top0, top1, ax, color="population"):
             colors_dict = {
                 "population": ["orange", "skyblue", 0.6],
                 "pseudo_population": ["grey", "grey", 0.1],
@@ -577,8 +619,8 @@ class InversePropensityWeighting(BaseExperiment):
                 for bar in bars:
                     bar.set_edgecolor("black")
 
-        def make_hists(idata, i, axs, method=method):
-            p_i = az.extract(idata)["p"][:, i].values
+        def _make_hists(idata, i, axs, method=method):
+            p_i = self._prepare_ps(az.extract(idata)["p"][:, i].values)
             if method == "raw":
                 weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
                 weight1 = 1 / (p_i[self.t.flatten() == 1])
@@ -594,14 +636,14 @@ class InversePropensityWeighting(BaseExperiment):
             bins = np.arange(0.025, 0.99, 0.005)
             top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
             top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
-            plot_weights(bins, top0, top1, axs[0])
+            _plot_weights(bins, top0, top1, axs[0])
             top0, _ = np.histogram(
                 p_i[self.t.flatten() == 0], bins=bins, weights=weight0
             )
             top1, _ = np.histogram(
                 p_i[self.t.flatten() == 1], bins=bins, weights=weight1
             )
-            plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
+            _plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
 
         mosaic = """AAAAAA
                     BBBBCC"""
@@ -632,7 +674,7 @@ class InversePropensityWeighting(BaseExperiment):
             ["Treatment PS", "Control PS", "Weighted Pseudo Population", "Extreme PS"],
         )
 
-        [make_hists(idata, i, axs) for i in range(prop_draws)]
+        [_make_hists(idata, i, axs) for i in range(prop_draws)]
         ate_df = pd.DataFrame(
             [self.get_ate(i, idata, method=method) for i in range(ate_draws)],
             columns=["ATE", "Y(1)", "Y(0)"],
@@ -749,7 +791,7 @@ class InversePropensityWeighting(BaseExperiment):
         if weighting_scheme is None:
             weighting_scheme = self.weighting_scheme
 
-        ps = az.extract(idata)["p"].mean(dim="sample").values
+        ps = self._prepare_ps(az.extract(idata)["p"].mean(dim="sample").values)
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()

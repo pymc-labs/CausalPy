@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Synthetic Control Experiment
-"""
+"""Synthetic Control Experiment."""
 
 import warnings
 from typing import Any, Literal
@@ -28,10 +26,11 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import get_hdi_to_df, plot_xY
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import check_convex_hull_violation, round_num
+from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -39,23 +38,35 @@ from .base import BaseExperiment
 class SyntheticControl(BaseExperiment):
     """The class for the synthetic control experiment.
 
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param control_units:
-        A list of control units to be used in the experiment
-    :param treated_units:
-        A list of treated units to be used in the experiment
-    :param model:
-        A PyMC or sklearn model. Defaults to WeightedSumFitter.
-    :param min_donor_correlation:
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    treatment_time : int, float, or pd.Timestamp
+        The time when treatment occurred, in reference to the data index.
+    control_units : list of str
+        A list of control units to be used in the experiment.
+    treated_units : list of str
+        A list of treated units to be used in the experiment.
+    model : PyMCModel, RegressorMixin, or None, default None
+        A PyMC or sklearn model. Defaults to :class:`WeightedSumFitter`.
+    min_donor_correlation : float, default 0.0
         Minimum acceptable Pearson correlation between each control unit and
         treated unit in the pre-treatment period. Control units below this
         threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
         negatively correlated donors).
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Notes
+    -----
+    For Bayesian models, the causal impact is calculated using the posterior expectation
+    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
+    its uncertainty represent the systematic causal effect, excluding observation-level
+    noise. The uncertainty bands in the plots reflect parameter uncertainty and
+    counterfactual prediction uncertainty, but not individual observation variability.
+
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("sc")
@@ -74,19 +85,17 @@ class SyntheticControl(BaseExperiment):
     ...         }
     ...     ),
     ... )
-
-    Notes
-    -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
     """
 
     supports_ols = True
     supports_bayes = True
     _default_model_class = WeightedSumFitter
+    _deprecated_design_aliases = {
+        "datapre_control": ("pre_design", "control"),
+        "datapre_treated": ("pre_design", "treated"),
+        "datapost_control": ("post_design", "control"),
+        "datapost_treated": ("post_design", "treated"),
+    }
 
     def __init__(
         self,
@@ -107,6 +116,13 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        if self._model_backend.is_ols and len(treated_units) > 1:
+            raise ValueError(
+                "OLS/sklearn synthetic control supports only a single treated "
+                f"unit, but {len(treated_units)} were given: {treated_units}. "
+                "Use a PyMC model (e.g. WeightedSumFitter) for multiple treated "
+                "units, or run a separate experiment per treated unit."
+            )
         if not (-1 <= min_donor_correlation <= 1):
             raise ValueError(
                 f"min_donor_correlation must be between -1 and 1, "
@@ -126,12 +142,12 @@ class SyntheticControl(BaseExperiment):
         total_above = 0
         total_below = 0
         n_units = len(self.treated_units)
-        n_pre_points = self.datapre_treated.shape[0]
+        n_pre_points = self.pre_design["treated"].shape[0]
 
         for i in range(n_units):
             unit_check = check_convex_hull_violation(
-                self.datapre_treated.isel(treated_units=i).values,
-                self.datapre_control.values,
+                self.pre_design["treated"].isel(treated_units=i),
+                self.pre_design["control"],
             )
             total_violations += unit_check["n_violations"]
             total_above += unit_check["pct_above"] * n_pre_points / 100
@@ -222,86 +238,78 @@ class SyntheticControl(BaseExperiment):
         return self.data[self.data.index >= self.treatment_time]
 
     def _prepare_data(self) -> None:
-        """Prepare xarray DataArrays for control and treated units in pre/post periods."""
-        # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray.DataArray objects.
-        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
-        # make constructing the xarray DataArray objects easier.
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
+        """Bundle control and treated data into ``xr.Dataset`` objects per period."""
+        self.pre_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapre[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapre[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapre[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapre[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
+        self.post_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapost[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapost[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapost[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapost[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
         # fit the model to the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                # key must stay as "coeffs" unless we can find a way to auto identify
-                # the predictor dimension name. "coeffs" is assumed by
-                # PyMCModel.print_coefficients for example.
-                "coeffs": self.control_units,
-                "treated_units": self.treated_units,
-                "obs_ind": np.arange(self.datapre.shape[0]),
-            }
-            self.model.fit(
-                X=self.datapre_control,
-                y=self.datapre_treated,
-                coords=COORDS,
-            )
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(
-                X=self.datapre_control.data,
-                y=self.datapre_treated.isel(treated_units=0).data,
-            )
-        else:
-            raise ValueError("Model type not recognized")
+        self._model_backend.fit(
+            X=self.pre_design["control"],
+            y=self.pre_design["treated"],
+            coords=build_coords(
+                self.control_units,
+                self.datapre.shape[0],
+                treated_units=self.treated_units,
+            ),
+        )
 
         # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(
-            X=self.datapre_control,
-            y=self.datapre_treated,
+        self.score = self._model_backend.score(
+            X=self.pre_design["control"],
+            y=self.pre_design["treated"],
         )
 
         # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.datapre_control)
+        self.pre_pred = self._model_backend.predict(X=self.pre_design["control"])
 
         # calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.datapost_control)
+        self.post_pred = self._model_backend.predict(X=self.post_design["control"])
         self.pre_impact = self.model.calculate_impact(
-            self.datapre_treated, self.pre_pred
+            self.pre_design["treated"], self.pre_pred
         )
 
         self.post_impact = self.model.calculate_impact(
-            self.datapost_treated, self.post_pred
+            self.post_design["treated"], self.post_pred
         )
 
         self.post_impact_cumulative = self.model.calculate_cumulative_impact(
@@ -311,7 +319,15 @@ class SyntheticControl(BaseExperiment):
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The experiment data.
+        treatment_time : int, float, or pd.Timestamp
+            The treatment time, expected to be compatible with ``data.index``.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -336,8 +352,10 @@ class SyntheticControl(BaseExperiment):
         """
         correlations: dict[str, float] = {}
         for unit in self.treated_units:
-            observed = self.datapre_treated.sel(treated_units=unit).values.flatten()
-            if isinstance(self.model, PyMCModel):
+            observed = (
+                self.pre_design["treated"].sel(treated_units=unit).values.flatten()
+            )
+            if self._model_backend.is_bayesian:
                 predicted = (
                     self.pre_pred["posterior_predictive"]["mu"]
                     .sel(treated_units=unit)
@@ -352,8 +370,11 @@ class SyntheticControl(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Control units: {self.control_units}")
@@ -378,24 +399,102 @@ class SyntheticControl(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the synthetic control results for a specific treated unit.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title (e.g. the Bayesian :math:`R^2`). Defaults to ``None``,
+            in which case 2 significant figures are used.
+        treated_unit : str, optional
+            Which treated unit to plot. Must be one of the names supplied
+            via ``treated_units`` at construction time. Defaults to ``None``,
+            which selects the first treated unit.
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool
+            Whether to overlay the donor (control) unit trajectories on the
+            top panel. Defaults to ``False``.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The three axes (top: predictions, middle: causal impact,
+            bottom: cumulative impact).
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            treated_unit=treated_unit,
+            hdi_prob=hdi_prob,
+            plot_predictors=plot_predictors,
+            figsize=figsize,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
-        Plot the results for a specific treated unit
+        Plot the results for a specific treated unit.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
+            If ``None``, plots the first treated unit.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool, optional
+            Whether to overlay control-unit trajectories. Defaults to ``False``.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
 
@@ -420,6 +519,7 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             pre_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -428,7 +528,7 @@ class SyntheticControl(BaseExperiment):
         # Plot observations for primary treated unit
         (h,) = ax[0].plot(
             self.datapre.index,
-            self.datapre_treated.sel(treated_units=treated_unit),
+            self.pre_design["treated"].sel(treated_units=treated_unit),
             "k.",
             label="Observations",
         )
@@ -440,6 +540,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             post_pred,
             ax=ax[0],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -447,14 +548,14 @@ class SyntheticControl(BaseExperiment):
 
         ax[0].plot(
             self.datapost.index,
-            self.datapost_treated.sel(treated_units=treated_unit),
+            self.post_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
         # Shaded causal effect for primary treated unit
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost_treated.sel(treated_units=treated_unit).values,
+            y2=self.post_design["treated"].sel(treated_units=treated_unit).values,
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -469,12 +570,14 @@ class SyntheticControl(BaseExperiment):
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -493,6 +596,7 @@ class SyntheticControl(BaseExperiment):
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
+            hdi_prob=hdi_prob,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")
@@ -515,19 +619,18 @@ class SyntheticControl(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        plot_predictors = kwargs.get("plot_predictors", False)
         if plot_predictors:
             # plot control units as well
             ax[0].plot(
                 self.datapre.index,
-                self.datapre_control,
+                self.pre_design["control"],
                 "-",
                 c=[0.8, 0.8, 0.8],
                 zorder=1,
             )
             ax[0].plot(
                 self.datapost.index,
-                self.datapost_control,
+                self.post_design["control"],
                 "-",
                 c=[0.8, 0.8, 0.8],
                 zorder=1,
@@ -548,6 +651,7 @@ class SyntheticControl(BaseExperiment):
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
+        figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
@@ -558,6 +662,8 @@ class SyntheticControl(BaseExperiment):
         :param treated_unit:
             Which treated unit to plot. Must be a string name of the treated unit.
             If None, plots the first treated unit.
+        :param figsize:
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
 
@@ -571,16 +677,16 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         ax[0].plot(
-            self.datapre_treated["obs_ind"],
-            self.datapre_treated.sel(treated_units=treated_unit),
+            self.pre_design["treated"]["obs_ind"],
+            self.pre_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
         ax[0].plot(
-            self.datapost_treated["obs_ind"],
-            self.datapost_treated.sel(treated_units=treated_unit),
+            self.post_design["treated"]["obs_ind"],
+            self.post_design["treated"].sel(treated_units=treated_unit),
             "k.",
         )
 
@@ -599,7 +705,9 @@ class SyntheticControl(BaseExperiment):
         ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_values,
-            y2=np.squeeze(self.datapost_treated.sel(treated_units=treated_unit).data),
+            y2=np.squeeze(
+                self.post_design["treated"].sel(treated_units=treated_unit).data
+            ),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -674,13 +782,16 @@ class SyntheticControl(BaseExperiment):
         """
         Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
 
-        :param hdi_prob:
-            Prob for which the highest density interval will be computed. The default value is defined as the default from the :func:`arviz.hdi` function.
-        :param treated_unit:
-            Which treated unit to extract data for. Must be a string name of the treated unit.
-            If None, uses the first treated unit.
+        Parameters
+        ----------
+        hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
+            Probability mass of the highest density interval. Defaults to
+            the project-wide :data:`~causalpy.constants.HDI_PROB`.
+        treated_unit : str, optional
+            Which treated unit to extract data for. Must be a string name
+            of the treated unit. If ``None``, uses the first treated unit.
         """
-        if not isinstance(self.model, PyMCModel):
+        if not self._model_backend.is_bayesian:
             raise ValueError("Unsupported model type")
 
         hdi_pct = int(round(hdi_prob * 100))
@@ -764,7 +875,7 @@ class SyntheticControl(BaseExperiment):
 
     def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian model - get unit-specific R² scores using unified format
             unit_index = self.treated_units.index(treated_unit)
             r2_val = round_num(
@@ -778,7 +889,7 @@ class SyntheticControl(BaseExperiment):
             return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
         else:
             # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"
+            return f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to if round_to is not None else 2)}"
 
     def effect_summary(
         self,
@@ -801,6 +912,7 @@ class SyntheticControl(BaseExperiment):
         ----------
         window : str, tuple, or slice, default="post"
             Time window for analysis:
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
@@ -821,6 +933,9 @@ class SyntheticControl(BaseExperiment):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------
@@ -849,7 +964,7 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
-        is_pymc = isinstance(self.model, PyMCModel)
+        is_pymc = self._model_backend.is_bayesian
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(

@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Custom PyMC models for causal inference"""
+"""Custom PyMC models for causal inference."""
 
 import inspect
 import warnings
@@ -75,8 +75,23 @@ class PyMCModel(pm.Model):
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
     useful for causal inference.
 
-    Example
-    -------
+    The base :meth:`_data_setter` assumes the model graph contains mutable data
+    nodes named ``"X"`` (predictors) and ``"y"`` (target).  Subclasses that use
+    different data nodes should override :meth:`_data_setter`.  See
+    :class:`BayesianBasisExpansionTimeSeries` for an example.
+
+    Parameters
+    ----------
+    sample_kwargs : dict, optional
+        Dictionary of kwargs that get unpacked and passed to the
+        :func:`pymc.sample` function. Defaults to an empty dictionary if
+        ``None``.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case default priors are used.
+
+    Examples
+    --------
     >>> import causalpy as cp
     >>> import numpy as np
     >>> import pymc as pm
@@ -163,6 +178,11 @@ class PyMCModel(pm.Model):
             Dictionary mapping parameter names to Prior objects. The keys should
             match parameter names used in the model's `build_model()` method.
 
+        See Also
+        --------
+        WeightedSumFitter.priors_from_data : Example implementation that sets
+            Dirichlet prior shape based on number of control units.
+
         Notes
         -----
         The base implementation returns an empty dictionary, meaning no
@@ -201,11 +221,6 @@ class PyMCModel(pm.Model):
         ...             dims=["treated_units", "coeffs"],
         ...         )
         ...     }
-
-        See Also
-        --------
-        WeightedSumFitter.priors_from_data : Example implementation that sets
-            Dirichlet prior shape based on number of control units.
         """
         return {}
 
@@ -247,24 +262,51 @@ class PyMCModel(pm.Model):
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
+        """Construct the PyMC model graph.
+
+        Subclasses must override this method to declare priors, deterministic
+        nodes, and the likelihood for the model.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Input features with dimensions ``["obs_ind", "coeffs"]``.
+        y : xarray.DataArray
+            Target variable with dimensions ``["obs_ind", "treated_units"]``.
+        coords : dict or None
+            Mapping of named dimensions to coordinate labels for the
+            underlying ``pm.Model``.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, when called on the base class.
+        """
         raise NotImplementedError(
             "This method must be implemented by a subclass"
         )  # pragma: no cover
 
     def _data_setter(self, X: xr.DataArray) -> None:
         """
-        Set data for the model.
+        Set data for the model for prediction.
 
-        This method is used internally to register new data for the model for
-        prediction.
+        This method is called by :meth:`predict` to register new predictor data
+        and reshape the target placeholder so that ``pm.sample_posterior_predictive``
+        can run with the new observation count.
 
-        NOTE: We are actively changing the `X`. Often, this matrix will have a different
-        number of rows than the original data. So to make the shapes work, we need to
-        update all data nodes in the model to have the correct shape. The values are not
-        used, so we set them to 0. In our case, we just have data nodes X and y, but if
-        in the future we get more complex models with more data nodes, then we'll need
-        to update all of them - ideally programmatically.
+        The base implementation updates mutable data nodes named ``"X"`` and
+        ``"y"``.  Subclasses that use different data nodes should override this
+        method.  See :class:`BayesianBasisExpansionTimeSeries` for an example.
         """
+        for name in ("X", "y"):
+            if name not in self.named_vars:
+                raise ValueError(
+                    f"Data node '{name}' not found in model. "
+                    f"If your model uses different data node names, "
+                    f"override _data_setter() (see "
+                    f"BayesianBasisExpansionTimeSeries for an example)."
+                )
+
         new_no_of_observations = X.shape[0]
 
         # Use integer indices for obs_ind to avoid datetime compatibility issues with PyMC
@@ -277,7 +319,6 @@ class PyMCModel(pm.Model):
             )
             n_treated_units = len(treated_units_coord)
 
-            # Always use 2D format for consistency
             pm.set_data(
                 {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
                 coords={"obs_ind": obs_coords},
@@ -334,10 +375,23 @@ class PyMCModel(pm.Model):
         **kwargs,
     ):
         """
-        Predict data given input data `X`
+        Predict data given input data `X`.
 
         .. caution::
             Results in KeyError if model hasn't been fit.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features for which predictions are required.
+        coords : dict, optional
+            Coordinate names for named dimensions. Forwarded to subclass
+            ``_data_setter`` overrides; ignored by the base implementation.
+        out_of_sample : bool, optional
+            Marker for out-of-sample prediction. Reserved for subclasses;
+            the base implementation does not act on it.
+        **kwargs
+            Reserved for subclass extensions.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -376,6 +430,17 @@ class PyMCModel(pm.Model):
             The Bayesian :math:`R^2` is not the same as the traditional coefficient of
             determination, https://en.wikipedia.org/wiki/Coefficient_of_determination.
 
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features.
+        y : xr.DataArray
+            Observed targets to score against the posterior predictive mean.
+        coords : dict, optional
+            Coordinate names for named dimensions. Forwarded to
+            :meth:`predict`; ignored by the base implementation.
+        **kwargs
+            Reserved for subclass extensions.
         """
         mu = self.predict(X)
         mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
@@ -423,10 +488,12 @@ class PyMCModel(pm.Model):
         -----
         By using `mu` (the posterior expectation) rather than `y_hat` (the posterior
         predictive with observation noise), the uncertainty in the impact reflects:
+
         - Parameter uncertainty in the fitted model
         - Uncertainty in the counterfactual prediction
 
         But excludes:
+
         - Observation-level noise (sigma)
 
         This makes the impact plots focus on the systematic causal effect rather than
@@ -447,6 +514,19 @@ class PyMCModel(pm.Model):
         return impact.transpose(..., "obs_ind")
 
     def calculate_cumulative_impact(self, impact: xr.DataArray) -> xr.DataArray:
+        """Cumulative sum of pointwise causal impact along ``obs_ind``.
+
+        Parameters
+        ----------
+        impact : xarray.DataArray
+            Pointwise causal impact, typically the output of
+            :meth:`calculate_impact`.
+
+        Returns
+        -------
+        xarray.DataArray
+            Cumulative impact accumulated along the ``obs_ind`` dimension.
+        """
         return impact.cumsum(dim="obs_ind")
 
     def print_coefficients(
@@ -465,30 +545,30 @@ class PyMCModel(pm.Model):
         if self.idata is None:
             raise RuntimeError("Model has not been fit")
 
-        def print_row(
+        def _print_row(
             max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
         ) -> None:
-            """Print one row of the coefficient table"""
+            """Print one row of the coefficient table."""
             formatted_name = f"  {name: <{max_label_length}}"
             formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
             print(f"  {formatted_name}  {formatted_val}")
 
-        def print_coefficients_for_unit(
+        def _print_coefficients_for_unit(
             unit_coeffs: xr.DataArray,
             unit_sigma: xr.DataArray,
             labels: list,
             round_to: int,
         ) -> None:
-            """Print coefficients for a single unit"""
+            """Print coefficients for a single unit."""
             # Determine the width of the longest label
             max_label_length = max(len(name) for name in labels + ["y_hat_sigma"])
 
             for name in labels:
                 coeff_samples = unit_coeffs.sel(coeffs=name)
-                print_row(max_label_length, name, coeff_samples, round_to)
+                _print_row(max_label_length, name, coeff_samples, round_to)
 
             # Add coefficient for measurement std
-            print_row(max_label_length, "y_hat_sigma", unit_sigma, round_to)
+            _print_row(max_label_length, "y_hat_sigma", unit_sigma, round_to)
 
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
@@ -513,7 +593,7 @@ class PyMCModel(pm.Model):
             unit_sigma = az.extract(self.idata.posterior, var_names=sigma_var_name).sel(
                 treated_units=unit
             )
-            print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
+            _print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):
@@ -528,7 +608,7 @@ class LinearRegression(PyMCModel):
         \mu &= X \cdot \beta \\
         y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -566,7 +646,16 @@ class LinearRegression(PyMCModel):
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         """
-        Defines the PyMC model
+        Define the PyMC model.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Design matrix with dims ``("obs_ind", "coeffs")``.
+        y : xr.DataArray
+            Outcome with dims ``("obs_ind", "treated_units")``.
+        coords : dict or None
+            Coordinate names for the model's named dimensions.
         """
         with self:
             # Ensure treated_units coordinate exists for consistency
@@ -596,7 +685,7 @@ class WeightedSumFitter(PyMCModel):
         \mu &= X \cdot \beta \\
         y &\sim \mathrm{Normal}(\mu, \sigma) \\
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -652,6 +741,7 @@ class WeightedSumFitter(PyMCModel):
         -------
         Dict[str, Prior]
             Dictionary containing:
+
             - "beta": Dirichlet prior with shape=(1,...,1) for n_control_units
         """
         n_predictors = X.shape[1]
@@ -665,7 +755,16 @@ class WeightedSumFitter(PyMCModel):
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
         """
-        Defines the PyMC model
+        Define the PyMC model.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Design matrix with dims ``("obs_ind", "coeffs")``.
+        y : xr.DataArray
+            Outcome with dims ``("obs_ind", "treated_units")``.
+        coords : dict or None
+            Coordinate names for the model's named dimensions.
         """
         with self:
             self.add_coords(coords)
@@ -766,7 +865,7 @@ class SoftmaxWeightedSumFitter(PyMCModel):
     the role of the :math:`\ell_2` regularization parameter :math:`\zeta` in the
     frequentist SDiD of Arkhangelsky et al. (2021).
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -846,6 +945,7 @@ class SoftmaxWeightedSumFitter(PyMCModel):
         -------
         dict[str, Prior]
             Dictionary containing:
+
             - "beta_raw": Normal prior with dims ["treated_units", "coeffs_raw"]
         """
         return {
@@ -862,6 +962,15 @@ class SoftmaxWeightedSumFitter(PyMCModel):
     ) -> None:
         """
         Build the PyMC model with softmax-parameterized simplex weights.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Design matrix with dims ``("obs_ind", "coeffs")``.
+        y : xr.DataArray
+            Outcome with dims ``("obs_ind", "treated_units")``.
+        coords : dict or None
+            Coordinate names for the model's named dimensions.
         """
         if not coords or "coeffs" not in coords:
             raise ValueError(
@@ -890,10 +999,143 @@ class SoftmaxWeightedSumFitter(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
 
 
-class InstrumentalVariableRegression(PyMCModel):
-    """Custom PyMC model for instrumental linear regression
+class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
+    r"""
+    Bayesian weight fitter for Synthetic Difference-in-Differences.
 
-    Example
+    Encodes both the unit-weight module and the time-weight module in a single
+    PyMC model. Unit weights balance control units against treated units in the
+    pre-treatment period; time weights balance pre-treatment periods against
+    post-treatment periods for control units. Both use the softmax-over-Normal-logits
+    parameterization with a pinned reference level.
+
+    The treatment effect is **not** estimated inside this model. It is computed
+    analytically from the weight posteriors via the double-difference formula
+    in the experiment class.
+
+    Defines the PyMC model:
+
+    .. math::
+        \omega &= \mathrm{softmax}(0, \tilde{\omega}_2, \ldots, \tilde{\omega}_{N_\text{co}}) \\
+        \bar{Y}_{\text{tr},t} &\sim \mathrm{Normal}(\omega_0 + \boldsymbol{\omega}^\top \mathbf{Y}_{\text{co},t},\; \sigma_\omega) \\
+        \lambda &= \mathrm{softmax}(0, \tilde{\lambda}_2, \ldots, \tilde{\lambda}_{T_\text{pre}}) \\
+        \bar{Y}_{i,\text{post}} &\sim \mathrm{Normal}(\lambda_0 + \boldsymbol{\lambda}^\top \mathbf{Y}_{i,\text{pre}},\; \sigma_\lambda)
+
+    Notes
+    -----
+    This model implements the cut-posterior formulation of Bayesian SDiD.
+    Modules 1 and 2 share no parameters and are
+    conditionally independent given the data. Running them in a single MCMC
+    call is a convenience; the important property is that no treatment-effect
+    likelihood feeds back into the weight posteriors.
+
+    The prior scales on the logits play the role of the regularization
+    parameter in the frequentist SDiD:
+
+    - ``omega_raw`` default ``sigma=1.0`` (``zeta_omega=1.0``): moderate
+      regularization, allowing weights between SC-sparse and DiD-uniform.
+    - ``lam_raw`` default ``sigma=100.0`` (``zeta_lambda=0.01``): essentially
+      flat, letting time weights concentrate on the most informative
+      pre-treatment periods.
+
+    References
+    ----------
+    .. [1] Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
+       Wager, S. (2021). Synthetic Difference-in-Differences. *American
+       Economic Review*, 111(12), 4088-4118.
+    """  # noqa: W605
+
+    default_priors: dict[str, Prior] = {}
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """
+        Set default priors for unit and time weight modules.
+
+        Parameters
+        ----------
+        X : dict
+            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+        y : dict
+            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Priors for omega_raw, lam_raw, omega0, lambda0, sigma_omega,
+            sigma_lambda.
+        """
+        return {
+            "omega_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=1.0,
+                dims=["coeffs_raw"],
+            ),
+            "lam_raw": Prior(
+                "Normal",
+                mu=0,
+                sigma=100.0,
+                dims=["obs_ind_raw"],
+            ),
+            "omega0": Prior("Normal", mu=0, sigma=5.0),
+            "lambda0": Prior("Normal", mu=0, sigma=5.0),
+            "sigma_omega": Prior("HalfNormal", sigma=1.0),
+            "sigma_lambda": Prior("HalfNormal", sigma=1.0),
+        }
+
+    def build_model(self, X, y, coords: dict[str, Any] | None) -> None:
+        """
+        Build the PyMC model with both unit-weight and time-weight modules.
+
+        Parameters
+        ----------
+        X : dict
+            Mapping with ``"unit"`` and ``"time"`` design matrices for the
+            unit-weight and time-weight modules respectively.
+        y : dict
+            Mapping with ``"unit"`` and ``"time"`` outcome arrays for the
+            unit-weight and time-weight modules respectively.
+        coords : dict or None
+            Coordinate names for the model's named dimensions.
+        """
+        with self:
+            self.add_coords(coords)
+
+            # Data
+            X_unit = pm.Data("X_unit", X["unit"], dims=["obs_ind", "coeffs"])
+            y_unit = pm.Data("y_unit", y["unit"], dims=["obs_ind"])
+            X_time = pm.Data("X_time", X["time"], dims=["coeffs", "obs_ind"])
+            y_time = pm.Data("y_time", y["time"], dims=["coeffs"])
+
+            # Module 1: Unit weights
+            omega = _softmax_simplex_weights(
+                name="omega",
+                prior=self.priors["omega_raw"],
+                n_rows=1,
+                dims=["coeffs"],
+            )  # shape (N_co,) — 1D from helper when n_rows=1
+            omega0 = self.priors["omega0"].create_variable("omega0")
+            sigma_omega = self.priors["sigma_omega"].create_variable("sigma_omega")
+            mu_omega = omega0 + pt.dot(X_unit, omega)
+            pm.Normal("omega_match", mu=mu_omega, sigma=sigma_omega, observed=y_unit)
+
+            # Module 2: Time weights
+            lam = _softmax_simplex_weights(
+                name="lam",
+                prior=self.priors["lam_raw"],
+                n_rows=1,
+                dims=["obs_ind"],
+            )  # shape (T_pre,) — 1D from helper when n_rows=1
+            lambda0 = self.priors["lambda0"].create_variable("lambda0")
+            sigma_lambda = self.priors["sigma_lambda"].create_variable("sigma_lambda")
+            mu_lambda = lambda0 + pt.dot(X_time, lam)
+            pm.Normal("lambda_match", mu=mu_lambda, sigma=sigma_lambda, observed=y_time)
+
+
+class InstrumentalVariableRegression(PyMCModel):
+    """Custom PyMC model for instrumental linear regression.
+
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -969,13 +1211,15 @@ class InstrumentalVariableRegression(PyMCModel):
             Dictionary of priors for the mus and sigmas of both
             regressions. Example: ``priors = {"mus": [0, 0],
             "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
-        vs_prior_type: An optional string. Can be "spike_and_slab"
-                              or "horseshoe" or "normal
-        vs_hyperparams: An optional dictionary of priors for the
-                               variable selection hyperparameters
-        binary_treatment: A flag for determining the relevant
-                                likelihood to be used.
-
+        vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+            Optional variable-selection prior type. ``None`` falls back to
+            standard normal priors.
+        vs_hyperparams : dict, optional
+            Hyperparameters for the variable-selection prior. Only consulted
+            when ``vs_prior_type`` is set.
+        binary_treatment : bool, default False
+            Whether the treatment ``t`` is binary; selects the relevant
+            likelihood term.
         """
 
         # --- Priors ---
@@ -1113,7 +1357,15 @@ class InstrumentalVariableRegression(PyMCModel):
         using the JAX sampler compilation method. If using the
         JAX sampler it will sample only the posterior predictive distribution.
         If using the PYMC sampler if will sample both the prior
-        and posterior predictive distributions."""
+        and posterior predictive distributions.
+
+        Parameters
+        ----------
+        ppc_sampler : {"jax", "pymc"}, optional
+            Backend used for posterior predictive sampling. ``"jax"`` (the
+            default) is much faster for the multivariate Normal likelihood;
+            ``"pymc"`` additionally samples the prior predictive.
+        """
         random_seed = self.sample_kwargs.get("random_seed", None)
 
         if ppc_sampler == "jax":
@@ -1156,6 +1408,29 @@ class InstrumentalVariableRegression(PyMCModel):
         We default to None, so the user can determine if they wish
         to spend time sampling the posterior predictive distribution
         independently.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict the outcome ``y``.
+        Z : np.ndarray
+            Array used to predict the treatment variable ``t``.
+        y : np.ndarray
+            Focal outcome.
+        t : np.ndarray
+            Treatment whose causal impact is being estimated.
+        coords : dict
+            Coordinate names for the instruments and covariates.
+        priors : dict
+            Prior specification dictionary forwarded to :meth:`build_model`.
+        ppc_sampler : {"jax", "pymc"}, optional
+            Backend for posterior predictive sampling. ``None`` skips it.
+        vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+            Variable-selection prior type, forwarded to :meth:`build_model`.
+        vs_hyperparams : dict, optional
+            Hyperparameters for the variable-selection prior.
+        binary_treatment : bool, default False
+            Whether the treatment ``t`` is binary.
         """
 
         # Ensure random_seed is used in sample_prior_predictive() and
@@ -1172,8 +1447,7 @@ class InstrumentalVariableRegression(PyMCModel):
 
 
 class PropensityScore(PyMCModel):
-    r"""
-    Custom PyMC model for inverse propensity score models
+    r"""Custom PyMC model for inverse propensity score models.
 
     .. note:
         Generally, the `.fit()` method should be used rather than
@@ -1188,7 +1462,7 @@ class PropensityScore(PyMCModel):
         p &= \text{logit}^{-1}(\mu) \\
         t &\sim \mathrm{Bernoulli}(p)
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> import numpy as np
@@ -1218,7 +1492,23 @@ class PropensityScore(PyMCModel):
         prior: dict[str, Any] | None = None,
         noncentred: bool = True,
     ) -> None:
-        "Defines the PyMC propensity model"
+        """Define the PyMC propensity model.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Covariate matrix used to predict the treatment.
+        t : np.ndarray
+            Observed treatment indicator (0/1).
+        coords : dict
+            Coordinate names for named dimensions of the model.
+        prior : dict, optional
+            Prior specification overrides; see :attr:`default_priors` for
+            the expected keys.
+        noncentred : bool, default True
+            Reserved for future non-centred parameterisations of the
+            coefficient prior. Currently informational only.
+        """
         with self:
             self.add_coords(coords)
             X_data = pm.Data("X", X, dims=["obs_ind", "coeffs"])
@@ -1239,6 +1529,19 @@ class PropensityScore(PyMCModel):
         """Draw samples from posterior, prior predictive, and posterior predictive
         distributions. We overwrite the base method because the base method assumes
         a variable y and we use t to indicate the treatment variable here.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Covariate matrix used to predict the treatment.
+        t : np.ndarray
+            Observed treatment indicator (0/1).
+        coords : dict
+            Coordinate names for named dimensions of the model.
+        prior : dict, optional
+            Prior specification overrides. Defaults to ``{"b": [0, 1]}``.
+        noncentred : bool, default True
+            Forwarded to :meth:`build_model`.
         """
         if prior is None:
             prior = {"b": [0, 1]}
@@ -1291,6 +1594,7 @@ class PropensityScore(PyMCModel):
 
         priors : dict, optional
             Dictionary specifying priors for outcome model parameters:
+
                 - "b_outcome": list [mean, std] for regression coefficients.
                 - "sigma": standard deviation of the outcome noise (default 1).
 
@@ -1309,8 +1613,8 @@ class PropensityScore(PyMCModel):
             If we wish to winsorize the propensity score this can be set to clip the high
             and low values of the propensity at 0 + winsorize_boundary and 1-winsorize_boundary
 
-        spline_knots: int, default 30
-            The number of knots we use in the 0 - 1 interval to create our spline function
+        spline_knots : int, default 30
+            The number of knots we use in the 0 - 1 interval to create our spline function.
 
         Returns
         -------
@@ -1345,8 +1649,10 @@ class PropensityScore(PyMCModel):
                 "beta_ps": [0, 1],
             }
         if not hasattr(self, "idata"):
-            raise AttributeError("""Object is missing required attribute 'idata'
-                                 so cannot proceed. Call fit() first""")
+            raise AttributeError(
+                """Object is missing required attribute 'idata'
+                                 so cannot proceed. Call fit() first"""
+            )
         propensity_scores = az.extract(self.idata)["p"]
         random_seed = self.sample_kwargs.get("random_seed", None)
 
@@ -1443,6 +1749,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     sample_kwargs : dict, optional
         A dictionary of kwargs that get unpacked and passed to the
         :func:`pymc.sample` function. Defaults to an empty dictionary.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case default priors are used.
     """  # noqa: W605
 
     def __init__(
@@ -1453,8 +1762,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         trend_component: Any | None = None,
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -1479,6 +1789,18 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._trend_component = None
         self._seasonality_component = None
         self._validate_and_initialize_components()
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            n_order=self.n_order,
+            n_changepoints_trend=self.n_changepoints_trend,
+            prior_sigma=self.prior_sigma,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors,
+        )
 
     def _validate_and_initialize_components(self):
         """
@@ -1555,7 +1877,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         Returns
         -------
         tuple
-            (time_for_trend, time_for_seasonality, X_for_pymc, num_obs)
+            ``(time_for_trend, time_for_seasonality, X_for_pymc, num_obs)``:
+
             - time_for_trend: numpy array of time values for trend component
             - time_for_seasonality: numpy array of day-of-year values
             - X_for_pymc: xarray DataArray for exogenous vars, or None if no exog vars
@@ -1849,6 +2172,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Not used, kept for API compatibility.
         out_of_sample : bool, optional
             Not used, kept for API compatibility.
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------
@@ -1890,6 +2216,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
             Not used, kept for API compatibility.
+        **kwargs
+            Forwarded to :meth:`PyMCModel.score`.
 
         Returns
         -------
@@ -1918,6 +2246,9 @@ class StateSpaceTimeSeries(PyMCModel):
         Kwargs passed to `pm.sample`.
     mode : str, optional
         Pytensor compile mode passed to `build_statespace_graph`. Defaults to None.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case default priors are used.
     """
 
     def __init__(
@@ -1928,8 +2259,9 @@ class StateSpaceTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
+        priors: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
         # Warn that this is experimental
         warnings.warn(
@@ -1947,6 +2279,18 @@ class StateSpaceTimeSeries(PyMCModel):
         self.ss_mod: Any = None
         self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
+
+    def _clone(self) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration."""
+        return type(self)(
+            level_order=self.level_order,
+            seasonal_length=self.seasonal_length,
+            trend_component=self._custom_trend_component,
+            seasonality_component=self._custom_seasonality_component,
+            sample_kwargs=dict(self.sample_kwargs),
+            mode=self.mode,
+            priors=self._user_priors,
+        )
 
     def _validate_and_initialize_components(self):
         """
@@ -2222,6 +2566,9 @@ class StateSpaceTimeSeries(PyMCModel):
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
             If True, forecast future values. If False, return in-sample predictions.
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------
@@ -2293,6 +2640,8 @@ class StateSpaceTimeSeries(PyMCModel):
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
             Not used, kept for API compatibility.
+        **kwargs
+            Forwarded to :meth:`PyMCModel.score`.
 
         Returns
         -------

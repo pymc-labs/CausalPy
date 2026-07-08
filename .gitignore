@@ -14,7 +14,6 @@ dist/
 docs/build/
 docs/jupyter_execute/
 docs/source/api/generated/
-
 .cursor/plans
 .marimo/
 
@@ -27,3 +26,4 @@ docs/source/api/generated/
 
 # Local scratch space (not tracked)
 .scratch/
+coverage.xml

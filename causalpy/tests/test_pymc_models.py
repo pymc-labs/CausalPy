@@ -24,6 +24,7 @@ from causalpy.pymc_models import (
     LinearRegression,
     PyMCModel,
     SoftmaxWeightedSumFitter,
+    SyntheticDifferenceInDifferencesWeightFitter,
     WeightedSumFitter,
     _softmax_simplex_weights,
 )
@@ -184,6 +185,90 @@ class TestPyMCModel:
         assert "unit_0_r2" in score.index
         assert "unit_0_r2_std" in score.index
         assert isinstance(predictions, az.InferenceData)
+
+
+class NonStandardDataModel(PyMCModel):
+    """Subclass using non-default data node names without overriding _data_setter."""
+
+    def build_model(self, X, y, coords):
+        with self:
+            if "treated_units" not in coords:
+                coords = coords.copy() if coords else {}
+                coords["treated_units"] = ["unit_0"]
+            self.add_coords(coords)
+            X_ = pm.Data(name="X_design", value=X, dims=["obs_ind", "coeffs"])
+            y_ = pm.Data(name="y_obs", value=y, dims=["obs_ind", "treated_units"])
+            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
+            sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
+            mu = pm.Deterministic(
+                "mu", pm.math.dot(X_, beta.T), dims=["obs_ind", "treated_units"]
+            )
+            pm.Normal(
+                "y_hat",
+                mu=mu,
+                sigma=sigma,
+                observed=y_,
+                dims=["obs_ind", "treated_units"],
+            )
+
+
+class TestDataSetterValidation:
+    """Tests for _data_setter validation of expected data nodes."""
+
+    @pytest.fixture()
+    def xy_and_coords(self, rng):
+        X = xr.DataArray(
+            rng.normal(size=(20, 2)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(20), "coeffs": ["x1", "x2"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(20, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(20), "treated_units": ["unit_0"]},
+        )
+        coords = {
+            "obs_ind": np.arange(20),
+            "coeffs": ["x1", "x2"],
+            "treated_units": ["unit_0"],
+        }
+        return X, y, coords
+
+    def test_mismatched_X_raises(self, xy_and_coords, mock_pymc_sample):
+        """Subclass with non-standard data node names gets a clear ValueError."""
+        X, y, coords = xy_and_coords
+        model = NonStandardDataModel(sample_kwargs={"chains": 2, "draws": 2})
+        model.fit(X, y, coords=coords)
+        with pytest.raises(ValueError, match="Data node 'X' not found"):
+            model.predict(X=X)
+
+    def test_missing_y_raises(self, xy_and_coords, mock_pymc_sample):
+        """When only y is renamed, error message references 'y'."""
+
+        class OnlyYRenamed(PyMCModel):
+            def build_model(self, X, y, coords):
+                with self:
+                    coords = coords.copy() if coords else {}
+                    coords.setdefault("treated_units", ["unit_0"])
+                    self.add_coords(coords)
+                    X_ = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+                    y_ = pm.Data("outcome", y, dims=["obs_ind", "treated_units"])
+                    beta = pm.Normal(
+                        "beta", mu=0, sigma=1, dims=["treated_units", "coeffs"]
+                    )
+                    sigma = pm.HalfNormal("y_hat_sigma", sigma=1, dims="treated_units")
+                    mu = pm.Deterministic(
+                        "mu",
+                        pm.math.dot(X_, beta.T),
+                        dims=["obs_ind", "treated_units"],
+                    )
+                    pm.Normal("y_hat", mu=mu, sigma=sigma, observed=y_)
+
+        X, y, coords = xy_and_coords
+        model = OnlyYRenamed(sample_kwargs={"chains": 2, "draws": 2})
+        model.fit(X, y, coords=coords)
+        with pytest.raises(ValueError, match="Data node 'y' not found"):
+            model.predict(X=X)
 
 
 def test_idata_property(mock_pymc_sample, did_data):
@@ -671,6 +756,90 @@ class TestSoftmaxSimplexWeights:
                 )
 
 
+class TestSyntheticDifferenceInDifferencesWeightFitter:
+    """Tests for the SDiD weight fitter model."""
+
+    @pytest.fixture
+    def sdid_data(self, rng):
+        """Generate SDiD-shaped test data."""
+        n_co = 5
+        T_pre = 20
+
+        Y_co_pre = rng.normal(0, 1, (T_pre, n_co))
+        Y_tr_pre = rng.normal(0, 1, (T_pre, 1))
+        Y_co_post = rng.normal(0, 1, (10, n_co))
+
+        control_units = [f"c_{i}" for i in range(n_co)]
+
+        y_unit = xr.DataArray(
+            Y_tr_pre.mean(axis=1),
+            dims=["obs_ind"],
+            coords={"obs_ind": np.arange(T_pre)},
+        )
+        y_time = xr.DataArray(
+            Y_co_post.mean(axis=0),
+            dims=["coeffs"],
+            coords={"coeffs": control_units},
+        )
+        X_unit = xr.DataArray(
+            Y_co_pre,
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(T_pre), "coeffs": control_units},
+        )
+        X_time = xr.DataArray(
+            Y_co_pre.T,
+            dims=["coeffs", "obs_ind"],
+            coords={"coeffs": control_units, "obs_ind": np.arange(T_pre)},
+        )
+
+        X = {"unit": X_unit, "time": X_time}
+        y = {"unit": y_unit, "time": y_time}
+        coords = {
+            "coeffs": control_units,
+            "obs_ind": np.arange(T_pre),
+            "coeffs_raw": control_units[1:],
+            "obs_ind_raw": list(range(1, T_pre)),
+        }
+        return X, y, coords
+
+    def test_fitting(self, sdid_data):
+        """Test that the model fits and produces omega and lam posteriors."""
+        X, y, coords = sdid_data
+        model = SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        )
+        result = model.fit(X, y, coords=coords)
+
+        assert isinstance(result, az.InferenceData)
+        assert "posterior" in result.groups()
+        assert "omega" in result.posterior
+        assert "lam" in result.posterior
+
+    def test_omega_is_simplex(self, sdid_data):
+        """Test that omega weights sum to 1."""
+        X, y, coords = sdid_data
+        model = SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        )
+        model.fit(X, y, coords=coords)
+
+        omega = model.idata.posterior["omega"]
+        omega_sum = omega.sum(dim="coeffs")
+        np.testing.assert_allclose(omega_sum.values, 1.0, atol=1e-5)
+
+    def test_lam_is_simplex(self, sdid_data):
+        """Test that lam (time) weights sum to 1."""
+        X, y, coords = sdid_data
+        model = SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        )
+        model.fit(X, y, coords=coords)
+
+        lam = model.idata.posterior["lam"]
+        lam_sum = lam.sum(dim="obs_ind")
+        np.testing.assert_allclose(lam_sum.values, 1.0, atol=1e-5)
+
+
 class TestSoftmaxWeightedSumFitterMultiUnit:
     """Tests for SoftmaxWeightedSumFitter with multiple treated units."""
 
@@ -831,6 +1000,21 @@ class TestPriorIntegration:
         assert beta_raw_prior.parameters["sigma"] == 1.0
         assert beta_raw_prior.parameters["mu"] == 0
         assert beta_raw_prior.dims == ("treated_units", "coeffs_raw")
+
+    def test_sdid_weight_fitter_priors_from_data(self, prior_test_data):
+        """Test SyntheticDifferenceInDifferencesWeightFitter prior generation."""
+        X, y, coords = prior_test_data
+        model = SyntheticDifferenceInDifferencesWeightFitter()
+        X_dict = {"unit": X, "time": X}
+        y_dict = {"unit": y, "time": y}
+        data_priors = model.priors_from_data(X_dict, y_dict)
+
+        assert "omega_raw" in data_priors
+        assert "lam_raw" in data_priors
+        assert data_priors["omega_raw"].distribution == "Normal"
+        assert data_priors["lam_raw"].distribution == "Normal"
+        assert data_priors["omega_raw"].parameters["sigma"] == 1.0
+        assert data_priors["lam_raw"].parameters["sigma"] == 100.0
 
     def test_prior_precedence_system(self, prior_test_data):
         """Test that user priors override data-driven priors override defaults."""

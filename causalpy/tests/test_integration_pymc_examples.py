@@ -427,6 +427,95 @@ def test_its_covid(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
+    """Regression test: ITS plot must remain readable when the post-period
+    contains a single observation.
+
+    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
+    zero-area polygon, the median line has no neighbours to connect to, and
+    the (then top-of-zorder) treatment ``axvline`` covers the only datum -
+    leaving the bottom two panels visually empty. The fix
+        1. lowers the treatment-line zorder and switches it to a thin dashed
+           style so it reads as an annotation, never as data;
+        2. overlays an explicit median-plus-HDI errorbar on every panel;
+        3. swaps the legend handle to that errorbar so the legend matches
+           what is drawn (and drops the "Causal impact" entry whose
+           ``fill_between`` collapses to nothing).
+    """
+    from matplotlib.collections import LineCollection
+    from matplotlib.container import ErrorbarContainer
+
+    df = its_data
+    # Choose treatment_time so exactly one datum sits in the post-period.
+    treatment_time = df.index[-1]
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert len(result.datapost) == 1
+    fig, ax = result.plot()
+
+    treatment_axvlines = [
+        ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
+    ]
+    assert treatment_axvlines, "expected a treatment-start axvline"
+    assert all(ln.get_zorder() < 2 for ln in treatment_axvlines), (
+        "treatment axvline must sit below data (zorder<2) so it never "
+        "occludes the only post-period observation"
+    )
+    assert all(ln.get_linestyle() == "--" for ln in treatment_axvlines), (
+        "treatment axvline must be dashed to read as an annotation"
+    )
+    assert all(ln.get_linewidth() <= 2 for ln in treatment_axvlines), (
+        "treatment axvline must be thin to avoid dominating the plot"
+    )
+
+    # Each panel must contain at least one errorbar overlay
+    # (rendered as a LineCollection from the errorbar caps/whiskers).
+    for i, a in enumerate(ax):
+        line_collections = [c for c in a.collections if isinstance(c, LineCollection)]
+        assert line_collections, (
+            f"panel {i} should have a LineCollection from the singleton "
+            "errorbar overlay; otherwise the post-period is invisible"
+        )
+
+    # Top-panel legend must reflect what is actually drawn: a Counterfactual
+    # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
+    # and no "Causal impact" entry (since its fill_between is degenerate).
+    legend = ax[0].get_legend()
+    assert legend is not None, "top panel should have a legend"
+    legend_labels = [t.get_text() for t in legend.get_texts()]
+    assert "Counterfactual" in legend_labels
+    assert "Causal impact" not in legend_labels, (
+        "Causal impact entry must be dropped when its fill_between collapses"
+    )
+    cf_idx = legend_labels.index("Counterfactual")
+    cf_handle = legend.legend_handles[cf_idx]
+    # Matplotlib renders an ErrorbarContainer in the legend via a
+    # LineCollection proxy. What we want to assert is that the handle is
+    # *not* the old (Line2D, PolyCollection) tuple, since that would imply
+    # the legend swatch shows a ribbon that does not exist on the plot.
+    from matplotlib.collections import PolyCollection
+    from matplotlib.lines import Line2D
+
+    assert not (isinstance(cf_handle, tuple) and len(cf_handle) == 2), (
+        "Counterfactual legend handle should not be a (line, ribbon) tuple "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert not isinstance(cf_handle, PolyCollection), (
+        "Counterfactual legend handle should not be a PolyCollection ribbon "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert isinstance(cf_handle, ErrorbarContainer | LineCollection | Line2D), (
+        "Counterfactual legend handle should reflect the errorbar overlay, "
+        f"got {type(cf_handle).__name__}"
+    )
+    plt.close(fig)
+
+
+@pytest.mark.integration
 def test_sc(mock_pymc_sample, sc_data):
     """
     Test Synthetic Control experiment.
@@ -535,6 +624,95 @@ def test_sc_softmax(mock_pymc_sample):
     assert set(expected_columns).issubset(set(plot_data.columns)), (
         f"DataFrame is missing expected columns {expected_columns}"
     )
+
+
+@pytest.mark.integration
+def test_sdid(mock_pymc_sample):
+    """
+    Test Synthetic Difference-in-Differences experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. SyntheticDifferenceInDifferences returns correct type
+    3. tau_posterior exists with chain/draw dims
+    4. post_impact and post_impact_cumulative exist
+    5. summary runs without error
+    6. plot returns Figure and Axes
+    """
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticDifferenceInDifferences)
+
+    # tau posterior should exist with chain/draw dims
+    assert hasattr(result, "tau_posterior")
+    assert "chain" in result.tau_posterior.dims
+    assert "draw" in result.tau_posterior.dims
+
+    # post_impact should exist
+    assert hasattr(result, "post_impact")
+    assert hasattr(result, "post_impact_cumulative")
+
+    # summary should run without error
+    result.summary()
+
+    # plot should return fig and axes
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.integration
+def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
+    """SDiD with a DatetimeIndex panel exercises the datetime branch in
+    ``_bayesian_plot`` and the full ``effect_summary`` body, including the
+    ``period``-warning path and the ``cumulative=False`` branch.
+    """
+    df = cp.load_data("sc").copy()
+    df.index = pd.date_range("2020-01-01", periods=len(df), freq="D")
+    treatment_time = df.index[70]
+
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+
+    # DatetimeIndex branch in _bayesian_plot calls format_date_axes.
+    fig, _ = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+
+    # Default effect_summary call covers the main body and prose generation.
+    summary = result.effect_summary()
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+    assert isinstance(summary.text, str) and len(summary.text) > 0
+
+    # Passing period= triggers the ignored-warning branch.
+    with pytest.warns(
+        UserWarning, match="ignored for SyntheticDifferenceInDifferences"
+    ):
+        result.effect_summary(period="post")
+
+    # cumulative=False covers the conditional ``obs_cum``/``counterfactual_cum``
+    # branches that are skipped by the default call above.
+    summary_no_cum = result.effect_summary(cumulative=False)
+    assert "cumulative" not in summary_no_cum.table.index
 
 
 @pytest.mark.integration
@@ -1514,10 +1692,10 @@ class TestSyntheticControlMultiUnit:
         assert sc.treatment_time == treatment_time
 
         # Check data shapes
-        assert sc.datapre_treated.shape == (40, len(treated_units))
-        assert sc.datapost_treated.shape == (20, len(treated_units))
-        assert sc.datapre_control.shape == (40, len(control_units))
-        assert sc.datapost_control.shape == (20, len(control_units))
+        assert sc.pre_design["treated"].shape == (40, len(treated_units))
+        assert sc.post_design["treated"].shape == (20, len(treated_units))
+        assert sc.pre_design["control"].shape == (40, len(control_units))
+        assert sc.post_design["control"].shape == (20, len(control_units))
 
     @pytest.mark.integration
     def test_multi_unit_scoring(self, multi_unit_sc_data):

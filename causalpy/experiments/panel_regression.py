@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Panel Regression with Fixed Effects
-"""
+"""Panel Regression with Fixed Effects."""
 
 from typing import Any, Literal
 
@@ -21,20 +19,19 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from scipy import stats
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-
-LEGEND_FONT_SIZE = 12
 
 
 class PanelRegression(BaseExperiment):
@@ -61,6 +58,7 @@ class PanelRegression(BaseExperiment):
         If provided, time fixed effects will be included. Default is None.
     fe_method : {"dummies", "demeaned"}, default="dummies"
         Method for handling fixed effects:
+
         - "dummies": Use unpooled dummy-variable fixed effects
           (``C(unit)``/``C(time)`` in formula). Gets individual unit effect
           estimates but creates N-1 dummy columns. Best for small N.
@@ -68,6 +66,8 @@ class PanelRegression(BaseExperiment):
           but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -79,6 +79,37 @@ class PanelRegression(BaseExperiment):
         The fixed effects method used ("dummies" or "demeaned").
     _group_means : dict
         Stored group means for recovering unit effects (demeaned method only).
+
+    Notes
+    -----
+    The demeaned transformation (de-meaning by group) removes time-invariant
+    confounders but also drops time-invariant covariates from the model. For
+    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    extracted from the coefficients. For the demeaned approach, unit effects
+    can be recovered post-hoc using the stored group means (``_group_means``),
+    which are always computed from the original (pre-demeaning) data.
+
+    This class does not yet implement hierarchical/partial-pooling fixed
+    effects. Those semantics are intentionally kept out of scope here so
+    ``fe_method="dummies"`` remains an accurate label for the current
+    unpooled estimator.
+
+    Two-way fixed effects (unit + time) control for both unit-specific and
+    time-specific unobserved heterogeneity. This is the standard approach in
+    difference-in-differences estimation.
+
+    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
+    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
+    entry/exit, missing waves). When both unit and time fixed effects are
+    requested with ``fe_method="demeaned"``, the sequential demeaning
+    (first by unit, then by time) is algebraically equivalent to the standard
+    two-way demeaned transformation only for balanced panels. For unbalanced
+    panels, iterative alternating demeaning would be needed for exact
+    convergence; the single-pass approximation used here may introduce small
+    biases. Unbalanced panels are common in practice (e.g. firm or worker
+    panels with attrition); for heavily unbalanced data, consider checking
+    sensitivity or using dedicated FE packages that implement iterative
+    two-way demeaning (e.g. reghdfe, pyfixest).
 
     Examples
     --------
@@ -143,41 +174,11 @@ class PanelRegression(BaseExperiment):
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
     ... )
-
-    Notes
-    -----
-    The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
-
-    This class does not yet implement hierarchical/partial-pooling fixed
-    effects. Those semantics are intentionally kept out of scope here so
-    ``fe_method="dummies"`` remains an accurate label for the current
-    unpooled estimator.
-
-    Two-way fixed effects (unit + time) control for both unit-specific and
-    time-specific unobserved heterogeneity. This is the standard approach in
-    difference-in-differences estimation.
-
-    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
-    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
-    entry/exit, missing waves). When both unit and time fixed effects are
-    requested with ``fe_method="demeaned"``, the sequential demeaning
-    (first by unit, then by time) is algebraically equivalent to the standard
-    two-way demeaned transformation only for balanced panels. For unbalanced
-    panels, iterative alternating demeaning would be needed for exact
-    convergence; the single-pass approximation used here may introduce small
-    biases. Unbalanced panels are common in practice (e.g. firm or worker
-    panels with attrition); for heavily unbalanced data, consider checking
-    sensitivity or using dedicated FE packages that implement iterative
-    two-way demeaning (e.g. reghdfe, pyfixest).
     """
 
     supports_ols = True
     supports_bayes = True
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -277,40 +278,29 @@ class PanelRegression(BaseExperiment):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(  # type: ignore[assignment]
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(  # type: ignore[assignment]
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
-        )
+        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit the model."""
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
-        elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, set fit_intercept=False so that the
-            # patsy intercept column is included in the coefficients array.
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
-            self.model.fit(X=self.X, y=self.y)
+        X = self.design["X"]
+        y = self.design["y"]
+
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
         """Apply demeaned transformation (demean by group).
@@ -414,7 +404,7 @@ class PanelRegression(BaseExperiment):
         if self.n_periods:
             print(f"Periods: {self.n_periods} ({self.time_fe_variable})")
         print(f"FE method: {self.fe_method}")
-        print(f"Observations: {self.X.shape[0]}")
+        print(f"Observations: {self.design['X'].shape[0]}")
         print("=" * 60)
 
         coeff_labels = self._get_non_fe_labels()
@@ -427,7 +417,7 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # PyMC print_coefficients uses coordinate-based lookup so a
             # filtered label list works correctly.
             self.model.print_coefficients(coeff_labels, round_to)
@@ -468,6 +458,29 @@ class PanelRegression(BaseExperiment):
             so the standard ITS/SC-style effect summary does not directly
             apply.  Use :meth:`summary` for coefficient-level inference.
 
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (placeholder; not consumed).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            Treated unit selector for multi-unit experiments.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+
         Raises
         ------
         NotImplementedError
@@ -480,15 +493,68 @@ class PanelRegression(BaseExperiment):
             "inference."
         )
 
-    def _bayesian_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
+    def plot(
+        self,
+        *,
+        hdi_prob: float = HDI_PROB,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot the panel regression coefficients.
+
+        Bayesian models render a forest plot with HDI intervals; OLS models
+        render a bar plot of point estimates. To plot only a subset of
+        coefficients (or to customise the figure size), call
+        :meth:`plot_coefficients` directly.
+
+        Parameters
+        ----------
+        hdi_prob : float
+            Probability mass of the highest density interval drawn around
+            each posterior coefficient via :func:`arviz.plot_forest`. Must
+            be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the coefficient plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            hdi_prob=hdi_prob,
+        )
+
+    def _bayesian_plot(
+        self, hdi_prob: float = HDI_PROB, **kwargs: Any
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for Bayesian model.
+
+        Parameters
+        ----------
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around each
+            posterior coefficient via :func:`arviz.plot_forest`. Must be in
+            ``(0, 1]``. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal()
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
     def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for OLS model.
@@ -501,7 +567,7 @@ class PanelRegression(BaseExperiment):
         return self._plot_coefficients_internal()
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -510,16 +576,17 @@ class PanelRegression(BaseExperiment):
         var_names : list[str], optional
             Specific coefficient names to plot.  If ``None``, plots all
             non-FE coefficients (as determined by ``_get_non_fe_labels``).
-        hdi_prob : float, default=0.94
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
-            coefficients. Must be in (0, 1).
+            coefficients. Must be in (0, 1). Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         """
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: use az.plot_forest directly
             axes = az.plot_forest(
                 self.model.idata,
@@ -550,13 +617,19 @@ class PanelRegression(BaseExperiment):
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for Bayesian model.
 
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
         Returns
         -------
         pd.DataFrame
             DataFrame with fitted values and credible intervals
         """
         # Get posterior predictions
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
             pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
             pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
@@ -566,7 +639,7 @@ class PanelRegression(BaseExperiment):
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
+                "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": pred_mean,
                 "y_fitted_lower": pred_lower,
                 "y_fitted_upper": pred_upper,
@@ -582,19 +655,25 @@ class PanelRegression(BaseExperiment):
     def get_plot_data_ols(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for OLS model.
 
+        Parameters
+        ----------
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
         Returns
         -------
         pd.DataFrame
             DataFrame with fitted values
         """
-        if isinstance(self.model, RegressorMixin):
-            y_fitted = np.squeeze(self.model.predict(self.X))  # type: ignore[attr-defined]
+        if self._model_backend.is_ols:
+            y_fitted = np.squeeze(self.model.predict(self.design["X"]))
         else:
             raise ValueError("Model is not an OLS model")
 
         plot_data = pd.DataFrame(
             {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
+                "y_actual": self.design["y"].values.flatten(),
                 "y_fitted": y_fitted,
                 self.unit_fe_variable: self.data[self.unit_fe_variable].values,
             }
@@ -606,7 +685,7 @@ class PanelRegression(BaseExperiment):
         return plot_data
 
     def plot_coefficients(
-        self, var_names: list[str] | None = None, hdi_prob: float = 0.94
+        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
     ) -> tuple[plt.Figure, plt.Axes]:
         """Plot coefficient estimates with credible/confidence intervals.
 
@@ -619,9 +698,10 @@ class PanelRegression(BaseExperiment):
             Specific coefficient names to plot.  Names must match the patsy
             design-matrix labels (e.g. ``"treatment"``, ``"x1"``).
             If ``None``, plots all non-FE coefficients.
-        hdi_prob : float, default=0.94
+        hdi_prob : float
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Ignored for OLS models.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
@@ -671,7 +751,7 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
@@ -714,7 +794,7 @@ class PanelRegression(BaseExperiment):
         n_sample: int = 10,
         select: Literal["random", "extreme", "high_variance"] = "random",
         show_mean: bool = True,
-        hdi_prob: float = 0.94,
+        hdi_prob: float = HDI_PROB,
         interval_type: Literal["mean", "predictive"] = "mean",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
@@ -730,16 +810,19 @@ class PanelRegression(BaseExperiment):
             Number of units to sample if units not specified.
         select : {"random", "extreme", "high_variance"}, default="random"
             Method for selecting units:
+
             - "random": Random sample of units
             - "extreme": Units with largest positive and negative effects
             - "high_variance": Units with most within-unit variation
         show_mean : bool, default=True
             Whether to show the overall mean trajectory.
-        hdi_prob : float, default=0.94
-            Probability mass for the HDI credible interval (Bayesian models only).
-            Common values are 0.94 (default) or 0.89.
+        hdi_prob : float
+            Probability mass for the HDI credible interval (Bayesian models
+            only). Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94). Common alternative values are 0.89 or 0.5.
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
+
             - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
             - "predictive": HDI of posterior predictive ``y_hat``
               (includes observation noise)
@@ -762,7 +845,7 @@ class PanelRegression(BaseExperiment):
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
         # Check if model is Bayesian
-        is_bayesian = isinstance(self.model, PyMCModel)
+        is_bayesian = self._model_backend.is_bayesian
 
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
@@ -837,7 +920,7 @@ class PanelRegression(BaseExperiment):
             sorted_obs_indices = unit_obs_indices[sort_order]
 
             # Get actual y values (sorted by time)
-            y_actual = self.y.values.flatten()[sorted_obs_indices]  # type: ignore[attr-defined]
+            y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
 
             # Plot actual
             ax.plot(
@@ -880,7 +963,9 @@ class PanelRegression(BaseExperiment):
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.X))[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
+                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                    sorted_obs_indices
+                ]  # type: ignore[union-attr]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,
@@ -908,6 +993,7 @@ class PanelRegression(BaseExperiment):
         ----------
         kind : {"scatter", "histogram", "qq"}, default="scatter"
             Type of residual plot:
+
             - "scatter": Residuals vs fitted values
             - "histogram": Distribution of residuals
             - "qq": Q-Q plot for normality check
@@ -918,7 +1004,7 @@ class PanelRegression(BaseExperiment):
             Figure and axes objects
         """
         # Get plot data
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             plot_data = self.get_plot_data_bayesian()
         else:
             plot_data = self.get_plot_data_ols()

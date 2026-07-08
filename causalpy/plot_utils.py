@@ -57,7 +57,8 @@ def plot_xY(
         Keyword arguments for line, band, heatmap, or sample styling (passed through
         to matplotlib / ArviZ helpers depending on ``kind`` and ``ci_kind``).
     ci_prob : float, optional
-        The size of the credible interval. Default is :data:`~causalpy.constants.HDI_PROB`.
+        The size of the credible interval. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
     label : str, optional
         The plot label.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -373,7 +374,8 @@ def get_hdi_to_df(
     x : xr.DataArray
         Xarray data array.
     hdi_prob : float, optional
-        The size of the HDI. Default is :data:`~causalpy.constants.HDI_PROB`.
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
     Returns
     -------
