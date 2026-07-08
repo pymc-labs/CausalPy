@@ -8,15 +8,15 @@ Run all notebooks (with mock injection, outputs discarded):
 
 Run only PyMC notebooks:
 
-    python scripts/run_notebooks/runner.py --pattern "*_pymc*.ipynb"
+    python scripts/run_notebooks/runner.py --pattern "*-pymc.ipynb"
 
 Run only sklearn notebooks:
 
-    python scripts/run_notebooks/runner.py --pattern "*_skl*.ipynb"
+    python scripts/run_notebooks/runner.py --pattern "*-sklearn.ipynb"
 
 Exclude PyMC and sklearn notebooks (run others):
 
-    python scripts/run_notebooks/runner.py --exclude-pattern _pymc --exclude-pattern _skl
+    python scripts/run_notebooks/runner.py --exclude-pattern -pymc --exclude-pattern -sklearn
 
 Full execution (no mock, saves outputs in place):
 
@@ -24,7 +24,7 @@ Full execution (no mock, saves outputs in place):
 
 Full execution for a single notebook:
 
-    python scripts/run_notebooks/runner.py --full --pattern "sc_skl*.ipynb"
+    python scripts/run_notebooks/runner.py --full --pattern "synthetic-control-sklearn.ipynb"
 
 """
 
@@ -186,7 +186,7 @@ def parse_args() -> argparse.Namespace:
         "--pattern",
         type=str,
         default=None,
-        help="Glob pattern to filter notebooks (e.g., '*_pymc*.ipynb')",
+        help="Glob pattern to filter notebooks (e.g., '*-pymc.ipynb')",
     )
     parser.add_argument(
         "--exclude-pattern",

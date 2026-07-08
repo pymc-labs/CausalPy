@@ -57,13 +57,13 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 python scripts/run_notebooks/runner.py
 
 # Run only PyMC notebooks
-python scripts/run_notebooks/runner.py --pattern "*_pymc*.ipynb"
+python scripts/run_notebooks/runner.py --pattern "*-pymc.ipynb"
 
 # Run only sklearn notebooks
-python scripts/run_notebooks/runner.py --pattern "*_skl*.ipynb"
+python scripts/run_notebooks/runner.py --pattern "*-sklearn.ipynb"
 
 # Exclude PyMC and sklearn notebooks (run others)
-python scripts/run_notebooks/runner.py --exclude-pattern _pymc --exclude-pattern _skl
+python scripts/run_notebooks/runner.py --exclude-pattern -pymc --exclude-pattern -sklearn
 
 # Run notebooks in parallel (requires joblib)
 python scripts/run_notebooks/runner.py --parallel
