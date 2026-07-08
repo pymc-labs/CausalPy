@@ -25,9 +25,10 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import _PlotXYStyle, plot_xY
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -596,6 +597,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, np.ndarray]:
@@ -606,6 +612,25 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round the ATT in the title. Defaults to
             2. Use ``None`` for raw values.
+        ci_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"`` and ``"histogram"``, the legend shows
+            individual sample lines rather than a shaded band.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         show : bool, optional
             Whether to call :func:`matplotlib.pyplot.show` after drawing.
             Defaults to ``True``.
@@ -623,10 +648,22 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : numpy.ndarray
             Array of the three :class:`matplotlib.axes.Axes` instances.
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
         )
 
     @staticmethod
@@ -642,7 +679,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        **kwargs: dict,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
@@ -651,8 +691,15 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
-        **kwargs : dict
-            Additional keyword arguments (currently unused).
+        hdi_prob : float, optional
+            Probability mass of the credible interval. Must be in ``(0, 1]``.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
 
         Returns
         -------
@@ -661,6 +708,12 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : list of matplotlib.axes.Axes
             The three axes (counterfactual, impact, cumulative impact).
         """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         treated_unit = self.treated_units[0]
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
@@ -678,6 +731,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapre.index,
             pre_pred,
             ax=ax[0],
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -698,6 +752,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapost.index,
             post_pred,
             ax=ax[0],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -730,12 +785,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -756,6 +813,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")

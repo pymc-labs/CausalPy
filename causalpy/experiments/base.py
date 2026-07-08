@@ -337,7 +337,33 @@ class BaseExperiment(ABC):
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
-            ``_bayesian_plot`` / ``_ols_plot``.
+            ``_bayesian_plot`` / ``_ols_plot``. May include ``kind``,
+            ``ci_kind``, ``ci_prob``, and ``num_samples`` for
+            :func:`~causalpy.plot_utils.plot_xY`.
+
+        Notes
+        -----
+        **Legend handling and ``plot_xY`` return types:** :func:`~causalpy.plot_utils.plot_xY`
+        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
+        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
+        Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
+        matplotlib legends from those return values should only pack
+        ``(line, patch)`` tuples when calling ``plot_xY`` with ``kind="ribbon"``
+        (the default). Many current experiment plots always use the ribbon
+        default and never forward ``kind``; if a subclass forwards non-ribbon
+        kinds, it must build legend handles accordingly. The base class applies
+        ``legend_kwargs`` by mutating an existing legend in place, which preserves
+        whatever handle objects the subclass attached (including tuple handles
+        used for ribbon mean+band).
+
+        Examples
+        --------
+        Move the legend outside the plot area to avoid overlap:
+
+        >>> fig, ax = result.plot(  # doctest: +SKIP
+        ...     show=False,
+        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+        ... )
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if self._model_backend.is_bayesian:

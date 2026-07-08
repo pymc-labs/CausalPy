@@ -14,6 +14,7 @@
 """Piecewise Interrupted Time Series Analysis (Segmented Regression)."""
 
 import re
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -27,7 +28,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import _PlotXYStyle, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -425,7 +426,11 @@ class PiecewiseITS(BaseExperiment):
         self,
         *,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -437,11 +442,25 @@ class PiecewiseITS(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to 2. Use ``None`` to render raw numbers.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             fitted, counterfactual, causal effect, and cumulative effect
             bands. Must be in ``(0, 1]``. Ignored for OLS models. Defaults
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"`` and ``"histogram"``, the legend shows
+            individual sample lines rather than a shaded band.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 10)``.
@@ -462,18 +481,32 @@ class PiecewiseITS(BaseExperiment):
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -499,6 +532,12 @@ class PiecewiseITS(BaseExperiment):
         ax : list[plt.Axes]
             List of axes objects.
         """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         time_values = self.data[self.time_col].values
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
@@ -520,7 +559,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             y_pred_mu,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
 
@@ -532,7 +571,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             y_cf_mu,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
 
@@ -560,7 +599,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             self.effect,
             ax=ax[1],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C2"},
         )
         ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
@@ -577,7 +616,7 @@ class PiecewiseITS(BaseExperiment):
             time_values,
             self.cumulative_effect,
             ax=ax[2],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C3"},
         )
         ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)

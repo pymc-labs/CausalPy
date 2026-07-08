@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Difference in differences."""
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -30,7 +31,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import _PlotXYStyle, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -330,7 +331,11 @@ class DifferenceInDifferences(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -343,12 +348,25 @@ class DifferenceInDifferences(BaseExperiment):
             Number of decimals used to round numerical results in the figure
             title. Defaults to ``None``, in which case 2 significant figures
             are used.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             posterior predictive bands for the control, treatment, and
             counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
             OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"`` and ``"histogram"``, the legend shows
+            individual sample lines rather than a shaded band.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -371,18 +389,32 @@ class DifferenceInDifferences(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -403,6 +435,12 @@ class DifferenceInDifferences(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
 
         def _plot_causal_impact_arrow(results, ax):
             """
@@ -476,7 +514,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -489,7 +527,7 @@ class DifferenceInDifferences(BaseExperiment):
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -530,7 +568,7 @@ class DifferenceInDifferences(BaseExperiment):
                     treated_units=0
                 ),
                 ax=ax,
-                hdi_prob=hdi_prob,
+                **style,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
             )
