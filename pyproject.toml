@@ -71,6 +71,7 @@ dev = [
     "codespell",
     "nbformat",
     "nbconvert",
+    "PyYAML",
 ]
 docs = [
     "ipykernel",
@@ -97,6 +98,7 @@ docs = [
     "nbformat",
     "nbconvert",
     "Pillow",
+    "PyYAML",
 ]
 lint = ["prek", "ruff", "mypy"]
 test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill"]

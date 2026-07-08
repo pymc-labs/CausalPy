@@ -60,18 +60,14 @@ When creating a new example notebook:
 
 1. **Place it** in `docs/source/notebooks/` with naming pattern `{method}_{model}.ipynb`
 2. **Include at least one plot** in the notebook outputs (the first PNG image will be used as the thumbnail)
-3. **Manually add it to `docs/source/notebooks/index.md`**:
-   - Find the appropriate category section or create a new one
-   - Add a `grid-item-card` entry with:
-     - `:img-top: ../_static/thumbnails/{notebook_name}.png` (thumbnail path)
-     - `:link: {notebook_name_without_extension}` (notebook name without `.ipynb`)
-     - `:link-type: doc`
-   - Cards are arranged in 3-column grids using `sphinx-design`
-   - Add the notebook to the matching **hidden toctree** block at the bottom of `index.md` so the left Section Navigation sidebar stays populated
-4. **Thumbnails are generated automatically** during the build process by `scripts/generate_gallery.py` (runs via `conf.py` during Sphinx setup)
-5. **Test locally** with `make html` and check `docs/_build/html/notebooks/index.html`
+3. **Add an entry to `docs/source/notebooks/gallery.yaml`** in the appropriate category:
+   - `title`: card title shown in the gallery grid
+   - `notebook`: stem without extension (e.g. `did_pymc`)
+   - `thumbnail: false` for non-notebook pages such as `sensitivity_checks.md`
+4. **Regenerate the gallery index** with `python scripts/generate_gallery.py` (or `make gallery`). This updates `index.md`, hidden toctrees for the left sidebar, and thumbnails.
+5. **Test locally** with `make html` and check `docs/_build/notebooks/index.html`
 
-**Important**: The `index.md` file is manually maintained. The `generate_gallery.py` script only generates thumbnails; it does not modify `index.md`. Thumbnails are gitignored (`docs/source/_static/thumbnails/`) and generated on-demand during builds.
+**Important**: `gallery.yaml` is the source of truth. `index.md` is generated — do not edit it by hand. The `gallery-in-sync` prek hook fails if `gallery.yaml`, notebooks, and `index.md` drift apart.
 
 ## Code quality checks
 

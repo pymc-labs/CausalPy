@@ -229,31 +229,19 @@ When adding a new example notebook to the documentation gallery:
 
 2. **Ensure the notebook has at least one plot/figure** in its outputs. The gallery generation script (`scripts/generate_gallery.py`) will automatically extract the first PNG image from the notebook outputs to create a thumbnail. If the notebook has no outputs, the script will attempt to execute it to generate the thumbnail.
 
-3. **Add the notebook to the gallery** by manually editing `docs/source/notebooks/index.md`:
-   - Find the appropriate category section (e.g., "Difference in Differences", "Regression Discontinuity") or create a new one if needed
-   - Add a new `grid-item-card` entry within the category's grid, following this format:
+3. **Add the notebook to `docs/source/notebooks/gallery.yaml`** under the appropriate category:
+   - `title`: card title for the gallery grid
+   - `notebook`: filename stem without extension
+   - optional `thumbnail: false` when there is no plot (e.g. `sensitivity_checks.md`)
+   - optional category `intro` text when adding a new method section
 
-     ```markdown
-     :::{grid-item-card} Your Notebook Title
-     :class-card: sd-card-h-100
-     :img-top: ../_static/thumbnails/{notebook_name}.png
-     :link: {notebook_name_without_extension}
-     :link-type: doc
-     :::
-     ```
-
-   - The `:img-top:` path should reference `../_static/thumbnails/{notebook_name}.png` (the thumbnail will be generated automatically)
-   - The `:link:` should be the notebook name without the `.ipynb` extension
-   - Cards are arranged in a 3-column grid layout
-   - Add the notebook to the matching hidden `toctree` block at the bottom of `index.md` (same caption group as on `main`) so the left Section Navigation sidebar lists it
-
-4. **Generate thumbnails locally** (optional, for testing):
+4. **Regenerate the gallery** (updates `index.md`, sidebar toctrees, and thumbnails):
 
    ```bash
    python scripts/generate_gallery.py
    ```
 
-   Thumbnails are automatically generated during the documentation build process, so you don't need to commit them (the `docs/source/_static/thumbnails/` directory is gitignored).
+   Thumbnails are gitignored (`docs/source/_static/thumbnails/`) and are also generated during `make html` / Read the Docs builds.
 
 5. **Build and test the documentation** to verify the notebook appears correctly in the gallery:
 
@@ -261,9 +249,9 @@ When adding a new example notebook to the documentation gallery:
    make html
    ```
 
-   Then open `docs/_build/html/notebooks/index.html` in your browser to see the gallery and confirm the left sidebar lists the new notebook.
+   Then open `docs/_build/notebooks/index.html` in your browser to see the gallery and confirm the left sidebar lists the new notebook.
 
-**Note**: The gallery generation script (`scripts/generate_gallery.py`) runs automatically during the Sphinx build process (configured in `docs/source/conf.py`), so thumbnails will be generated on Read the Docs builds without needing to commit them.
+**Note**: `gallery.yaml` is the source of truth; `index.md` is generated. The `gallery-in-sync` prek hook enforces that they stay in sync.
 
 - If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
 

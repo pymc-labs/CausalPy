@@ -80,7 +80,7 @@ repos:
       - id: pymarkdown
         args: [scan]
         files: \.md$
-        exclude: ^(docs/_build/|\.scratch/)
+        exclude: ^(docs/_build/|\.scratch/|docs/source/notebooks/index\.md)$
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
   # Dev env uses python>=3.11; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
   # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
@@ -119,6 +119,13 @@ repos:
         language: python
         files: \.ipynb$
         additional_dependencies: [nbformat]
+      - id: gallery-in-sync
+        name: Gallery index in sync with gallery.yaml
+        entry: python scripts/generate_gallery.py --check --no-thumbnails
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/notebooks/gallery\.yaml|docs/source/notebooks/index\.md|scripts/generate_gallery\.py|docs/source/notebooks/.*\.(ipynb|md))$
+        additional_dependencies: [PyYAML]
       - id: validate-bibtex
         name: Validate BibTeX files
         entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"

@@ -49,7 +49,7 @@ test-patch-cov: ## Run tests and fail if patch coverage versus the base branch i
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
 
-gallery: ## Generate example gallery from notebooks
+gallery: ## Regenerate index.md and thumbnails from gallery.yaml
 	python scripts/generate_gallery.py
 
 html: gallery ## Build HTML documentation with Sphinx
