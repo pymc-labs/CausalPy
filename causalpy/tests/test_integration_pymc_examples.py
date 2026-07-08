@@ -867,6 +867,7 @@ def test_iv_reg(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
 
