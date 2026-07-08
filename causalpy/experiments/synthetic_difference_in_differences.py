@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Synthetic Difference-in-Differences Experiment
+Synthetic Difference-in-Differences Experiment.
 """
 
 import warnings
@@ -25,9 +25,10 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import _PlotXYStyle, plot_xY
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -57,27 +58,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     model : PyMCModel or sklearn.base.RegressorMixin, optional
         A ``SyntheticDifferenceInDifferencesWeightFitter`` instance. Defaults
         to ``SyntheticDifferenceInDifferencesWeightFitter``.
-
-    Examples
-    --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("sc")
-    >>> treatment_time = 70
-    >>> result = cp.SyntheticDifferenceInDifferences(
-    ...     df,
-    ...     treatment_time,
-    ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
-    ...     treated_units=["actual"],
-    ...     model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
-    ...         sample_kwargs={
-    ...             "tune": 20,
-    ...             "draws": 20,
-    ...             "chains": 2,
-    ...             "cores": 2,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... )
+    **kwargs : dict
+        Additional keyword arguments (currently unused).
 
     Notes
     -----
@@ -103,11 +85,38 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     .. [1] Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
        Wager, S. (2021). Synthetic Difference-in-Differences. *American
        Economic Review*, 111(12), 4088-4118.
+
+    Examples
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("sc")
+    >>> treatment_time = 70
+    >>> result = cp.SyntheticDifferenceInDifferences(
+    ...     df,
+    ...     treatment_time,
+    ...     control_units=["a", "b", "c", "d", "e", "f", "g"],
+    ...     treated_units=["actual"],
+    ...     model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+    ...         sample_kwargs={
+    ...             "tune": 20,
+    ...             "draws": 20,
+    ...             "chains": 2,
+    ...             "cores": 2,
+    ...             "progressbar": False,
+    ...         }
+    ...     ),
+    ... )
     """
 
     supports_ols = True
     supports_bayes = True
     _default_model_class = SyntheticDifferenceInDifferencesWeightFitter
+    _deprecated_design_aliases = {
+        "datapre_control": ("pre_design", "control"),
+        "datapre_treated": ("pre_design", "treated"),
+        "datapost_control": ("post_design", "control"),
+        "datapost_treated": ("post_design", "treated"),
+    }
 
     def __init__(
         self,
@@ -150,7 +159,16 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
-        """Validate the input data for correctness."""
+        """Validate the input data for correctness.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            A dataframe in wide format (columns = units, rows = time periods).
+        treatment_time : int, float or pandas.Timestamp
+            The time when treatment occurred, should be in reference to the
+            data index.
+        """
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -165,43 +183,50 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             )
 
     def _prepare_data(self) -> None:
-        """Prepare xarray DataArrays for control and treated units in pre/post periods.
+        """Bundle control and treated data into ``xr.Dataset`` objects per period.
 
-        Also constructs the dict-based inputs expected by
-        SyntheticDifferenceInDifferencesWeightFitter.
+        Builds ``pre_design`` / ``post_design`` datasets with ``control`` and
+        ``treated`` variables, mirroring :class:`SyntheticControl`.
         """
-        # Four-quadrant split as xarray DataArrays (same as SyntheticControl)
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
+        self.pre_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapre[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapre[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapre[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapre[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
+        self.post_design = xr.Dataset(
+            {
+                "control": xr.DataArray(
+                    self.datapost[self.control_units],
+                    dims=["obs_ind", "coeffs"],
+                    coords={
+                        "obs_ind": self.datapost[self.control_units].index,
+                        "coeffs": self.control_units,
+                    },
+                ),
+                "treated": xr.DataArray(
+                    self.datapost[self.treated_units],
+                    dims=["obs_ind", "treated_units"],
+                    coords={
+                        "obs_ind": self.datapost[self.treated_units].index,
+                        "treated_units": self.treated_units,
+                    },
+                ),
+            }
         )
 
     def algorithm(self) -> None:
@@ -223,7 +248,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         6. :meth:`_build_reporting_objects` constructs the xarray objects
            required by the reporting helpers.
         """
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             raise NotImplementedError(
                 "OLS estimation for SyntheticDifferenceInDifferences is not yet "
                 "implemented. Please use a PyMC model."
@@ -234,7 +259,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         T_pre = self.datapre.shape[0]
 
         X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
-        self.model.fit(X=X, y=y, coords=coords)
+        self._model_backend.fit(X=X, y=y, coords=coords)
         if self.model.idata is None:
             raise AttributeError("Model fitting failed to produce idata")
 
@@ -572,6 +597,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, np.ndarray]:
@@ -582,6 +612,25 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round the ATT in the title. Defaults to
             2. Use ``None`` for raw values.
+        ci_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"`` and ``"histogram"``, the legend shows
+            individual sample lines rather than a shaded band.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         show : bool, optional
             Whether to call :func:`matplotlib.pyplot.show` after drawing.
             Defaults to ``True``.
@@ -599,10 +648,22 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : numpy.ndarray
             Array of the three :class:`matplotlib.axes.Axes` instances.
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
         )
 
     @staticmethod
@@ -618,7 +679,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        **kwargs: dict,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
@@ -627,8 +691,15 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
-        **kwargs : dict
-            Additional keyword arguments (currently unused).
+        hdi_prob : float, optional
+            Probability mass of the credible interval. Must be in ``(0, 1]``.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
 
         Returns
         -------
@@ -637,6 +708,12 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : list of matplotlib.axes.Axes
             The three axes (counterfactual, impact, cumulative impact).
         """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         treated_unit = self.treated_units[0]
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
@@ -654,6 +731,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapre.index,
             pre_pred,
             ax=ax[0],
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -674,6 +752,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapost.index,
             post_pred,
             ax=ax[0],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles.append((h_line, h_patch))
@@ -706,12 +785,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_xY(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[1].axhline(y=0, c="k")
@@ -732,6 +813,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         ax[2].axhline(y=0, c="k")
@@ -806,6 +888,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Ignored for SDiD (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
 
         Returns
         -------

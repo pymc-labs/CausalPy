@@ -48,7 +48,13 @@ class LeaveOneOut:
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment is a SyntheticControl instance."""
+        """Verify the experiment is a SyntheticControl instance.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment, SyntheticControl):
             raise TypeError("LeaveOneOut requires a SyntheticControl experiment.")
 
@@ -57,7 +63,15 @@ class LeaveOneOut:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Drop each control unit in turn and compare effect estimates."""
+        """Drop each control unit in turn and compare effect estimates.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted SyntheticControl experiment.
+        context : PipelineContext
+            Pipeline context providing ``experiment_config`` for re-fits.
+        """
         if context.experiment_config is None:
             raise RuntimeError(
                 "No experiment_config in context. Use EstimateEffect "

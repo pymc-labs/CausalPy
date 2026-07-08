@@ -125,6 +125,30 @@ def test_every_concrete_subclass_declares_plot() -> None:
     )
 
 
+_POSTERIOR_PLOT_XY_CLASSES = [
+    "InterruptedTimeSeries",
+    "DifferenceInDifferences",
+    "PrePostNEGD",
+    "RegressionDiscontinuity",
+    "RegressionKink",
+    "SyntheticControl",
+    "SyntheticDifferenceInDifferences",
+    "PiecewiseITS",
+]
+
+
+@pytest.mark.parametrize("class_name", _POSTERIOR_PLOT_XY_CLASSES)
+def test_posterior_plot_exposes_viz_kind(class_name: str) -> None:
+    cls = next(c for c in _OVERRIDING_SUBCLASSES if c.__name__ == class_name)
+    plot_method = cls.__dict__["plot"]
+    sig = inspect.signature(plot_method).parameters
+    for param in ("kind", "ci_kind", "num_samples"):
+        assert param in sig, (
+            f"{class_name}.plot() is missing '{param}'; all plot_xY-backed classes "
+            "must expose kind, ci_kind, and num_samples."
+        )
+
+
 @pytest.mark.parametrize(
     "cls",
     _OVERRIDING_SUBCLASSES,
@@ -228,11 +252,11 @@ def test_base_experiment_has_no_public_plot() -> None:
     **kwargs`` signature and re-introduce the discoverability problem
     described in #886. If this test starts failing, somebody has added a
     public ``plot`` back to :class:`BaseExperiment`; either remove it or
-    update the design contract documented in ``AGENTS.md``.
+    update the design contract documented in ``ARCHITECTURE.md``.
     """
     assert "plot" not in BaseExperiment.__dict__, (
         "BaseExperiment must not declare a public plot(); the shared "
-        "dispatcher is _render_plot. See AGENTS.md and issue #886."
+        "dispatcher is _render_plot. See ARCHITECTURE.md and issue #886."
     )
     assert hasattr(BaseExperiment, "_render_plot"), (
         "BaseExperiment should define the protected _render_plot helper "

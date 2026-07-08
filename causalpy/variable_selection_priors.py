@@ -84,8 +84,8 @@ class SpikeAndSlabPrior:
     dims : str or tuple, optional
         Dimension names for the coefficient vector
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import SpikeAndSlabPrior
     >>> spike_slab = SpikeAndSlabPrior(dims="features")
@@ -164,8 +164,8 @@ class HorseshoePrior:
     dims : str or tuple, optional
         Dimension names for the coefficient vector
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import HorseshoePrior
     >>> horseshoe = HorseshoePrior(dims="features")
@@ -269,8 +269,8 @@ class VariableSelectionPrior:
             - mu: float or array (default=0) - Prior mean
             - sigma: float or array (default=1) - Prior SD
 
-    Example
-    -------
+    Examples
+    --------
     >>> import pymc as pm
     >>> from causalpy.variable_selection_priors import VariableSelectionPrior
     >>> # Create spike-and-slab prior
@@ -379,8 +379,8 @@ class VariableSelectionPrior:
         PyMC variable
             The coefficient vector with the specified prior
 
-        Example
-        -------
+        Examples
+        --------
         >>> import pymc as pm
         >>> import pandas as pd
         >>> from causalpy.variable_selection_priors import VariableSelectionPrior

@@ -20,6 +20,7 @@ individual steps without paying the cost of a full MCMC run.
 """
 
 from types import SimpleNamespace
+from typing import Any, Protocol
 
 import arviz as az
 import numpy as np
@@ -33,13 +34,33 @@ from causalpy.experiments.synthetic_difference_in_differences import (
 )
 
 
+class _StubFittableModel(Protocol):
+    """Minimal model protocol for SDiD stub tests."""
+
+    idata: Any
+
+    def fit(self, X: Any, y: Any, *, coords: Any = None) -> Any: ...
+
+
+class _StubModelAdapter:
+    """Minimal adapter for SDiD unit-test stubs that bypass ``__init__``."""
+
+    def __init__(self, model: _StubFittableModel) -> None:
+        self.model = model
+        self.is_ols = False
+        self.is_bayesian = False
+
+    def fit(self, X: Any, y: Any, *, coords: Any | None = None) -> Any:
+        return self.model.fit(X=X, y=y, coords=coords)
+
+
 def _make_experiment_stub(
     *,
     control_units: list[str] | None = None,
     treated_units: list[str] | None = None,
     data: pd.DataFrame | None = None,
     treatment_time: int | None = None,
-    model: object | None = None,
+    model: _StubFittableModel | None = None,
 ) -> SyntheticDifferenceInDifferences:
     """Construct an SDiD instance without running ``__init__``/``algorithm``.
 
@@ -57,6 +78,7 @@ def _make_experiment_stub(
         stub.treatment_time = treatment_time
     if model is not None:
         stub.model = model
+        stub._model_backend = _StubModelAdapter(model)  # type: ignore[assignment]
     return stub
 
 

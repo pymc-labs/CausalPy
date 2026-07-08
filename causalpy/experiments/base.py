@@ -18,19 +18,22 @@ Base class for quasi experimental designs.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import xarray as xr
 from sklearn.base import RegressorMixin
 
+from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.skl_models import create_causalpy_compatible_class
 
 
 def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
@@ -98,6 +101,12 @@ class BaseExperiment(ABC):
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
     Bayesian default. To use an OLS/sklearn model, pass one explicitly.
 
+    Parameters
+    ----------
+    model : PyMCModel, RegressorMixin, or None, default None
+        Model instance to use. If ``None`` and ``_default_model_class`` is set,
+        an instance of that default class is constructed.
+
     Notes
     -----
     Optional ``maketables`` integration is exposed through ``__maketables_*``
@@ -114,34 +123,104 @@ class BaseExperiment(ABC):
 
     _default_model_class: type[PyMCModel] | None = None
 
+    _deprecated_design_aliases: dict[str, tuple[str, str]] = {}
+    """Mapping of ``old_attr -> (dataset_attr, key)`` for deprecated design
+    matrix accessors.  Subclasses populate this so that
+    ``__getattr__`` can forward accesses with a deprecation warning."""
+
+    def __getattr__(self, name: str) -> Any:
+        aliases = type(self)._deprecated_design_aliases
+        if name in aliases:
+            dataset_attr, key = aliases[name]
+            warnings.warn(
+                f"{name} is deprecated, use {dataset_attr}['{key}']",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return getattr(self, dataset_attr)[key]
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    @staticmethod
+    def _build_design_dataset(
+        X_raw: np.ndarray,
+        y_raw: np.ndarray,
+        *,
+        obs_ind: np.ndarray | pd.Index,
+        coeffs: list[str],
+        treated_units: list[str] | None = None,
+    ) -> xr.Dataset:
+        """Build a standard ``xr.Dataset`` from raw design matrices.
+
+        Parameters
+        ----------
+        X_raw : np.ndarray
+            Predictor matrix, shape ``(n_obs, n_coeffs)``.
+        y_raw : np.ndarray
+            Outcome matrix, shape ``(n_obs, n_units)``.
+        obs_ind : array-like
+            Observation index coordinates.
+        coeffs : list[str]
+            Coefficient / column names for ``X_raw``.
+        treated_units : list[str], optional
+            Names for the treated-unit dimension of ``y_raw``.
+            Defaults to ``["unit_0"]``.
+        """
+        if treated_units is None:
+            treated_units = ["unit_0"]
+        return xr.Dataset(
+            {
+                "X": xr.DataArray(
+                    X_raw,
+                    dims=["obs_ind", "coeffs"],
+                    coords={"obs_ind": obs_ind, "coeffs": coeffs},
+                ),
+                "y": xr.DataArray(
+                    y_raw,
+                    dims=["obs_ind", "treated_units"],
+                    coords={"obs_ind": obs_ind, "treated_units": treated_units},
+                ),
+            }
+        )
+
+    _model_backend: ModelAdapter
+
     def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
-        # Ensure we've made any provided Scikit Learn model (as identified as being type
-        # RegressorMixin) compatible with CausalPy by appending our custom methods.
-        if isinstance(model, RegressorMixin):
-            model = create_causalpy_compatible_class(model)
-
-        if model is None and self._default_model_class is not None:
-            model = self._default_model_class()
-
-        if model is not None:
-            self.model = model
-
-        if getattr(self, "model", None) is None:
-            raise ValueError("model not set or passed.")
-
-        if isinstance(self.model, PyMCModel) and not self.supports_bayes:
-            raise ValueError("Bayesian models not supported.")
-
-        if isinstance(self.model, RegressorMixin) and not self.supports_ols:
-            raise ValueError("OLS models not supported.")
+        adapter = make_model_adapter(
+            model,
+            default_model_class=self._default_model_class,
+            supports_bayes=self.supports_bayes,
+            supports_ols=self.supports_ols,
+        )
+        self._model_backend = adapter
+        self.model = adapter.model
 
     def fit(self, *args: Any, **kwargs: Any) -> None:
+        """Fit the underlying model.
+
+        Subclasses must override this hook to delegate to their concrete
+        fitting routine; the base class only provides the abstract entry
+        point.
+
+        Parameters
+        ----------
+        *args : Any
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs : Any
+            Keyword arguments forwarded to the subclass implementation.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, when called on the base class.
+        """
         raise NotImplementedError("fit method not implemented")
 
     @property
     def idata(self) -> az.InferenceData:
         """Return the InferenceData object of the model. Only relevant for PyMC models."""
-        return self.model.idata
+        return self._model_backend.idata
 
     def print_coefficients(self, round_to: int | None = None) -> None:
         """Ask the model to print its coefficients.
@@ -152,7 +231,7 @@ class BaseExperiment(ABC):
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
         """
-        self.model.print_coefficients(self.labels, round_to)
+        self._model_backend.print_coefficients(self.labels, round_to)
 
     def set_maketables_options(self, *, hdi_prob: float | None = None) -> None:
         """Set optional maketables rendering options for this experiment.
@@ -258,12 +337,38 @@ class BaseExperiment(ABC):
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
-            ``_bayesian_plot`` / ``_ols_plot``.
+            ``_bayesian_plot`` / ``_ols_plot``. May include ``kind``,
+            ``ci_kind``, ``ci_prob``, and ``num_samples`` for
+            :func:`~causalpy.plot_utils.plot_xY`.
+
+        Notes
+        -----
+        **Legend handling and ``plot_xY`` return types:** :func:`~causalpy.plot_utils.plot_xY`
+        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
+        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
+        Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
+        matplotlib legends from those return values should only pack
+        ``(line, patch)`` tuples when calling ``plot_xY`` with ``kind="ribbon"``
+        (the default). Many current experiment plots always use the ribbon
+        default and never forward ``kind``; if a subclass forwards non-ribbon
+        kinds, it must build legend handles accordingly. The base class applies
+        ``legend_kwargs`` by mutating an existing legend in place, which preserves
+        whatever handle objects the subclass attached (including tuple handles
+        used for ribbon mean+band).
+
+        Examples
+        --------
+        Move the legend outside the plot area to avoid overlap:
+
+        >>> fig, ax = result.plot(  # doctest: +SKIP
+        ...     show=False,
+        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+        ... )
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            if isinstance(self.model, PyMCModel):
+            if self._model_backend.is_bayesian:
                 fig, ax = self._bayesian_plot(**draw_kwargs)
-            elif isinstance(self.model, RegressorMixin):
+            elif self._model_backend.is_ols:
                 fig, ax = self._ols_plot(**draw_kwargs)
             else:
                 raise ValueError("Unsupported model type")
@@ -308,20 +413,42 @@ class BaseExperiment(ABC):
 
         Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
         depending on the model type.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the model-specific implementation.
+        **kwargs
+            Keyword arguments forwarded to the model-specific implementation.
         """
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             return self.get_plot_data_bayesian(*args, **kwargs)
-        elif isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             return self.get_plot_data_ols(*args, **kwargs)
-        else:
-            raise ValueError("Unsupported model type")
+        raise ValueError("Unsupported model type")
 
     def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian models. Override in subclasses that support Bayesian."""
+        """Return plot data for Bayesian models. Override in subclasses that support Bayesian.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
 
     def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for OLS models. Override in subclasses that support OLS."""
+        """Return plot data for OLS models. Override in subclasses that support OLS.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the subclass implementation.
+        **kwargs
+            Keyword arguments forwarded to the subclass implementation.
+        """
         raise NotImplementedError("get_plot_data_ols method not yet implemented")
 
     @abstractmethod
@@ -383,6 +510,9 @@ class BaseExperiment(ABC):
         prefix : str, optional
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
+        **kwargs
+            Reserved for forward-compatibility; subclasses may consume
+            additional keyword arguments.
 
         Returns
         -------

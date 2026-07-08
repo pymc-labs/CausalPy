@@ -1693,10 +1693,10 @@ class TestSyntheticControlMultiUnit:
         assert sc.treatment_time == treatment_time
 
         # Check data shapes
-        assert sc.datapre_treated.shape == (40, len(treated_units))
-        assert sc.datapost_treated.shape == (20, len(treated_units))
-        assert sc.datapre_control.shape == (40, len(control_units))
-        assert sc.datapost_control.shape == (20, len(control_units))
+        assert sc.pre_design["treated"].shape == (40, len(treated_units))
+        assert sc.post_design["treated"].shape == (20, len(treated_units))
+        assert sc.pre_design["control"].shape == (40, len(control_units))
+        assert sc.post_design["control"].shape == (20, len(control_units))
 
     @pytest.mark.integration
     def test_multi_unit_scoring(self, multi_unit_sc_data):

@@ -24,6 +24,7 @@ sc_skl.ipynb
 sc_pymc.ipynb
 sc_pymc_brexit.ipynb
 sdid_pymc.ipynb
+its_causalpy_vs_causalimpact.ipynb
 :::
 
 :::{toctree}
@@ -53,6 +54,7 @@ its_pymc.ipynb
 its_post_intervention_analysis.ipynb
 its_covid.ipynb
 its_lift_test.ipynb
+its_placebo_in_time_analysis.ipynb
 :::
 
 :::{toctree}

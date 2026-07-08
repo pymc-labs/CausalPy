@@ -382,6 +382,10 @@ def _effect_summary_staggered_did(
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
     post_treatment = att_et[att_et["event_time"] >= 0]
+    if "identified" in post_treatment.columns:
+        post_treatment = post_treatment[post_treatment["identified"]]
+    if "identified" in pre_treatment.columns:
+        pre_treatment = pre_treatment[pre_treatment["identified"]]
 
     # Build summary table with all event-time effects
     table = att_et.copy()
@@ -1487,10 +1491,12 @@ def _compute_statistics_did_ols(
 
     # Calculate standard error from model residuals
     # Get fitted values and residuals
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the interaction term coefficient index
@@ -1506,8 +1512,7 @@ def _compute_statistics_did_ols(
     if coeff_idx is None:
         raise ValueError(f"Could not find interaction term {interaction_term} in model")
 
-    # Calculate standard error for this coefficient
-    X = result.X
+    X = X_da
     try:
         # Try to get X as numpy array
         if hasattr(X, "values"):
@@ -1619,10 +1624,12 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     discontinuity = result.discontinuity_at_threshold  # scalar
 
     # Calculate standard error from model
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the treated coefficient index
@@ -1633,11 +1640,9 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
             break
 
     if coeff_idx is None:
-        # Fallback: use simple approximation
         se = np.std(residuals) / np.sqrt(n)
     else:
-        # Calculate standard error for this coefficient
-        X = result.X
+        X = X_da
         try:
             if hasattr(X, "values"):
                 X = X.values

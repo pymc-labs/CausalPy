@@ -974,11 +974,12 @@ def test_piecewise_its_instance_attributes():
     assert result.time_col == "t"
     assert result.outcome_variable_name == "y"
 
-    # Check X and y are xarray DataArrays
-    assert hasattr(result.X, "dims")
-    assert hasattr(result.y, "dims")
-    assert "obs_ind" in result.X.dims
-    assert "coeffs" in result.X.dims
+    # Check design Dataset contains X and y DataArrays
+    assert hasattr(result, "design")
+    assert "X" in result.design
+    assert "y" in result.design
+    assert "obs_ind" in result.design["X"].dims
+    assert "coeffs" in result.design["X"].dims
 
     # Check design info stored
     assert hasattr(result, "_x_design_info")
@@ -1328,7 +1329,7 @@ def test_piecewise_its_unrecognized_model_type():
     class FakeModel:
         pass
 
-    with pytest.raises(ValueError, match="Model type not recognized"):
+    with pytest.raises(ValueError, match="Unsupported model type"):
         cp.PiecewiseITS(
             df,
             formula="y ~ 1 + t + step(t, 50)",
@@ -1409,13 +1410,13 @@ def test_piecewise_its_x_y_shapes():
     )
 
     # X should be (n_obs, n_coeffs)
-    assert result.X.shape == (100, 4)
+    assert result.design["X"].shape == (100, 4)
 
     # y should be (n_obs, 1) for treated_units
-    assert result.y.shape == (100, 1)
+    assert result.design["y"].shape == (100, 1)
 
     # Check coordinates
-    assert list(result.X.coords["coeffs"].values) == result.labels
+    assert list(result.design["X"].coords["coeffs"].values) == result.labels
 
 
 def test_piecewise_its_y_pred_shape():

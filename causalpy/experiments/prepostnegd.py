@@ -11,10 +11,9 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Pretest/posttest nonequivalent group design
-"""
+"""Pretest/posttest nonequivalent group design."""
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -24,13 +23,13 @@ import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
-from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
-from causalpy.plot_utils import plot_xY
+from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import _PlotXYStyle, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -40,21 +39,25 @@ from .base import BaseExperiment
 
 class PrePostNEGD(BaseExperiment):
     """
-    A class to analyse data from pretest/posttest designs
+    A class to analyse data from pretest/posttest designs.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param group_variable_name:
-        Name of the column in data for the group variable, should be either
-        binary or boolean
-    :param pretreatment_variable_name:
-        Name of the column in data for the pretreatment variable
-    :param model:
-        A PyMC model. Defaults to LinearRegression.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    group_variable_name : str
+        Name of the column in ``data`` for the group variable; should be
+        either binary or boolean.
+    pretreatment_variable_name : str
+        Name of the column in ``data`` for the pretreatment variable.
+    model : PyMCModel, optional
+        A PyMC model. Defaults to :class:`LinearRegression`.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("anova1")
@@ -88,6 +91,7 @@ class PrePostNEGD(BaseExperiment):
     supports_ols = False
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -119,39 +123,34 @@ class PrePostNEGD(BaseExperiment):
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=self.data.index,
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": self.data.index, "treated_units": ["unit_0"]},
-        )
+        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        # fit the model to the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)
-        elif isinstance(self.model, RegressorMixin):
+        X = self.design["X"]
+        y = self.design["y"]
+
+        if self._model_backend.is_ols:
             raise NotImplementedError("Not implemented for OLS model")
-        else:
+        if not self._model_backend.is_bayesian:
             raise ValueError("Model type not recognized")
+
+        self._model_backend.fit(
+            X=X,
+            y=y,
+            coords=build_coords(self.labels, X.shape[0]),
+        )
 
         assert self.model.idata is not None
         # Calculate the posterior predictive for the treatment and control for an
@@ -189,7 +188,7 @@ class PrePostNEGD(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         if not _is_variable_dummy_coded(self.data[self.group_variable_name]):
             raise DataException(
                 f"""
@@ -226,8 +225,11 @@ class PrePostNEGD(BaseExperiment):
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
@@ -239,7 +241,11 @@ class PrePostNEGD(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -252,12 +258,26 @@ class PrePostNEGD(BaseExperiment):
             Number of decimals used to round numerical results in the figure.
             Defaults to ``None``, in which case 2 significant figures are
             used.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             posterior predictive bands for the control and treatment groups,
             and around the posterior of the estimated treatment effect.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"`` and ``"histogram"``, the legend shows
+            individual sample lines rather than a shaded band.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 9)``.
@@ -278,18 +298,32 @@ class PrePostNEGD(BaseExperiment):
             The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -309,6 +343,12 @@ class PrePostNEGD(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         fig, ax = plt.subplots(
             2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -330,7 +370,7 @@ class PrePostNEGD(BaseExperiment):
             self.pred_xi,
             self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -342,7 +382,7 @@ class PrePostNEGD(BaseExperiment):
             self.pred_xi,
             self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -361,7 +401,7 @@ class PrePostNEGD(BaseExperiment):
             ref_val=0,
             ax=ax[1],
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            hdi_prob=ci_prob,
         )
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
@@ -385,6 +425,9 @@ class PrePostNEGD(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

@@ -11,7 +11,6 @@
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
-![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
@@ -60,6 +59,10 @@ Alternatively, if you want the very latest version of the package you can instal
 ```bash
 pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
+
+## AI Agent Skills
+
+CausalPy includes agent skills that teach AI coding assistants how to use the library for causal inference. Skills are available via [Decision AI Hub](https://hub.decision.ai) and live in `causalpy/skills/` in the source tree.
 
 ## Quickstart
 
