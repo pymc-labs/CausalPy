@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Instrumental variable regression
-"""
+"""Instrumental variable regression."""
 
 import warnings  # noqa: I001
 
@@ -22,8 +20,16 @@ import pandas as pd
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
+import arviz as az
+
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.pymc_models import InstrumentalVariableRegression
+from causalpy.utils import round_num
+
 from .base import BaseExperiment
+from causalpy.reporting import EffectSummary
+from typing import Any, Literal
 
 
 class InstrumentalVariable(BaseExperiment):
@@ -44,15 +50,27 @@ class InstrumentalVariable(BaseExperiment):
     formula : str
         A statistical model formula for the focal regression,
         e.g. ``y ~ 1 + t + x1 + x2 + x3``.
-    model : BaseExperiment, optional
-        A PyMC model. Defaults to None.
+    model : InstrumentalVariableRegression, optional
+        A PyMC model. Defaults to InstrumentalVariableRegression.
     priors : dict, optional
         Dictionary of priors for the mus and sigmas of both regressions.
         If priors are not specified we will substitute MLE estimates for
         the beta coefficients. Example: ``priors = {"mus": [0, 0],
         "sigmas": [1, 1], "eta": 2, "lkj_sd": 2}``.
+    vs_prior_type : str or None, default=None
+        Type of variable selection prior: 'spike_and_slab', 'horseshoe', or None.
+        If None, uses standard normal priors.
+    vs_hyperparams : dict, optional
+        Hyperparameters for variable selection priors. Only used if vs_prior_type
+        is not None.
+    binary_treatment : bool, default=False
+        A indicator for whether the treatment to be modelled is binary or not.
+        Determines which PyMC model we use to model the joint outcome and
+        treatment.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import pandas as pd
     >>> import causalpy as cp
@@ -85,10 +103,21 @@ class InstrumentalVariable(BaseExperiment):
     ...     formula=formula,
     ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ... )
+    >>> # With variable selection
+    >>> iv = cp.InstrumentalVariable(
+    ...     instruments_data=instruments_data,
+    ...     data=data,
+    ...     instruments_formula=instruments_formula,
+    ...     formula=formula,
+    ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
+    ...     vs_prior_type="spike_and_slab",
+    ...     vs_hyperparams={"slab_sigma": 5.0},
+    ... )
     """
 
     supports_ols = False
     supports_bayes = True
+    _default_model_class = InstrumentalVariableRegression
 
     def __init__(
         self,
@@ -96,9 +125,12 @@ class InstrumentalVariable(BaseExperiment):
         data: pd.DataFrame,
         instruments_formula: str,
         formula: str,
-        model: BaseExperiment | None = None,
+        model: InstrumentalVariableRegression | None = None,
         priors: dict | None = None,
-        **kwargs: dict,
+        vs_prior_type=None,
+        vs_hyperparams=None,
+        binary_treatment=False,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
@@ -106,43 +138,74 @@ class InstrumentalVariable(BaseExperiment):
         self.instruments_data = instruments_data
         self.formula = formula
         self.instruments_formula = instruments_formula
-        self.model = model
+        self.vs_prior_type = vs_prior_type
+        self.vs_hyperparams = vs_hyperparams or {}
+        self.binary_treatment = binary_treatment
+        self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
         self.input_validation()
+        self._build_design_matrices()
 
-        y, X = dmatrices(formula, self.data)
+        # Store user-provided priors (will set defaults in algorithm() if None)
+        self.priors = priors
+
+        self.algorithm()
+
+    def _build_design_matrices(self) -> None:
+        """Build design matrices for outcome and instrument formulas."""
+        y, X = dmatrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        t, Z = dmatrices(instruments_formula, self.instruments_data)
+        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
         self._t_design_info = t.design_info
         self._z_design_info = Z.design_info
         self.labels_instruments = Z.design_info.column_names
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
 
+    def algorithm(self) -> None:
+        """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
         self.get_naive_OLS_fit()
         self.get_2SLS_fit()
 
         # fit the model to the data
         COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
         self.coords = COORDS
-        if priors is None:
-            priors = {
-                "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
-                "sigmas": [1, 1],
-                "eta": 2,
-                "lkj_sd": 1,
-            }
-        self.priors = priors
+        # Only set default priors if user didn't provide custom priors
+        if self.priors is None:
+            if self.binary_treatment:
+                # Different default priors for binary treatment
+                self.priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "sigma_U": 1.0,
+                    "rho_bounds": [-0.99, 0.99],
+                }
+            else:
+                # Original continuous treatment priors
+                self.priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "eta": 2,
+                    "lkj_sd": 1,
+                }
         self.model.fit(  # type: ignore[call-arg,union-attr]
-            X=self.X, Z=self.Z, y=self.y, t=self.t, coords=COORDS, priors=self.priors
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            t=self.t,
+            coords=COORDS,
+            priors=self.priors,
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
+            binary_treatment=self.binary_treatment,
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns
         test = test & (treatment.strip() in self.data.columns)
@@ -159,14 +222,13 @@ class InstrumentalVariable(BaseExperiment):
         if check_binary:
             warnings.warn(
                 """Warning. The treatment variable is not Binary.
-                This is not necessarily a problem but it violates
-                the assumption of a simple IV experiment.
-                The coefficients should be interpreted appropriately."""
+                We will use the multivariate normal likelihood
+                for continuous treatment.""",
+                stacklevel=2,
             )
 
     def get_2SLS_fit(self) -> None:
-        """
-        Two Stage Least Squares Fit
+        """Two Stage Least Squares Fit.
 
         This function is called by the experiment, results are used for
         priors if none are provided.
@@ -187,30 +249,134 @@ class InstrumentalVariable(BaseExperiment):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self) -> None:
-        """
-        Naive Ordinary Least Squares
+        """Naive Ordinary Least Squares.
 
         This function is called by the experiment.
         """
         ols_reg = sk_lin_reg().fit(self.X, self.y)
         beta_params = list(ols_reg.coef_[0][1:])
         beta_params.insert(0, ols_reg.intercept_[0])
-        self.ols_beta_params = dict(zip(self._x_design_info.column_names, beta_params))
+        self.ols_beta_params = dict(
+            zip(self._x_design_info.column_names, beta_params, strict=False)
+        )
         self.ols_reg = ols_reg
 
-    def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
-        """
-        Plot the results
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+
+        Notes
+        -----
+        Plotting is not yet implemented for instrumental variable
+        experiments. This stub exists so every experiment subclass
+        offers an explicit, kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
         """
         raise NotImplementedError("Plot method not implemented.")
 
-    def summary(self, round_to: int | None = None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
-        raise NotImplementedError("Summary method not implemented.")
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print(f"Instruments formula: {self.instruments_formula}")
+
+        print("\nNaive OLS coefficients:")
+        for name, val in self.ols_beta_params.items():
+            print(f"  {name: <20}  {round_num(val, round_to)}")
+
+        print("\n2SLS coefficients:")
+        print("  First stage:")
+        for name, val in zip(
+            self.labels_instruments, self.ols_beta_first_params, strict=False
+        ):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+        print("  Second stage:")
+        for name, val in zip(self.labels, self.ols_beta_second_params, strict=False):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+
+        print("\nBayesian coefficients:")
+        posterior = self.idata.posterior  # type: ignore[union-attr]
+        for var, dim, labels, stage in [
+            ("beta_t", "instruments", self.labels_instruments, "Instrument stage"),
+            ("beta_z", "covariates", self.labels, "Outcome stage"),
+        ]:
+            print(f"  {stage}:")
+            coeffs = az.extract(posterior, var_names=var)
+            for name in labels:
+                samples = coeffs.sel({dim: name})
+                lo = samples.quantile((1 - HDI_PROB) / 2).item()
+                hi = samples.quantile(1 - (1 - HDI_PROB) / 2).item()
+                print(
+                    f"    {name: <20}  {round_num(samples.mean().item(), round_to)}, "
+                    f"{HDI_PROB * 100:.0f}% HDI [{round_num(lo, round_to)}, "
+                    f"{round_num(hi, round_to)}]"
+                )
+
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """
+        Generate a decision-ready summary of causal effects.
+
+        Note: effect_summary is not yet implemented for InstrumentalVariable experiments.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (unused for InstrumentalVariable).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            For multi-unit experiments, the unit to analyse.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
+        """
+        raise NotImplementedError(
+            "effect_summary is not yet implemented for InstrumentalVariable experiments."
+        )

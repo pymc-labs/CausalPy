@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import contextlib
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -21,12 +23,13 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 import causalpy as cp
+from causalpy.tests.conftest import setup_regression_kink_data
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_did(mock_pymc_sample):
+def test_did(mock_pymc_sample, did_data):
     """
     Test Difference in Differences (DID) PyMC experiment.
 
@@ -36,7 +39,7 @@ def test_did(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group*post_treatment",
@@ -56,56 +59,29 @@ def test_did(mock_pymc_sample):
         result.get_plot_data()
 
 
-# TODO: set up fixture for the banks dataset
-
-
 @pytest.mark.integration
-def test_did_banks_simple(mock_pymc_sample):
+def test_did_banks_simple(mock_pymc_sample, banks_data):
     """
     Test simple Differences In Differences Experiment on the 'banks' data set.
 
     :code: `formula="bib ~ 1 + district * post_treatment"`
 
-    Loads, transforms data and checks:
+    Uses the ``banks_data`` fixture and checks:
     1. data is a dataframe
     2. pymc_experiements.DifferenceInDifferences returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
-
     """
-    treatment_time = 1930.5
-    df = (
-        cp.load_data("banks")
-        .filter(items=["bib6", "bib8", "year"])
-        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
-        .groupby("year")
-        .median()
-    )
-    # SET TREATMENT TIME TO ZERO =========
-    df.index = df.index - treatment_time
-    treatment_time = 0
-    # ====================================
-    df.reset_index(level=0, inplace=True)
-    df_long = pd.melt(
-        df,
-        id_vars=["year"],
-        value_vars=["Sixth District", "Eighth District"],
-        var_name="district",
-        value_name="bib",
-    ).sort_values("year")
-    df_long["unit"] = df_long["district"]
-    df_long["post_treatment"] = df_long.year >= treatment_time
-    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+    df_long, _treatment_time = banks_data
 
     result = cp.DifferenceInDifferences(
-        # df_long[df_long.year.isin([1930, 1931])],
         df_long[df_long.year.isin([-0.5, 0.5])],
         formula="bib ~ 1 + district * post_treatment",
         time_variable_name="year",
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -116,42 +92,20 @@ def test_did_banks_simple(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_did_banks_multi(mock_pymc_sample):
+def test_did_banks_multi(mock_pymc_sample, banks_data):
     """
     Test multiple regression Differences In Differences Experiment on the 'banks'
     data set.
 
     :code: `formula="bib ~ 1 + year + district + post_treatment + district:post_treatment"` # noqa: E501
 
-    Loads, transforms data and checks:
+    Uses the ``banks_data`` fixture and checks:
     1. data is a dataframe
     2. pymc_experiements.DifferenceInDifferences returns correct type
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    treatment_time = 1930.5
-    df = (
-        cp.load_data("banks")
-        .filter(items=["bib6", "bib8", "year"])
-        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
-        .groupby("year")
-        .median()
-    )
-    # SET TREATMENT TIME TO ZERO =========
-    df.index = df.index - treatment_time
-    treatment_time = 0
-    # ====================================
-    df.reset_index(level=0, inplace=True)
-    df_long = pd.melt(
-        df,
-        id_vars=["year"],
-        value_vars=["Sixth District", "Eighth District"],
-        var_name="district",
-        value_name="bib",
-    ).sort_values("year")
-    df_long["unit"] = df_long["district"]
-    df_long["post_treatment"] = df_long.year >= treatment_time
-    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+    df_long, _treatment_time = banks_data
 
     result = cp.DifferenceInDifferences(
         df_long,
@@ -160,7 +114,7 @@ def test_did_banks_multi(mock_pymc_sample):
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
@@ -171,7 +125,7 @@ def test_did_banks_multi(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_rd(mock_pymc_sample):
+def test_rd(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment.
 
@@ -181,7 +135,7 @@ def test_rd(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
@@ -202,7 +156,7 @@ def test_rd(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_rd_bandwidth(mock_pymc_sample):
+def test_rd_bandwidth(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment with bandwidth parameter.
 
@@ -212,7 +166,7 @@ def test_rd_bandwidth(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -226,6 +180,46 @@ def test_rd_bandwidth(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+
+@pytest.mark.integration
+def test_rd_bandwidth_custom_running_variable(mock_pymc_sample):
+    """
+    Test Regression Discontinuity experiment with bandwidth parameter and custom running variable name.
+
+    This test verifies the bug fix where the bandwidth parameter was hardcoding 'x'
+    instead of using the user-specified running_variable_name.
+
+    Creates synthetic data with custom column name and checks:
+    1. RegressionDiscontinuity works with bandwidth and custom running variable name
+    2. The model completes successfully
+    3. Plot can be generated
+    """
+    # Create synthetic data with custom running variable name
+    df = pd.DataFrame(
+        {
+            "my_running_var": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "outcome": [1, 2, 3, 4, 10, 11, 12],
+            "treated": [False, False, False, False, True, True, True],
+        }
+    )
+
+    # This should work without errors (previously failed with "name 'x' is not defined")
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="outcome ~ 1 + my_running_var + treated",
+        running_variable_name="my_running_var",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=0.45,
+        bandwidth=0.2,
+    )
+
+    assert isinstance(result, cp.RegressionDiscontinuity)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
@@ -262,33 +256,6 @@ def test_rd_drinking(mock_pymc_sample):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-
-
-def setup_regression_kink_data(kink):
-    """Set up data for regression kink design tests"""
-    # define parameters for data generation
-    seed = 42
-    rng = np.random.default_rng(seed)
-    N = 50
-    kink = 0.5
-    beta = [0, -1, 0, 2, 0]
-    sigma = 0.05
-    # generate data
-    x = rng.uniform(-1, 1, N)
-    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
-    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
-
-
-def reg_kink_function(x, beta, kink):
-    """Utility function for regression kink design. Returns a piecewise linear function
-    evaluated at x with a kink at kink and parameters beta"""
-    return (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink) * (x >= kink)
-        + beta[4] * (x - kink) ** 2 * (x >= kink)
-    )
 
 
 @pytest.mark.integration
@@ -353,7 +320,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_its(mock_pymc_sample):
+def test_its(mock_pymc_sample, its_data):
     """
     Test Interrupted Time-Series experiment.
 
@@ -364,11 +331,7 @@ def test_its(mock_pymc_sample):
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -464,7 +427,96 @@ def test_its_covid(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_sc(mock_pymc_sample):
+def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
+    """Regression test: ITS plot must remain readable when the post-period
+    contains a single observation.
+
+    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
+    zero-area polygon, the median line has no neighbours to connect to, and
+    the (then top-of-zorder) treatment ``axvline`` covers the only datum -
+    leaving the bottom two panels visually empty. The fix
+        1. lowers the treatment-line zorder and switches it to a thin dashed
+           style so it reads as an annotation, never as data;
+        2. overlays an explicit median-plus-HDI errorbar on every panel;
+        3. swaps the legend handle to that errorbar so the legend matches
+           what is drawn (and drops the "Causal impact" entry whose
+           ``fill_between`` collapses to nothing).
+    """
+    from matplotlib.collections import LineCollection
+    from matplotlib.container import ErrorbarContainer
+
+    df = its_data
+    # Choose treatment_time so exactly one datum sits in the post-period.
+    treatment_time = df.index[-1]
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert len(result.datapost) == 1
+    fig, ax = result.plot()
+
+    treatment_axvlines = [
+        ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
+    ]
+    assert treatment_axvlines, "expected a treatment-start axvline"
+    assert all(ln.get_zorder() < 2 for ln in treatment_axvlines), (
+        "treatment axvline must sit below data (zorder<2) so it never "
+        "occludes the only post-period observation"
+    )
+    assert all(ln.get_linestyle() == "--" for ln in treatment_axvlines), (
+        "treatment axvline must be dashed to read as an annotation"
+    )
+    assert all(ln.get_linewidth() <= 2 for ln in treatment_axvlines), (
+        "treatment axvline must be thin to avoid dominating the plot"
+    )
+
+    # Each panel must contain at least one errorbar overlay
+    # (rendered as a LineCollection from the errorbar caps/whiskers).
+    for i, a in enumerate(ax):
+        line_collections = [c for c in a.collections if isinstance(c, LineCollection)]
+        assert line_collections, (
+            f"panel {i} should have a LineCollection from the singleton "
+            "errorbar overlay; otherwise the post-period is invisible"
+        )
+
+    # Top-panel legend must reflect what is actually drawn: a Counterfactual
+    # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
+    # and no "Causal impact" entry (since its fill_between is degenerate).
+    legend = ax[0].get_legend()
+    assert legend is not None, "top panel should have a legend"
+    legend_labels = [t.get_text() for t in legend.get_texts()]
+    assert "Counterfactual" in legend_labels
+    assert "Causal impact" not in legend_labels, (
+        "Causal impact entry must be dropped when its fill_between collapses"
+    )
+    cf_idx = legend_labels.index("Counterfactual")
+    cf_handle = legend.legend_handles[cf_idx]
+    # Matplotlib renders an ErrorbarContainer in the legend via a
+    # LineCollection proxy. What we want to assert is that the handle is
+    # *not* the old (Line2D, PolyCollection) tuple, since that would imply
+    # the legend swatch shows a ribbon that does not exist on the plot.
+    from matplotlib.collections import PolyCollection
+    from matplotlib.lines import Line2D
+
+    assert not (isinstance(cf_handle, tuple) and len(cf_handle) == 2), (
+        "Counterfactual legend handle should not be a (line, ribbon) tuple "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert not isinstance(cf_handle, PolyCollection), (
+        "Counterfactual legend handle should not be a PolyCollection ribbon "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert isinstance(cf_handle, ErrorbarContainer | LineCollection | Line2D), (
+        "Counterfactual legend handle should reflect the errorbar overlay, "
+        f"got {type(cf_handle).__name__}"
+    )
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_sc(mock_pymc_sample, sc_data):
     """
     Test Synthetic Control experiment.
 
@@ -476,7 +528,7 @@ def test_sc(mock_pymc_sample):
     5. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -520,6 +572,147 @@ def test_sc(mock_pymc_sample):
     assert set(expected_columns).issubset(set(plot_data.columns)), (
         f"DataFrame is missing expected columns {expected_columns}"
     )
+
+
+@pytest.mark.integration
+def test_sc_softmax(mock_pymc_sample):
+    """
+    Test Synthetic Control experiment with SoftmaxWeightedSumFitter.
+
+    Verifies that SoftmaxWeightedSumFitter is a drop-in replacement for
+    WeightedSumFitter in the SyntheticControl experiment:
+    1. data is a dataframe
+    2. causalpy.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    5. the method get_plot_data returns a DataFrame with expected columns
+    """
+
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticControl(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticControl)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), (
+        "The returned object is not a pandas DataFrame"
+    )
+    expected_columns = [
+        "prediction",
+        "pred_hdi_lower_94",
+        "pred_hdi_upper_94",
+        "impact",
+        "impact_hdi_lower_94",
+        "impact_hdi_upper_94",
+    ]
+    assert set(expected_columns).issubset(set(plot_data.columns)), (
+        f"DataFrame is missing expected columns {expected_columns}"
+    )
+
+
+@pytest.mark.integration
+def test_sdid(mock_pymc_sample):
+    """
+    Test Synthetic Difference-in-Differences experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. SyntheticDifferenceInDifferences returns correct type
+    3. tau_posterior exists with chain/draw dims
+    4. post_impact and post_impact_cumulative exist
+    5. summary runs without error
+    6. plot returns Figure and Axes
+    """
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticDifferenceInDifferences)
+
+    # tau posterior should exist with chain/draw dims
+    assert hasattr(result, "tau_posterior")
+    assert "chain" in result.tau_posterior.dims
+    assert "draw" in result.tau_posterior.dims
+
+    # post_impact should exist
+    assert hasattr(result, "post_impact")
+    assert hasattr(result, "post_impact_cumulative")
+
+    # summary should run without error
+    result.summary()
+
+    # plot should return fig and axes
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.integration
+def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
+    """SDiD with a DatetimeIndex panel exercises the datetime branch in
+    ``_bayesian_plot`` and the full ``effect_summary`` body, including the
+    ``period``-warning path and the ``cumulative=False`` branch.
+    """
+    df = cp.load_data("sc").copy()
+    df.index = pd.date_range("2020-01-01", periods=len(df), freq="D")
+    treatment_time = df.index[70]
+
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+
+    # DatetimeIndex branch in _bayesian_plot calls format_date_axes.
+    fig, _ = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+
+    # Default effect_summary call covers the main body and prose generation.
+    summary = result.effect_summary()
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+    assert isinstance(summary.text, str) and len(summary.text) > 0
+
+    # Passing period= triggers the ignored-warning branch.
+    with pytest.warns(
+        UserWarning, match="ignored for SyntheticDifferenceInDifferences"
+    ):
+        result.effect_summary(period="post")
+
+    # cumulative=False covers the conditional ``obs_cum``/``counterfactual_cum``
+    # branches that are skipped by the default call above.
+    summary_no_cum = result.effect_summary(cumulative=False)
+    assert "cumulative" not in summary_no_cum.table.index
 
 
 @pytest.mark.integration
@@ -586,7 +779,7 @@ def test_sc_brexit(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_ancova(mock_pymc_sample):
+def test_ancova(mock_pymc_sample, anova1_data):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -596,7 +789,7 @@ def test_ancova(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
@@ -618,7 +811,7 @@ def test_ancova(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_geolift1(mock_pymc_sample):
+def test_geolift1(mock_pymc_sample, geolift1_data):
     """
     Test Synthetic Control experiment on geo lift data.
 
@@ -628,11 +821,7 @@ def test_geolift1(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = (
-        cp.load_data("geolift1")
-        .assign(time=lambda x: pd.to_datetime(x["time"]))
-        .set_index("time")
-    )
+    df = geolift1_data
     treatment_time = pd.to_datetime("2022-01-01")
     result = cp.SyntheticControl(
         df,
@@ -678,8 +867,120 @@ def test_iv_reg(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
+
+
+@pytest.mark.integration
+def test_iv_binary_treatment(mock_pymc_sample):
+    df = cp.load_data("risk")
+    df["binary_trt"] = np.random.binomial(1, 0.5, len(df))
+    instruments_formula = "binary_trt  ~ 1 + risk + logmort0"
+    formula = "loggdp ~  1 + binary_trt + risk"
+    instruments_data = df[["risk", "logmort0", "binary_trt"]]
+    data = df[["loggdp", "risk", "binary_trt"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        binary_treatment=True,
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "rho" in result.model.named_vars
+
+
+@pytest.mark.integration
+def test_iv_reg_vs_prior(mock_pymc_sample):
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        vs_prior_type="spike_and_slab",
+        vs_hyperparams={"pi_alpha": 5, "outcome": True},
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "gamma_beta_t" in result.model.named_vars
+    assert "pi_beta_t" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+            result.idata, "beta_z"
+        )
+
+
+@pytest.mark.integration
+def test_iv_reg_vs_prior_hs(mock_pymc_sample):
+    df = cp.load_data("risk")
+    instruments_formula = "risk  ~ 1 + logmort0"
+    formula = "loggdp ~  1 + risk"
+    instruments_data = df[["risk", "logmort0"]]
+    data = df[["loggdp", "risk"]]
+
+    result = cp.InstrumentalVariable(
+        instruments_data=instruments_data,
+        data=data,
+        instruments_formula=instruments_formula,
+        formula=formula,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+        vs_prior_type="horseshoe",
+        vs_hyperparams={"outcome": True},
+    )
+    result.model.sample_predictive_distribution(ppc_sampler="pymc")
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(data, pd.DataFrame)
+    assert isinstance(instruments_data, pd.DataFrame)
+    assert isinstance(result, cp.InstrumentalVariable)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
+    assert "tau_beta_t" in result.model.named_vars
+    assert "tau_beta_z" in result.model.named_vars
+    summary = result.model.vs_prior_outcome.get_shrinkage_factors(
+        result.idata, "beta_z"
+    )
+    assert isinstance(summary, pd.DataFrame)
+    with pytest.raises(ValueError):
+        summary = result.model.vs_prior_outcome.get_inclusion_probabilities(
+            result.idata, "beta_z"
+        )
 
 
 @pytest.mark.integration
@@ -772,6 +1073,9 @@ def test_inverse_prop(mock_pymc_sample):
 @pytest.mark.integration
 def test_bayesian_structural_time_series():
     """Test the BayesianBasisExpansionTimeSeries model."""
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
     # Generate synthetic data
     rng = np.random.default_rng(seed=123)
     dates = pd.date_range(start="2020-01-01", end="2021-12-31", freq="D")
@@ -996,6 +1300,38 @@ def test_bayesian_structural_time_series():
         )
 
         model_with_x.predict(X=X_wrong_shape, coords=coords_with_x)
+
+    # --- Test Case 5: Custom component validation errors --- #
+    class BadTrendComponent:
+        """Component without apply method"""
+
+        pass
+
+    with pytest.raises(
+        ValueError,
+        match="Custom trend_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            trend_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Custom seasonality_component must have an 'apply' method",
+    ):
+        cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            seasonality_component=BadTrendComponent(),
+            sample_kwargs=bsts_sample_kwargs,
+        )
+
+    # --- Test Case 6: Additional error conditions --- #
+    # Test TypeError for non-xarray X (expecting xarray DataArray)
+    with pytest.raises(TypeError, match="X must be an xarray DataArray"):
+        model_with_x.predict(
+            X=data_with_x[["x1"]].values,  # Pass numpy array instead of xarray
+            coords=coords_with_x,
+        )
 
 
 @pytest.mark.integration
@@ -1357,10 +1693,10 @@ class TestSyntheticControlMultiUnit:
         assert sc.treatment_time == treatment_time
 
         # Check data shapes
-        assert sc.datapre_treated.shape == (40, len(treated_units))
-        assert sc.datapost_treated.shape == (20, len(treated_units))
-        assert sc.datapre_control.shape == (40, len(control_units))
-        assert sc.datapost_control.shape == (20, len(control_units))
+        assert sc.pre_design["treated"].shape == (40, len(treated_units))
+        assert sc.post_design["treated"].shape == (20, len(treated_units))
+        assert sc.pre_design["control"].shape == (40, len(control_units))
+        assert sc.post_design["control"].shape == (20, len(control_units))
 
     @pytest.mark.integration
     def test_multi_unit_scoring(self, multi_unit_sc_data):
@@ -1381,7 +1717,7 @@ class TestSyntheticControlMultiUnit:
         assert isinstance(sc.score, pd.Series)
 
         # Check that we have r2 and r2_std for each treated unit using unified format
-        for i, unit in enumerate(treated_units):
+        for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in sc.score.index
             assert f"unit_{i}_r2_std" in sc.score.index
 
@@ -1513,12 +1849,8 @@ class TestSyntheticControlMultiUnit:
 
         # Test that invalid treated unit name is handled gracefully
         # Note: Current implementation may not raise ValueError, so we test default behavior
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.plot(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable
 
-        try:
+        with contextlib.suppress(ValueError, KeyError):
             sc.get_plot_data(treated_unit="invalid_unit")
-        except (ValueError, KeyError):
-            pass  # Either error type is acceptable

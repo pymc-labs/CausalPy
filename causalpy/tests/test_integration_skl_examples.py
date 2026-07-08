@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import causalpy as cp
 
 
 @pytest.mark.integration
-def test_did():
+def test_did(did_data):
     """
     Test Difference in Differences (DID) scikit-learn experiment.
 
@@ -31,7 +31,7 @@ def test_did():
     1. data is a dataframe
     2. skl_experiements.DifferenceInDifferences returns correct type
     """
-    data = cp.load_data("did")
+    data = did_data
     result = cp.DifferenceInDifferences(
         data,
         formula="y ~ 1 + group*post_treatment",
@@ -85,7 +85,7 @@ def test_rd_drinking():
 
 
 @pytest.mark.integration
-def test_its():
+def test_its(its_data):
     """
     Test Interrupted Time Series scikit-learn experiment.
 
@@ -95,11 +95,7 @@ def test_its():
     3. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -128,7 +124,7 @@ def test_its():
 
 
 @pytest.mark.integration
-def test_sc():
+def test_sc(sc_data):
     """
     Test Synthetic Control scikit-learn experiment.
 
@@ -137,7 +133,7 @@ def test_sc():
     2. skl_experiements.SyntheticControl returns correct type
     3. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -175,7 +171,47 @@ def test_sc():
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects():
+def test_sc_datetime_treatment_time_plot(geolift1_data):
+    """Test SyntheticControl plotting with datetime treatment_time and sklearn model."""
+    df = geolift1_data
+    treatment_time = pd.to_datetime("2022-01-01")
+
+    result = cp.SyntheticControl(
+        df,
+        treatment_time,
+        control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
+        treated_units=["Denmark"],
+        model=cp.skl_models.WeightedProportion(),
+    )
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.parametrize("error_type", [TypeError, ValueError])
+def test_sc_convert_treatment_time_for_axis_fallback(error_type):
+    """Return original treatment_time when axis conversion raises."""
+
+    class FailingXAxis:
+        def convert_units(self, _value):
+            raise error_type("conversion failed")
+
+    class FailingAxis:
+        xaxis = FailingXAxis()
+
+    treatment_time = pd.Timestamp("2022-01-01")
+    converted = cp.SyntheticControl._convert_treatment_time_for_axis(
+        FailingAxis(), treatment_time
+    )
+
+    assert converted is treatment_time
+
+
+@pytest.mark.integration
+def test_rd_linear_main_effects(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment main effects.
 
@@ -183,7 +219,7 @@ def test_rd_linear_main_effects():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
@@ -200,7 +236,7 @@ def test_rd_linear_main_effects():
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects_bandwidth():
+def test_rd_linear_main_effects_bandwidth(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment, main effects with
     bandwidth parameter.
@@ -209,7 +245,7 @@ def test_rd_linear_main_effects_bandwidth():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
@@ -227,7 +263,46 @@ def test_rd_linear_main_effects_bandwidth():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_interaction():
+def test_rd_linear_main_effects_bandwidth_custom_running_variable():
+    """
+    Test Regression Discontinuity scikit-learn experiment with bandwidth parameter
+    and custom running variable name.
+
+    This test verifies the bug fix where the bandwidth parameter was hardcoding 'x'
+    instead of using the user-specified running_variable_name.
+
+    Creates synthetic data with custom column name and checks:
+    1. RegressionDiscontinuity works with bandwidth and custom running variable name
+    2. The model completes successfully
+    3. Plot can be generated
+    """
+    # Create synthetic data with custom running variable name
+    df = pd.DataFrame(
+        {
+            "my_running_var": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "outcome": [1, 2, 3, 4, 10, 11, 12],
+            "treated": [False, False, False, False, True, True, True],
+        }
+    )
+
+    # This should work without errors (previously failed with "name 'x' is not defined")
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="outcome ~ 1 + my_running_var + treated",
+        running_variable_name="my_running_var",
+        model=LinearRegression(),
+        treatment_threshold=0.45,
+        bandwidth=0.2,
+    )
+
+    assert isinstance(result, cp.RegressionDiscontinuity)
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+
+
+@pytest.mark.integration
+def test_rd_linear_with_interaction(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with interaction.
 
@@ -235,7 +310,7 @@ def test_rd_linear_with_interaction():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
@@ -252,7 +327,7 @@ def test_rd_linear_with_interaction():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_gaussian_process():
+def test_rd_linear_with_gaussian_process(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with Gaussian process model.
 
@@ -260,7 +335,7 @@ def test_rd_linear_with_gaussian_process():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.RegressionDiscontinuity(
         data,

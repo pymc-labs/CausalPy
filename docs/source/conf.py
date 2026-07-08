@@ -16,6 +16,7 @@ from pathlib import Path
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
 
 
 # Generate gallery before building docs
@@ -72,6 +73,15 @@ copyright = f"2024, {author}"
 release = __version__
 version = release
 
+# The version info for the project you're documenting
+if os.environ.get("READTHEDOCS", False):
+    rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
+    if rtd_version.lower() == "latest":
+        version = "dev"
+else:
+    version = "local"
+    rtd_version = version
+
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
@@ -92,7 +102,9 @@ extensions = [
     "notfound.extension",
     "sphinx_copybutton",
     "sphinx_design",
+    "sphinx_sitemap",
     "sphinx_togglebutton",
+    "strip_citation_labels",
 ]
 
 nb_execution_mode = "off"
@@ -108,7 +120,7 @@ source_suffix = {
     ".myst": "myst-nb",
 }
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".codespell"]
 master_doc = "index"
 
 # Suppress warnings for notebooks linked from gallery (not in toctree)
@@ -120,7 +132,7 @@ suppress_warnings = [
 
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
-bibtex_default_style = "unsrt"
+bibtex_default_style = "alpha"
 bibtex_reference_style = "author_year"
 
 
@@ -162,6 +174,7 @@ intersphinx_mapping = {
 
 # MyST options for working with markdown files.
 # Info about extensions here https://myst-parser.readthedocs.io/en/latest/syntax/optional.html?highlight=math#admonition-directives # noqa: E501
+myst_heading_anchors = 3  # auto-generate anchors for H1–H3, enabling #slug cross-refs
 myst_enable_extensions = [
     "dollarmath",
     "amsmath",
@@ -170,11 +183,17 @@ myst_enable_extensions = [
     "html_admonition",
 ]
 
+# sitemap extension configuration
+site_url = "https://causalpy.readthedocs.io/"
+sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
+html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 html_css_files = ["gallery.css"]
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -200,6 +219,7 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs/source/",
     "default_mode": "light",
+    "baseurl": "https://causalpy.readthedocs.io/",
 }
 
 # -- Options for autodoc ----------------------------------------------------
@@ -211,12 +231,3 @@ autodoc_typehints = "description"
 
 # Don't show class signature with the class' name.
 autodoc_class_signature = "separated"
-
-# Add "Edit on Github" link. Replaces "view page source" ----------------------
-html_context = {
-    "display_github": True,  # Integrate GitHub
-    "github_user": "pymc-labs",  # Username
-    "github_repo": "CausalPy",  # Repo name
-    "github_version": "master",  # Version
-    "conf_py_path": "/docs/source/",  # Path in the checkout to the docs root
-}

@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -18,22 +18,43 @@ Custom Exceptions for CausalPy.
 
 class BadIndexException(Exception):
     """Custom exception used when we have a mismatch in types between the dataframe
-    index and an event, typically a treatment or intervention."""
+    index and an event, typically a treatment or intervention.
+
+    Parameters
+    ----------
+    message : str
+        Human-readable description of the index mismatch.
+    """
 
     def __init__(self, message: str):
+        super().__init__(message)
         self.message = message
 
 
 class FormulaException(Exception):
     """Exception raised given when there is some error in a user-provided model
-    formula"""
+    formula.
+
+    Parameters
+    ----------
+    message : str
+        Human-readable description of the formula problem.
+    """
 
     def __init__(self, message: str):
+        super().__init__(message)
         self.message = message
 
 
 class DataException(Exception):
-    """Exception raised given when there is some error in user-provided dataframe"""
+    """Exception raised given when there is some error in user-provided dataframe.
+
+    Parameters
+    ----------
+    message : str
+        Human-readable description of the data problem.
+    """
 
     def __init__(self, message: str):
+        super().__init__(message)
         self.message = message

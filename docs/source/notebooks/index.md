@@ -1,4 +1,6 @@
-# How-to
+# Examples
+
+## Panel data methods
 
 On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
@@ -17,29 +19,56 @@ Analysis of covariance is a simple linear model, typically with one continuous p
 :::
 ::::
 
-## Difference in Differences
+## Panel Fixed Effects
 
-Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
+Panel data tracks the same units over multiple time periods. Fixed effects exploit this structure to control for unobserved confounders that are stable within units or common across time.
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Difference in Differences with `pymc` models
+:::{grid-item-card} Panel Fixed Effects for Causal Inference
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc.png
-:link: did_pymc
+:img-top: ../_static/thumbnails/panel_fixed_effects.png
+:link: panel_fixed_effects
 :link-type: doc
 :::
-:::{grid-item-card} Banking dataset with a `pymc` model
+::::
+
+## Synthetic Control
+
+The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Synthetic control with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc_banks.png
-:link: did_pymc_banks
+:img-top: ../_static/thumbnails/sc_skl.png
+:link: sc_skl
 :link-type: doc
 :::
-:::{grid-item-card} Difference in Differences with scikit-learn models
+:::{grid-item-card} Synthetic control with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_skl.png
-:link: did_skl
+:img-top: ../_static/thumbnails/sc_pymc.png
+:link: sc_pymc
+:link-type: doc
+:::
+:::{grid-item-card} The effects of Brexit
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/sc_pymc_brexit.png
+:link: sc_pymc_brexit
+:link-type: doc
+:::
+:::{grid-item-card} Synthetic Difference-in-Differences with `pymc` models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/sdid_pymc.png
+:link: sdid_pymc
+:link-type: doc
+:::
+:::{grid-item-card} Choosing the right counterfactual: ITS vs. synthetic control
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/its_causalpy_vs_causalimpact.png
+:link: its_causalpy_vs_causalimpact
 :link-type: doc
 :::
 ::::
@@ -65,23 +94,35 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 :::
 ::::
 
-## Instrumental Variables Regression
+## Difference in Differences
 
-A quasi-experimental design to estimate a treatment effect where there is a risk of confounding between the treatment and the outcome due to endogeneity. Instrumental variables help identify causal effects by using variables that affect treatment assignment but not the outcome directly.
+Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Instrumental Variable Modelling (IV) with `pymc` models
+:::{grid-item-card} Difference in Differences with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_pymc.png
-:link: iv_pymc
+:img-top: ../_static/thumbnails/did_skl.png
+:link: did_skl
 :link-type: doc
 :::
-:::{grid-item-card} Instrumental Regression and Justifying Instruments with `pymc`
+:::{grid-item-card} Difference in Differences with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_weak_instruments.png
-:link: iv_weak_instruments
+:img-top: ../_static/thumbnails/did_pymc.png
+:link: did_pymc
+:link-type: doc
+:::
+:::{grid-item-card} Banking dataset with a `pymc` model
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/did_pymc_banks.png
+:link: did_pymc_banks
+:link-type: doc
+:::
+:::{grid-item-card} Staggered Difference-in-Differences
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/staggered_did_pymc.png
+:link: staggered_did_pymc
 :link-type: doc
 :::
 ::::
@@ -93,10 +134,10 @@ A quasi-experimental design that uses time series methods to generate counterfac
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Excess deaths due to COVID-19
+:::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_covid.png
-:link: its_covid
+:img-top: ../_static/thumbnails/its_skl.png
+:link: its_skl
 :link-type: doc
 :::
 :::{grid-item-card} Bayesian Interrupted Time Series
@@ -104,36 +145,64 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :img-top: ../_static/thumbnails/its_pymc.png
 :link: its_pymc
 :link-type: doc
-
 :::
-:::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
+:::{grid-item-card} Interrupted Time Series for fixed-period interventions
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_skl.png
-:link: its_skl
+:img-top: ../_static/thumbnails/its_post_intervention_analysis.png
+:link: its_post_intervention_analysis
+:link-type: doc
+:::
+:::{grid-item-card} Excess deaths due to COVID-19
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/its_covid.png
+:link: its_covid
+:link-type: doc
+:::
+:::{grid-item-card} Lift Testing with Interrupted Time Series
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/its_lift_test.png
+:link: its_lift_test
+:link-type: doc
+:::
+:::{grid-item-card} Placebo-in-time and falsification: a UK CO₂ case study
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/its_placebo_in_time_analysis.png
+:link: its_placebo_in_time_analysis
 :link-type: doc
 :::
 ::::
 
-## Inverse Propensity Score Weighting
+## Comparative Interrupted Time Series
 
-A method for estimating causal effects by weighting observations by the inverse of their probability of receiving treatment (propensity score). This helps adjust for confounding by creating a pseudo-population where treatment assignment is independent of observed covariates.
+Comparative interrupted time series extends standard ITS by incorporating control units as predictors, helping disentangle treatment effects from coincidental changes that affect both treated and control units.
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} The Paradox of Propensity Scores in Bayesian Inference
+:::{grid-item-card} Comparative Interrupted Time Series: a geo-experimentation example
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_latent.png
-:link: inv_prop_latent
-:link-type: doc
-:::
-:::{grid-item-card} Inverse Propensity Score Weighting with `pymc`
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_pymc.png
-:link: inv_prop_pymc
+:img-top: ../_static/thumbnails/its_pymc_comparative.png
+:link: its_pymc_comparative
 :link-type: doc
 :::
 ::::
+
+## Piecewise Interrupted Time Series
+
+Piecewise interrupted time series (segmented regression) models the outcome with separate slopes before and after the intervention, allowing the level and trend to change at the treatment point.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Piecewise Interrupted Time Series (Segmented Regression)
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/piecewise_its_pymc.png
+:link: piecewise_its_pymc
+:link-type: doc
+:::
+::::
+
+## Cross-sectional methods
 
 ## Regression Discontinuity
 
@@ -142,10 +211,22 @@ A quasi-experimental design where treatment assignment is determined by a cutoff
 ::::{grid} 1 2 3 3
 :gutter: 3
 
+:::{grid-item-card} Sharp regression discontinuity with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/rd_skl.png
+:link: rd_skl
+:link-type: doc
+:::
 :::{grid-item-card} Sharp regression discontinuity with `pymc` models
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/rd_pymc.png
 :link: rd_pymc
+:link-type: doc
+:::
+:::{grid-item-card} Drinking age with a scikit-learn model
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/rd_skl_drinking.png
+:link: rd_skl_drinking
 :link-type: doc
 :::
 :::{grid-item-card} Drinking age - Bayesian analysis
@@ -154,16 +235,10 @@ A quasi-experimental design where treatment assignment is determined by a cutoff
 :link: rd_pymc_drinking
 :link-type: doc
 :::
-:::{grid-item-card} Sharp regression discontinuity with scikit-learn models
+:::{grid-item-card} Donut Regression Discontinuity
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_skl.png
-:link: rd_skl
-:link-type: doc
-:::
-:::{grid-item-card} Drinking age with a scikit-learn model
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_skl_drinking.png
-:link: rd_skl_drinking
+:img-top: ../_static/thumbnails/rd_donut_pymc.png
+:link: rd_donut_pymc
 :link-type: doc
 :::
 ::::
@@ -183,29 +258,96 @@ A variation of regression discontinuity where treatment affects the slope (rate 
 :::
 ::::
 
-## Synthetic Control
+## Instrumental Variables Regression
 
-The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
+A quasi-experimental design to estimate a treatment effect where there is a risk of confounding between the treatment and the outcome due to endogeneity. Instrumental variables help identify causal effects by using variables that affect treatment assignment but not the outcome directly.
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Synthetic control with `pymc` models
+:::{grid-item-card} Instrumental Variable Modelling (IV) with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc.png
-:link: sc_pymc
+:img-top: ../_static/thumbnails/iv_pymc.png
+:link: iv_pymc
 :link-type: doc
 :::
-:::{grid-item-card} The effects of Brexit
+:::{grid-item-card} Instrumental Regression and Justifying Instruments with `pymc`
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc_brexit.png
-:link: sc_pymc_brexit
+:img-top: ../_static/thumbnails/iv_weak_instruments.png
+:link: iv_weak_instruments
 :link-type: doc
 :::
-:::{grid-item-card} Synthetic control with scikit-learn models
+:::{grid-item-card} Variable Selection Priors and Instrumental Variable Designs
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_skl.png
-:link: sc_skl
+:img-top: ../_static/thumbnails/iv_vs_priors.png
+:link: iv_vs_priors
+:link-type: doc
+:::
+::::
+
+## Inverse Propensity Score Weighting
+
+A method for estimating causal effects by weighting observations by the inverse of their probability of receiving treatment (propensity score). This helps adjust for confounding by creating a pseudo-population where treatment assignment is independent of observed covariates.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Inverse Propensity Score Weighting with `pymc`
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/inv_prop_pymc.png
+:link: inv_prop_pymc
+:link-type: doc
+:::
+:::{grid-item-card} The Paradox of Propensity Scores in Bayesian Inference
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/inv_prop_latent.png
+:link: inv_prop_latent
+:link-type: doc
+:::
+::::
+
+## Workflow
+
+## Pipeline
+
+CausalPy's pipeline API chains causal inference steps into a single, reproducible workflow.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Pipeline Workflow
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/pipeline_workflow.png
+:link: pipeline_workflow
+:link-type: doc
+:::
+::::
+
+## Sensitivity Checks
+
+Sensitivity checks help assess whether a causal estimate is robust or fragile. CausalPy's pipeline API makes sensitivity analysis a first-class step in reproducible workflows.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Sensitivity Checks in Pipeline Workflows
+:class-card: sd-card-h-100
+:link: sensitivity_checks
+:link-type: doc
+:::
+::::
+
+## Reporting
+
+Every CausalPy experiment can produce a self-contained HTML report summarising the analysis.
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} HTML Report Generation
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/report_demo.png
+:link: report_demo
 :link-type: doc
 :::
 ::::

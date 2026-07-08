@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2025 The PyMC Labs Developers
+#   Copyright 2022 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,11 +15,30 @@
 CausalPy Test Configuration
 
 Functions:
+
 * rng: random number generator with session level scope
 """
 
+import matplotlib
 import numpy as np
+import pandas as pd
 import pytest
+
+# Force a non-interactive backend so plot() calls in tests never open GUI windows.
+matplotlib.use("Agg", force=True)
+
+import causalpy as cp
+from causalpy.data.simulate_data import (
+    RANDOM_SEED,
+    generate_ancova_data,
+    generate_did,
+    generate_geolift_data,
+    generate_multicell_geolift_data,
+    generate_regression_discontinuity_data,
+    generate_synthetic_control_data,
+    generate_time_series_data_seasonal,
+    generate_time_series_data_simple,
+)
 
 # Try to use PyMC's testing helpers if available; otherwise, fall back to no-op fixtures
 try:  # pragma: no cover - conditional import for compatibility across PyMC versions
@@ -59,3 +78,110 @@ def mock_sample_for_doctest(request):
     import pymc as pm
 
     pm.sample = mock_sample
+
+
+@pytest.fixture(scope="session")
+def did_data():
+    """Synthetic difference-in-differences data."""
+    return generate_did(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def its_data():
+    """Synthetic interrupted time series data (seasonal, date as datetime index)."""
+    return generate_time_series_data_seasonal(
+        treatment_time=pd.to_datetime("2017-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def its_simple_data():
+    """Synthetic simple ITS data (date as datetime index)."""
+    return generate_time_series_data_simple(
+        treatment_time=pd.to_datetime("2015-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def rd_data():
+    """Synthetic regression discontinuity data."""
+    return generate_regression_discontinuity_data(
+        true_treatment_threshold=0.5, seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def sc_data():
+    """Synthetic control data (DataFrame only, no weightings)."""
+    return generate_synthetic_control_data(seed=RANDOM_SEED)[0]
+
+
+@pytest.fixture(scope="session")
+def anova1_data():
+    """Synthetic ANCOVA / pre-post NEGD data."""
+    return generate_ancova_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift1_data():
+    """Synthetic geolift data (time as datetime index)."""
+    return generate_geolift_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift_multi_cell_data():
+    """Synthetic multi-cell geolift data (time as datetime index)."""
+    return generate_multicell_geolift_data(seed=RANDOM_SEED)
+
+
+def reg_kink_function(x, beta, kink):
+    """Piecewise linear function with a kink, for regression kink design tests."""
+    return (
+        beta[0]
+        + beta[1] * x
+        + beta[2] * x**2
+        + beta[3] * (x - kink) * (x >= kink)
+        + beta[4] * (x - kink) ** 2 * (x >= kink)
+    )
+
+
+def setup_regression_kink_data(kink):
+    """Generate synthetic data for regression kink design tests."""
+    rng = np.random.default_rng(42)
+    N = 50
+    beta = [0, -1, 0, 2, 0]
+    sigma = 0.05
+    x = rng.uniform(-1, 1, N)
+    y = reg_kink_function(x, beta, kink) + rng.normal(0, sigma, N)
+    return pd.DataFrame({"x": x, "y": y, "treated": x >= kink})
+
+
+@pytest.fixture()
+def banks_data():
+    """Load and reshape the banks dataset for DiD integration tests.
+
+    Returns (df_long, treatment_time) where treatment_time has been
+    shifted to 0 so that tests don't depend on absolute years.
+    """
+    treatment_time = 1930.5
+    df = (
+        cp.load_data("banks")
+        .filter(items=["bib6", "bib8", "year"])
+        .rename(columns={"bib6": "Sixth District", "bib8": "Eighth District"})
+        .groupby("year")
+        .median()
+    )
+    df.index = df.index - treatment_time
+    treatment_time = 0
+    df.reset_index(level=0, inplace=True)
+    df_long = pd.melt(
+        df,
+        id_vars=["year"],
+        value_vars=["Sixth District", "Eighth District"],
+        var_name="district",
+        value_name="bib",
+    ).sort_values("year")
+    df_long["unit"] = df_long["district"]
+    df_long["post_treatment"] = df_long.year >= treatment_time
+    df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
+    return df_long, treatment_time

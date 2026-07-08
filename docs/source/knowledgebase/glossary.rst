@@ -23,7 +23,7 @@ Glossary
 
    Comparative interrupted time-series
    CITS
-      An interrupted time series design with added comparison time series observations.
+      An interrupted time series design with added comparison time series observations. In CITS, one or more control units are included as predictors in the model, providing a counterfactual by accounting for common trends and shocks that affect both treated and control units. This approach provides stronger causal inference than standard ITS by controlling for confounding trends. CITS can be implemented using the ``InterruptedTimeSeries`` class by including control unit observations as predictors in the model formula (e.g., ``treated ~ 1 + control``). Unlike synthetic control, CITS typically includes an intercept and has no sum-to-1 constraint on control weights. Additional covariates such as seasonality, time trends, or other predictors can also be included alongside control units.
 
    Confidence interval
    CI
@@ -31,6 +31,9 @@ Glossary
 
    Confound
       Anything besides the treatment which varies across the treatment and control conditions.
+
+   Convex hull condition
+      In synthetic control methods, the requirement that the treated unit's pre-intervention outcomes can be expressed as a convex combination (non-negative weights summing to one) of control units' outcomes. This is a necessary condition for the weighted sum approach to produce a valid synthetic control. When violated—such as when all control series are consistently above or below the treated series—the method cannot construct an accurate counterfactual :footcite:p:`abadie2010synthetic`.
 
    Counterfactual
       A hypothetical outcome that could or will occur under specific hypothetical circumstances.
@@ -41,6 +44,18 @@ Glossary
    Difference in differences
    DiD
       Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
+
+   Donor pool
+   Donor pool selection
+      In synthetic control methods, the donor pool is the set of untreated units available to construct the synthetic control. Donor pool selection (or curation) is the process of choosing which untreated units to include. Units that are structurally dissimilar to the treated unit -- for example, those with negative pre-treatment correlations -- should be excluded because they can introduce interpolation bias and degrade the synthetic control fit. This is especially important in Bayesian implementations where priors (e.g. Dirichlet) assign non-zero weight to every donor by construction :footcite:p:`abadie2021using,abadie2010synthetic`.
+
+   Donut regression discontinuity
+   Donut RDD
+      A robustness approach for regression discontinuity designs where observations within a specified distance from the treatment threshold are excluded from model fitting. This technique is used when observations closest to the cutoff may be problematic due to manipulation, sorting, or heaping/rounding of the running variable. By excluding the "donut hole" around the threshold, the analysis relies on observations that are less likely to be affected by such issues. See :footcite:t:`noack2024donut` for formal discussion of donut RDD properties.
+
+   Event study
+   Event-time effects
+      Treatment effect estimates indexed by time relative to treatment onset.
 
    Interrupted time series design
    ITS
@@ -66,9 +81,17 @@ Glossary
    Highest Density Interval
       In Bayesian statistics, the narrowest credible interval containing a specified percentage of the posterior probability mass. For example, a 95% HDI is the shortest interval that contains 95% of the posterior distribution. This is the default uncertainty interval reported by CausalPy for PyMC models. See :doc:`reporting_statistics` for interpretation guidance.
 
+   Heaping
+   Rounding in running variable
+      In regression discontinuity designs, heaping refers to the clustering of running variable values at specific points (typically round numbers) due to rounding or measurement conventions. This can create mass points in the distribution that may be correlated with outcomes or covariates, potentially biasing local fits near the threshold. Donut RDD is one approach to address heaping-induced bias by excluding observations near the threshold. See :footcite:t:`barreca2016heaping` for analysis of heaping-induced bias.
+
    Local Average Treatment effect
    LATE
       Also known as the complier average causal effect (CACE), is the effect of a treatment for subjects who comply with the experimental treatment assigned to their sample group. It is the quantity we're estimating in IV designs.
+
+   Manipulation
+   Sorting at the threshold
+      In regression discontinuity designs, manipulation (or sorting) refers to the concern that agents may precisely influence their running variable value to fall just above or below the treatment threshold. For example, students might strategically score just above a passing grade threshold. Such behavior violates the continuity assumptions underlying RDD and can bias treatment effect estimates. The McCrary density test is a common diagnostic for detecting manipulation by testing for discontinuities in the density of the running variable at the threshold. See :footcite:t:`mccrary2008manipulation` for the formal density test.
 
    Non-equivalent group designs
    NEGD
@@ -82,6 +105,12 @@ Glossary
 
    Panel data
       Time series data collected on multiple units where the same units are observed at each time point.
+
+   Staggered Difference-in-Differences
+      A difference-in-differences setting where different units receive treatment at different times (staggered adoption), often analyzed with event-time treatment effects.
+
+   Absorbing treatment
+      A treatment that, once applied, remains in effect permanently. This assumption is required by the Borusyak, Jaravel, and Spiess (2024) imputation estimator used by ``StaggeredDifferenceInDifferences``.
 
    Posterior probability
       In Bayesian statistics, the probability of a hypothesis or parameter value after observing the data. In CausalPy's reporting, posterior probabilities are used for hypothesis testing (e.g., the probability that a treatment effect is positive). Unlike p-values, these are direct probability statements about the hypothesis of interest. See :doc:`reporting_statistics` for examples.
@@ -125,7 +154,7 @@ Glossary
       In regression discontinuity designs, the running variable is the variable that determines the assignment of units to treatment or control conditions. This is typically a continuous variable. Examples could include a test score, age, income, or spatial location. But the running variable would not be time, which is the case in interrupted time series designs.
 
    Sharp regression discontinuity design
-      A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function.
+      A Regression discontinuity design where allocation to treatment or control is determined by a sharp threshold / step function. Common robustness checks for sharp RDD include donut regression discontinuity (excluding observations very close to the threshold) and bandwidth sensitivity analysis. See :footcite:t:`lee2010regression` for a comprehensive overview of RDD methods.
 
    Synthetic control
       The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.

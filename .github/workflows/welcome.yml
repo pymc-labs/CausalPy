@@ -1,0 +1,75 @@
+name: Welcome New Contributors
+
+on:
+  # zizmor: ignore[dangerous-triggers]
+  # pull_request_target is required so this workflow can comment and label on
+  # PRs from forks (the read-only pull_request token cannot write). Safe here:
+  # we never check out or execute PR contents, only call SHA-pinned actions,
+  # and the only user-controlled value (github.actor) is hoisted to env and
+  # used in a Markdown body, never in a shell or expression context.
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    # Skip automated accounts (pre-commit-ci, dependabot, etc.) — see contributors.yml BOT_PATTERN.
+    if: >-
+      !contains(github.actor, '[bot]') &&
+      !contains(github.actor, 'dependabot') &&
+      !contains(github.actor, 'renovate')
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      ACTOR: ${{ github.actor }}
+    steps:
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
+
+            Thank you for opening your first issue! We appreciate you taking the time to post this.
+
+            Here are a few things that might help:
+            - 📖 Check out our [documentation](https://causalpy.readthedocs.io/)
+            - 💬 Feel free to ask questions - we're happy to help!
+            - 🐛 If this is a bug report, please ensure you've included steps to reproduce it
+
+            A maintainer will take a look soon. Thanks for being part of the CausalPy community! 🎉
+
+          pr_message: |
+            👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
+
+            Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
+
+            Here are a few tips to help your PR get merged smoothly:
+            - ✅ Make sure all CI checks pass (tests, linting, type checking)
+            - 📝 Run `prek run --all-files` locally before pushing
+            - 📖 Check our [Contributing Guide](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md) for more details
+
+            A maintainer will review your changes soon. Thanks for helping make CausalPy better! 🚀
+
+            ---
+
+            💼 **LinkedIn Shoutout**: Once your PR is merged, we'd love to give you a shoutout on LinkedIn to thank you for your contribution! If you're interested, just drop your LinkedIn profile URL in a comment below.
+
+      # Add label for first-time contributors on PRs
+      # FIRST_TIMER: never contributed to any GitHub repo
+      # FIRST_TIME_CONTRIBUTOR: contributed elsewhere but not to this repo
+      - name: Add first-time-contributor label
+        if: github.event_name == 'pull_request_target' && (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' || github.event.pull_request.author_association == 'FIRST_TIMER')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['first-time-contributor']
+            });
