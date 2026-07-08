@@ -1,3 +1,7 @@
+---
+html_theme.sidebar_secondary.remove: true
+---
+
 # How-to
 
 On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
