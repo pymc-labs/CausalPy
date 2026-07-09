@@ -178,7 +178,7 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
-:::{grid-item-card} Temperature and mortality: a UK causal analysis (draft)
+:::{grid-item-card} Heatwaves and excess mortality: a piecewise ITS analysis (draft)
 :class-card: sd-card-h-100
 :link: its_temperature_mortality
 :link-type: doc

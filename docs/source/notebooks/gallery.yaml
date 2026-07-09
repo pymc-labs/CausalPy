@@ -68,7 +68,7 @@ groups:
             notebook: its_post_intervention_analysis
           - title: Excess deaths due to COVID-19
             notebook: its_covid
-          - title: "Temperature and mortality: a UK causal analysis (draft)"
+          - title: "Heatwaves and excess mortality: a piecewise ITS analysis (draft)"
             notebook: its_temperature_mortality
             thumbnail: false
           - title: Lift Testing with Interrupted Time Series
