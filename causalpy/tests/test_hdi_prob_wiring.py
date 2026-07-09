@@ -336,7 +336,11 @@ def _check_default(
 
 
 _ITS_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.interrupted_time_series.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.interrupted_time_series.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
@@ -492,17 +496,18 @@ def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
 
 @pytest.mark.integration
 def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
-    """``plot(hdi_prob=...)`` still reaches ``plot_posterior_over_x`` via the deprecated alias.
+    """``plot(hdi_prob=...)`` still reaches ``td.point_interval`` via the deprecated alias.
 
     Ensures that existing user code does not silently break after the rename
     to ``ci_prob``. The deprecated alias must emit a ``FutureWarning`` and
-    forward the value to ``plot_posterior_over_x`` as ``ci_prob``.
+    forward the value to ``td.point_interval`` as ``probs``.
     """
     stack, recorded = _record_hdi_prob_calls(
         [
             (
-                "causalpy.experiments.interrupted_time_series.plot_posterior_over_x",
-                "ci_prob",
+                "causalpy.experiments.interrupted_time_series.td.point_interval",
+                "probs",
+                lambda probs: probs[0] if probs else None,
             )
         ]
     )
