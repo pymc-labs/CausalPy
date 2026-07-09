@@ -47,6 +47,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.plot_utils import _PlotXYStyle, concat_x_y, plot_xY
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -699,6 +700,209 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
+    def _bayesian_plot_matplotlib(
+        self,
+        round_to: int | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the results: counterfactual, impact, and cumulative impact.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the credible interval. Must be in ``(0, 1]``.
+            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The matplotlib figure containing the plots.
+        ax : list of matplotlib.axes.Axes
+            The three axes (counterfactual, impact, cumulative impact).
+        """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+
+        def _legend_handle(h_line, h_patch):
+            if kind in ("spaghetti", "histogram") and isinstance(h_line, list):
+                return h_line[-1]
+            return (h_line, h_patch)
+
+        treated_unit = self.treated_units[0]
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
+
+        # ---- TOP PLOT: Observed vs counterfactual ----
+        pre_pred = self.pre_pred.posterior_predictive["mu"].sel(
+            treated_units=treated_unit
+        )
+        post_pred = self.post_pred.posterior_predictive["mu"].sel(
+            treated_units=treated_unit
+        )
+
+        if kind == "histogram":
+            x_top, pred_top = concat_x_y(
+                self.datapre.index, pre_pred, self.datapost.index, post_pred
+            )
+            h_line, h_patch = plot_xY(
+                x_top,
+                pred_top,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [_legend_handle(h_line, h_patch)]
+            labels = ["Posterior density"]
+        else:
+            h_line, h_patch = plot_xY(
+                self.datapre.index,
+                pre_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [(h_line, h_patch)]
+            labels = ["Pre-intervention fit"]
+
+        # Observed treated outcome
+        (h,) = ax[0].plot(
+            self.datapre.index,
+            self.datapre[self.treated_units].values.mean(axis=1),
+            "k.",
+            label="Observations",
+        )
+        handles.append(h)
+        labels.append("Observations")
+
+        if kind != "histogram":
+            h_line, h_patch = plot_xY(
+                self.datapost.index,
+                post_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            handles.append((h_line, h_patch))
+            labels.append("Counterfactual")
+
+        ax[0].plot(
+            self.datapost.index,
+            self.datapost[self.treated_units].values.mean(axis=1),
+            "k.",
+        )
+
+        # Shaded causal effect
+        h = ax[0].fill_between(
+            self.datapost.index,
+            y1=post_pred.mean(dim=["chain", "draw"]).values,
+            y2=self.datapost[self.treated_units].values.mean(axis=1),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        handles.append(h)
+        labels.append("Causal impact")
+
+        tau_mean = float(self.tau_posterior.mean())
+        r_to = round_to if round_to is not None else 2
+        ax[0].set(title=f"SDiD: ATT = {round(tau_mean, r_to)}")
+
+        # ---- MIDDLE PLOT: Impact ----
+        if kind == "histogram":
+            x_mid, impact_mid = concat_x_y(
+                self.datapre.index,
+                self.pre_impact.sel(treated_units=treated_unit),
+                self.datapost.index,
+                self.post_impact.sel(treated_units=treated_unit),
+            )
+            plot_xY(
+                x_mid,
+                impact_mid,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+        else:
+            plot_xY(
+                self.datapre.index,
+                self.pre_impact.sel(treated_units=treated_unit),
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            plot_xY(
+                self.datapost.index,
+                self.post_impact.sel(treated_units=treated_unit),
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        ax[1].axhline(y=0, c="k")
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=self.post_impact.mean(["chain", "draw"])
+            .sel(treated_units=treated_unit)
+            .values,
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].set(title="Causal Impact")
+
+        # ---- BOTTOM PLOT: Cumulative impact ----
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            self.datapost.index,
+            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            ax=ax[2],
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax[2].axhline(y=0, c="k")
+
+        # Intervention line
+        for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
+            ax[i].axvline(
+                x=treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+            )
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+        )
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
+
+        return fig, ax
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -708,7 +912,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
         """Plot SDiD results via a faceted plotnine base plus matplotlib overlays.
 
         Builds the three-panel layout as one ``facet_wrap`` ggplot, then
@@ -720,10 +924,12 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         (#988). No shared helper with ITS/SC yet — assess SDiD alone.
         """
         if kind != "ribbon":
-            raise ValueError(
-                f"kind={kind!r} is not yet supported for the plotnine "
-                "SyntheticDifferenceInDifferences plot; use kind='ribbon'. "
-                "Tracked in issue #988."
+            return self._bayesian_plot_matplotlib(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
             )
 
         treated_unit = self.treated_units[0]

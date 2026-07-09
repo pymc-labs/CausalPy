@@ -46,7 +46,12 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import get_hdi_to_df
+from causalpy.plot_utils import (
+    _PlotXYStyle,
+    concat_x_y,
+    get_hdi_to_df,
+    plot_xY,
+)
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
@@ -509,6 +514,234 @@ class SyntheticControl(BaseExperiment):
             figsize=figsize,
         )
 
+    def _bayesian_plot_matplotlib(
+        self,
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """
+        Plot the results for a specific treated unit.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        treated_unit : str, optional
+            Which treated unit to plot. Must be a string name of the treated unit.
+            If ``None``, plots the first treated unit.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool, optional
+            Whether to overlay control-unit trajectories. Defaults to ``False``.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
+        """
+        counterfactual_label = "Counterfactual"
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+
+        def _legend_handle(h_line, h_patch):
+            if kind in ("spaghetti", "histogram") and isinstance(h_line, list):
+                return h_line[-1]
+            return (h_line, h_patch)
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
+        # TOP PLOT --------------------------------------------------
+        # pre-intervention period
+
+        # Get treated unit name - default to first unit if None
+        treated_unit = (
+            treated_unit if treated_unit is not None else self.treated_units[0]
+        )
+
+        if treated_unit not in self.treated_units:
+            raise ValueError(
+                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
+            )
+
+        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
+            treated_units=treated_unit
+        )
+        post_pred = self.post_pred["posterior_predictive"].mu.sel(
+            treated_units=treated_unit
+        )
+
+        if kind == "histogram":
+            x_top, pred_top = concat_x_y(
+                self.datapre.index, pre_pred, self.datapost.index, post_pred
+            )
+            h_line, h_patch = plot_xY(
+                x_top,
+                pred_top,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [_legend_handle(h_line, h_patch)]
+            labels = ["Posterior density"]
+        else:
+            h_line, h_patch = plot_xY(
+                self.datapre.index,
+                pre_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [(h_line, h_patch)]
+            labels = ["Pre-intervention period"]
+
+        # Plot observations for primary treated unit
+        (h,) = ax[0].plot(
+            self.datapre.index,
+            self.pre_design["treated"].sel(treated_units=treated_unit),
+            "k.",
+            label="Observations",
+        )
+        handles.append(h)
+        labels.append("Observations")
+
+        if kind != "histogram":
+            h_line, h_patch = plot_xY(
+                self.datapost.index,
+                post_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            handles.append((h_line, h_patch))
+            labels.append(counterfactual_label)
+
+        ax[0].plot(
+            self.datapost.index,
+            self.post_design["treated"].sel(treated_units=treated_unit),
+            "k.",
+        )
+        # Shaded causal effect for primary treated unit
+        h = ax[0].fill_between(
+            self.datapost.index,
+            y1=post_pred.mean(dim=["chain", "draw"]).values,
+            y2=self.post_design["treated"].sel(treated_units=treated_unit).values,
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        handles.append(h)
+        labels.append("Causal impact")
+
+        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
+
+        # MIDDLE PLOT -----------------------------------------------
+        if kind == "histogram":
+            x_mid, impact_mid = concat_x_y(
+                self.datapre.index,
+                self.pre_impact.sel(treated_units=treated_unit),
+                self.datapost.index,
+                self.post_impact.sel(treated_units=treated_unit),
+            )
+            plot_xY(
+                x_mid,
+                impact_mid,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+        else:
+            plot_xY(
+                self.datapre.index,
+                self.pre_impact.sel(treated_units=treated_unit),
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            plot_xY(
+                self.datapost.index,
+                self.post_impact.sel(treated_units=treated_unit),
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        ax[1].axhline(y=0, c="k")
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units=treated_unit),
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].set(title="Causal Impact")
+
+        # BOTTOM PLOT -----------------------------------------------
+        ax[2].set(title="Cumulative Causal Impact")
+        plot_xY(
+            self.datapost.index,
+            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            ax=ax[2],
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax[2].axhline(y=0, c="k")
+
+        # Intervention line
+        for i in [0, 1, 2]:
+            treatment_time = self._convert_treatment_time_for_axis(
+                ax[i], self.treatment_time
+            )
+            ax[i].axvline(
+                x=treatment_time,
+                ls="-",
+                lw=3,
+                color="r",
+            )
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        if plot_predictors:
+            # plot control units as well
+            ax[0].plot(
+                self.datapre.index,
+                self.pre_design["control"],
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
+            )
+            ax[0].plot(
+                self.datapost.index,
+                self.post_design["control"],
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
+            )
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
+
+        return fig, ax
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -520,7 +753,7 @@ class SyntheticControl(BaseExperiment):
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
         """Plot SC results via a faceted plotnine base plus matplotlib overlays.
 
         Builds the three-panel layout as one ``facet_wrap`` ggplot for a chosen
@@ -528,13 +761,20 @@ class SyntheticControl(BaseExperiment):
         optional donor trajectories, and date formatting. Returns ``(fig, ax)``.
 
         ponytail: treatment vline, ``plot_predictors``, and date formatting stay
-        on matplotlib after ``.draw()``. ``kind`` other than ``"ribbon"`` raises
-        until migrated (#988). No shared helper with ITS yet — assess SC alone.
+        on matplotlib after ``.draw()``. Non-ribbon ``kind`` values delegate to
+        ``_bayesian_plot_matplotlib`` until plotnine migration (#988).
         """
         if kind != "ribbon":
-            raise ValueError(
-                f"kind={kind!r} is not yet supported for the plotnine "
-                "SyntheticControl plot; use kind='ribbon'. Tracked in issue #988."
+            return self._bayesian_plot_matplotlib(
+                round_to=round_to,
+                treated_unit=treated_unit,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                plot_predictors=plot_predictors,
+                figsize=figsize,
+                **kwargs,
             )
 
         treated_unit = (

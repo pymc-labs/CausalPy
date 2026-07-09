@@ -20,8 +20,10 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import polars as pl
+import seaborn as sns
 import tidydraws as td
 import xarray as xr
+from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
@@ -37,11 +39,12 @@ from plotnine import (
     scale_fill_manual,
 )
 
-from causalpy.constants import HDI_PROB
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import _PlotXYStyle, histogram_y_edges, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -327,6 +330,108 @@ class PrePostNEGD(BaseExperiment):
             figsize=figsize,
         )
 
+    def _bayesian_plot_matplotlib(
+        self,
+        round_to: int | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] = (7, 9),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Generate plot for ANOVA-like experiments with non-equivalent group designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive bands for the control and treatment groups,
+            and around the posterior of the estimated treatment effect.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 9)``.
+        """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+        fig, ax = plt.subplots(
+            2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
+        )
+
+        # Plot raw data
+        sns.scatterplot(
+            x="pre",
+            y="post",
+            hue="group",
+            alpha=0.5,
+            data=self.data,
+            legend=True,
+            ax=ax[0],
+        )
+        ax[0].set(xlabel="Pretest", ylabel="Posttest")
+
+        untreated_mu = self.pred_untreated["posterior_predictive"].mu.isel(
+            treated_units=0
+        )
+        treated_mu = self.pred_treated["posterior_predictive"].mu.isel(treated_units=0)
+        hist_edges = (
+            histogram_y_edges(untreated_mu, treated_mu) if kind == "histogram" else None
+        )
+
+        def _legend_handle(h_line, h_patch):
+            if kind in ("spaghetti", "histogram") and isinstance(h_line, list):
+                return h_line[-1]
+            return (h_line, h_patch)
+
+        h_line, h_patch = plot_xY(
+            self.pred_xi,
+            untreated_mu,
+            ax=ax[0],
+            **style,
+            plot_hdi_kwargs={"color": "C0"},
+            label="Control group",
+            y_edges=hist_edges,
+        )
+        handles = [_legend_handle(h_line, h_patch)]
+        labels = ["Control group"]
+
+        h_line, h_patch = plot_xY(
+            self.pred_xi,
+            treated_mu,
+            ax=ax[0],
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+            label="Treatment group",
+            y_edges=hist_edges,
+        )
+        handles.append(_legend_handle(h_line, h_patch))
+        labels.append("Treatment group")
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        # Plot estimated caual impact / treatment effect
+        az.plot_posterior(
+            self.causal_impact,
+            ref_val=0,
+            ax=ax[1],
+            round_to=round_to,
+            hdi_prob=ci_prob,
+        )
+        ax[1].set(title="Estimated treatment effect")
+        return fig, ax
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -349,9 +454,14 @@ class PrePostNEGD(BaseExperiment):
         a clean plotnine form exists (#988).
         """
         if kind != "ribbon":
-            raise ValueError(
-                f"kind={kind!r} is not yet supported for the plotnine "
-                "PrePostNEGD plot; use kind='ribbon'. Tracked in issue #988."
+            return self._bayesian_plot_matplotlib(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                figsize=figsize,
+                **kwargs,
             )
 
         top = "Pretest vs posttest"

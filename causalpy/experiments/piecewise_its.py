@@ -47,6 +47,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import _PlotXYStyle, histogram_y_edges, plot_xY
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -518,6 +519,159 @@ class PiecewiseITS(BaseExperiment):
             figsize=figsize,
         )
 
+    def _bayesian_plot_matplotlib(
+        self,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] = (10, 10),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """
+        Plot the results for Bayesian models.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals for rounding. Defaults to 2.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            fitted, counterfactual, causal effect, and cumulative effect bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(10, 10)``.
+
+        Returns
+        -------
+        fig : plt.Figure
+            The matplotlib figure.
+        ax : list[plt.Axes]
+            List of axes objects.
+        """
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+        time_values = self.data[self.time_col].values
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
+
+        # TOP PLOT: Observed, Fitted, and Counterfactual
+        # Observed data
+        (h_obs,) = ax[0].plot(
+            time_values,
+            self.design["y"].isel(treated_units=0),
+            "k.",
+            label="Observations",
+        )
+
+        # Fitted values (mu)
+        y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
+        if "treated_units" in y_pred_mu.dims:
+            y_pred_mu = y_pred_mu.isel(treated_units=0)
+        y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
+        if "treated_units" in y_cf_mu.dims:
+            y_cf_mu = y_cf_mu.isel(treated_units=0)
+
+        hist_edges = (
+            histogram_y_edges(y_pred_mu, y_cf_mu) if kind == "histogram" else None
+        )
+
+        h_line_fit, h_patch_fit = plot_xY(
+            time_values,
+            y_pred_mu,
+            ax=ax[0],
+            **style,
+            plot_hdi_kwargs={"color": "C0"},
+            y_edges=hist_edges,
+        )
+
+        h_line_cf, h_patch_cf = plot_xY(
+            time_values,
+            y_cf_mu,
+            ax=ax[0],
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+            y_edges=hist_edges,
+        )
+
+        # Title with R^2
+        r2_val = None
+        try:
+            if isinstance(self.score, pd.Series):
+                if "unit_0_r2" in self.score.index:
+                    r2_val = self.score["unit_0_r2"]
+                elif "r2" in self.score.index:
+                    r2_val = self.score["r2"]
+        except Exception:
+            pass
+
+        title_str = "Piecewise ITS: Bayesian $R^2$"
+        if r2_val is not None:
+            title_str += f" = {round_num(r2_val, round_to)}"
+        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
+
+        handles = [h_obs, (h_line_fit, h_patch_fit), (h_line_cf, h_patch_cf)]
+        if kind in ("spaghetti", "histogram"):
+            handles = [
+                h_obs,
+                h_line_fit[-1] if isinstance(h_line_fit, list) else h_line_fit,
+                h_line_cf[-1] if isinstance(h_line_cf, list) else h_line_cf,
+            ]
+        labels_legend = ["Observations", "Fitted", "Counterfactual"]
+
+        # MIDDLE PLOT: Causal Effect
+        plot_xY(
+            time_values,
+            self.effect,
+            ax=ax[1],
+            **style,
+            plot_hdi_kwargs={"color": "C2"},
+        )
+        ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
+        ax[1].fill_between(
+            time_values,
+            y1=self.effect.mean(dim=["chain", "draw"]).values,
+            alpha=0.25,
+            color="C2",
+        )
+        ax[1].set(title="Causal Effect", ylabel="Effect")
+
+        # BOTTOM PLOT: Cumulative Effect
+        plot_xY(
+            time_values,
+            self.cumulative_effect,
+            ax=ax[2],
+            **style,
+            plot_hdi_kwargs={"color": "C3"},
+        )
+        ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)
+        ax[2].set(title="Cumulative Causal Effect", ylabel="Cumulative Effect")
+
+        # Add vertical lines for interruptions
+        for i, t_k in enumerate(self.interruption_times):
+            for a in ax:
+                a.axvline(
+                    x=t_k,
+                    ls="-",
+                    lw=2,
+                    color="red",
+                    alpha=0.7,
+                    label=f"Interruption {i}" if a == ax[0] else None,
+                )
+            handles.append(plt.Line2D([0], [0], color="red", lw=2))
+            labels_legend.append(f"Interruption {i}")
+
+        ax[0].legend(handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE)
+
+        plt.tight_layout()
+        return fig, ax
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -527,7 +681,7 @@ class PiecewiseITS(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
         """Plot PiecewiseITS via a faceted plotnine base plus matplotlib overlays.
 
         Builds the three-panel layout as one ``facet_wrap`` ggplot over the
@@ -539,9 +693,14 @@ class PiecewiseITS(BaseExperiment):
         shared helper with ITS/SC/SDiD yet — assess PiecewiseITS alone.
         """
         if kind != "ribbon":
-            raise ValueError(
-                f"kind={kind!r} is not yet supported for the plotnine "
-                "PiecewiseITS plot; use kind='ribbon'. Tracked in issue #988."
+            return self._bayesian_plot_matplotlib(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                figsize=figsize,
+                **kwargs,
             )
 
         interval = "eti" if ci_kind == "eti" else "hdi"

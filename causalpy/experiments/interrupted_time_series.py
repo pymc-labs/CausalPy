@@ -47,7 +47,12 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import get_hdi_to_df
+from causalpy.plot_utils import (
+    _PlotXYStyle,
+    concat_x_y,
+    get_hdi_to_df,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, round_num
@@ -719,6 +724,293 @@ class InterruptedTimeSeries(BaseExperiment):
             zorder=3,
         )
 
+    def _bayesian_plot_matplotlib(
+        self,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] = (7, 8),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """
+        Plot the results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
+        """
+        counterfactual_label = "Counterfactual"
+        single_post_obs = len(self.datapost) <= 1
+        style: _PlotXYStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+
+        def _legend_handle(h_line, h_patch):
+            # ponytail: spaghetti/histogram return list[Line2D]; legend needs one artist
+            if kind in ("spaghetti", "histogram") and isinstance(h_line, list):
+                return h_line[-1]
+            return (h_line, h_patch)
+
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
+        # TOP PLOT --------------------------------------------------
+        # pre-intervention period
+        pre_mu = self.pre_pred["posterior_predictive"].mu
+        pre_mu_plot = (
+            pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
+        )
+        post_mu = self.post_pred["posterior_predictive"].mu
+        post_mu_plot = (
+            post_mu.isel(treated_units=0)
+            if "treated_units" in post_mu.dims
+            else post_mu
+        )
+        if kind == "histogram":
+            x_top, mu_top = concat_x_y(
+                self.datapre.index,
+                pre_mu_plot,
+                self.datapost.index,
+                post_mu_plot,
+            )
+            h_line, h_patch = plot_xY(
+                x_top,
+                mu_top,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [_legend_handle(h_line, h_patch)]
+            labels = ["Posterior density"]
+        else:
+            h_line, h_patch = plot_xY(
+                self.datapre.index,
+                pre_mu_plot,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles = [_legend_handle(h_line, h_patch)]
+            labels = ["Pre-intervention period"]
+
+        (h,) = ax[0].plot(
+            self.datapre.index,
+            self.pre_design["y"].isel(treated_units=0),
+            "k.",
+            label="Observations",
+        )
+        handles.append(h)
+        labels.append("Observations")
+
+        if kind != "histogram":
+            h_line, h_patch = plot_xY(
+                self.datapost.index,
+                post_mu_plot,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            if single_post_obs:
+                # plot_xY's HDI ribbon collapses to a zero-area polygon for a
+                # single post-period datum; overlay an explicit median + HDI
+                # errorbar so the counterfactual is still visible. Use the
+                # errorbar artist itself as the legend handle so the legend
+                # matches what is actually drawn.
+                errbar = self._draw_singleton_hdi_marker(
+                    ax[0], self.datapost.index, post_mu, color="C1"
+                )
+                handles.append(errbar)
+            else:
+                handles.append(_legend_handle(h_line, h_patch))
+            labels.append(counterfactual_label)
+
+        ax[0].plot(
+            self.datapost.index,
+            self.post_design["y"].isel(treated_units=0),
+            "k.",
+            zorder=3,
+        )
+        # Shaded causal effect (only meaningful when there are >=2 post-period
+        # points; with a single datum the fill_between collapses to nothing,
+        # so we omit the legend entry to avoid misleading the reader).
+        post_pred_mu = az.extract(
+            self.post_pred, group="posterior_predictive", var_names="mu"
+        )
+        if "treated_units" in post_pred_mu.dims:
+            post_pred_mu = post_pred_mu.isel(treated_units=0)
+        post_pred_mu = post_pred_mu.mean("sample")
+        h = ax[0].fill_between(
+            self.datapost.index,
+            y1=post_pred_mu,
+            y2=self.post_design["y"].isel(treated_units=0),
+            color="C0",
+            alpha=0.25,
+        )
+        if not single_post_obs:
+            handles.append(h)
+            labels.append("Causal impact")
+
+        # Title with R^2, supporting both unit_0_r2 and r2 keys
+        r2_val = None
+        r2_std_val = None
+        try:
+            if isinstance(self.score, pd.Series):
+                if "unit_0_r2" in self.score.index:
+                    r2_val = self.score["unit_0_r2"]
+                    r2_std_val = self.score.get("unit_0_r2_std", None)
+                elif "r2" in self.score.index:
+                    r2_val = self.score["r2"]
+                    r2_std_val = self.score.get("r2_std", None)
+        except Exception:
+            pass
+        title_str = "Pre-intervention Bayesian $R^2$"
+        if r2_val is not None:
+            title_str += f": {round_num(r2_val, round_to)}"
+            if r2_std_val is not None:
+                title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
+        ax[0].set(title=title_str)
+
+        # MIDDLE PLOT -----------------------------------------------
+        pre_impact_plot = (
+            self.pre_impact.isel(treated_units=0)
+            if hasattr(self.pre_impact, "dims")
+            and "treated_units" in self.pre_impact.dims
+            else self.pre_impact
+        )
+        post_impact_plot = (
+            self.post_impact.isel(treated_units=0)
+            if hasattr(self.post_impact, "dims")
+            and "treated_units" in self.post_impact.dims
+            else self.post_impact
+        )
+        if kind == "histogram":
+            x_mid, impact_mid = concat_x_y(
+                self.datapre.index,
+                pre_impact_plot,
+                self.datapost.index,
+                post_impact_plot,
+            )
+            plot_xY(
+                x_mid,
+                impact_mid,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+        else:
+            plot_xY(
+                self.datapre.index,
+                pre_impact_plot,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            plot_xY(
+                self.datapost.index,
+                post_impact_plot,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        if single_post_obs:
+            self._draw_singleton_hdi_marker(
+                ax[1], self.datapost.index, self.post_impact, color="C1"
+            )
+        ax[1].axhline(y=0, c="k")
+        post_impact_mean = (
+            self.post_impact.mean(["chain", "draw"])
+            if hasattr(self.post_impact, "mean")
+            else self.post_impact
+        )
+        if (
+            hasattr(post_impact_mean, "dims")
+            and "treated_units" in post_impact_mean.dims
+        ):
+            post_impact_mean = post_impact_mean.isel(treated_units=0)
+        ax[1].fill_between(
+            self.datapost.index,
+            y1=post_impact_mean,
+            color="C0",
+            alpha=0.25,
+            label="Causal impact",
+        )
+        ax[1].set(title="Causal Impact")
+
+        # BOTTOM PLOT -----------------------------------------------
+        ax[2].set(title="Cumulative Causal Impact")
+        post_cum_plot = (
+            self.post_impact_cumulative.isel(treated_units=0)
+            if hasattr(self.post_impact_cumulative, "dims")
+            and "treated_units" in self.post_impact_cumulative.dims
+            else self.post_impact_cumulative
+        )
+        plot_xY(
+            self.datapost.index,
+            post_cum_plot,
+            ax=ax[2],
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        if single_post_obs:
+            self._draw_singleton_hdi_marker(
+                ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+            )
+        ax[2].axhline(y=0, c="k")
+
+        # Intervention lines. Use a thin dashed black style and a zorder just
+        # below the data so the treatment marker reads as a neutral
+        # annotation rather than data, and never occludes data points or HDI
+        # ribbons - important for the edge case of very few post-treatment
+        # observations where the marker can land exactly on top of the only
+        # post-period datum.
+        for i in [0, 1, 2]:
+            ax[i].axvline(
+                x=self.treatment_time,
+                ls="--",
+                lw=1.5,
+                color="k",
+                zorder=1.5,
+                label="Treatment start" if i == 0 else None,
+            )
+            if self.treatment_end_time is not None:
+                ax[i].axvline(
+                    x=self.treatment_end_time,
+                    ls=":",
+                    lw=1.5,
+                    color="k",
+                    zorder=1.5,
+                    label="Treatment end" if i == 0 else None,
+                )
+
+        ax[0].legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            # Combine pre and post indices for full date range
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes(ax, full_index)
+
+        return fig, ax
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -728,7 +1020,7 @@ class InterruptedTimeSeries(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
         """Plot ITS results via a faceted plotnine base plus matplotlib overlays.
 
         Builds the three-panel (counterfactual / period impact / cumulative
@@ -742,10 +1034,14 @@ class InterruptedTimeSeries(BaseExperiment):
         until migrated (#988).
         """
         if kind != "ribbon":
-            raise ValueError(
-                f"kind={kind!r} is not yet supported for the plotnine "
-                "InterruptedTimeSeries plot; use kind='ribbon'. "
-                "Tracked in issue #988."
+            return self._bayesian_plot_matplotlib(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                figsize=figsize,
+                **kwargs,
             )
 
         single_post_obs = len(self.datapost) <= 1
