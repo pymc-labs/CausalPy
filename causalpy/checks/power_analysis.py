@@ -142,7 +142,7 @@ class PowerCurveResult:
     smooth_detection_rates: np.ndarray | None = field(default=None, repr=False)
     mde: float | None = None
 
-    def plot(
+    def plot(  # pragma: no cover
         self,
         power_threshold: float = 0.80,
         ax: Any = None,

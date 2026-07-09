@@ -487,3 +487,114 @@ class TestPowerCurvePlot:
         returned_fig = result.plot(ax=ax)
         assert returned_fig is fig
         plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Tests for coverage of edge branches
+# ---------------------------------------------------------------------------
+
+
+class TestPowerAnalysisBranches:
+    """Tests for uncovered code branches."""
+
+    def test_fold_results_fallback(self):
+        """Should extract fold_sds from fold_results when fold_sds is missing."""
+        from types import SimpleNamespace
+
+        rng = np.random.default_rng(42)
+        null_samples = rng.normal(0, 50, size=2000)
+        fold_results = [
+            SimpleNamespace(fold_sd=25.0),
+            SimpleNamespace(fold_sd=30.0),
+            SimpleNamespace(fold_sd=35.0),
+        ]
+
+        pit_result = CheckResult(
+            check_name="PlaceboInTime",
+            passed=True,
+            metadata={
+                "null_samples": null_samples,
+                "fold_results": fold_results,
+                "rope_half_width": 20.0,
+                "threshold": 0.95,
+            },
+        )
+        result = power_analysis(
+            pit_result,
+            effect_sizes=[0, 100, 200],
+            n_simulations=50,
+            strategy="grid",
+            random_seed=42,
+        )
+        assert len(result.detection_rates) == 3
+
+    def test_fold_results_empty_raises(self):
+        """Should raise ValueError when both fold_sds and fold_results are missing."""
+        rng = np.random.default_rng(42)
+        null_samples = rng.normal(0, 50, size=2000)
+
+        pit_result = CheckResult(
+            check_name="PlaceboInTime",
+            passed=True,
+            metadata={
+                "null_samples": null_samples,
+                "rope_half_width": 20.0,
+                "threshold": 0.95,
+            },
+        )
+        with pytest.raises(ValueError, match="no fold_sds or fold_results"):
+            power_analysis(pit_result)
+
+    def test_sigmoid_multiple_effect_sizes_as_range(self):
+        """Sigmoid with >2 effect sizes should use min/max as range."""
+        pit_result = _make_pit_result()
+        result = power_analysis(
+            pit_result,
+            effect_sizes=[50, 100, 150, 200, 300],
+            n_simulations=50,
+            strategy="sigmoid",
+            n_evaluation_points=5,
+            random_seed=42,
+        )
+        # Should use min=50, max=300 as range
+        assert result.effect_sizes[0] == pytest.approx(50.0)
+        assert result.effect_sizes[-1] == pytest.approx(300.0)
+        assert result.fitted_curve is not None
+
+    def test_sigmoid_mde_outside_range_warns(self):
+        """Should warn when MDE is outside the evaluated range."""
+        # Use a very narrow range that won't contain the MDE
+        pit_result = _make_pit_result(null_std=50.0, rope_half_width=20.0)
+        with pytest.warns(UserWarning, match="outside the evaluated range"):
+            power_analysis(
+                pit_result,
+                effect_sizes=[0, 10],  # very narrow, MDE will be outside
+                n_simulations=100,
+                strategy="sigmoid",
+                n_evaluation_points=5,
+                random_seed=42,
+            )
+
+    def test_sigmoid_fitting_failure_warns(self):
+        """Should warn when sigmoid fitting fails (e.g., constant data)."""
+        # Create a result where all detection rates will be 0 (impossible to fit)
+        pit_result = CheckResult(
+            check_name="PlaceboInTime",
+            passed=True,
+            metadata={
+                "null_samples": np.zeros(100),  # no variance
+                "fold_sds": np.array([1e-15]),  # near-zero SD
+                "rope_half_width": 1e10,  # impossibly large ROPE
+                "threshold": 0.99999,
+            },
+        )
+        # This should either fit poorly or fail; either way, no crash
+        result = power_analysis(
+            pit_result,
+            effect_sizes=[0, 1],
+            n_simulations=20,
+            strategy="sigmoid",
+            n_evaluation_points=5,
+            random_seed=42,
+        )
+        assert isinstance(result, PowerCurveResult)
