@@ -20,15 +20,33 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
+import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from patsy import dmatrices
+from plotnine import (
+    aes,
+    element_blank,
+    facet_wrap,
+    geom_hline,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    ggplot,
+    guides,
+    labs,
+    scale_color_manual,
+    scale_fill_manual,
+    theme,
+)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -449,22 +467,20 @@ class PiecewiseITS(BaseExperiment):
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon"}, optional
+            How posterior uncertainty is rendered for Bayesian models.
+            Defaults to ``"ribbon"`` (mean + credible band).
+            ``"spaghetti"`` and ``"histogram"`` are not yet migrated and
+            raise ``ValueError``; tracked in issue #988. Ignored for OLS.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
+            Unused until ``kind="spaghetti"`` is migrated; retained for API
+            compatibility.
 
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 10)``.
+            Width and height of the figure in inches. Defaults to ``(10, 10)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -477,8 +493,9 @@ class PiecewiseITS(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+            The figure that was created (plotnine base plus matplotlib
+            overlays for interruption lines when Bayesian).
+        ax : list[matplotlib.axes.Axes] or numpy.ndarray
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
@@ -510,73 +527,27 @@ class PiecewiseITS(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results for Bayesian models.
+    ) -> tuple[plt.Figure, np.ndarray]:
+        """Plot PiecewiseITS via a faceted plotnine base plus matplotlib overlays.
 
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals for rounding. Defaults to 2.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            fitted, counterfactual, causal effect, and cumulative effect bands.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(10, 10)``.
+        Builds the three-panel layout as one ``facet_wrap`` ggplot over the
+        full time series, then ``.draw()``s and overlays interruption lines,
+        titles, and the legend. Returns ``(fig, ax)``.
 
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure.
-        ax : list[plt.Axes]
-            List of axes objects.
+        ponytail: interruption vlines stay on matplotlib after ``.draw()``.
+        ``kind`` other than ``"ribbon"`` raises until migrated (#988). No
+        shared helper with ITS/SC/SDiD yet — assess PiecewiseITS alone.
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
+        if kind != "ribbon":
+            raise ValueError(
+                f"kind={kind!r} is not yet supported for the plotnine "
+                "PiecewiseITS plot; use kind='ribbon'. Tracked in issue #988."
+            )
+
+        interval = "eti" if ci_kind == "eti" else "hdi"
         time_values = self.data[self.time_col].values
+        mid, bot = "Causal Effect", "Cumulative Causal Effect"
 
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-
-        # TOP PLOT: Observed, Fitted, and Counterfactual
-        # Observed data
-        (h_obs,) = ax[0].plot(
-            time_values,
-            self.design["y"].isel(treated_units=0),
-            "k.",
-            label="Observations",
-        )
-
-        # Fitted values (mu)
-        y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-        if "treated_units" in y_pred_mu.dims:
-            y_pred_mu = y_pred_mu.isel(treated_units=0)
-        h_line_fit, h_patch_fit = plot_posterior_over_x(
-            time_values,
-            y_pred_mu,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-
-        # Counterfactual
-        y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-        if "treated_units" in y_cf_mu.dims:
-            y_cf_mu = y_cf_mu.isel(treated_units=0)
-        h_line_cf, h_patch_cf = plot_posterior_over_x(
-            time_values,
-            y_cf_mu,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-
-        # Title with R^2
         r2_val = None
         try:
             if isinstance(self.score, pd.Series):
@@ -586,60 +557,164 @@ class PiecewiseITS(BaseExperiment):
                     r2_val = self.score["r2"]
         except Exception:
             pass
-
         title_str = "Piecewise ITS: Bayesian $R^2$"
         if r2_val is not None:
             title_str += f" = {round_num(r2_val, round_to)}"
-        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
+        top = title_str  # facet key; real title set on ax after .draw()
 
-        handles = [h_obs, (h_line_fit, h_patch_fit), (h_line_cf, h_patch_cf)]
+        def _pred_band(pred, series, panel):
+            newdata = pd.DataFrame({"obs_ind": self.data.index})
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            if "treated_units" in draws.columns:
+                draws = draws.filter(
+                    pl.col("treated_units") == draws["treated_units"][0]
+                )
+            band = (
+                td.point_interval(
+                    draws,
+                    "mu",
+                    group_by="obs_ind",
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort("obs_ind")
+                .to_pandas()
+            )
+            band["t"] = time_values
+            return band.assign(series=series, panel=panel)
+
+        def _da_band(da, series, panel):
+            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
+            if "treated_units" in tidy.columns:
+                first = tidy["treated_units"][0]
+                tidy = tidy.filter(pl.col("treated_units") == first)
+            band = (
+                td.point_interval(
+                    tidy,
+                    "mu",
+                    group_by="obs_ind",
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort("obs_ind")
+                .to_pandas()
+            )
+            band["t"] = time_values
+            return band.assign(series=series, panel=panel)
+
+        fit_band = _pred_band(self.y_pred, "Fitted", top)
+        cf_band = _pred_band(self.y_counterfactual, "Counterfactual", top)
+        effect_band = _da_band(self.effect, "effect", mid)
+        bands = pd.concat(
+            [
+                fit_band,
+                cf_band,
+                effect_band,
+                _da_band(self.cumulative_effect, "cumulative", bot),
+            ]
+        )
+
+        obs = pd.DataFrame(
+            {
+                "t": time_values,
+                "y": np.asarray(self.design["y"].isel(treated_units=0)),
+            }
+        ).assign(series="Observations", panel=top)
+
+        shade_mid = (
+            effect_band[["t", "mu"]]
+            .rename(columns={"mu": "y1"})
+            .assign(y2=0.0, panel=mid)
+        )
+
+        panels = [top, mid, bot]
+        for frame in (bands, obs, shade_mid):
+            frame["panel"] = pd.Categorical(
+                frame["panel"], categories=panels, ordered=True
+            )
+
+        colors = {
+            "Fitted": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "effect": "#2ca02c",
+            "cumulative": "#d62728",
+        }
+        zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
+        zero_df["panel"] = pd.Categorical(
+            zero_df["panel"], categories=panels, ordered=True
+        )
+
+        p = (
+            ggplot()
+            + geom_ribbon(
+                shade_mid,
+                aes("t", ymin="y1", ymax="y2"),
+                fill="#2ca02c",
+                alpha=0.25,
+            )
+            + geom_ribbon(
+                bands,
+                aes("t", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                alpha=0.3,
+                show_legend=False,
+            )
+            + geom_line(bands, aes("t", "mu", color="series"))
+            + geom_point(obs, aes("t", "y", color="series"), size=1)
+            + geom_hline(
+                zero_df,
+                aes(yintercept="yintercept"),
+                color="black",
+                linetype="dashed",
+                alpha=0.5,
+            )
+            + facet_wrap("panel", ncol=1, scales="free_y")
+            + scale_color_manual(values=colors, name="")
+            + scale_fill_manual(values=colors, name="")
+            + guides(color="none", fill="none")
+            + labs(x="", y="")
+            + theme(
+                strip_text=element_blank(),
+                strip_background=element_blank(),
+                figure_size=figsize,
+                panel_spacing_y=0.06,
+                plot_margin_bottom=0.08,
+            )
+        )
+
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = np.asarray(axes[:3])
+
+        handles: list[Any] = [
+            Line2D([0], [0], color="black", marker=".", linestyle=""),
+            (
+                Line2D([0], [0], color=colors["Fitted"]),
+                Patch(facecolor=colors["Fitted"], alpha=0.3),
+            ),
+            (
+                Line2D([0], [0], color=colors["Counterfactual"]),
+                Patch(facecolor=colors["Counterfactual"], alpha=0.3),
+            ),
+        ]
         labels_legend = ["Observations", "Fitted", "Counterfactual"]
-
-        # MIDDLE PLOT: Causal Effect
-        plot_posterior_over_x(
-            time_values,
-            self.effect,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C2"},
-        )
-        ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
-        ax[1].fill_between(
-            time_values,
-            y1=self.effect.mean(dim=["chain", "draw"]).values,
-            alpha=0.25,
-            color="C2",
-        )
-        ax[1].set(title="Causal Effect", ylabel="Effect")
-
-        # BOTTOM PLOT: Cumulative Effect
-        plot_posterior_over_x(
-            time_values,
-            self.cumulative_effect,
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C3"},
-        )
-        ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)
-        ax[2].set(title="Cumulative Causal Effect", ylabel="Cumulative Effect")
-
-        # Add vertical lines for interruptions
         for i, t_k in enumerate(self.interruption_times):
             for a in ax:
-                a.axvline(
-                    x=t_k,
-                    ls="-",
-                    lw=2,
-                    color="red",
-                    alpha=0.7,
-                    label=f"Interruption {i}" if a == ax[0] else None,
-                )
-            handles.append(plt.Line2D([0], [0], color="red", lw=2))
+                a.axvline(x=t_k, ls="-", lw=2, color="red", alpha=0.7)
+            handles.append(Line2D([0], [0], color="red", lw=2))
             labels_legend.append(f"Interruption {i}")
 
         ax[0].legend(handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE)
+        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
+        ax[1].set(title=mid, ylabel="Effect")
+        ax[2].set(title=bot, ylabel="Cumulative Effect")
+        for a in ax[:-1]:
+            a.tick_params(axis="x", labelbottom=False)
 
-        plt.tight_layout()
         return fig, ax
 
     def _ols_plot(

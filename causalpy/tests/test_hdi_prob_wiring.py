@@ -385,7 +385,11 @@ _PREPOST_TARGETS: list[_SpyTarget] = [
     ),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.piecewise_its.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.piecewise_its.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _PANEL_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.panel_regression.az.plot_forest", "hdi_prob"),
