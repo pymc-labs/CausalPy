@@ -37,7 +37,6 @@ from plotnine import (
     labs,
     scale_color_manual,
     scale_fill_manual,
-    theme,
 )
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -371,11 +370,15 @@ class PrePostNEGD(BaseExperiment):
         bottom = "Estimated treatment effect"
         interval = "eti" if ci_kind == "eti" else "hdi"
 
-        # Top facet: observed data as (_x=pre, _y=post).
-        scatter = self.data[["pre", "post", "group"]].rename(
-            columns={"pre": "_x", "post": "_y"}
+        # Top facet: observed data as (_x=pre, _y=post). Relabel the two group
+        # levels to the same names as the posterior bands so points, lines and
+        # bands share a single legend (group 0 = control, 1 = treatment).
+        levels = sorted(self.data[self.group_variable_name].unique())
+        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
+        scatter = self.data[["pre", "post"]].rename(columns={"pre": "_x", "post": "_y"})
+        scatter["series"] = (
+            self.data[self.group_variable_name].map(group_to_series).values
         )
-        scatter["group"] = scatter["group"].astype(str)
         scatter["panel"] = top
 
         # Top facet: posterior predictive bands for each group. tidydraws keeps
@@ -445,19 +448,15 @@ class PrePostNEGD(BaseExperiment):
                 frame["panel"], categories=panels, ordered=True
             )
 
-        colors = {
-            "0": "#1f77b4",
-            "1": "#ff7f0e",
-            "Control group": "#1f77b4",
-            "Treatment group": "#ff7f0e",
-        }
+        colors = {"Control group": "#1f77b4", "Treatment group": "#ff7f0e"}
         return (
             ggplot()
-            + geom_point(scatter, aes("_x", "_y", color="group"), alpha=0.5)
+            + geom_point(scatter, aes("_x", "_y", color="series"), alpha=0.5)
             + geom_ribbon(
                 bands,
                 aes("_x", ymin="mu_lower", ymax="mu_upper", fill="series"),
                 alpha=0.3,
+                show_legend=False,
             )
             + geom_line(bands, aes("_x", "_y", color="series"))
             + geom_density(effect_df, aes("_x"))
@@ -474,7 +473,6 @@ class PrePostNEGD(BaseExperiment):
             + scale_color_manual(values=colors, name="")
             + scale_fill_manual(values=colors, name="")
             + labs(x="", y="", title=mean_label)
-            + theme(panel_spacing=0.25)
         )
 
     def _bayesian_plot_mpl(
