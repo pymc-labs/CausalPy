@@ -637,16 +637,17 @@ class InterruptedTimeSeries(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
-            not yet migrated and raise ``ValueError``; tracked in issue #988.
+            (mean + credible band). ``"spaghetti"`` draws posterior sample
+            lines via plotnine. ``"histogram"`` uses the matplotlib heatmap
+            path until plotnine ``geom_tile`` lands (#988).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Unused until ``kind="spaghetti"`` is migrated; retained for API
-            compatibility.
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to
+            50.
         figsize : tuple of (float, float)
             Width and height of the figure in inches. Defaults to ``(7, 11)``
             so the three panels and date tick labels have room.
@@ -1030,10 +1031,10 @@ class InterruptedTimeSeries(BaseExperiment):
         ``(fig, ax)``.
 
         ponytail: singleton HDI marker and date-axis formatting stay on
-        matplotlib after ``.draw()``. ``kind`` other than ``"ribbon"`` raises
-        until migrated (#988).
+        matplotlib after ``.draw()``. ``kind="histogram"`` delegates to
+        matplotlib until ``geom_tile`` (#988).
         """
-        if kind != "ribbon":
+        if kind == "histogram":
             return self._bayesian_plot_matplotlib(
                 round_to=round_to,
                 ci_prob=ci_prob,
@@ -1107,6 +1108,35 @@ class InterruptedTimeSeries(BaseExperiment):
                 .assign(series=series, panel=panel)
             )
 
+        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
+            tagged = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = tagged.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            return tagged.join(chosen, on="_draw_id").sort("obs_ind")
+
+        def _pred_spaghetti(pred, index, series, panel):
+            newdata = pd.DataFrame({"obs_ind": index})
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            return (
+                _sample_draw_lines(draws, num_samples)
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
+        def _da_spaghetti(da, series, panel):
+            if hasattr(da, "dims") and "treated_units" in da.dims:
+                da = da.isel(treated_units=0)
+            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
+            return (
+                _sample_draw_lines(tidy, num_samples)
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
         pre_band = _pred_band(
             self.pre_pred, self.datapre.index, "Pre-intervention period", top
         )
@@ -1123,6 +1153,28 @@ class InterruptedTimeSeries(BaseExperiment):
                 _da_band(self.post_impact_cumulative, "post", bot),
             ]
         )
+
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_df = pd.concat(
+                [
+                    _pred_spaghetti(
+                        self.pre_pred,
+                        self.datapre.index,
+                        "Pre-intervention period",
+                        top,
+                    ),
+                    _pred_spaghetti(
+                        self.post_pred,
+                        self.datapost.index,
+                        "Counterfactual",
+                        top,
+                    ),
+                    _da_spaghetti(self.pre_impact, "pre", mid),
+                    _da_spaghetti(self.post_impact, "post", mid),
+                    _da_spaghetti(self.post_impact_cumulative, "post", bot),
+                ]
+            )
 
         obs = pd.concat(
             [
@@ -1162,6 +1214,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         panels = [top, mid, bot]
         frames = [bands, obs] + ([shade_df] if shade_df is not None else [])
+        if spaghetti_df is not None:
+            frames.append(spaghetti_df)
         for frame in frames:
             frame["panel"] = pd.Categorical(
                 frame["panel"], categories=panels, ordered=True
@@ -1186,15 +1240,31 @@ class InterruptedTimeSeries(BaseExperiment):
                 fill="#1f77b4",
                 alpha=0.25,
             )
+        if kind == "spaghetti":
+            p = (
+                p
+                + geom_line(
+                    spaghetti_df,
+                    aes("obs_ind", "mu", group="_draw_id", color="series"),
+                    alpha=0.1,
+                    size=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            )
+        else:
+            p = (
+                p
+                + geom_ribbon(
+                    bands,
+                    aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                    alpha=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            )
         p = (
             p
-            + geom_ribbon(
-                bands,
-                aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                alpha=0.3,
-                show_legend=False,
-            )
-            + geom_line(bands, aes("obs_ind", "mu", color="series"))
             + geom_point(obs, aes("obs_ind", "y", color="series"), size=1)
             + geom_hline(zero_df, aes(yintercept="yintercept"), color="black")
             + facet_wrap("panel", ncol=1, scales="free_y")
