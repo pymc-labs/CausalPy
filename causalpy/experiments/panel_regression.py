@@ -28,8 +28,11 @@ from plotnine import (
     geom_col,
     geom_errorbarh,
     geom_histogram,
+    geom_hline,
     geom_line,
     geom_point,
+    geom_qq,
+    geom_qq_line,
     geom_ribbon,
     geom_vline,
     ggplot,
@@ -37,7 +40,6 @@ from plotnine import (
     labs,
     theme,
 )
-from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
@@ -1077,29 +1079,41 @@ class PanelRegression(BaseExperiment):
 
         # Calculate residuals
         residuals = plot_data["y_actual"] - plot_data["y_fitted"]
-
-        fig, ax = plt.subplots(figsize=(10, 6))
+        tidy = pd.DataFrame({"residual": residuals, "fitted": plot_data["y_fitted"]})
 
         if kind == "scatter":
-            ax.scatter(plot_data["y_fitted"], residuals, alpha=0.5)
-            ax.axhline(y=0, color="r", linestyle="--")
-            ax.set_xlabel("Fitted Values")
-            ax.set_ylabel("Residuals")
-            ax.set_title("Residuals vs Fitted Values")
-
+            p = (
+                ggplot(tidy, aes("fitted", "residual"))
+                + geom_point(alpha=0.5)
+                + geom_hline(yintercept=0, color="red", linetype="dashed")
+                + labs(
+                    x="Fitted Values",
+                    y="Residuals",
+                    title="Residuals vs Fitted Values",
+                )
+                + theme(figure_size=(10, 6))
+            )
         elif kind == "histogram":
-            ax.hist(residuals, bins=50, edgecolor="black")
-            ax.set_xlabel("Residuals")
-            ax.set_ylabel("Count")
-            ax.set_title("Distribution of Residuals")
-
+            p = (
+                ggplot(tidy, aes(x="residual"))
+                + geom_histogram(bins=50, fill="#1f77b4", color="black", alpha=0.7)
+                + labs(x="Residuals", y="Count", title="Distribution of Residuals")
+                + theme(figure_size=(10, 6))
+            )
         elif kind == "qq":
-            stats.probplot(residuals, dist="norm", plot=ax)
-            # Update colors to match the rest of the plots
-            ax.get_lines()[0].set_markerfacecolor("C0")
-            ax.get_lines()[0].set_markeredgecolor("C0")
-            ax.get_lines()[1].set_color("C1")
-            ax.set_title("Q-Q Plot")
+            p = (
+                ggplot(tidy, aes(sample="residual"))
+                + geom_qq(color="#1f77b4")
+                + geom_qq_line(color="#ff7f0e")
+                + labs(
+                    title="Q-Q Plot", x="Theoretical Quantiles", y="Sample Quantiles"
+                )
+                + theme(figure_size=(10, 6))
+            )
+        else:
+            raise ValueError("kind must be 'scatter', 'histogram', or 'qq'")
 
-        plt.tight_layout()
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
         return fig, ax
