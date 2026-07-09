@@ -28,9 +28,9 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _PlotXYStyle,
+    _PosteriorPlotStyle,
     get_hdi_to_df,
-    plot_xY,
+    plot_posterior_over_x,
 )
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
@@ -439,7 +439,7 @@ class SyntheticControl(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
             For ``"spaghetti"`` and ``"histogram"``, the legend shows
             individual sample lines rather than a shaded band.
         ci_kind : {"hdi", "eti"}, optional
@@ -529,7 +529,7 @@ class SyntheticControl(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -557,7 +557,7 @@ class SyntheticControl(BaseExperiment):
             treated_units=treated_unit
         )
 
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_pred,
             ax=ax[0],
@@ -578,7 +578,7 @@ class SyntheticControl(BaseExperiment):
         labels.append("Observations")
 
         # post intervention period
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapost.index,
             post_pred,
             ax=ax[0],
@@ -608,14 +608,14 @@ class SyntheticControl(BaseExperiment):
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
 
         # MIDDLE PLOT -----------------------------------------------
-        plot_xY(
+        plot_posterior_over_x(
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
             **style,
             plot_hdi_kwargs={"color": "C0"},
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
@@ -634,7 +634,7 @@ class SyntheticControl(BaseExperiment):
 
         # BOTTOM PLOT -----------------------------------------------
         ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],

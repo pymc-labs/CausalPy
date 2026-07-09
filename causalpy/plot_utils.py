@@ -31,8 +31,8 @@ from pandas.api.extensions import ExtensionArray
 from causalpy.constants import HDI_PROB
 
 
-class _PlotXYStyle(TypedDict):
-    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_xY`` call."""
+class _PosteriorPlotStyle(TypedDict):
+    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_posterior_over_x`` call."""
 
     ci_prob: float
     kind: Literal["ribbon", "histogram", "spaghetti"]
@@ -40,7 +40,7 @@ class _PlotXYStyle(TypedDict):
     num_samples: int
 
 
-def plot_xY(
+def plot_posterior_over_x(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
     ax: plt.Axes,
@@ -93,9 +93,9 @@ def plot_xY(
           sample/mean lines and no single band patch.
 
         Experiment :meth:`~causalpy.experiments.base.BaseExperiment.plot` code
-        that builds legends from ``plot_xY`` return values should only assume
+        that builds legends from ``plot_posterior_over_x`` return values should only assume
         the ribbon shape when it passes ``kind="ribbon"`` (the default) through
-        to :func:`plot_xY`.
+        to :func:`plot_posterior_over_x`.
     """
     # Handle backward compatibility: hdi_prob was in original API
     if hdi_prob is not None:
@@ -264,7 +264,7 @@ def _plot_histogram(
     time_dims = [d for d in Y.dims if d not in ("chain", "draw")]
     if len(time_dims) != 1:
         msg = (
-            "plot_xY histogram expects Y with exactly one non-chain/draw dimension; "
+            "plot_posterior_over_x histogram expects Y with exactly one non-chain/draw dimension; "
             f"got {time_dims!r}"
         )
         raise ValueError(msg)

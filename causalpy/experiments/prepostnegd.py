@@ -29,7 +29,7 @@ from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -268,7 +268,7 @@ class PrePostNEGD(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
             For ``"spaghetti"`` and ``"histogram"``, the legend shows
             individual sample lines rather than a shaded band.
         ci_kind : {"hdi", "eti"}, optional
@@ -343,7 +343,7 @@ class PrePostNEGD(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -366,7 +366,7 @@ class PrePostNEGD(BaseExperiment):
         ax[0].set(xlabel="Pretest", ylabel="Posttest")
 
         # plot posterior predictive of untreated
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
             self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
@@ -378,7 +378,7 @@ class PrePostNEGD(BaseExperiment):
         labels = ["Control group"]
 
         # plot posterior predictive of treated
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
             self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],

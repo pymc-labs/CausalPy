@@ -24,7 +24,7 @@ import seaborn as sns
 from patsy import build_design_matrices, dmatrices
 import xarray as xr
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -276,7 +276,7 @@ class RegressionKink(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
             For ``"spaghetti"`` and ``"histogram"``, the legend shows
             individual sample lines rather than a shaded band.
         ci_kind : {"hdi", "eti"}, optional
@@ -352,7 +352,7 @@ class RegressionKink(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -369,7 +369,7 @@ class RegressionKink(BaseExperiment):
         )
 
         # Plot model fit to data
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,

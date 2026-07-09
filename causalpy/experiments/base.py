@@ -40,7 +40,7 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     """Mutate an existing Legend in place without recreating it.
 
     This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
-    built by :func:`~causalpy.plot_utils.plot_xY`) that would be lost if the
+    built by :func:`~causalpy.plot_utils.plot_posterior_over_x`) that would be lost if the
     legend were rebuilt with ``ax.legend()``.
 
     Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
@@ -331,7 +331,7 @@ class BaseExperiment(ABC):
             Keyword arguments to adjust legend placement and styling. The
             existing legend is modified **in place** so that custom
             handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
-            :func:`~causalpy.plot_utils.plot_xY`) are preserved.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
@@ -339,16 +339,16 @@ class BaseExperiment(ABC):
             Subclass-specific drawing parameters forwarded verbatim to
             ``_bayesian_plot`` / ``_ols_plot``. May include ``kind``,
             ``ci_kind``, ``ci_prob``, and ``num_samples`` for
-            :func:`~causalpy.plot_utils.plot_xY`.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`.
 
         Notes
         -----
-        **Legend handling and ``plot_xY`` return types:** :func:`~causalpy.plot_utils.plot_xY`
+        **Legend handling and ``plot_posterior_over_x`` return types:** :func:`~causalpy.plot_utils.plot_posterior_over_x`
         returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
         ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
         Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
         matplotlib legends from those return values should only pack
-        ``(line, patch)`` tuples when calling ``plot_xY`` with ``kind="ribbon"``
+        ``(line, patch)`` tuples when calling ``plot_posterior_over_x`` with ``kind="ribbon"``
         (the default). Many current experiment plots always use the ribbon
         default and never forward ``kind``; if a subclass forwards non-ribbon
         kinds, it must build legend handles accordingly. The base class applies
@@ -375,7 +375,7 @@ class BaseExperiment(ABC):
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
-        # (Line2D, PolyCollection) tuples built by plot_xY — are preserved
+        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x — are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
             # Normalise ax to a flat list so we can iterate uniformly.

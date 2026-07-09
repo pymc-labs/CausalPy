@@ -29,9 +29,9 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _PlotXYStyle,
+    _PosteriorPlotStyle,
     get_hdi_to_df,
-    plot_xY,
+    plot_posterior_over_x,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -619,7 +619,7 @@ class InterruptedTimeSeries(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
             For ``"spaghetti"`` and ``"histogram"``, the legend shows
             individual sample lines rather than a shaded band.
         ci_kind : {"hdi", "eti"}, optional
@@ -680,7 +680,7 @@ class InterruptedTimeSeries(BaseExperiment):
     ) -> Any:
         """Overlay a median dot + HDI errorbar for a single post-period datum.
 
-        ``plot_xY`` (and the ``arviz.plot_hdi`` it wraps) renders a degenerate
+        ``plot_posterior_over_x`` (and the ``arviz.plot_hdi`` it wraps) renders a degenerate
         zero-area polygon when the post-period contains a single observation,
         so neither the median line nor the HDI ribbon is visible. Drawing an
         explicit point and errorbar makes both the central tendency and the
@@ -732,7 +732,7 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         counterfactual_label = "Counterfactual"
         single_post_obs = len(self.datapost) <= 1
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -746,7 +746,7 @@ class InterruptedTimeSeries(BaseExperiment):
         pre_mu_plot = (
             pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
         )
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_mu_plot,
             ax=ax[0],
@@ -772,7 +772,7 @@ class InterruptedTimeSeries(BaseExperiment):
             if "treated_units" in post_mu.dims
             else post_mu
         )
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapost.index,
             post_mu_plot,
             ax=ax[0],
@@ -780,7 +780,7 @@ class InterruptedTimeSeries(BaseExperiment):
             plot_hdi_kwargs={"color": "C1"},
         )
         if single_post_obs:
-            # plot_xY's HDI ribbon collapses to a zero-area polygon for a
+            # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
             # single post-period datum; overlay an explicit median + HDI
             # errorbar so the counterfactual is still visible. Use the
             # errorbar artist itself as the legend handle so the legend
@@ -846,7 +846,7 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.pre_impact.dims
             else self.pre_impact
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapre.index,
             pre_impact_plot,
             ax=ax[1],
@@ -859,7 +859,7 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.post_impact.dims
             else self.post_impact
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             post_impact_plot,
             ax=ax[1],
@@ -898,7 +898,7 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.post_impact_cumulative.dims
             else self.post_impact_cumulative
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             post_cum_plot,
             ax=ax[2],
