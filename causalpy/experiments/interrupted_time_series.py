@@ -694,7 +694,7 @@ class InterruptedTimeSeries(BaseExperiment):
     ) -> Any:
         """Overlay a median dot + HDI errorbar for a single post-period datum.
 
-        When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
+        When a posterior ribbon is drawn with ``az.plot_hdi`` and HDI intervals,
         HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
         when the post-period contains a single observation, so neither the median
         line nor the HDI ribbon is visible. Drawing an explicit point and errorbar

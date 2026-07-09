@@ -18,8 +18,8 @@ values actually change the rendered credible-interval bands.
 
 These tests guard against the regression described in GitHub issue
 `pymc-labs/CausalPy#890`_, where ``result.plot(hdi_prob=...)`` was silently
-swallowed by ``**kwargs`` rather than reaching the underlying
-:func:`causalpy.plot_utils.plot_posterior_over_x` (and equivalent) calls.
+swallowed by ``**kwargs`` rather than reaching the underlying plotting
+callables (e.g. ``td.point_interval``, ``az.hdi``).
 
 ``hdi_prob`` was the original parameter name. It was renamed to ``ci_prob``
 when ETI support was added (since the parameter controls the *credible interval*
@@ -50,8 +50,6 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # Each entry maps a "spy target" (dotted import path of the callable used by
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
-# ``plot_posterior_over_x`` targets use ``"ci_prob"`` (the canonical name); other callables
-# such as ``az.plot_posterior`` and ``az.plot_forest`` use ``"hdi_prob"``.
 # Migrated (plotnine) experiments thread ``ci_prob`` into ``td.point_interval``
 # as ``probs=(ci_prob,)``; those targets add a third element that extracts the
 # scalar from the recorded tuple.
@@ -399,20 +397,20 @@ _PANEL_TARGETS: list[_SpyTarget] = [
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_its_plot_threads_ci_prob(mock_pymc_sample, fitted_its, ci_prob):
-    """ITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """ITS ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_its, _ITS_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
 def test_its_plot_default_ci_prob(mock_pymc_sample, fitted_its):
-    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_posterior_over_x`` call (as ``ci_prob``)."""
+    """ITS default ``plot()`` forwards ``HDI_PROB`` to ``td.point_interval``."""
     _check_default(fitted_its, _ITS_TARGETS)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
-    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """Synthetic Control ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_sc, _SC_TARGETS, ci_prob)
 
 
@@ -490,7 +488,7 @@ def test_prepost_plot_default_ci_prob(mock_pymc_sample, fitted_prepost):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_piecewise_plot_threads_ci_prob(mock_pymc_sample, fitted_piecewise, ci_prob):
-    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """PiecewiseITS ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, ci_prob)
 
 
