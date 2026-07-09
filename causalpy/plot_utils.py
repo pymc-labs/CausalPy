@@ -29,6 +29,7 @@ import pandas as pd
 import polars as pl
 import tidydraws as td
 import xarray as xr
+from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 from plotnine import (
     aes,
@@ -48,7 +49,7 @@ from plotnine import (
     theme,
 )
 
-from causalpy.constants import HDI_PROB
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 
 HISTOGRAM_PANEL_THEME = theme(
     panel_background=element_rect(fill="white"),
@@ -424,12 +425,41 @@ def _categorize_panels(frames: list[pd.DataFrame], panels: list[str]) -> None:
         frame["panel"] = pd.Categorical(frame["panel"], categories=panels, ordered=True)
 
 
+def add_causal_panel_legend(
+    ax: plt.Axes,
+    *,
+    labels: list[str],
+    colors: dict[str, str],
+) -> None:
+    """Add the Matplotlib legend required by the public ``legend_kwargs`` API.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Top panel that owns the legend.
+    labels : list of str
+        Ordered legend entries.
+    colors : dict
+        Color for each legend entry.
+    """
+    handles = [
+        (
+            Line2D([0], [0], color=colors[label], marker=".", linestyle="")
+            if label == "Observations"
+            else Line2D([0], [0], color=colors[label])
+        )
+        for label in labels
+    ]
+    ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
+
+
 def build_causal_panel_plot(
     bands: pd.DataFrame,
     obs: pd.DataFrame,
     *,
     panels: list[str],
     colors: dict[str, str],
+    show_panel_titles: bool = False,
     kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
     x: str = "obs_ind",
     shade_df: pd.DataFrame | None = None,
@@ -452,6 +482,8 @@ def build_causal_panel_plot(
         Ordered facet labels (top, middle, bottom).
     colors : dict
         Series name to color mapping.
+    show_panel_titles : bool, optional
+        Whether to display facet labels as panel titles.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
         Posterior rendering mode.
     x : str, optional
@@ -506,6 +538,16 @@ def build_causal_panel_plot(
     scales = [scale_color_manual(values=colors, name="")]
     if kind != "histogram":
         scales.append(scale_fill_manual(values=colors, name=""))
+    plot_theme: dict[str, Any] = {
+        "figure_size": figsize,
+        "panel_spacing_y": 0.06,
+        "plot_margin_bottom": 0.08,
+    }
+    if not show_panel_titles:
+        plot_theme.update(
+            strip_text=element_blank(),
+            strip_background=element_blank(),
+        )
     p = (
         p
         + geom_point(obs, aes(x, "y", color="series"), size=1)
@@ -515,13 +557,7 @@ def build_causal_panel_plot(
         + (scales[1] if len(scales) > 1 else guides())
         + guides(color="none", fill="none")
         + labs(x="", y="")
-        + theme(
-            strip_text=element_blank(),
-            strip_background=element_blank(),
-            figure_size=figsize,
-            panel_spacing_y=0.06,
-            plot_margin_bottom=0.08,
-        )
+        + theme(**plot_theme)
     )
     if kind == "histogram":
         p = p + HISTOGRAM_PANEL_THEME

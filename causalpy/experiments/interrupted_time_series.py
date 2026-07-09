@@ -14,6 +14,7 @@
 """Interrupted Time Series Analysis."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -22,9 +23,8 @@ import pandas as pd
 import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from patsy import build_design_matrices, dmatrices
+from plotnine import aes, element_text, geom_pointrange, geom_vline, theme
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -32,14 +32,14 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    HistogramLayer,
     PlotSpec,
+    add_causal_panel_legend,
     build_causal_panel_plot,
-    concat_histogram_tiles,
     dataarray_draws,
     get_hdi_to_df,
     interval_kind,
     label_draws,
+    posterior_histogram_tiles,
     prediction_draws,
     spaghetti_draws,
     summarize_draws,
@@ -49,6 +49,18 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _ITSPlotData:
+    """Tidy tables consumed by the declarative ITS plot."""
+
+    intervals: pd.DataFrame
+    observations: pd.DataFrame
+    effect_area: pd.DataFrame | None
+    posterior_paths: pd.DataFrame | None
+    posterior_density: pd.DataFrame | None
+    singleton_intervals: pd.DataFrame
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -681,25 +693,135 @@ class InterruptedTimeSeries(BaseExperiment):
             figsize=figsize,
         )
 
-    @staticmethod
-    def _draw_singleton_interval_marker(
-        ax: plt.Axes,
-        summary: pd.Series,
-        color: str,
-    ) -> Any:
-        """Overlay a precomputed point and interval for one post-period datum."""
-        point = float(summary["mu"])
-        lower = float(summary["mu_lower"])
-        upper = float(summary["mu_upper"])
-        return ax.errorbar(
-            [summary["obs_ind"]],
-            [point],
-            yerr=[[point - lower], [upper - point]],
-            fmt="o",
-            color=color,
-            ecolor=color,
-            capsize=4,
-            zorder=3,
+    def _prepare_bayesian_plot_data(
+        self,
+        *,
+        panels: tuple[str, str, str],
+        ci_prob: float,
+        interval: Literal["hdi", "eti"],
+        kind: Literal["ribbon", "histogram", "spaghetti"],
+        num_samples: int,
+    ) -> _ITSPlotData:
+        """Prepare tidy posterior, observed, and effect tables for plotting."""
+        top, middle, bottom = panels
+        pre_predictions = prediction_draws(
+            self.pre_pred, pd.DataFrame({"obs_ind": self.datapre.index})
+        )
+        post_predictions = prediction_draws(
+            self.post_pred, pd.DataFrame({"obs_ind": self.datapost.index})
+        )
+        pre_effect = dataarray_draws(self.pre_impact)
+        post_effect = dataarray_draws(self.post_impact)
+        cumulative_effect = dataarray_draws(self.post_impact_cumulative)
+
+        panel_draws = pl.concat(
+            [
+                label_draws(
+                    pre_predictions,
+                    series="Pre-intervention period",
+                    panel=top,
+                ),
+                label_draws(
+                    post_predictions,
+                    series="Counterfactual",
+                    panel=top,
+                ),
+                label_draws(pre_effect, series="pre", panel=middle),
+                label_draws(post_effect, series="post", panel=middle),
+                label_draws(cumulative_effect, series="post", panel=bottom),
+            ],
+            how="diagonal_relaxed",
+        )
+        grouping = ["panel", "series", "obs_ind"]
+        intervals = summarize_draws(
+            panel_draws,
+            group_by=grouping,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+
+        observations = pd.DataFrame(
+            {
+                "obs_ind": self.data.index,
+                "y": np.concatenate(
+                    [
+                        self.pre_design["y"].isel(treated_units=0).to_numpy(),
+                        self.post_design["y"].isel(treated_units=0).to_numpy(),
+                    ]
+                ),
+                "series": "Observations",
+                "panel": top,
+            }
+        )
+        post_prediction = intervals.query(
+            "panel == @top and series == 'Counterfactual'"
+        )
+        post_impact = intervals.query("panel == @middle and series == 'post'")
+        cumulative_impact = intervals.query("panel == @bottom and series == 'post'")
+
+        effect_area = None
+        if len(self.datapost) > 1:
+            post_observations = observations.loc[
+                observations["obs_ind"].isin(self.datapost.index.tolist()),
+                ["obs_ind", "y"],
+            ]
+            effect_area = pd.concat(
+                [
+                    post_prediction[["obs_ind", "mu"]]
+                    .merge(post_observations, on="obs_ind")
+                    .rename(columns={"mu": "y1", "y": "y2"})
+                    .assign(panel=top),
+                    post_impact[["obs_ind", "mu"]]
+                    .rename(columns={"mu": "y1"})
+                    .assign(y2=0.0, panel=middle),
+                ],
+                ignore_index=True,
+            )
+
+        posterior_paths = (
+            spaghetti_draws(
+                panel_draws,
+                group_by=grouping,
+                num_samples=num_samples,
+            )
+            if kind == "spaghetti"
+            else None
+        )
+        posterior_density = (
+            pd.concat(
+                [
+                    posterior_histogram_tiles(
+                        panel_draws.filter(pl.col("panel") == panel),
+                        "obs_ind",
+                        x_col="obs_ind",
+                        panel=panel,
+                    )
+                    for panel in panels
+                ],
+                ignore_index=True,
+            )
+            if kind == "histogram"
+            else None
+        )
+        singleton_intervals = (
+            pd.concat(
+                [post_prediction, post_impact, cumulative_impact],
+                ignore_index=True,
+            )
+            if len(self.datapost) == 1
+            else intervals.iloc[0:0].copy()
+        )
+        singleton_intervals["panel"] = pd.Categorical(
+            singleton_intervals["panel"], categories=panels, ordered=True
+        )
+
+        return _ITSPlotData(
+            intervals=intervals,
+            observations=observations,
+            effect_area=effect_area,
+            posterior_paths=posterior_paths,
+            posterior_density=posterior_density,
+            singleton_intervals=singleton_intervals,
         )
 
     def _bayesian_plot(
@@ -712,140 +834,22 @@ class InterruptedTimeSeries(BaseExperiment):
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
     ) -> PlotSpec:
-        """Plot ITS results via a faceted plotnine base plus matplotlib overlays.
-
-        ponytail: singleton HDI marker and date-axis formatting stay on
-        matplotlib after ``.draw()``.
-        """
-        single_post_obs = len(self.datapost) <= 1
-        interval = interval_kind(ci_kind)
-        top, mid, bot = (
-            "Pre-intervention Bayesian $R^2$",
+        """Build the Bayesian ITS plot from tidy tables and declarative layers."""
+        score = self.score
+        panels = (
+            f"Pre-intervention Bayesian $R^2$: "
+            f"{round_num(score['unit_0_r2'], round_to)}\n"
+            f"(std = {round_num(score['unit_0_r2_std'], round_to)})",
             "Causal Impact",
             "Cumulative Causal Impact",
         )
-        # Title with R^2, supporting both unit_0_r2 and r2 keys
-        r2_val = None
-        r2_std_val = None
-        try:
-            if isinstance(self.score, pd.Series):
-                if "unit_0_r2" in self.score.index:
-                    r2_val = self.score["unit_0_r2"]
-                    r2_std_val = self.score.get("unit_0_r2_std", None)
-                elif "r2" in self.score.index:
-                    r2_val = self.score["r2"]
-                    r2_std_val = self.score.get("r2_std", None)
-        except Exception:
-            pass
-        title_str = top
-        if r2_val is not None:
-            title_str += f": {round_num(r2_val, round_to)}"
-            if r2_std_val is not None:
-                title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
-
-        def _pred_draws(pred, index):
-            newdata = pd.DataFrame({"obs_ind": index})
-            return prediction_draws(pred, newdata)
-
-        pre_pred_draws = _pred_draws(self.pre_pred, self.datapre.index)
-        post_pred_draws = _pred_draws(self.post_pred, self.datapost.index)
-        pre_impact_draws = dataarray_draws(self.pre_impact)
-        post_impact_draws = dataarray_draws(self.post_impact)
-        cumulative_draws = dataarray_draws(self.post_impact_cumulative)
-
-        all_draws = pl.concat(
-            [
-                label_draws(
-                    pre_pred_draws,
-                    series="Pre-intervention period",
-                    panel=top,
-                ),
-                label_draws(post_pred_draws, series="Counterfactual", panel=top),
-                label_draws(pre_impact_draws, series="pre", panel=mid),
-                label_draws(post_impact_draws, series="post", panel=mid),
-                label_draws(cumulative_draws, series="post", panel=bot),
-            ],
-            how="diagonal_relaxed",
-        )
-        group_by = ["panel", "series", "obs_ind"]
-        bands = summarize_draws(
-            all_draws,
-            group_by=group_by,
+        plot_data = self._prepare_bayesian_plot_data(
+            panels=panels,
             ci_prob=ci_prob,
-            interval=interval,
+            interval=interval_kind(ci_kind),
+            kind=kind,
+            num_samples=num_samples,
         )
-        post_band = bands.query("panel == @top and series == 'Counterfactual'")
-        post_impact_band = bands.query("panel == @mid and series == 'post'")
-        cumulative_band = bands.query("panel == @bot and series == 'post'")
-
-        spaghetti_df = None
-        if kind == "spaghetti":
-            spaghetti_df = spaghetti_draws(
-                all_draws,
-                group_by=group_by,
-                num_samples=num_samples,
-            )
-
-        histogram_tiles = None
-        if kind == "histogram":
-            histogram_tiles = concat_histogram_tiles(
-                [
-                    HistogramLayer(
-                        pl.concat([pre_pred_draws, post_pred_draws]),
-                        "obs_ind",
-                        panel=top,
-                    ),
-                    HistogramLayer(
-                        pl.concat([pre_impact_draws, post_impact_draws]),
-                        "obs_ind",
-                        panel=mid,
-                    ),
-                    HistogramLayer(
-                        cumulative_draws,
-                        "obs_ind",
-                        panel=bot,
-                    ),
-                ],
-                x_col="obs_ind",
-            )
-
-        obs = pd.concat(
-            [
-                pd.DataFrame(
-                    {
-                        "obs_ind": self.datapre.index,
-                        "y": np.asarray(self.pre_design["y"].isel(treated_units=0)),
-                    }
-                ),
-                pd.DataFrame(
-                    {
-                        "obs_ind": self.datapost.index,
-                        "y": np.asarray(self.post_design["y"].isel(treated_units=0)),
-                    }
-                ),
-            ]
-        ).assign(series="Observations", panel=top)
-
-        # Causal-impact shade: observed vs counterfactual mean (top) and
-        # post-impact mean vs zero (middle). Skip when a single post point
-        # would collapse the ribbon.
-        shade_df = None
-        if not single_post_obs:
-            post_mean = post_band[["obs_ind", "mu"]].rename(columns={"mu": "y1"})
-            y_obs = obs.loc[obs["obs_ind"].isin(self.datapost.index), ["obs_ind", "y"]]
-            shade_top = (
-                post_mean.merge(y_obs, on="obs_ind")
-                .rename(columns={"y": "y2"})
-                .assign(panel=top)
-            )
-            shade_mid = (
-                post_impact_band[["obs_ind", "mu"]]
-                .rename(columns={"mu": "y1"})
-                .assign(y2=0.0, panel=mid)
-            )
-            shade_df = pd.concat([shade_top, shade_mid])
-
-        panels = [top, mid, bot]
         colors = {
             "Pre-intervention period": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -854,104 +858,60 @@ class InterruptedTimeSeries(BaseExperiment):
             "post": "#ff7f0e",
         }
         p = build_causal_panel_plot(
-            bands,
-            obs,
-            panels=panels,
+            plot_data.intervals,
+            plot_data.observations,
+            panels=list(panels),
             colors=colors,
+            show_panel_titles=True,
             kind=kind,
-            shade_df=shade_df,
-            spaghetti_df=spaghetti_df,
-            histogram_tiles=histogram_tiles,
+            shade_df=plot_data.effect_area,
+            spaghetti_df=plot_data.posterior_paths,
+            histogram_tiles=plot_data.posterior_density,
             figsize=figsize,
         )
-
-        def overlay(fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            ax = np.asarray(axes[:3])
-            for i, a in enumerate(ax):
-                a.axvline(
-                    x=self.treatment_time,
-                    ls="--",
-                    lw=1.5,
-                    color="k",
-                    zorder=1.5,
-                    label="Treatment start" if i == 0 else None,
-                )
-                if self.treatment_end_time is not None:
-                    a.axvline(
-                        x=self.treatment_end_time,
-                        ls=":",
-                        lw=1.5,
-                        color="k",
-                        zorder=1.5,
-                        label="Treatment end" if i == 0 else None,
-                    )
-            if single_post_obs:
-                self._draw_singleton_interval_marker(
-                    ax[0],
-                    post_band.iloc[0],
-                    color="C1",
-                )
-                self._draw_singleton_interval_marker(
-                    ax[1],
-                    post_impact_band.iloc[0],
-                    color="C1",
-                )
-                self._draw_singleton_interval_marker(
-                    ax[2],
-                    cumulative_band.iloc[0],
-                    color="C1",
-                )
-
-            legend_labels = [
-                "Pre-intervention period",
-                "Observations",
-                "Counterfactual",
-            ]
-            if not single_post_obs:
-                legend_labels.append("Causal impact")
-            legend_colors = {
-                "Pre-intervention period": "#1f77b4",
-                "Observations": "black",
-                "Counterfactual": "#ff7f0e",
-                "Causal impact": "#1f77b4",
-            }
-            handles = []
-            for label in legend_labels:
-                if label == "Observations":
-                    handles.append(
-                        Line2D([0], [0], color="black", marker=".", linestyle="")
-                    )
-                elif label == "Causal impact":
-                    handles.append(Patch(facecolor="#1f77b4", alpha=0.25))
-                else:
-                    handles.append(
-                        (
-                            Line2D([0], [0], color=legend_colors[label]),
-                            Patch(facecolor=legend_colors[label], alpha=0.3),
-                        )
-                    )
-            ax[0].legend(
-                handles=handles, labels=legend_labels, fontsize=LEGEND_FONT_SIZE
+        p += geom_vline(
+            pd.DataFrame({"obs_ind": [self.treatment_time]}),
+            aes(xintercept="obs_ind"),
+            linetype="dashed",
+            color="black",
+            size=1,
+        )
+        if self.treatment_end_time is not None:
+            p += geom_vline(
+                pd.DataFrame({"obs_ind": [self.treatment_end_time]}),
+                aes(xintercept="obs_ind"),
+                linetype="dotted",
+                color="black",
+                size=1,
             )
-            ax[0].set_title(title_str)
-            ax[1].set_title(mid)
-            ax[2].set_title(bot)
-            for a in ax[:-1]:
-                a.tick_params(axis="x", labelbottom=False)
+        p += geom_pointrange(
+            plot_data.singleton_intervals,
+            aes(
+                "obs_ind",
+                "mu",
+                ymin="mu_lower",
+                ymax="mu_upper",
+            ),
+            color="#ff7f0e",
+            size=0.5,
+            show_legend=False,
+        )
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            p += theme(axis_text_x=element_text(rotation=45, ha="right"))
 
-            if isinstance(self.datapre.index, pd.DatetimeIndex):
-                full_index = _combine_datetime_indices(
-                    pd.DatetimeIndex(self.datapre.index),
-                    pd.DatetimeIndex(self.datapost.index),
-                )
-                format_date_axes(list(ax), full_index)
-                for label in ax[-1].get_xticklabels():
-                    label.set_rotation(45)
-                    label.set_ha("right")
-                    label.set_va("top")
-                fig.subplots_adjust(bottom=0.12)
+        # plotnine guides are not Axes legends, so keep this compatibility boundary for the public matplotlib-based legend_kwargs API.
+        def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            add_causal_panel_legend(
+                axes[0],
+                labels=[
+                    "Pre-intervention period",
+                    "Observations",
+                    "Counterfactual",
+                ],
+                colors=colors,
+            )
 
-        return PlotSpec(p, overlay=overlay, n_panels=3)
+        return PlotSpec(p, overlay=add_legend, n_panels=3)
 
     def _ols_plot(
         self,
