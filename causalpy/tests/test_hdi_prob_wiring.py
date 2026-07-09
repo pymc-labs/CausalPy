@@ -349,6 +349,13 @@ _SC_TARGETS: list[_SpyTarget] = [
         lambda probs: probs[0] if probs else None,
     ),
 ]
+_SDID_TARGETS: list[_SpyTarget] = [
+    (
+        "causalpy.experiments.synthetic_difference_in_differences.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
+]
 _DID_TARGETS: list[_SpyTarget] = [
     (
         "causalpy.experiments.diff_in_diff.td.point_interval",
@@ -409,6 +416,19 @@ def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
 def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
     """Synthetic Control default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_sc, _SC_TARGETS)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_sdid_plot_threads_ci_prob(mock_pymc_sample, fitted_sdid, ci_prob):
+    """SDiD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
+    _check_threading(fitted_sdid, _SDID_TARGETS, ci_prob)
+
+
+@pytest.mark.integration
+def test_sdid_plot_default_ci_prob(mock_pymc_sample, fitted_sdid):
+    """SDiD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
+    _check_default(fitted_sdid, _SDID_TARGETS)
 
 
 @pytest.mark.integration
