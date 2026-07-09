@@ -27,6 +27,8 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
+    element_blank,
+    element_rect,
     geom_line,
     geom_point,
     geom_ribbon,
@@ -34,10 +36,11 @@ from plotnine import (
     ggplot,
     labs,
     scale_color_manual,
+    theme,
 )
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PlotXYStyle, _plot_histogram, plot_xY
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -267,7 +270,7 @@ class RegressionKink(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot:
+    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
         """Plot the regression kink results.
 
         Parameters
@@ -284,11 +287,11 @@ class RegressionKink(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
             (mean + credible band). ``"spaghetti"`` draws individual posterior
-            predictive lines. ``"histogram"`` is not yet migrated and raises
-            ``ValueError``; tracked in issue #988.
+            predictive lines. ``"histogram"`` uses a matplotlib density heatmap
+            overlay on the plotnine base.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -424,26 +427,13 @@ class RegressionKink(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> ggplot:
+    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
         """Generate a plotnine plot for regression kink designs.
 
-        Returns a :class:`plotnine.ggplot` for the ``"ribbon"`` and
-        ``"spaghetti"`` kinds.
-
-        ponytail: ``kind="histogram"`` has no plotnine geom yet — raises until
-        a tidydraws + ``geom_tile`` path lands (#988).
+        Returns a :class:`plotnine.ggplot` for ``"ribbon"`` and
+        ``"spaghetti"``. ``"histogram"`` returns ``(fig, ax)`` after drawing
+        with a matplotlib ``pcolormesh`` density overlay.
         """
-        if kind == "histogram":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
-                **kwargs,
-            )
-
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
         round_digits = round_to if round_to is not None else 2
@@ -481,7 +471,9 @@ class RegressionKink(BaseExperiment):
         }
 
         p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
-        if kind == "spaghetti":
+        if kind == "histogram":
+            p = p + geom_line(summary, aes(x=xcol, y="mu", color="series"))
+        elif kind == "spaghetti":
             sample = draws.with_columns(
                 (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
             )
@@ -526,11 +518,31 @@ class RegressionKink(BaseExperiment):
             thr_df, aes(xintercept="xintercept", color="series"), size=1.5
         )
 
-        return (
+        p = (
             p
             + scale_color_manual(values=color_values, name="")
             + labs(title=r2 + "\n" + grad_change + ci, x=xcol, y=ycol)
         )
+        if kind == "histogram":
+            p = p + theme(
+                panel_background=element_rect(fill="white"),
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+            )
+            fig = p.draw()
+            ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
+            mu = self.pred["posterior_predictive"].mu.isel(treated_units=0)
+            _plot_histogram(
+                self.x_pred[xcol],
+                mu,
+                ax,
+                {"cmap": "Greys", "alpha": 0.85, "color": "C1"},
+                None,
+                draw_mean=False,
+            )
+            return fig, ax
+
+        return p
 
     def effect_summary(
         self,
