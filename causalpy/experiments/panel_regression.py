@@ -21,6 +21,17 @@ import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
+from plotnine import (
+    aes,
+    coord_flip,
+    geom_col,
+    geom_errorbarh,
+    geom_point,
+    geom_vline,
+    ggplot,
+    labs,
+    theme,
+)
 from scipy import stats
 from sklearn.base import RegressorMixin
 
@@ -585,33 +596,56 @@ class PanelRegression(BaseExperiment):
             raise ValueError("hdi_prob must be between 0 and 1")
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
+        fig_height = max(4, len(coeff_names) * 0.5)
+        figsize = (10, fig_height)
 
         if self._model_backend.is_bayesian:
-            # Bayesian: use az.plot_forest directly
-            axes = az.plot_forest(
-                self.model.idata,
-                var_names=["beta"],
-                coords={"coeffs": coeff_names},
-                combined=True,
-                hdi_prob=hdi_prob,
+            beta = self.model.idata.posterior["beta"].sel(coeffs=coeff_names)  # type: ignore[union-attr]
+            if "treated_units" in beta.dims:
+                beta = beta.squeeze("treated_units", drop=True)
+            hdi = az.hdi(beta, hdi_prob=hdi_prob)
+            means = beta.mean(dim=["chain", "draw"])
+            tidy = pd.DataFrame(
+                {
+                    "coeffs": coeff_names,
+                    "mean": means.values,
+                    "lower": hdi["beta"].sel(hdi="lower").values,
+                    "higher": hdi["beta"].sel(hdi="higher").values,
+                }
             )
-            ax = axes.ravel()[0]
-            fig = ax.figure
-            ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
+            tidy["coeffs"] = pd.Categorical(
+                tidy["coeffs"], categories=coeff_names, ordered=True
+            )
+            title = f"Model Coefficients with {hdi_prob:.0%} HDI"
+            p = (
+                ggplot(tidy, aes(x="mean", y="coeffs"))
+                + geom_errorbarh(aes(xmin="lower", xmax="higher"), height=0.2, size=0.6)
+                + geom_point(size=2)
+                + geom_vline(xintercept=0, color="black", linetype="dashed", alpha=0.8)
+                + labs(title="", x="Coefficient Value", y="")
+                + theme(figure_size=figsize)
+            )
         else:
-            # OLS: point estimates
-            fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
             coefs = self.model.get_coeffs()[coef_indices]
-            y_pos = np.arange(len(coeff_names))
-            ax.barh(y_pos, coefs)
-            ax.set_yticks(y_pos)
-            ax.set_yticklabels(coeff_names)
-            ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8)
-            ax.set_xlabel("Coefficient Value")
-            ax.set_title("Model Coefficients")
+            tidy = pd.DataFrame({"coeffs": coeff_names, "coef": coefs})
+            tidy["coeffs"] = pd.Categorical(
+                tidy["coeffs"], categories=coeff_names, ordered=True
+            )
+            title = "Model Coefficients"
+            p = (
+                ggplot(tidy, aes(x="coef", y="coeffs"))
+                + geom_col(fill="#1f77b4")
+                + geom_vline(xintercept=0, color="black", linetype="dashed", alpha=0.8)
+                + coord_flip()
+                + labs(title="", x="Coefficient Value", y="")
+                + theme(figure_size=figsize)
+            )
 
-        plt.tight_layout()
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
+        ax.set_title(title)
         return fig, ax
 
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
