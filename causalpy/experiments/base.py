@@ -362,12 +362,9 @@ class BaseExperiment(ABC):
             else:
                 raise ValueError("Unsupported model type")
 
-        # plotnine path (issue #988 migration): a migrated ``_bayesian_plot``
-        # returns a ``ggplot`` rather than a ``(fig, ax)`` tuple. Theming and
-        # legend placement live on the ggplot itself, so there is nothing to
-        # mutate here — just optionally display and pass it through.
-        # ponytail: dual return type only during the staged migration; drops out
-        # in the cleanup commit once every experiment returns a ggplot.
+        # plotnine path (issue #988): ribbon/spaghetti return a ``ggplot``;
+        # ``kind="histogram"`` still returns ``(fig, ax)`` after a matplotlib
+        # pcolormesh overlay. ggplot theming/legend live on the object itself.
         if isinstance(result, ggplot):
             if show:
                 result.show()
@@ -404,8 +401,8 @@ class BaseExperiment(ABC):
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> ggplot | tuple:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian.
 
-        Returns a :class:`plotnine.ggplot` for migrated experiments (issue
-        #988) or a legacy ``(fig, ax)`` tuple otherwise.
+        Returns a :class:`plotnine.ggplot` for ribbon/spaghetti, or
+        ``(fig, ax)`` for ``kind="histogram"`` (matplotlib density overlay).
         """
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 

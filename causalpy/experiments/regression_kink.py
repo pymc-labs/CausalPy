@@ -20,7 +20,6 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import polars as pl
-import seaborn as sns
 import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -39,8 +38,8 @@ from plotnine import (
     theme,
 )
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PlotXYStyle, _plot_histogram, plot_xY
+from causalpy.constants import HDI_PROB
+from causalpy.plot_utils import _plot_histogram
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -334,89 +333,6 @@ class RegressionKink(BaseExperiment):
             num_samples=num_samples,
             figsize=figsize,
         )
-
-    def _bayesian_plot_matplotlib(
-        self,
-        round_to: int | None = 2,
-        ci_prob: float = HDI_PROB,
-        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-        ci_kind: Literal["hdi", "eti"] = "hdi",
-        num_samples: int = 50,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression kink designs.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive band, and the central credible interval
-            reported in the figure title for the change in gradient at the
-            kink point. Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        style: _PlotXYStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-        fig, ax = plt.subplots(figsize=figsize)
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            c="k",  # hue="treated",
-            ax=ax,
-        )
-
-        # Plot model fit to data
-        h_line, h_patch = plot_xY(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Posterior mean"]
-
-        # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.gradient_change.quantile(
-            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-        ).values
-        ci = (
-            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
-        )
-        grad_change = f"""
-            Change in gradient = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)},
-            """
-        ax.set(title=r2 + "\n" + grad_change + ci)
-        # Intervention line
-        ax.axvline(
-            x=self.kink_point,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-        return fig, ax
 
     def _bayesian_plot(
         self,
