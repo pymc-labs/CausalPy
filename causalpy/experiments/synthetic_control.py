@@ -19,19 +19,34 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
+import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from plotnine import (
+    aes,
+    element_blank,
+    facet_wrap,
+    geom_hline,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    ggplot,
+    guides,
+    labs,
+    scale_color_manual,
+    scale_fill_manual,
+    theme,
+)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import (
-    _PosteriorPlotStyle,
-    get_hdi_to_df,
-    plot_posterior_over_x,
-)
+from causalpy.plot_utils import get_hdi_to_df
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
@@ -414,10 +429,10 @@ class SyntheticControl(BaseExperiment):
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
         plot_predictors: bool = False,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot the synthetic control results for a specific treated unit.
 
         Parameters
@@ -437,25 +452,22 @@ class SyntheticControl(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
+            not yet migrated and raise ``ValueError``; tracked in issue #988.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
-
+            Unused until ``kind="spaghetti"`` is migrated; retained for API
+            compatibility.
         plot_predictors : bool
             Whether to overlay the donor (control) unit trajectories on the
             top panel. Defaults to ``False``.
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+            Width and height of the figure in inches. Defaults to ``(7, 11)``
+            so the three panels and date tick labels have room.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
             Set to ``False`` if you want to modify the figure before
@@ -470,8 +482,9 @@ class SyntheticControl(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+            The figure that was created (plotnine base plus matplotlib
+            overlays for treatment lines, predictors, and date formatting).
+        ax : numpy.ndarray
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
@@ -505,165 +518,188 @@ class SyntheticControl(BaseExperiment):
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
         plot_predictors: bool = False,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, np.ndarray]:
+        """Plot SC results via a faceted plotnine base plus matplotlib overlays.
+
+        Builds the three-panel layout as one ``facet_wrap`` ggplot for a chosen
+        treated unit, then ``.draw()``s and overlays the treatment line,
+        optional donor trajectories, and date formatting. Returns ``(fig, ax)``.
+
+        ponytail: treatment vline, ``plot_predictors``, and date formatting stay
+        on matplotlib after ``.draw()``. ``kind`` other than ``"ribbon"`` raises
+        until migrated (#988). No shared helper with ITS yet — assess SC alone.
         """
-        Plot the results for a specific treated unit.
+        if kind != "ribbon":
+            raise ValueError(
+                f"kind={kind!r} is not yet supported for the plotnine "
+                "SyntheticControl plot; use kind='ribbon'. Tracked in issue #988."
+            )
 
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        treated_unit : str, optional
-            Which treated unit to plot. Must be a string name of the treated unit.
-            If ``None``, plots the first treated unit.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        plot_predictors : bool, optional
-            Whether to overlay control-unit trajectories. Defaults to ``False``.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(7, 8)``.
-        """
-        counterfactual_label = "Counterfactual"
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-        # TOP PLOT --------------------------------------------------
-        # pre-intervention period
-
-        # Get treated unit name - default to first unit if None
         treated_unit = (
             treated_unit if treated_unit is not None else self.treated_units[0]
         )
-
         if treated_unit not in self.treated_units:
             raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
+                f"treated_unit '{treated_unit}' not found. "
+                f"Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
-            treated_units=treated_unit
+        interval = "eti" if ci_kind == "eti" else "hdi"
+        mid, bot = "Causal Impact", "Cumulative Causal Impact"
+        title_str = self._get_score_title(treated_unit, round_to)
+        top = title_str  # facet key; real title set on ax after .draw()
+
+        def _pred_band(pred, index, series, panel):
+            newdata = pd.DataFrame({"obs_ind": index})
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            if "treated_units" in draws.columns:
+                draws = draws.filter(pl.col("treated_units") == treated_unit)
+            return (
+                td.point_interval(
+                    draws,
+                    "mu",
+                    group_by="obs_ind",
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort("obs_ind")
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
+        def _da_band(da, series, panel):
+            da = da.sel(treated_units=treated_unit)
+            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
+            return (
+                td.point_interval(
+                    tidy,
+                    "mu",
+                    group_by="obs_ind",
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort("obs_ind")
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
+        pre_band = _pred_band(
+            self.pre_pred, self.datapre.index, "Pre-intervention period", top
         )
-        post_pred = self.post_pred["posterior_predictive"].mu.sel(
-            treated_units=treated_unit
+        post_band = _pred_band(
+            self.post_pred, self.datapost.index, "Counterfactual", top
+        )
+        post_impact_band = _da_band(self.post_impact, "post", mid)
+        bands = pd.concat(
+            [
+                pre_band,
+                post_band,
+                _da_band(self.pre_impact, "pre", mid),
+                post_impact_band,
+                _da_band(self.post_impact_cumulative, "post", bot),
+            ]
         )
 
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapre.index,
-            pre_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
+        obs = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "obs_ind": self.datapre.index,
+                        "y": np.asarray(
+                            self.pre_design["treated"].sel(treated_units=treated_unit)
+                        ),
+                    }
+                ),
+                pd.DataFrame(
+                    {
+                        "obs_ind": self.datapost.index,
+                        "y": np.asarray(
+                            self.post_design["treated"].sel(treated_units=treated_unit)
+                        ),
+                    }
+                ),
+            ]
+        ).assign(series="Observations", panel=top)
 
-        # Plot observations for primary treated unit
-        (h,) = ax[0].plot(
-            self.datapre.index,
-            self.pre_design["treated"].sel(treated_units=treated_unit),
-            "k.",
-            label="Observations",
+        post_mean = post_band[["obs_ind", "mu"]].rename(columns={"mu": "y1"})
+        y_obs = obs.loc[obs["obs_ind"].isin(self.datapost.index), ["obs_ind", "y"]]
+        shade_top = (
+            post_mean.merge(y_obs, on="obs_ind")
+            .rename(columns={"y": "y2"})
+            .assign(panel=top)
         )
-        handles.append(h)
-        labels.append("Observations")
+        shade_mid = (
+            post_impact_band[["obs_ind", "mu"]]
+            .rename(columns={"mu": "y1"})
+            .assign(y2=0.0, panel=mid)
+        )
+        shade_df = pd.concat([shade_top, shade_mid])
 
-        # post intervention period
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapost.index,
-            post_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
+        panels = [top, mid, bot]
+        for frame in (bands, obs, shade_df):
+            frame["panel"] = pd.Categorical(
+                frame["panel"], categories=panels, ordered=True
+            )
 
-        ax[0].plot(
-            self.datapost.index,
-            self.post_design["treated"].sel(treated_units=treated_unit),
-            "k.",
+        colors = {
+            "Pre-intervention period": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "pre": "#1f77b4",
+            "post": "#ff7f0e",
+        }
+        zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
+        zero_df["panel"] = pd.Categorical(
+            zero_df["panel"], categories=panels, ordered=True
         )
-        # Shaded causal effect for primary treated unit
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.post_design["treated"].sel(treated_units=treated_unit).values,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        handles.append(h)
-        labels.append("Causal impact")
 
-        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
+        p = (
+            ggplot()
+            + geom_ribbon(
+                shade_df,
+                aes("obs_ind", ymin="y1", ymax="y2"),
+                fill="#1f77b4",
+                alpha=0.25,
+            )
+            + geom_ribbon(
+                bands,
+                aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                alpha=0.3,
+                show_legend=False,
+            )
+            + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            + geom_point(obs, aes("obs_ind", "y", color="series"), size=1)
+            + geom_hline(zero_df, aes(yintercept="yintercept"), color="black")
+            + facet_wrap("panel", ncol=1, scales="free_y")
+            + scale_color_manual(values=colors, name="")
+            + scale_fill_manual(values=colors, name="")
+            + guides(color="none", fill="none")
+            + labs(x="", y="")
+            + theme(
+                strip_text=element_blank(),
+                strip_background=element_blank(),
+                figure_size=figsize,
+                panel_spacing_y=0.06,
+                plot_margin_bottom=0.08,
+            )
+        )
 
-        # MIDDLE PLOT -----------------------------------------------
-        plot_posterior_over_x(
-            self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units=treated_unit),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].set(title="Causal Impact")
-
-        # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[2].axhline(y=0, c="k")
-
-        # Intervention line
-        for i in [0, 1, 2]:
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = np.asarray(axes[:3])
+        for a in ax:
             treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
+                a, self.treatment_time
             )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
-
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+            a.axvline(x=treatment_time, ls="-", lw=3, color="r")
 
         if plot_predictors:
-            # plot control units as well
             ax[0].plot(
                 self.datapre.index,
                 self.pre_design["control"],
@@ -679,14 +715,51 @@ class SyntheticControl(BaseExperiment):
                 zorder=1,
             )
 
-        # Apply intelligent date formatting if data has datetime index
+        legend_labels = [
+            "Pre-intervention period",
+            "Observations",
+            "Counterfactual",
+            "Causal impact",
+        ]
+        legend_colors = {
+            "Pre-intervention period": "#1f77b4",
+            "Observations": "black",
+            "Counterfactual": "#ff7f0e",
+            "Causal impact": "#1f77b4",
+        }
+        handles = []
+        for label in legend_labels:
+            if label == "Observations":
+                handles.append(
+                    Line2D([0], [0], color="black", marker=".", linestyle="")
+                )
+            elif label == "Causal impact":
+                handles.append(Patch(facecolor="#1f77b4", alpha=0.25))
+            else:
+                handles.append(
+                    (
+                        Line2D([0], [0], color=legend_colors[label]),
+                        Patch(facecolor=legend_colors[label], alpha=0.3),
+                    )
+                )
+        ax[0].legend(handles=handles, labels=legend_labels, fontsize=LEGEND_FONT_SIZE)
+        ax[0].set_title(title_str)
+        ax[1].set_title(mid)
+        ax[2].set_title(bot)
+        for a in ax[:-1]:
+            a.tick_params(axis="x", labelbottom=False)
+
         if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
             full_index = _combine_datetime_indices(
                 pd.DatetimeIndex(self.datapre.index),
                 pd.DatetimeIndex(self.datapost.index),
             )
-            format_date_axes(ax, full_index)
+            format_date_axes(list(ax), full_index)
+            for label in ax[-1].get_xticklabels():
+                label.set_rotation(45)
+                label.set_ha("right")
+                label.set_va("top")
+            fig.subplots_adjust(bottom=0.12)
 
         return fig, ax
 

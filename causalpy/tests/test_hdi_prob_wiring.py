@@ -343,7 +343,11 @@ _ITS_TARGETS: list[_SpyTarget] = [
     ),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.synthetic_control.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
     (
