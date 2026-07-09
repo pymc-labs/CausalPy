@@ -510,7 +510,7 @@ class PrePostNEGD(BaseExperiment):
             )
             ids = tagged.select("_draw_id").unique()
             chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            return tagged.join(chosen, on="_draw_id").sort("pre")
+            return tagged.join(chosen, on="_draw_id").sort(["_draw_id", "pre"])
 
         def _band_spaghetti(pred, series):
             newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
@@ -518,12 +518,13 @@ class PrePostNEGD(BaseExperiment):
             draws = td.prediction_draws(
                 pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
             )
-            return (
+            sampled = (
                 _sample_draw_lines(draws, num_samples)
                 .to_pandas()
                 .rename(columns={"pre": "_x", "mu": "_y"})
-                .assign(series=series, panel=top)
             )
+            sampled["_line_id"] = f"{series}_" + sampled["_draw_id"].astype(str)
+            return sampled.assign(series=series, panel=top)
 
         bands = pd.concat(
             [
@@ -595,7 +596,7 @@ class PrePostNEGD(BaseExperiment):
                 p
                 + geom_line(
                     spaghetti_df,
-                    aes("_x", "_y", group="_draw_id", color="series"),
+                    aes("_x", "_y", group="_line_id", color="series"),
                     alpha=0.1,
                     size=0.3,
                     show_legend=False,
