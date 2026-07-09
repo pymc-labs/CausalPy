@@ -18,9 +18,21 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import seaborn as sns
+import tidydraws as td
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
+from plotnine import (
+    aes,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    geom_vline,
+    ggplot,
+    labs,
+    scale_color_manual,
+)
 from sklearn.base import RegressorMixin
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
@@ -306,7 +318,7 @@ class RegressionDiscontinuity(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
         """Plot the regression discontinuity results.
 
         Parameters
@@ -351,10 +363,11 @@ class RegressionDiscontinuity(BaseExperiment):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : matplotlib.axes.Axes
-            The axes object containing the plot.
+        plotnine.ggplot or tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+            For ``kind="ribbon"`` (default) and ``kind="spaghetti"``, a
+            :class:`plotnine.ggplot` object. Call ``.draw()`` on it to obtain
+            the matplotlib figure. For ``kind="histogram"`` a
+            ``(fig, ax)`` tuple is returned (legacy matplotlib path).
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -384,8 +397,156 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
+    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
+        """Generate a plotnine plot for regression discontinuity designs.
+
+        Returns a :class:`plotnine.ggplot` for the ``"ribbon"`` and
+        ``"spaghetti"`` kinds. The ``"histogram"`` kind (a per-column
+        normalised 2D density heatmap) has no plotnine geom, so it falls back
+        to the legacy matplotlib implementation via the ``p.draw()`` escape
+        hatch and returns a ``(fig, ax)`` tuple.
+
+        ponytail: histogram heatmap kept on matplotlib; upgrade path is a
+        tidydraws temporal-density helper + ``geom_tile`` (tracked in #988).
+        """
+        if kind == "histogram":
+            return self._bayesian_plot_mpl(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                figsize=figsize,
+            )
+
+        xcol = self.running_variable_name
+        ycol = self.outcome_variable_name
+
+        # Observed data points, tagged so excluded (donut) rows render greyed.
+        points = self.data.copy()
+        has_exclusion = len(self.fit_data) < len(self.data)
+        point_label = "fit data" if has_exclusion else "data"
+        points["series"] = (
+            np.where(
+                points.index.isin(self.fit_data.index), "fit data", "excluded data"
+            )
+            if has_exclusion
+            else "data"
+        )
+
+        # Posterior predictive draws → tidy point + interval summary. tidydraws
+        # flattens chain/draw and keeps the running variable as a column, so the
+        # old ``isel(treated_units=0)`` / ``stack`` guards disappear.
+        newdata = self.x_pred.reset_index(drop=True)
+        newdata["obs_ind"] = range(len(newdata))
+        draws = td.prediction_draws(
+            self.pred,
+            newdata=newdata,
+            var_name="mu",
+            idata_group="posterior_predictive",
+        )
+        interval = "eti" if ci_kind == "eti" else "hdi"
+        summary = (
+            td.point_interval(
+                draws,
+                "mu",
+                group_by=xcol,
+                probs=(ci_prob,),
+                point="mean",
+                interval=interval,
+            )
+            .sort(xcol)
+            .to_pandas()
+        )
+        summary["series"] = "Posterior mean"
+
+        color_values = {point_label: "black", "Posterior mean": "#ff7f0e"}
+        if has_exclusion:
+            color_values["excluded data"] = "lightgray"
+
+        p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
+        if kind == "spaghetti":
+            sample = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = sample.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            spaghetti = sample.join(chosen, on="_draw_id").sort(xcol).to_pandas()
+            p = p + geom_line(
+                spaghetti,
+                aes(xcol, "mu", group="_draw_id"),
+                color="#ff7f0e",
+                alpha=0.1,
+                size=0.3,
+            )
+        else:
+            p = p + geom_ribbon(
+                summary,
+                aes(x=xcol, ymin="mu_lower", ymax="mu_upper"),
+                fill="#ff7f0e",
+                alpha=0.3,
+            )
+        p = p + geom_line(summary, aes(x=xcol, y="mu", color="series"))
+
+        # Title: Bayesian R^2 on fit data + discontinuity credible interval.
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
+        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+        percentiles = self.discontinuity_at_threshold.quantile(
+            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+        ).values
+        ci = (
+            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
+            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+        )
+        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}, "
+
+        # Treatment threshold (and optional donut boundaries) as legend-mapped
+        # vertical lines.
+        thr_df = pd.DataFrame(
+            {
+                "xintercept": [self.treatment_threshold],
+                "series": ["treatment threshold"],
+            }
+        )
+        color_values["treatment threshold"] = "red"
+        p = p + geom_vline(
+            thr_df, aes(xintercept="xintercept", color="series"), size=1.5
+        )
+        if self.donut_hole > 0:
+            donut_df = pd.DataFrame(
+                {
+                    "xintercept": [
+                        self.treatment_threshold - self.donut_hole,
+                        self.treatment_threshold + self.donut_hole,
+                    ],
+                    "series": ["donut boundary", "donut boundary"],
+                }
+            )
+            p = p + geom_vline(
+                donut_df,
+                aes(xintercept="xintercept", color="series"),
+                linetype="dashed",
+                size=1,
+            )
+            color_values["donut boundary"] = "orange"
+
+        return (
+            p
+            + scale_color_manual(values=color_values, name="")
+            + labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
+        )
+
+    def _bayesian_plot_mpl(
+        self,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs.
+        """Legacy matplotlib plot, retained for the ``histogram`` kind.
 
         Parameters
         ----------

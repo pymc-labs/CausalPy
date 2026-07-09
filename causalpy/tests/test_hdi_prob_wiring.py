@@ -29,6 +29,7 @@ width, not only HDI). ``hdi_prob`` remains accepted with a ``FutureWarning``.
 """
 
 import importlib
+from collections.abc import Callable
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
@@ -51,7 +52,10 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
 # ``plot_posterior_over_x`` targets use ``"ci_prob"`` (the canonical name); other callables
 # such as ``az.plot_posterior`` and ``az.plot_forest`` use ``"hdi_prob"``.
-_SpyTarget = tuple[str, str]
+# Migrated (plotnine) experiments thread ``ci_prob`` into ``td.point_interval``
+# as ``probs=(ci_prob,)``; those targets add a third element that extracts the
+# scalar from the recorded tuple.
+_SpyTarget = tuple[str, str] | tuple[str, str, Callable[[Any], float | None]]
 
 
 def _resolve_dotted(dotted: str) -> Any:
@@ -86,15 +90,18 @@ def _record_hdi_prob_calls(
     recorded: list[float | None] = []
     stack = ExitStack()
 
-    for dotted, kwarg in targets:
+    for target in targets:
+        dotted, kwarg = target[0], target[1]
+        transform = target[2] if len(target) > 2 else (lambda v: v)
         real = _resolve_dotted(dotted)
 
-        def make_spy(real_callable=real, kwarg_name=kwarg):
+        def make_spy(real_callable=real, kwarg_name=kwarg, extract=transform):
             """Build a side_effect that records ``kwarg_name`` and forwards to ``real_callable``."""
 
             def spy(*args, **kwargs):
                 """Record ``hdi_prob`` then delegate to the real callable."""
-                recorded.append(kwargs.get(kwarg_name))
+                value = kwargs.get(kwarg_name)
+                recorded.append(value if value is None else extract(value))
                 return real_callable(*args, **kwargs)
 
             return spy
@@ -338,7 +345,11 @@ _DID_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),
 ]
 _RD_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_discontinuity.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.regression_discontinuity.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _RKINK_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),

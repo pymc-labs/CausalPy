@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+from plotnine import ggplot
 from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
@@ -301,7 +302,7 @@ class BaseExperiment(ABC):
         show: bool,
         legend_kwargs: dict[str, Any] | None,
         **draw_kwargs: Any,
-    ) -> tuple:
+    ) -> ggplot | tuple:
         """Template Method shared by every subclass's public ``plot``.
 
         Each :class:`BaseExperiment` subclass exposes its own explicit,
@@ -369,11 +370,24 @@ class BaseExperiment(ABC):
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if self._model_backend.is_bayesian:
-                fig, ax = self._bayesian_plot(**draw_kwargs)
+                result = self._bayesian_plot(**draw_kwargs)
             elif self._model_backend.is_ols:
-                fig, ax = self._ols_plot(**draw_kwargs)
+                result = self._ols_plot(**draw_kwargs)
             else:
                 raise ValueError("Unsupported model type")
+
+        # plotnine path (issue #988 migration): a migrated ``_bayesian_plot``
+        # returns a ``ggplot`` rather than a ``(fig, ax)`` tuple. Theming and
+        # legend placement live on the ggplot itself, so there is nothing to
+        # mutate here — just optionally display and pass it through.
+        # ponytail: dual return type only during the staged migration; drops out
+        # in the cleanup commit once every experiment returns a ggplot.
+        if isinstance(result, ggplot):
+            if show:
+                result.show()
+            return result
+
+        fig, ax = result
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
@@ -403,11 +417,15 @@ class BaseExperiment(ABC):
 
         return fig, ax
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
+    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> ggplot | tuple:
+        """Plot results for Bayesian models. Override in subclasses that support Bayesian.
+
+        Returns a :class:`plotnine.ggplot` for migrated experiments (issue
+        #988) or a legacy ``(fig, ax)`` tuple otherwise.
+        """
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> ggplot | tuple:
         """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 

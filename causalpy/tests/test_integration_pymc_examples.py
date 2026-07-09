@@ -21,6 +21,7 @@ import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
+from plotnine import ggplot
 
 import causalpy as cp
 from causalpy.tests.conftest import setup_regression_kink_data
@@ -148,9 +149,7 @@ def test_rd(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
 
@@ -180,9 +179,7 @@ def test_rd_bandwidth(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
 
 
 @pytest.mark.integration
@@ -220,9 +217,7 @@ def test_rd_bandwidth_custom_running_variable(mock_pymc_sample):
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
 
 
 @pytest.mark.integration
@@ -253,9 +248,7 @@ def test_rd_drinking(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
 
 
 @pytest.mark.integration
