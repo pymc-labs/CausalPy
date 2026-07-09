@@ -25,7 +25,22 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 from patsy import dmatrices
+from plotnine import (
+    aes,
+    geom_hline,
+    geom_pointrange,
+    geom_rect,
+    geom_vline,
+    ggplot,
+    guides,
+    labs,
+    scale_color_manual,
+    scale_shape_manual,
+    scale_x_continuous,
+    theme,
+)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -907,7 +922,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         Returns
         -------
         tuple[plt.Figure, list[plt.Axes]]
-            Figure and axes objects.
+            Figure and axes objects. The event-study view is built with
+            plotnine then ``.draw()``; ``plot_group_time`` remains on
+            matplotlib until migrated separately (issue #988).
         """
         if hdi_prob is not None and hdi_prob != self.hdi_prob_:
             raise ValueError(
@@ -928,74 +945,88 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if view != "event_time":
             raise ValueError("view must be 'event_time' or 'group_time'")
 
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-
+        # ponytail: event-study only this commit; plot_group_time stays matplotlib
+        # until assessed separately (#988). Cached att_lower/att_upper — no tidydraws.
         att_et = self.att_event_time_.copy()
+        hdi_pct = int(self.hdi_prob_ * 100)
+        placebo_label = f"Placebo estimate ({hdi_pct}% HDI)"
+        att_label = f"ATT estimate ({hdi_pct}% HDI)"
+        att_et["series"] = np.where(att_et["event_time"] < 0, placebo_label, att_label)
 
-        # Separate pre-treatment (placebo) and post-treatment (ATT)
-        pre_treatment = att_et[att_et["event_time"] < 0]
-        post_treatment = att_et[att_et["event_time"] >= 0]
-
-        # Plot pre-treatment placebo estimates (different style)
-        if len(pre_treatment) > 0:
-            ax.errorbar(
-                pre_treatment["event_time"],
-                pre_treatment["att"],
-                yerr=[
-                    pre_treatment["att"] - pre_treatment["att_lower"],
-                    pre_treatment["att_upper"] - pre_treatment["att"],
-                ],
-                fmt="s",  # Square markers for placebo
-                capsize=4,
-                capthick=2,
-                markersize=7,
-                color="gray",
-                alpha=0.7,
-                label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
-            )
-
-        # Plot post-treatment ATT estimates
-        if len(post_treatment) > 0:
-            ax.errorbar(
-                post_treatment["event_time"],
-                post_treatment["att"],
-                yerr=[
-                    post_treatment["att"] - post_treatment["att_lower"],
-                    post_treatment["att_upper"] - post_treatment["att"],
-                ],
-                fmt="o",
-                capsize=4,
-                capthick=2,
-                markersize=8,
-                color="C0",
-                label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
-            )
-
-        # Add horizontal line at zero
-        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
-
-        # Add vertical line at event_time = 0 (treatment onset)
-        ax.axvline(x=-0.5, color="red", linestyle="-", linewidth=2, alpha=0.7)
-
-        # Shade pre-treatment region
+        colors = {placebo_label: "gray", att_label: "#1f77b4"}
+        shapes = {placebo_label: "s", att_label: "o"}
+        p = (
+            ggplot(att_et, aes("event_time", "att", color="series", shape="series"))
+            + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
+            + geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
+        )
         event_min = att_et["event_time"].min()
         if event_min < 0:
-            ax.axvspan(
-                event_min - 0.5,
-                -0.5,
-                alpha=0.1,
-                color="gray",
+            shade = pd.DataFrame(
+                {
+                    "xmin": [float(event_min) - 0.5],
+                    "xmax": [-0.5],
+                    "ymin": [-np.inf],
+                    "ymax": [np.inf],
+                }
             )
+            p = p + geom_rect(
+                shade,
+                aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
+                fill="gray",
+                alpha=0.1,
+                inherit_aes=False,
+            )
+        p = (
+            p
+            + geom_pointrange(
+                aes(ymin="att_lower", ymax="att_upper"),
+                size=0.7,
+                fatten=6,
+            )
+            + scale_color_manual(values=colors, name="")
+            + scale_shape_manual(values=shapes, name="")
+            + scale_x_continuous(breaks=list(att_et["event_time"].values))
+            + guides(color="none", shape="none")
+            + labs(x="", y="")
+            + theme(figure_size=figsize or (10, 6))
+        )
 
-        # Labels and formatting
-        ax.set_xlabel("Event Time (periods relative to treatment)", fontsize=12)
-        ax.set_ylabel("Effect Estimate", fontsize=12)
-        ax.set_title("Staggered DiD Event Study", fontsize=14)
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Set integer ticks for event time
-        ax.set_xticks(att_et["event_time"].values)
-
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
+        ax.set_xlabel("Event Time (periods relative to treatment)")
+        ax.set_ylabel("Effect Estimate")
+        ax.set_title("Staggered DiD Event Study")
+        # Rebuild legend so legend_kwargs / tests see matplotlib handles.
+        handles = []
+        labels = []
+        if (att_et["event_time"] < 0).any():
+            handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color="gray",
+                    marker="s",
+                    linestyle="",
+                    markersize=9,
+                    alpha=0.7,
+                )
+            )
+            labels.append(placebo_label)
+        if (att_et["event_time"] >= 0).any():
+            handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color="#1f77b4",
+                    marker="o",
+                    linestyle="",
+                    markersize=10,
+                )
+            )
+            labels.append(att_label)
+        ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
         return fig, [ax]
 
     def _bayesian_plot_group_time(
