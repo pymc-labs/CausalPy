@@ -357,8 +357,9 @@ def _plot_histogram(
     """Plot histogram visualization of the posterior as a 2D heatmap.
 
     Columns are time points (x), rows are y-value bins; cell values are
-    per-time histogram counts, column-normalized for display. The posterior
-    mean line is overlaid on top.
+    per-time histogram counts, column-normalized for display (0 = white,
+    1 = black under the default ``Greys`` colormap). The posterior mean line
+    is overlaid on top.
     """
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
@@ -409,7 +410,7 @@ def _plot_histogram(
         x_edges[-1] = x_num[-1] + dx[-1] / 2
         x_edges[1:-1] = x_num[:-1] + dx / 2
 
-    cmap = plot_hdi_kwargs.get("cmap", "viridis")
+    cmap = plot_hdi_kwargs.get("cmap", "Greys")
     alpha = float(plot_hdi_kwargs.get("alpha", 0.85))
     color_line = plot_hdi_kwargs.get("color", "C0")
 
@@ -418,6 +419,8 @@ def _plot_histogram(
         y_edges,
         hist2d_norm,
         cmap=cmap,
+        vmin=0.0,
+        vmax=1.0,
         shading="flat",
         alpha=alpha,
     )

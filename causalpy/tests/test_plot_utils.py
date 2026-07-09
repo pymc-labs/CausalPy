@@ -266,6 +266,7 @@ def test_plot_xY_histogram(synthetic_posterior_data):
         "Should have collections or images (pcolormesh/heatmap)"
     )
     assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
+    assert ax.collections[0].get_cmap().name == "Greys"
 
     plt.close(fig)
 
