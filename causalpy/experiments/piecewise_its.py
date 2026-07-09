@@ -30,6 +30,7 @@ from patsy import dmatrices
 from plotnine import (
     aes,
     element_blank,
+    element_rect,
     facet_wrap,
     geom_hline,
     geom_line,
@@ -47,7 +48,12 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, histogram_y_edges, plot_xY
+from causalpy.plot_utils import (
+    _plot_histogram,
+    _PlotXYStyle,
+    histogram_y_edges,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -468,17 +474,15 @@ class PiecewiseITS(BaseExperiment):
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered for Bayesian models.
-            Defaults to ``"ribbon"`` (mean + credible band).
-            ``"spaghetti"`` and ``"histogram"`` are not yet migrated and
-            raise ``ValueError``; tracked in issue #988. Ignored for OLS.
+            Defaults to ``"ribbon"`` (mean + credible band). Ignored for OLS.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Unused until ``kind="spaghetti"`` is migrated; retained for API
-            compatibility.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
 
         figsize : tuple of (float, float)
             Width and height of the figure in inches. Defaults to ``(10, 10)``.
@@ -689,22 +693,10 @@ class PiecewiseITS(BaseExperiment):
         titles, and the legend. Returns ``(fig, ax)``.
 
         ponytail: interruption vlines stay on matplotlib after ``.draw()``.
-        ``kind`` other than ``"ribbon"`` raises until migrated (#988). No
-        shared helper with ITS/SC/SDiD yet — assess PiecewiseITS alone.
         """
-        if kind != "ribbon":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
-                **kwargs,
-            )
-
         interval = "eti" if ci_kind == "eti" else "hdi"
         time_values = self.data[self.time_col].values
+        obs_to_t = pd.DataFrame({"obs_ind": range(len(time_values)), "t": time_values})
         mid, bot = "Causal Effect", "Cumulative Causal Effect"
 
         r2_val = None
@@ -765,6 +757,42 @@ class PiecewiseITS(BaseExperiment):
             band["t"] = time_values
             return band.assign(series=series, panel=panel)
 
+        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
+            tagged = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = tagged.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            return tagged.join(chosen, on="_draw_id").sort("obs_ind")
+
+        def _pred_spaghetti(pred, series, panel):
+            newdata = pd.DataFrame({"obs_ind": self.data.index})
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            if "treated_units" in draws.columns:
+                draws = draws.filter(
+                    pl.col("treated_units") == draws["treated_units"][0]
+                )
+            sampled = (
+                _sample_draw_lines(draws, num_samples)
+                .to_pandas()
+                .merge(obs_to_t, on="obs_ind")
+            )
+            return sampled.assign(series=series, panel=panel)
+
+        def _da_spaghetti(da, series, panel):
+            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
+            if "treated_units" in tidy.columns:
+                first = tidy["treated_units"][0]
+                tidy = tidy.filter(pl.col("treated_units") == first)
+            sampled = (
+                _sample_draw_lines(tidy, num_samples)
+                .to_pandas()
+                .merge(obs_to_t, on="obs_ind")
+            )
+            return sampled.assign(series=series, panel=panel)
+
         fit_band = _pred_band(self.y_pred, "Fitted", top)
         cf_band = _pred_band(self.y_counterfactual, "Counterfactual", top)
         effect_band = _da_band(self.effect, "effect", mid)
@@ -776,6 +804,42 @@ class PiecewiseITS(BaseExperiment):
                 _da_band(self.cumulative_effect, "cumulative", bot),
             ]
         )
+
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_df = pd.concat(
+                [
+                    _pred_spaghetti(self.y_pred, "Fitted", top),
+                    _pred_spaghetti(self.y_counterfactual, "Counterfactual", top),
+                    _da_spaghetti(self.effect, "effect", mid),
+                    _da_spaghetti(self.cumulative_effect, "cumulative", bot),
+                ]
+            )
+
+        hist_layers: (
+            list[tuple[int, Any, xr.DataArray, dict[str, Any], np.ndarray | None]]
+            | None
+        ) = None
+        if kind == "histogram":
+            y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
+            if "treated_units" in y_pred_mu.dims:
+                y_pred_mu = y_pred_mu.isel(treated_units=0)
+            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
+            if "treated_units" in y_cf_mu.dims:
+                y_cf_mu = y_cf_mu.isel(treated_units=0)
+            effect_mu = self.effect
+            if hasattr(effect_mu, "dims") and "treated_units" in effect_mu.dims:
+                effect_mu = effect_mu.isel(treated_units=0)
+            cum_mu = self.cumulative_effect
+            if hasattr(cum_mu, "dims") and "treated_units" in cum_mu.dims:
+                cum_mu = cum_mu.isel(treated_units=0)
+            hist_top_edges = histogram_y_edges(y_pred_mu, y_cf_mu)
+            hist_layers = [
+                (0, time_values, y_pred_mu, {"color": "C0"}, hist_top_edges),
+                (0, time_values, y_cf_mu, {"color": "C1"}, hist_top_edges),
+                (1, time_values, effect_mu, {"color": "C2"}, None),
+                (2, time_values, cum_mu, {"color": "C3"}, None),
+            ]
 
         obs = pd.DataFrame(
             {
@@ -791,7 +855,10 @@ class PiecewiseITS(BaseExperiment):
         )
 
         panels = [top, mid, bot]
-        for frame in (bands, obs, shade_mid):
+        frames = [bands, obs, shade_mid]
+        if spaghetti_df is not None:
+            frames.append(spaghetti_df)
+        for frame in frames:
             frame["panel"] = pd.Categorical(
                 frame["panel"], categories=panels, ordered=True
             )
@@ -808,21 +875,39 @@ class PiecewiseITS(BaseExperiment):
             zero_df["panel"], categories=panels, ordered=True
         )
 
+        p = ggplot() + geom_ribbon(
+            shade_mid,
+            aes("t", ymin="y1", ymax="y2"),
+            fill="#2ca02c",
+            alpha=0.25,
+        )
+        if kind == "histogram":
+            p = p + geom_line(bands, aes("t", "mu", color="series"))
+        elif kind == "spaghetti":
+            p = (
+                p
+                + geom_line(
+                    spaghetti_df,
+                    aes("t", "mu", group="_draw_id", color="series"),
+                    alpha=0.1,
+                    size=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("t", "mu", color="series"))
+            )
+        else:
+            p = (
+                p
+                + geom_ribbon(
+                    bands,
+                    aes("t", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                    alpha=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("t", "mu", color="series"))
+            )
         p = (
-            ggplot()
-            + geom_ribbon(
-                shade_mid,
-                aes("t", ymin="y1", ymax="y2"),
-                fill="#2ca02c",
-                alpha=0.25,
-            )
-            + geom_ribbon(
-                bands,
-                aes("t", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                alpha=0.3,
-                show_legend=False,
-            )
-            + geom_line(bands, aes("t", "mu", color="series"))
+            p
             + geom_point(obs, aes("t", "y", color="series"), size=1)
             + geom_hline(
                 zero_df,
@@ -842,12 +927,33 @@ class PiecewiseITS(BaseExperiment):
                 figure_size=figsize,
                 panel_spacing_y=0.06,
                 plot_margin_bottom=0.08,
+                **(
+                    {
+                        "panel_background": element_rect(fill="white"),
+                        "panel_grid_major": element_blank(),
+                        "panel_grid_minor": element_blank(),
+                    }
+                    if kind == "histogram"
+                    else {}
+                ),
             )
         )
 
         fig = p.draw()
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
         ax = np.asarray(axes[:3])
+        if hist_layers is not None:
+            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
+            for panel_idx, x_vals, y_da, extra, y_edges in hist_layers:
+                _plot_histogram(
+                    x_vals,
+                    y_da,
+                    ax[panel_idx],
+                    {**hist_kwargs, **extra},
+                    None,
+                    y_edges=y_edges,
+                    draw_mean=False,
+                )
 
         handles: list[Any] = [
             Line2D([0], [0], color="black", marker=".", linestyle=""),

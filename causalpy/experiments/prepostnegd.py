@@ -27,6 +27,8 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
+    element_blank,
+    element_rect,
     facet_wrap,
     geom_density,
     geom_line,
@@ -34,9 +36,11 @@ from plotnine import (
     geom_ribbon,
     geom_vline,
     ggplot,
+    guides,
     labs,
     scale_color_manual,
     scale_fill_manual,
+    theme,
 )
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -44,7 +48,12 @@ from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, histogram_y_edges, plot_xY
+from causalpy.plot_utils import (
+    _plot_histogram,
+    _PlotXYStyle,
+    histogram_y_edges,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -264,7 +273,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot:
+    ) -> ggplot | tuple[plt.Figure, np.ndarray]:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -281,17 +290,15 @@ class PrePostNEGD(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
-            not yet migrated to plotnine and raise ``ValueError``; tracked in
-            issue #988.
+            (mean + credible band).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Unused until ``kind="spaghetti"`` is migrated; retained for API
-            compatibility.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
         figsize : tuple of (float, float)
             Unused for the plotnine path; retained for API compatibility.
             Defaults to ``(7, 9)``.
@@ -306,10 +313,11 @@ class PrePostNEGD(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot
-            A two-facet :class:`plotnine.ggplot` (top: scatter + posterior
-            predictive bands; bottom: estimated treatment effect posterior).
-            Call ``.draw()`` for the matplotlib figure.
+        plotnine.ggplot or tuple of (matplotlib.figure.Figure, numpy.ndarray)
+            A two-facet plot (top: scatter + posterior predictive bands;
+            bottom: estimated treatment effect posterior). ``kind="ribbon"``
+            returns a :class:`plotnine.ggplot`; other kinds return
+            ``(fig, ax)`` after drawing.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -441,29 +449,21 @@ class PrePostNEGD(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
-    ) -> ggplot:
+    ) -> ggplot | tuple[plt.Figure, np.ndarray]:
         """Generate a plotnine plot for pretest/posttest nonequivalent group designs.
 
-        Returns a two-facet :class:`plotnine.ggplot` for ``kind="ribbon"``: the
-        top facet shows the pre/post scatter plus control and treatment
-        posterior predictive bands; the bottom facet shows the estimated
-        treatment effect posterior as a density with a reference line at zero
-        and the credible interval bounds (replacing ``az.plot_posterior``).
+        Returns a two-facet plot for ``kind="ribbon"``: the top facet shows the
+        pre/post scatter plus control and treatment posterior predictive bands;
+        the bottom facet shows the estimated treatment effect posterior as a
+        density with a reference line at zero and the credible interval bounds
+        (replacing ``az.plot_posterior``).
 
-        ponytail: ``spaghetti`` / ``histogram`` not migrated yet — raise until
-        a clean plotnine form exists (#988).
+        ``kind="spaghetti"`` and ``kind="histogram"`` return ``(fig, ax)``
+        after drawing; the top facet uses sampled draws or a matplotlib
+        ``pcolormesh`` density layer respectively.
+
+        ponytail: bottom-facet effect density is unchanged across ``kind`` values.
         """
-        if kind != "ribbon":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
-                **kwargs,
-            )
-
         top = "Pretest vs posttest"
         bottom = "Estimated treatment effect"
         interval = "eti" if ci_kind == "eti" else "hdi"
@@ -504,12 +504,52 @@ class PrePostNEGD(BaseExperiment):
             summ["panel"] = top
             return summ
 
+        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
+            tagged = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = tagged.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            return tagged.join(chosen, on="_draw_id").sort("pre")
+
+        def _band_spaghetti(pred, series):
+            newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
+            newdata["obs_ind"] = range(len(newdata))
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            return (
+                _sample_draw_lines(draws, num_samples)
+                .to_pandas()
+                .rename(columns={"pre": "_x", "mu": "_y"})
+                .assign(series=series, panel=top)
+            )
+
         bands = pd.concat(
             [
                 _band(self.pred_untreated, "Control group"),
                 _band(self.pred_treated, "Treatment group"),
             ]
         )
+
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_df = pd.concat(
+                [
+                    _band_spaghetti(self.pred_untreated, "Control group"),
+                    _band_spaghetti(self.pred_treated, "Treatment group"),
+                ]
+            )
+
+        hist_edges = None
+        if kind == "histogram":
+            untreated_mu = self.pred_untreated["posterior_predictive"].mu.isel(
+                treated_units=0
+            )
+            treated_mu = self.pred_treated["posterior_predictive"].mu.isel(
+                treated_units=0
+            )
+            hist_edges = histogram_y_edges(untreated_mu, treated_mu)
 
         # Bottom facet: treatment effect posterior samples + interval summary.
         effect = np.asarray(self.causal_impact).ravel()
@@ -547,16 +587,34 @@ class PrePostNEGD(BaseExperiment):
             )
 
         colors = {"Control group": "#1f77b4", "Treatment group": "#ff7f0e"}
-        return (
-            ggplot()
-            + geom_point(scatter, aes("_x", "_y", color="series"), alpha=0.5)
-            + geom_ribbon(
-                bands,
-                aes("_x", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                alpha=0.3,
-                show_legend=False,
+        p = ggplot() + geom_point(scatter, aes("_x", "_y", color="series"), alpha=0.5)
+        if kind == "histogram":
+            p = p + geom_line(bands, aes("_x", "_y", color="series"))
+        elif kind == "spaghetti":
+            p = (
+                p
+                + geom_line(
+                    spaghetti_df,
+                    aes("_x", "_y", group="_draw_id", color="series"),
+                    alpha=0.1,
+                    size=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("_x", "_y", color="series"))
             )
-            + geom_line(bands, aes("_x", "_y", color="series"))
+        else:
+            p = (
+                p
+                + geom_ribbon(
+                    bands,
+                    aes("_x", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                    alpha=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("_x", "_y", color="series"))
+            )
+        p = (
+            p
             + geom_density(effect_df, aes("_x"))
             + geom_vline(
                 refs[refs["ref"] == "zero"], aes(xintercept="_x"), color="grey"
@@ -570,8 +628,43 @@ class PrePostNEGD(BaseExperiment):
             + facet_wrap("panel", ncol=1, scales="free")
             + scale_color_manual(values=colors, name="")
             + scale_fill_manual(values=colors, name="")
+            + guides(color="none", fill="none")
             + labs(x="", y="", title=mean_label)
         )
+        if kind == "histogram":
+            p = p + theme(
+                panel_background=element_rect(fill="white"),
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+            )
+
+        if kind == "ribbon":
+            return p
+
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = np.asarray(axes[:2])
+        if kind == "histogram":
+            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
+            _plot_histogram(
+                self.pred_xi,
+                untreated_mu,
+                ax[0],
+                {**hist_kwargs, "color": "C0"},
+                None,
+                y_edges=hist_edges,
+                draw_mean=False,
+            )
+            _plot_histogram(
+                self.pred_xi,
+                treated_mu,
+                ax[0],
+                {**hist_kwargs, "color": "C1"},
+                None,
+                y_edges=hist_edges,
+                draw_mean=False,
+            )
+        return fig, ax
 
     def effect_summary(
         self,

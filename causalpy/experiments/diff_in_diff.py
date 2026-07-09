@@ -19,6 +19,7 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
 import seaborn as sns
 import tidydraws as td
 import xarray as xr
@@ -29,6 +30,8 @@ from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
     coord_cartesian,
+    element_blank,
+    element_rect,
     geom_line,
     geom_point,
     geom_ribbon,
@@ -38,6 +41,7 @@ from plotnine import (
     scale_color_manual,
     scale_fill_manual,
     scale_x_continuous,
+    theme,
 )
 from sklearn.base import RegressorMixin
 
@@ -47,7 +51,12 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, histogram_y_edges, plot_xY
+from causalpy.plot_utils import (
+    _plot_histogram,
+    _PlotXYStyle,
+    histogram_y_edges,
+    plot_xY,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -372,16 +381,15 @@ class DifferenceInDifferences(BaseExperiment):
             (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
-            not yet migrated and raise ``ValueError``; tracked in issue #988.
+            (mean + credible band).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Unused until ``kind="spaghetti"`` is migrated; retained for API
-            compatibility.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -643,18 +651,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         ponytail: single-period counterfactual stays on ``ax.violinplot``
         (no plotnine continuous-x violin); arrow/text stay on ``ax.annotate``.
-        ``kind`` other than ``"ribbon"`` raises until migrated (#988).
         """
-        if kind != "ribbon":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
-                **kwargs,
-            )
 
         def _plot_causal_impact_arrow(results, ax):
             """
@@ -745,6 +742,24 @@ class DifferenceInDifferences(BaseExperiment):
                 .assign(series=series)
             )
 
+        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
+            tagged = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = tagged.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            return tagged.join(chosen, on="_draw_id").sort(tcol)
+
+        def _pred_spaghetti(pred, newdata, series):
+            grid = newdata.reset_index(drop=True).copy()
+            grid["obs_ind"] = range(len(grid))
+            draws = td.prediction_draws(
+                pred, newdata=grid, var_name="mu", idata_group="posterior_predictive"
+            )
+            return (
+                _sample_draw_lines(draws, num_samples).to_pandas().assign(series=series)
+            )
+
         bands = pd.concat(
             [
                 _band(self.y_pred_control, self.x_pred_control, "Control group"),
@@ -765,16 +780,69 @@ class DifferenceInDifferences(BaseExperiment):
                 ]
             )
 
-        p = (
-            ggplot()
-            + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
-            + geom_ribbon(
-                bands,
-                aes(tcol, ymin="mu_lower", ymax="mu_upper", fill="series"),
-                alpha=0.3,
-                show_legend=False,
+        control_mu = self.y_pred_control["posterior_predictive"].mu.isel(
+            treated_units=0
+        )
+        treatment_mu = self.y_pred_treatment["posterior_predictive"].mu.isel(
+            treated_units=0
+        )
+        counterfactual_mu = self.y_pred_counterfactual.posterior_predictive.mu.isel(
+            treated_units=0
+        )
+        hist_edges = (
+            histogram_y_edges(control_mu, treatment_mu, counterfactual_mu)
+            if kind == "histogram"
+            else None
+        )
+
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_parts = [
+                _pred_spaghetti(
+                    self.y_pred_control, self.x_pred_control, "Control group"
+                ),
+                _pred_spaghetti(
+                    self.y_pred_treatment, self.x_pred_treatment, "Treatment group"
+                ),
+            ]
+            if len(time_points) > 1:
+                spaghetti_parts.append(
+                    _pred_spaghetti(
+                        self.y_pred_counterfactual,
+                        self.x_pred_counterfactual,
+                        "Counterfactual",
+                    )
+                )
+            spaghetti_df = pd.concat(spaghetti_parts)
+
+        p = ggplot() + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
+        if kind == "histogram":
+            p = p + geom_line(bands, aes(tcol, "mu", color="series"))
+        elif kind == "spaghetti":
+            p = (
+                p
+                + geom_line(
+                    spaghetti_df,
+                    aes(tcol, "mu", group="_draw_id", color="series"),
+                    alpha=0.1,
+                    size=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes(tcol, "mu", color="series"))
             )
-            + geom_line(bands, aes(tcol, "mu", color="series"))
+        else:
+            p = (
+                p
+                + geom_ribbon(
+                    bands,
+                    aes(tcol, ymin="mu_lower", ymax="mu_upper", fill="series"),
+                    alpha=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes(tcol, "mu", color="series"))
+            )
+        p = (
+            p
             + scale_color_manual(values=colors, name="")
             + scale_fill_manual(values=colors, name="")
             # Drop plotnine's guide; rebuild a matplotlib legend after .draw()
@@ -796,12 +864,49 @@ class DifferenceInDifferences(BaseExperiment):
             )
             + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
+        if kind == "histogram":
+            p = p + theme(
+                panel_background=element_rect(fill="white"),
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+            )
 
         # Escape hatch: continuous-x violin + arrow need a real Axes.
         # Rebuild a matplotlib legend so ``legend_kwargs`` in ``_render_plot``
         # can still mutate it (plotnine's guide is not an ``Axes`` legend).
         fig = p.draw()
         ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
+        if kind == "histogram":
+            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
+            ctrl_t = self.x_pred_control[tcol].values
+            _plot_histogram(
+                ctrl_t,
+                control_mu,
+                ax,
+                {**hist_kwargs, "color": "C0"},
+                None,
+                y_edges=hist_edges,
+                draw_mean=False,
+            )
+            _plot_histogram(
+                self.x_pred_treatment[tcol].values,
+                treatment_mu,
+                ax,
+                {**hist_kwargs, "color": "C1"},
+                None,
+                y_edges=hist_edges,
+                draw_mean=False,
+            )
+            if len(time_points) > 1:
+                _plot_histogram(
+                    self.x_pred_counterfactual[tcol].values,
+                    counterfactual_mu,
+                    ax,
+                    {**hist_kwargs, "color": "C2"},
+                    None,
+                    y_edges=hist_edges,
+                    draw_mean=False,
+                )
         legend_labels = ["Control group", "Treatment group"]
         if len(time_points) > 1:
             legend_labels.append("Counterfactual")
