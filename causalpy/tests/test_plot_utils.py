@@ -214,25 +214,30 @@ def test_posterior_histogram_tiles_use_draw_proportions(synthetic_posterior_draw
 
 def test_histogram_layers_share_explicit_y_grid(synthetic_posterior_draws):
     from causalpy.plot_utils import (
-        HistogramLayer,
-        concat_histogram_tiles,
         histogram_y_edges,
+        posterior_histogram_tiles,
     )
 
     shifted = synthetic_posterior_draws.with_columns(
         mu=synthetic_posterior_draws["mu"] + 10
     )
     edges = histogram_y_edges(synthetic_posterior_draws, shifted)
-    tiles = concat_histogram_tiles(
+    tiles = pd.concat(
         [
-            HistogramLayer(
+            posterior_histogram_tiles(
                 synthetic_posterior_draws,
                 "obs_ind",
                 panel="first",
                 y_edges=edges,
             ),
-            HistogramLayer(shifted, "obs_ind", panel="second", y_edges=edges),
-        ]
+            posterior_histogram_tiles(
+                shifted,
+                "obs_ind",
+                panel="second",
+                y_edges=edges,
+            ),
+        ],
+        ignore_index=True,
     )
 
     assert set(tiles["panel"]) == {"first", "second"}
@@ -252,13 +257,6 @@ def test_posterior_histogram_tiles_render_with_plotnine(synthetic_posterior_draw
     fig = p.draw(show=False)
     assert fig.axes
     plt.close(fig)
-
-
-def test_concat_histogram_tiles_empty_raises():
-    from causalpy.plot_utils import concat_histogram_tiles
-
-    with pytest.raises(ValueError, match="at least one layer"):
-        concat_histogram_tiles([])
 
 
 def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_draws):

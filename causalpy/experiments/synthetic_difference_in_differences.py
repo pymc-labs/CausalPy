@@ -16,6 +16,7 @@ Synthetic Difference-in-Differences Experiment.
 """
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -24,21 +25,19 @@ import pandas as pd
 import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from plotnine import aes, element_text, geom_vline, theme
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.plot_utils import (
-    HistogramLayer,
     PlotSpec,
+    add_causal_panel_legend,
     build_causal_panel_plot,
-    concat_histogram_tiles,
     dataarray_draws,
     interval_kind,
     label_draws,
+    posterior_histogram_tiles,
     prediction_draws,
     spaghetti_draws,
     summarize_draws,
@@ -47,6 +46,17 @@ from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeig
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _SyntheticDiDPlotData:
+    """Tidy tables consumed by the declarative synthetic DiD plot."""
+
+    intervals: pd.DataFrame
+    observations: pd.DataFrame
+    effect_area: pd.DataFrame
+    posterior_paths: pd.DataFrame | None
+    posterior_density: pd.DataFrame | None
 
 
 class SyntheticDifferenceInDifferences(BaseExperiment):
@@ -684,15 +694,118 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
-    @staticmethod
-    def _convert_treatment_time_for_axis(
-        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
-    ) -> int | float | pd.Timestamp:
-        """Convert treatment time into the plotting units expected by a specific axis."""
-        try:
-            return axis.xaxis.convert_units(treatment_time)
-        except (TypeError, ValueError):
-            return treatment_time
+    def _prepare_bayesian_plot_data(
+        self,
+        *,
+        treated_unit: str,
+        panels: tuple[str, str, str],
+        ci_prob: float,
+        interval: Literal["hdi", "eti"],
+        kind: Literal["ribbon", "histogram", "spaghetti"],
+        num_samples: int,
+    ) -> _SyntheticDiDPlotData:
+        """Prepare tidy posterior and observed tables for plotting."""
+        top, middle, bottom = panels
+        pre_predictions = prediction_draws(
+            self.pre_pred,
+            pd.DataFrame({"obs_ind": self.datapre.index}),
+            treated_unit=treated_unit,
+        )
+        post_predictions = prediction_draws(
+            self.post_pred,
+            pd.DataFrame({"obs_ind": self.datapost.index}),
+            treated_unit=treated_unit,
+        )
+        pre_effect = dataarray_draws(self.pre_impact, treated_unit=treated_unit)
+        post_effect = dataarray_draws(self.post_impact, treated_unit=treated_unit)
+        cumulative_effect = dataarray_draws(
+            self.post_impact_cumulative, treated_unit=treated_unit
+        )
+        panel_draws = pl.concat(
+            [
+                label_draws(
+                    pre_predictions,
+                    series="Pre-intervention fit",
+                    panel=top,
+                ),
+                label_draws(
+                    post_predictions,
+                    series="Counterfactual",
+                    panel=top,
+                ),
+                label_draws(pre_effect, series="pre", panel=middle),
+                label_draws(post_effect, series="post", panel=middle),
+                label_draws(cumulative_effect, series="post", panel=bottom),
+            ],
+            how="diagonal_relaxed",
+        )
+        grouping = ["panel", "series", "obs_ind"]
+        intervals = summarize_draws(
+            panel_draws,
+            group_by=grouping,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+        observations = pd.DataFrame(
+            {
+                "obs_ind": self.data.index,
+                "y": self.data[self.treated_units].mean(axis=1).to_numpy(),
+                "series": "Observations",
+                "panel": top,
+            }
+        )
+        post_prediction = intervals.query(
+            "panel == @top and series == 'Counterfactual'"
+        )
+        post_impact = intervals.query("panel == @middle and series == 'post'")
+        post_observations = observations.loc[
+            observations["obs_ind"].isin(self.datapost.index.tolist()),
+            ["obs_ind", "y"],
+        ]
+        effect_area = pd.concat(
+            [
+                post_prediction[["obs_ind", "mu"]]
+                .merge(post_observations, on="obs_ind")
+                .rename(columns={"mu": "y1", "y": "y2"})
+                .assign(panel=top),
+                post_impact[["obs_ind", "mu"]]
+                .rename(columns={"mu": "y1"})
+                .assign(y2=0.0, panel=middle),
+            ],
+            ignore_index=True,
+        )
+        posterior_paths = (
+            spaghetti_draws(
+                panel_draws,
+                group_by=grouping,
+                num_samples=num_samples,
+            )
+            if kind == "spaghetti"
+            else None
+        )
+        posterior_density = (
+            pd.concat(
+                [
+                    posterior_histogram_tiles(
+                        panel_draws.filter(pl.col("panel") == panel),
+                        "obs_ind",
+                        x_col="obs_ind",
+                        panel=panel,
+                    )
+                    for panel in panels
+                ],
+                ignore_index=True,
+            )
+            if kind == "histogram"
+            else None
+        )
+        return _SyntheticDiDPlotData(
+            intervals=intervals,
+            observations=observations,
+            effect_area=effect_area,
+            posterior_paths=posterior_paths,
+            posterior_density=posterior_density,
+        )
 
     def _bayesian_plot(
         self,
@@ -704,122 +817,23 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
     ) -> PlotSpec:
-        """Plot SDiD results via a faceted plotnine base plus matplotlib overlays.
-
-        ponytail: treatment vline and date formatting stay on matplotlib after
-        ``.draw()``.
-        """
+        """Build the Bayesian synthetic DiD plot from tidy declarative layers."""
         treated_unit = self.treated_units[0]
-        interval = interval_kind(ci_kind)
-        mid, bot = "Causal Impact", "Cumulative Causal Impact"
         tau_mean = float(self.tau_posterior.mean())
         r_to = round_to if round_to is not None else 2
-        title_str = f"SDiD: ATT = {round(tau_mean, r_to)}"
-        top = title_str  # facet key; real title set on ax after .draw()
-
-        def _pred_draws(pred, index):
-            newdata = pd.DataFrame({"obs_ind": index})
-            return prediction_draws(
-                pred,
-                newdata,
-                treated_unit=treated_unit,
-            )
-
-        pre_pred_draws = _pred_draws(self.pre_pred, self.datapre.index)
-        post_pred_draws = _pred_draws(self.post_pred, self.datapost.index)
-        pre_impact_draws = dataarray_draws(self.pre_impact, treated_unit=treated_unit)
-        post_impact_draws = dataarray_draws(self.post_impact, treated_unit=treated_unit)
-        cumulative_draws = dataarray_draws(
-            self.post_impact_cumulative, treated_unit=treated_unit
+        panels = (
+            f"SDiD: ATT = {round(tau_mean, r_to)}",
+            "Causal Impact",
+            "Cumulative Causal Impact",
         )
-
-        all_draws = pl.concat(
-            [
-                label_draws(
-                    pre_pred_draws,
-                    series="Pre-intervention fit",
-                    panel=top,
-                ),
-                label_draws(post_pred_draws, series="Counterfactual", panel=top),
-                label_draws(pre_impact_draws, series="pre", panel=mid),
-                label_draws(post_impact_draws, series="post", panel=mid),
-                label_draws(cumulative_draws, series="post", panel=bot),
-            ],
-            how="diagonal_relaxed",
-        )
-        group_by = ["panel", "series", "obs_ind"]
-        bands = summarize_draws(
-            all_draws,
-            group_by=group_by,
+        plot_data = self._prepare_bayesian_plot_data(
+            treated_unit=treated_unit,
+            panels=panels,
             ci_prob=ci_prob,
-            interval=interval,
+            interval=interval_kind(ci_kind),
+            kind=kind,
+            num_samples=num_samples,
         )
-        post_band = bands.query("panel == @top and series == 'Counterfactual'")
-        post_impact_band = bands.query("panel == @mid and series == 'post'")
-
-        spaghetti_df = None
-        if kind == "spaghetti":
-            spaghetti_df = spaghetti_draws(
-                all_draws,
-                group_by=group_by,
-                num_samples=num_samples,
-            )
-
-        histogram_tiles = None
-        if kind == "histogram":
-            histogram_tiles = concat_histogram_tiles(
-                [
-                    HistogramLayer(
-                        pl.concat([pre_pred_draws, post_pred_draws]),
-                        "obs_ind",
-                        panel=top,
-                    ),
-                    HistogramLayer(
-                        pl.concat([pre_impact_draws, post_impact_draws]),
-                        "obs_ind",
-                        panel=mid,
-                    ),
-                    HistogramLayer(
-                        cumulative_draws,
-                        "obs_ind",
-                        panel=bot,
-                    ),
-                ],
-                x_col="obs_ind",
-            )
-
-        obs = pd.concat(
-            [
-                pd.DataFrame(
-                    {
-                        "obs_ind": self.datapre.index,
-                        "y": self.datapre[self.treated_units].values.mean(axis=1),
-                    }
-                ),
-                pd.DataFrame(
-                    {
-                        "obs_ind": self.datapost.index,
-                        "y": self.datapost[self.treated_units].values.mean(axis=1),
-                    }
-                ),
-            ]
-        ).assign(series="Observations", panel=top)
-
-        post_mean = post_band[["obs_ind", "mu"]].rename(columns={"mu": "y1"})
-        y_obs = obs.loc[obs["obs_ind"].isin(self.datapost.index), ["obs_ind", "y"]]
-        shade_top = (
-            post_mean.merge(y_obs, on="obs_ind")
-            .rename(columns={"y": "y2"})
-            .assign(panel=top)
-        )
-        shade_mid = (
-            post_impact_band[["obs_ind", "mu"]]
-            .rename(columns={"mu": "y1"})
-            .assign(y2=0.0, panel=mid)
-        )
-        shade_df = pd.concat([shade_top, shade_mid])
-
-        panels = [top, mid, bot]
         colors = {
             "Pre-intervention fit": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -828,74 +842,40 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             "post": "#ff7f0e",
         }
         p = build_causal_panel_plot(
-            bands,
-            obs,
-            panels=panels,
+            plot_data.intervals,
+            plot_data.observations,
+            panels=list(panels),
             colors=colors,
+            show_panel_titles=True,
             kind=kind,
-            shade_df=shade_df,
-            spaghetti_df=spaghetti_df,
-            histogram_tiles=histogram_tiles,
+            shade_df=plot_data.effect_area,
+            spaghetti_df=plot_data.posterior_paths,
+            histogram_tiles=plot_data.posterior_density,
             figsize=figsize,
         )
+        p += geom_vline(
+            pd.DataFrame({"obs_ind": [self.treatment_time]}),
+            aes(xintercept="obs_ind"),
+            color="red",
+            size=2,
+        )
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            p += theme(axis_text_x=element_text(rotation=45, ha="right"))
 
-        def overlay(fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            ax = np.asarray(axes[:3])
-            for a in ax:
-                treatment_time = self._convert_treatment_time_for_axis(
-                    a, self.treatment_time
-                )
-                a.axvline(x=treatment_time, ls="-", lw=3, color="r")
-
-            legend_labels = [
-                "Pre-intervention fit",
-                "Observations",
-                "Counterfactual",
-                "Causal impact",
-            ]
-            legend_colors = {
-                "Pre-intervention fit": "#1f77b4",
-                "Observations": "black",
-                "Counterfactual": "#ff7f0e",
-                "Causal impact": "#1f77b4",
-            }
-            handles = []
-            for label in legend_labels:
-                if label == "Observations":
-                    handles.append(
-                        Line2D([0], [0], color="black", marker=".", linestyle="")
-                    )
-                elif label == "Causal impact":
-                    handles.append(Patch(facecolor="#1f77b4", alpha=0.25))
-                else:
-                    handles.append(
-                        (
-                            Line2D([0], [0], color=legend_colors[label]),
-                            Patch(facecolor=legend_colors[label], alpha=0.3),
-                        )
-                    )
-            ax[0].legend(
-                handles=handles, labels=legend_labels, fontsize=LEGEND_FONT_SIZE
+        def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            add_causal_panel_legend(
+                axes[0],
+                labels=[
+                    "Pre-intervention fit",
+                    "Observations",
+                    "Counterfactual",
+                    "Causal impact",
+                ],
+                colors={**colors, "Causal impact": "#1f77b4"},
+                area_labels={"Causal impact"},
             )
-            ax[0].set_title(title_str)
-            ax[1].set_title(mid)
-            ax[2].set_title(bot)
-            for a in ax[:-1]:
-                a.tick_params(axis="x", labelbottom=False)
 
-            if isinstance(self.datapre.index, pd.DatetimeIndex):
-                full_index = _combine_datetime_indices(
-                    pd.DatetimeIndex(self.datapre.index),
-                    pd.DatetimeIndex(self.datapost.index),
-                )
-                format_date_axes(list(ax), full_index)
-                for label in ax[-1].get_xticklabels():
-                    label.set_rotation(45)
-                    label.set_ha("right")
-                    label.set_va("top")
-                fig.subplots_adjust(bottom=0.12)
-
-        return PlotSpec(p, overlay=overlay, n_panels=3)
+        return PlotSpec(p, overlay=add_legend, n_panels=3)
 
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """OLS not supported for SDiD."""

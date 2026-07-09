@@ -30,6 +30,7 @@ import polars as pl
 import tidydraws as td
 import xarray as xr
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from pandas.api.extensions import ExtensionArray
 from plotnine import (
     aes,
@@ -298,16 +299,6 @@ def spaghetti_draws(
     return sampled.to_pandas()
 
 
-@dataclass(frozen=True)
-class HistogramLayer:
-    """One posterior heatmap source for :func:`concat_histogram_tiles`."""
-
-    draws: pl.DataFrame
-    x: str
-    panel: str | None = None
-    y_edges: np.ndarray | None = None
-
-
 def posterior_kind_layers(
     bands: pd.DataFrame,
     kind: Literal["ribbon", "histogram", "spaghetti"],
@@ -333,7 +324,7 @@ def posterior_kind_layers(
     spaghetti_df : pandas.DataFrame, optional
         Sampled draws when ``kind="spaghetti"``.
     histogram_tiles : pandas.DataFrame, optional
-        Tidy tile grid from :func:`concat_histogram_tiles` when
+        Tidy tile grid from :func:`posterior_histogram_tiles` when
         ``kind="histogram"``.
     ymin, ymax : str, optional
         Interval bound columns for ribbon mode.
@@ -430,6 +421,7 @@ def add_causal_panel_legend(
     *,
     labels: list[str],
     colors: dict[str, str],
+    area_labels: set[str] | None = None,
 ) -> None:
     """Add the Matplotlib legend required by the public ``legend_kwargs`` API.
 
@@ -441,15 +433,20 @@ def add_causal_panel_legend(
         Ordered legend entries.
     colors : dict
         Color for each legend entry.
+    area_labels : set of str, optional
+        Entries represented by filled areas rather than lines.
     """
-    handles = [
-        (
-            Line2D([0], [0], color=colors[label], marker=".", linestyle="")
-            if label == "Observations"
-            else Line2D([0], [0], color=colors[label])
-        )
-        for label in labels
-    ]
+    area_labels = area_labels or set()
+    handles = []
+    for label in labels:
+        if label in area_labels:
+            handles.append(Patch(facecolor=colors[label], alpha=0.25))
+        elif label == "Observations":
+            handles.append(
+                Line2D([0], [0], color=colors[label], marker=".", linestyle="")
+            )
+        else:
+            handles.append(Line2D([0], [0], color=colors[label]))
     ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
 
 
@@ -698,37 +695,6 @@ def posterior_histogram_tiles(
     if panel is not None:
         tiles["panel"] = panel
     return tiles
-
-
-def concat_histogram_tiles(
-    layers: list[HistogramLayer],
-    *,
-    x_col: str = "x",
-    y_col: str = "y",
-) -> pd.DataFrame:
-    """Concatenate tidy heatmap tiles for multiple posterior series/panels.
-
-    Parameters
-    ----------
-    layers : list of HistogramLayer
-        One heatmap source per series or facet panel.
-    x_col, y_col : str
-        Column names passed through to :func:`posterior_histogram_tiles`.
-    """
-    if not layers:
-        raise ValueError("concat_histogram_tiles requires at least one layer")
-    parts = [
-        posterior_histogram_tiles(
-            layer.draws,
-            layer.x,
-            x_col=x_col,
-            y_col=y_col,
-            y_edges=layer.y_edges,
-            panel=layer.panel,
-        )
-        for layer in layers
-    ]
-    return pd.concat(parts, ignore_index=True)
 
 
 def histogram_y_edges(

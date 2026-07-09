@@ -14,6 +14,7 @@
 """Regression discontinuity design."""
 
 import warnings  # noqa: I001
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -55,6 +56,17 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _RDPlotData:
+    """Tidy tables consumed by the declarative RD plot."""
+
+    points: pd.DataFrame
+    intervals: pd.DataFrame
+    posterior_paths: pd.DataFrame | None
+    posterior_density: pd.DataFrame | None
+    colors: dict[str, str]
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -388,25 +400,16 @@ class RegressionDiscontinuity(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _prepare_bayesian_plot_data(
         self,
-        round_to: int | None = 2,
-        ci_prob: float = HDI_PROB,
-        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-        ci_kind: Literal["hdi", "eti"] = "hdi",
-        num_samples: int = 50,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> ggplot:
-        """Generate a plotnine plot for regression discontinuity designs.
-
-        Returns a :class:`plotnine.ggplot` or :class:`~causalpy.plot_utils.PlotSpec`
-        when ``kind="histogram"`` needs a matplotlib density overlay.
-        """
+        *,
+        ci_prob: float,
+        interval: Literal["hdi", "eti"],
+        kind: Literal["ribbon", "histogram", "spaghetti"],
+        num_samples: int,
+    ) -> _RDPlotData:
+        """Prepare observed and posterior tables for plotting."""
         xcol = self.running_variable_name
-        ycol = self.outcome_variable_name
-
-        # Observed data points, tagged so excluded (donut) rows render greyed.
         points = self.data.copy()
         has_exclusion = len(self.fit_data) < len(self.data)
         point_label = "fit data" if has_exclusion else "data"
@@ -417,49 +420,68 @@ class RegressionDiscontinuity(BaseExperiment):
             if has_exclusion
             else "data"
         )
-
-        # Posterior predictive draws → tidy point + interval summary.
         newdata = self.x_pred.reset_index(drop=True)
         newdata["obs_ind"] = range(len(newdata))
-        interval = interval_kind(ci_kind)
         draws = prediction_draws(self.pred, newdata)
-        summary = summarize_draws(
+        intervals = summarize_draws(
             draws,
             group_by=xcol,
             ci_prob=ci_prob,
             interval=interval,
-        )
-        spaghetti_df = (
+        ).assign(series="Posterior mean")
+        posterior_paths = (
             spaghetti_draws(
                 draws,
                 group_by=xcol,
                 num_samples=num_samples,
-            )
+            ).assign(series="Posterior mean")
             if kind == "spaghetti"
             else None
         )
-        summary["series"] = "Posterior mean"
-        if spaghetti_df is not None:
-            spaghetti_df = spaghetti_df.assign(series="Posterior mean")
-
-        color_values = {point_label: "black", "Posterior mean": "#ff7f0e"}
+        colors = {point_label: "black", "Posterior mean": "#ff7f0e"}
         if has_exclusion:
-            color_values["excluded data"] = "lightgray"
-
-        p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
-        histogram_tiles = None
-        if kind == "histogram":
-            histogram_tiles = posterior_histogram_tiles(draws, xcol)
-        p = add_posterior_kind(
-            p,
-            summary,
-            kind,
-            x=xcol,
-            spaghetti_df=spaghetti_df,
-            histogram_tiles=histogram_tiles,
+            colors["excluded data"] = "lightgray"
+        return _RDPlotData(
+            points=points,
+            intervals=intervals,
+            posterior_paths=posterior_paths,
+            posterior_density=(
+                posterior_histogram_tiles(draws, xcol) if kind == "histogram" else None
+            ),
+            colors=colors,
         )
 
-        # Title: Bayesian R^2 on fit data + discontinuity credible interval.
+    def _bayesian_plot(
+        self,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
+    ) -> ggplot:
+        """Build the Bayesian RD plot from tidy declarative layers."""
+        xcol = self.running_variable_name
+        ycol = self.outcome_variable_name
+        plot_data = self._prepare_bayesian_plot_data(
+            ci_prob=ci_prob,
+            interval=interval_kind(ci_kind),
+            kind=kind,
+            num_samples=num_samples,
+        )
+        p = ggplot() + geom_point(
+            plot_data.points, aes(xcol, ycol, color="series"), size=1.5
+        )
+        p = add_posterior_kind(
+            p,
+            plot_data.intervals,
+            kind,
+            x=xcol,
+            spaghetti_df=plot_data.posterior_paths,
+            histogram_tiles=plot_data.posterior_density,
+        )
+
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
         percentiles = self.discontinuity_at_threshold.quantile(
@@ -479,7 +501,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 "series": ["treatment threshold"],
             }
         )
-        color_values["treatment threshold"] = "red"
+        plot_data.colors["treatment threshold"] = "red"
         p = p + geom_vline(
             thr_df, aes(xintercept="xintercept", color="series"), size=1.5
         )
@@ -499,11 +521,11 @@ class RegressionDiscontinuity(BaseExperiment):
                 linetype="dashed",
                 size=1,
             )
-            color_values["donut boundary"] = "orange"
+            plot_data.colors["donut boundary"] = "orange"
 
         p = (
             p
-            + scale_color_manual(values=color_values, name="")
+            + scale_color_manual(values=plot_data.colors, name="")
             + labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
         )
         if kind == "histogram":

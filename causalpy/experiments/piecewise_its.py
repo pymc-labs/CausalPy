@@ -15,6 +15,7 @@
 
 import re
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -23,23 +24,22 @@ import pandas as pd
 import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from patsy import dmatrices
+from plotnine import aes, geom_vline
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    HistogramLayer,
     PlotSpec,
+    add_causal_panel_legend,
     build_causal_panel_plot,
-    concat_histogram_tiles,
     dataarray_draws,
     histogram_y_edges,
     interval_kind,
     label_draws,
+    posterior_histogram_tiles,
     prediction_draws,
     spaghetti_draws,
     summarize_draws,
@@ -50,6 +50,17 @@ from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _PiecewiseITSPlotData:
+    """Tidy tables consumed by the declarative piecewise ITS plot."""
+
+    intervals: pd.DataFrame
+    observations: pd.DataFrame
+    effect_area: pd.DataFrame
+    posterior_paths: pd.DataFrame | None
+    posterior_density: pd.DataFrame | None
 
 
 class PiecewiseITS(BaseExperiment):
@@ -513,6 +524,110 @@ class PiecewiseITS(BaseExperiment):
             figsize=figsize,
         )
 
+    def _prepare_bayesian_plot_data(
+        self,
+        *,
+        panels: tuple[str, str, str],
+        ci_prob: float,
+        interval: Literal["hdi", "eti"],
+        kind: Literal["ribbon", "histogram", "spaghetti"],
+        num_samples: int,
+    ) -> _PiecewiseITSPlotData:
+        """Prepare tidy posterior and observed tables for plotting."""
+        top, middle, bottom = panels
+        time_values = self.data[self.time_col].to_numpy()
+        newdata = pd.DataFrame({"obs_ind": self.data.index, "t": time_values})
+        time_lookup = pl.from_pandas(newdata)
+        fitted = prediction_draws(self.y_pred, newdata)
+        counterfactual = prediction_draws(self.y_counterfactual, newdata)
+        effect = dataarray_draws(self.effect).join(time_lookup, on="obs_ind")
+        cumulative_effect = dataarray_draws(self.cumulative_effect).join(
+            time_lookup, on="obs_ind"
+        )
+        panel_draws = pl.concat(
+            [
+                label_draws(fitted, series="Fitted", panel=top),
+                label_draws(
+                    counterfactual,
+                    series="Counterfactual",
+                    panel=top,
+                ),
+                label_draws(effect, series="effect", panel=middle),
+                label_draws(cumulative_effect, series="cumulative", panel=bottom),
+            ],
+            how="diagonal_relaxed",
+        )
+        grouping = ["panel", "series", "t"]
+        intervals = summarize_draws(
+            panel_draws,
+            group_by=grouping,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+        observations = pd.DataFrame(
+            {
+                "t": time_values,
+                "y": self.design["y"].isel(treated_units=0).to_numpy(),
+                "series": "Observations",
+                "panel": top,
+            }
+        )
+        effect_area = (
+            intervals.query("panel == @middle and series == 'effect'")[["t", "mu"]]
+            .rename(columns={"mu": "y1"})
+            .assign(y2=0.0, panel=middle)
+        )
+        posterior_paths = (
+            spaghetti_draws(
+                panel_draws,
+                group_by=grouping,
+                num_samples=num_samples,
+            )
+            if kind == "spaghetti"
+            else None
+        )
+        posterior_density = None
+        if kind == "histogram":
+            top_edges = histogram_y_edges(fitted, counterfactual)
+            posterior_density = pd.concat(
+                [
+                    posterior_histogram_tiles(
+                        fitted,
+                        "t",
+                        x_col="t",
+                        panel=top,
+                        y_edges=top_edges,
+                    ),
+                    posterior_histogram_tiles(
+                        counterfactual,
+                        "t",
+                        x_col="t",
+                        panel=top,
+                        y_edges=top_edges,
+                    ),
+                    posterior_histogram_tiles(
+                        effect,
+                        "t",
+                        x_col="t",
+                        panel=middle,
+                    ),
+                    posterior_histogram_tiles(
+                        cumulative_effect,
+                        "t",
+                        x_col="t",
+                        panel=bottom,
+                    ),
+                ],
+                ignore_index=True,
+            )
+        return _PiecewiseITSPlotData(
+            intervals=intervals,
+            observations=observations,
+            effect_area=effect_area,
+            posterior_paths=posterior_paths,
+            posterior_density=posterior_density,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -523,106 +638,20 @@ class PiecewiseITS(BaseExperiment):
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
     ) -> PlotSpec:
-        """Plot PiecewiseITS via a faceted plotnine base plus matplotlib overlays.
-
-        Builds the three-panel layout with :func:`~causalpy.plot_utils.build_causal_panel_plot`,
-        then applies interruption lines, titles, and the legend in an overlay
-        callback after the base ``plot()`` draws the ggplot.
-
-        ponytail: interruption vlines stay on matplotlib after ``.draw()``.
-        """
-        interval = interval_kind(ci_kind)
-        time_values = self.data[self.time_col].values
-        mid, bot = "Causal Effect", "Cumulative Causal Effect"
-
-        r2_val = None
-        try:
-            if isinstance(self.score, pd.Series):
-                if "unit_0_r2" in self.score.index:
-                    r2_val = self.score["unit_0_r2"]
-                elif "r2" in self.score.index:
-                    r2_val = self.score["r2"]
-        except Exception:
-            pass
-        title_str = "Piecewise ITS: Bayesian $R^2$"
-        if r2_val is not None:
-            title_str += f" = {round_num(r2_val, round_to)}"
-        top = title_str  # facet key; real title set on ax after .draw()
-
-        newdata = pd.DataFrame({"obs_ind": self.data.index, "t": time_values})
-        time_lookup = pl.from_pandas(newdata)
-        fit_draws = prediction_draws(self.y_pred, newdata)
-        counterfactual_draws = prediction_draws(self.y_counterfactual, newdata)
-        effect_draws = dataarray_draws(self.effect).join(time_lookup, on="obs_ind")
-        cumulative_draws = dataarray_draws(self.cumulative_effect).join(
-            time_lookup, on="obs_ind"
+        """Build the Bayesian piecewise ITS plot from tidy declarative layers."""
+        panels = (
+            f"Piecewise ITS: Bayesian $R^2$ = "
+            f"{round_num(self.score['unit_0_r2'], round_to)}",
+            "Causal Effect",
+            "Cumulative Causal Effect",
         )
-
-        all_draws = pl.concat(
-            [
-                label_draws(fit_draws, series="Fitted", panel=top),
-                label_draws(
-                    counterfactual_draws,
-                    series="Counterfactual",
-                    panel=top,
-                ),
-                label_draws(effect_draws, series="effect", panel=mid),
-                label_draws(cumulative_draws, series="cumulative", panel=bot),
-            ],
-            how="diagonal_relaxed",
-        )
-        group_by = ["panel", "series", "t"]
-        bands = summarize_draws(
-            all_draws,
-            group_by=group_by,
+        plot_data = self._prepare_bayesian_plot_data(
+            panels=panels,
             ci_prob=ci_prob,
-            interval=interval,
+            interval=interval_kind(ci_kind),
+            kind=kind,
+            num_samples=num_samples,
         )
-        effect_band = bands.query("panel == @mid and series == 'effect'")
-
-        spaghetti_df = None
-        if kind == "spaghetti":
-            spaghetti_df = spaghetti_draws(
-                all_draws,
-                group_by=group_by,
-                num_samples=num_samples,
-            )
-
-        histogram_tiles = None
-        if kind == "histogram":
-            hist_top_edges = histogram_y_edges(
-                fit_draws,
-                counterfactual_draws,
-            )
-            histogram_tiles = concat_histogram_tiles(
-                [
-                    HistogramLayer(fit_draws, "t", panel=top, y_edges=hist_top_edges),
-                    HistogramLayer(
-                        counterfactual_draws,
-                        "t",
-                        panel=top,
-                        y_edges=hist_top_edges,
-                    ),
-                    HistogramLayer(effect_draws, "t", panel=mid),
-                    HistogramLayer(cumulative_draws, "t", panel=bot),
-                ],
-                x_col="t",
-            )
-
-        obs = pd.DataFrame(
-            {
-                "t": time_values,
-                "y": np.asarray(self.design["y"].isel(treated_units=0)),
-            }
-        ).assign(series="Observations", panel=top)
-
-        shade_mid = (
-            effect_band[["t", "mu"]]
-            .rename(columns={"mu": "y1"})
-            .assign(y2=0.0, panel=mid)
-        )
-
-        panels = [top, mid, bot]
         colors = {
             "Fitted": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -630,53 +659,52 @@ class PiecewiseITS(BaseExperiment):
             "effect": "#2ca02c",
             "cumulative": "#d62728",
         }
-
         p = build_causal_panel_plot(
-            bands,
-            obs,
-            panels=panels,
+            plot_data.intervals,
+            plot_data.observations,
+            panels=list(panels),
             colors=colors,
+            show_panel_titles=True,
             kind=kind,
             x="t",
-            shade_df=shade_mid,
+            shade_df=plot_data.effect_area,
             shade_fill="#2ca02c",
-            spaghetti_df=spaghetti_df,
-            histogram_tiles=histogram_tiles,
+            spaghetti_df=plot_data.posterior_paths,
+            histogram_tiles=plot_data.posterior_density,
             figsize=figsize,
             zero_linetype="dashed",
             zero_alpha=0.5,
         )
+        p += geom_vline(
+            pd.DataFrame({"t": self.interruption_times}),
+            aes(xintercept="t"),
+            color="red",
+            size=1.5,
+            alpha=0.7,
+        )
+        interruption_labels = [
+            f"Interruption {index}" for index in range(len(self.interruption_times))
+        ]
 
-        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            ax = np.asarray(axes[:3])
-            handles: list[Any] = [
-                Line2D([0], [0], color="black", marker=".", linestyle=""),
-                (
-                    Line2D([0], [0], color=colors["Fitted"]),
-                    Patch(facecolor=colors["Fitted"], alpha=0.3),
-                ),
-                (
-                    Line2D([0], [0], color=colors["Counterfactual"]),
-                    Patch(facecolor=colors["Counterfactual"], alpha=0.3),
-                ),
-            ]
-            labels_legend = ["Observations", "Fitted", "Counterfactual"]
-            for i, t_k in enumerate(self.interruption_times):
-                for a in ax:
-                    a.axvline(x=t_k, ls="-", lw=2, color="red", alpha=0.7)
-                handles.append(Line2D([0], [0], color="red", lw=2))
-                labels_legend.append(f"Interruption {i}")
-
-            ax[0].legend(
-                handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE
+        def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            add_causal_panel_legend(
+                axes[0],
+                labels=[
+                    "Observations",
+                    "Fitted",
+                    "Counterfactual",
+                    *interruption_labels,
+                ],
+                colors={
+                    **colors,
+                    **dict.fromkeys(interruption_labels, "red"),
+                },
             )
-            ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
-            ax[1].set(title=mid, ylabel="Effect")
-            ax[2].set(title=bot, ylabel="Cumulative Effect")
-            for a in ax[:-1]:
-                a.tick_params(axis="x", labelbottom=False)
+            axes[0].set_ylabel(self.outcome_variable_name)
+            axes[1].set_ylabel("Effect")
+            axes[2].set_ylabel("Cumulative Effect")
 
-        return PlotSpec(p, overlay=overlay, n_panels=3)
+        return PlotSpec(p, overlay=add_legend, n_panels=3)
 
     def _ols_plot(
         self,

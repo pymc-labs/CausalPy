@@ -14,6 +14,7 @@
 """Difference in differences."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -22,8 +23,6 @@ import polars as pl
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
@@ -47,13 +46,13 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
-    HistogramLayer,
     PlotSpec,
+    add_causal_panel_legend,
     add_posterior_kind,
-    concat_histogram_tiles,
     histogram_y_edges,
     interval_kind,
     label_draws,
+    posterior_histogram_tiles,
     prediction_draws,
     spaghetti_draws,
     summarize_draws,
@@ -75,6 +74,21 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _DiDPlotData:
+    """Tidy tables and annotation coordinates consumed by the DiD plot."""
+
+    scatter: pd.DataFrame
+    intervals: pd.DataFrame
+    posterior_paths: pd.DataFrame | None
+    posterior_density: pd.DataFrame | None
+    counterfactual_draws: pd.DataFrame
+    time_points: np.ndarray
+    arrow_x: float
+    treatment_y: float
+    counterfactual_y: float
 
 
 class DifferenceInDifferences(BaseExperiment):
@@ -432,6 +446,111 @@ class DifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
+    def _prepare_bayesian_plot_data(
+        self,
+        *,
+        ci_prob: float,
+        interval: Literal["hdi", "eti"],
+        kind: Literal["ribbon", "histogram", "spaghetti"],
+        num_samples: int,
+    ) -> _DiDPlotData:
+        """Prepare observed, posterior, and annotation data for plotting."""
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        levels = sorted(self.data[self.group_variable_name].unique())
+        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
+        scatter = self.data[[tcol, ycol]].copy()
+        scatter["series"] = (
+            self.data[self.group_variable_name].map(group_to_series).to_numpy()
+        )
+
+        control_grid = self.x_pred_control.reset_index(drop=True)
+        control_grid["obs_ind"] = range(len(control_grid))
+        treatment_grid = self.x_pred_treatment.reset_index(drop=True)
+        treatment_grid["obs_ind"] = range(len(treatment_grid))
+        counterfactual_grid = self.x_pred_counterfactual.reset_index(drop=True)
+        counterfactual_grid["obs_ind"] = range(len(counterfactual_grid))
+        control = prediction_draws(self.y_pred_control, control_grid)
+        treatment = prediction_draws(self.y_pred_treatment, treatment_grid)
+        counterfactual = prediction_draws(
+            self.y_pred_counterfactual, counterfactual_grid
+        )
+        time_points = self.x_pred_counterfactual[tcol].to_numpy()
+        draw_parts = [
+            label_draws(control, series="Control group"),
+            label_draws(treatment, series="Treatment group"),
+        ]
+        if len(time_points) > 1:
+            draw_parts.append(label_draws(counterfactual, series="Counterfactual"))
+        draws = pl.concat(draw_parts, how="diagonal_relaxed")
+        grouping = ["series", tcol]
+        intervals = summarize_draws(
+            draws,
+            group_by=grouping,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+        posterior_paths = (
+            spaghetti_draws(
+                draws,
+                group_by=grouping,
+                num_samples=num_samples,
+            )
+            if kind == "spaghetti"
+            else None
+        )
+        posterior_density = None
+        if kind == "histogram":
+            edges = histogram_y_edges(control, treatment, counterfactual)
+            density_parts = [
+                posterior_histogram_tiles(
+                    control,
+                    tcol,
+                    x_col=tcol,
+                    y_edges=edges,
+                ),
+                posterior_histogram_tiles(
+                    treatment,
+                    tcol,
+                    x_col=tcol,
+                    y_edges=edges,
+                ),
+            ]
+            if len(time_points) > 1:
+                density_parts.append(
+                    posterior_histogram_tiles(
+                        counterfactual,
+                        tcol,
+                        x_col=tcol,
+                        y_edges=edges,
+                    )
+                )
+            posterior_density = pd.concat(density_parts, ignore_index=True)
+
+        treatment_y = _as_scalar(
+            self.y_pred_treatment["posterior_predictive"]
+            .mu.isel({"obs_ind": 1})
+            .mean()
+            .data
+        )
+        counterfactual_y = _as_scalar(
+            self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+        )
+        treatment_times = self.x_pred_treatment[tcol].to_numpy()
+        time_span = float(np.ptp(treatment_times.astype(float)))
+        arrow_x = float(np.max(treatment_times)) + 0.1 * time_span
+        return _DiDPlotData(
+            scatter=scatter,
+            intervals=intervals,
+            posterior_paths=posterior_paths,
+            posterior_density=posterior_density,
+            counterfactual_draws=counterfactual.to_pandas(),
+            time_points=time_points,
+            arrow_x=arrow_x,
+            treatment_y=treatment_y,
+            counterfactual_y=counterfactual_y,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -442,165 +561,32 @@ class DifferenceInDifferences(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> PlotSpec:
-        """Plot DiD results via plotnine plus a small matplotlib overlay.
-
-        Builds scatter + control/treatment (and multi-period counterfactual)
-        ribbons as a shared :class:`plotnine.ggplot`, then applies histogram,
-        legend, violin, and causal-impact arrow overlays after the base draw.
-
-        ponytail: single-period counterfactual stays on ``ax.violinplot``
-        (no plotnine continuous-x violin); arrow/text stay on ``ax.annotate``.
-        """
-
-        def _plot_causal_impact_arrow(results, ax):
-            """
-            draw a vertical arrow between `y_pred_counterfactual` and
-            `y_pred_counterfactual`
-            """
-            # Calculate y values to plot the arrow between
-            y_pred_treatment = (
-                results.y_pred_treatment["posterior_predictive"]
-                .mu.isel({"obs_ind": 1})
-                .mean()
-                .data
-            )
-            y_pred_counterfactual = (
-                results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
-            )
-            y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
-            y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
-            # Calculate the x position to plot at
-            # Note that we force to be float to avoid a type error using np.ptp with boolean
-            # values
-            diff = np.ptp(
-                np.array(
-                    results.x_pred_treatment[results.time_variable_name].values
-                ).astype(float)
-            )
-            x = (
-                np.max(results.x_pred_treatment[results.time_variable_name].values)
-                + 0.1 * diff
-            )
-            # Plot the arrow
-            ax.annotate(
-                "",
-                xy=(x, y_pred_counterfactual_scalar),
-                xycoords="data",
-                xytext=(x, y_pred_treatment_scalar),
-                textcoords="data",
-                arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
-            )
-            # Plot text annotation next to arrow
-            ax.annotate(
-                "causal\nimpact",
-                xy=(
-                    x,
-                    np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
-                ),
-                xycoords="data",
-                xytext=(5, 0),
-                textcoords="offset points",
-                color="green",
-                va="center",
-            )
-
+        """Build the Bayesian DiD plot from tidy data and declarative layers."""
         tcol = self.time_variable_name
         ycol = self.outcome_variable_name
-        interval = interval_kind(ci_kind)
         colors = {
             "Control group": "#1f77b4",
             "Treatment group": "#ff7f0e",
             "Counterfactual": "#2ca02c",
         }
-
-        # Scatter: map group codes to the same series names as the bands.
-        levels = sorted(self.data[self.group_variable_name].unique())
-        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
-        scatter = self.data[[tcol, ycol]].copy()
-        scatter["series"] = (
-            self.data[self.group_variable_name].map(group_to_series).values
-        )
-
-        def _draws(pred, newdata):
-            grid = newdata.reset_index(drop=True).copy()
-            grid["obs_ind"] = range(len(grid))
-            return prediction_draws(pred, grid)
-
-        control_draws = _draws(self.y_pred_control, self.x_pred_control)
-        treatment_draws = _draws(self.y_pred_treatment, self.x_pred_treatment)
-        counterfactual_draws = _draws(
-            self.y_pred_counterfactual, self.x_pred_counterfactual
-        )
-
-        time_points = self.x_pred_counterfactual[tcol].values
-        draw_parts = [
-            label_draws(control_draws, series="Control group"),
-            label_draws(treatment_draws, series="Treatment group"),
-        ]
-        if len(time_points) > 1:
-            draw_parts.append(
-                label_draws(counterfactual_draws, series="Counterfactual")
-            )
-        all_draws = pl.concat(draw_parts, how="diagonal_relaxed")
-        group_by = ["series", tcol]
-        bands = summarize_draws(
-            all_draws,
-            group_by=group_by,
+        plot_data = self._prepare_bayesian_plot_data(
             ci_prob=ci_prob,
-            interval=interval,
+            interval=interval_kind(ci_kind),
+            kind=kind,
+            num_samples=num_samples,
         )
-
-        hist_edges = (
-            histogram_y_edges(
-                control_draws,
-                treatment_draws,
-                counterfactual_draws,
-            )
-            if kind == "histogram"
-            else None
+        p = ggplot() + geom_point(
+            plot_data.scatter, aes(tcol, ycol, color="series"), size=1.5
         )
-
-        spaghetti_df = None
-        if kind == "spaghetti":
-            spaghetti_df = spaghetti_draws(
-                all_draws,
-                group_by=group_by,
-                num_samples=num_samples,
-            )
-
-        histogram_tiles = None
-        if kind == "histogram":
-            layers = [
-                HistogramLayer(
-                    control_draws,
-                    tcol,
-                    y_edges=hist_edges,
-                ),
-                HistogramLayer(
-                    treatment_draws,
-                    tcol,
-                    y_edges=hist_edges,
-                ),
-            ]
-            if len(time_points) > 1:
-                layers.append(
-                    HistogramLayer(
-                        counterfactual_draws,
-                        tcol,
-                        y_edges=hist_edges,
-                    )
-                )
-            histogram_tiles = concat_histogram_tiles(layers, x_col=tcol)
-
-        p = ggplot() + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
         p = add_posterior_kind(
             p,
-            bands,
+            plot_data.intervals,
             kind,
             x=tcol,
-            spaghetti_df=spaghetti_df,
-            histogram_tiles=histogram_tiles,
+            spaghetti_df=plot_data.posterior_paths,
+            histogram_tiles=plot_data.posterior_density,
         )
+        treatment_times = self.x_pred_treatment[tcol].to_numpy().astype(float)
         p = (
             p
             + scale_color_manual(values=colors, name="")
@@ -609,27 +595,21 @@ class DifferenceInDifferences(BaseExperiment):
                 if kind == "ribbon"
                 else guides()
             )
-            + scale_x_continuous(
-                breaks=list(self.x_pred_treatment[tcol].values.astype(float))
-            )
-            # Room for the causal-impact arrow drawn just past the last time point.
+            + scale_x_continuous(breaks=list(treatment_times))
             + coord_cartesian(
                 xlim=(
-                    float(np.min(self.x_pred_treatment[tcol].values)) - 0.05,
-                    float(np.max(self.x_pred_treatment[tcol].values))
-                    + 0.15
-                    * float(
-                        np.ptp(self.x_pred_treatment[tcol].values.astype(float)) or 1.0
-                    ),
+                    float(np.min(treatment_times)) - 0.05,
+                    float(np.max(treatment_times))
+                    + 0.15 * float(np.ptp(treatment_times) or 1.0),
                 )
             )
             + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
-        if len(time_points) == 1:
+        if len(plot_data.time_points) == 1:
             p = p + geom_violin(
-                counterfactual_draws.to_pandas(),
+                plot_data.counterfactual_draws,
                 aes(tcol, "mu"),
                 width=0.2,
                 fill="#1f77b4",
@@ -642,20 +622,30 @@ class DifferenceInDifferences(BaseExperiment):
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             ax = axes[0]
             legend_labels = ["Control group", "Treatment group"]
-            if len(time_points) > 1:
+            if len(plot_data.time_points) > 1:
                 legend_labels.append("Counterfactual")
-            ax.legend(
-                handles=[
-                    (
-                        Line2D([0], [0], color=colors[label]),
-                        Patch(facecolor=colors[label], alpha=0.3),
-                    )
-                    for label in legend_labels
-                ],
+            add_causal_panel_legend(
+                ax,
                 labels=legend_labels,
-                fontsize=LEGEND_FONT_SIZE,
+                colors=colors,
             )
-            _plot_causal_impact_arrow(self, ax)
+            ax.annotate(
+                "",
+                xy=(plot_data.arrow_x, plot_data.counterfactual_y),
+                xytext=(plot_data.arrow_x, plot_data.treatment_y),
+                arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
+            )
+            ax.annotate(
+                "causal\nimpact",
+                xy=(
+                    plot_data.arrow_x,
+                    np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),
+                ),
+                xytext=(5, 0),
+                textcoords="offset points",
+                color="green",
+                va="center",
+            )
 
         return PlotSpec(p, overlay=overlay, n_panels=1)
 

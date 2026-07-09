@@ -19,6 +19,7 @@ different units receive treatment at different times.
 """
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -59,6 +60,27 @@ from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _EventTimePlotData:
+    """Tidy event-study estimates and declarative plotting metadata."""
+
+    estimates: pd.DataFrame
+    placebo_area: pd.DataFrame | None
+    colors: dict[str, str]
+    shapes: dict[str, str]
+
+
+@dataclass(frozen=True)
+class _GroupTimePlotData:
+    """Tidy cohort-time estimates and declarative plotting metadata."""
+
+    estimates: pd.DataFrame
+    cohorts: list[Any]
+    x_col: str
+    x_label: str
+    y_label: str
 
 
 class StaggeredDifferenceInDifferences(BaseExperiment):
@@ -890,6 +912,64 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         )
         return fig, to_axes_list(ax)
 
+    def _prepare_event_time_plot_data(self) -> _EventTimePlotData:
+        """Prepare event-study estimates and legend metadata for plotting."""
+        estimates = self.att_event_time_.copy()
+        hdi_pct = int(self.hdi_prob_ * 100)
+        placebo_label = f"Placebo estimate ({hdi_pct}% HDI)"
+        att_label = f"ATT estimate ({hdi_pct}% HDI)"
+        estimates["series"] = np.where(
+            estimates["event_time"] < 0, placebo_label, att_label
+        )
+        event_min = estimates["event_time"].min()
+        placebo_area = (
+            pd.DataFrame(
+                {
+                    "xmin": [float(event_min) - 0.5],
+                    "xmax": [-0.5],
+                    "ymin": [-np.inf],
+                    "ymax": [np.inf],
+                }
+            )
+            if event_min < 0
+            else None
+        )
+        return _EventTimePlotData(
+            estimates=estimates,
+            placebo_area=placebo_area,
+            colors={placebo_label: "gray", att_label: "#1f77b4"},
+            shapes={placebo_label: "s", att_label: "o"},
+        )
+
+    def _prepare_group_time_plot_data(
+        self,
+        *,
+        x_axis: Literal["event_time", "calendar_time"],
+        include_placebo: bool,
+    ) -> _GroupTimePlotData:
+        """Prepare cohort-time estimates and facet metadata for plotting."""
+        estimates, x_col, x_label, y_label = self._get_group_time_plot_data(
+            x_axis=x_axis, include_placebo=include_placebo
+        )
+        cohorts = list(estimates["cohort"].drop_duplicates())
+        estimates = estimates.copy()
+        estimates["series"] = estimates["type"].map(
+            {"placebo": "Placebo estimate", "ATT": "ATT estimate"}
+        )
+        estimates["cohort_label"] = estimates["cohort"].map(lambda c: f"Cohort {c}")
+        estimates["cohort_label"] = pd.Categorical(
+            estimates["cohort_label"],
+            categories=[f"Cohort {cohort}" for cohort in cohorts],
+            ordered=True,
+        )
+        return _GroupTimePlotData(
+            estimates=estimates,
+            cohorts=cohorts,
+            x_col=x_col,
+            x_label=x_label,
+            y_label=y_label,
+        )
+
     def _bayesian_plot(
         self,
         hdi_prob: float | None = None,
@@ -955,33 +1035,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if view != "event_time":
             raise ValueError("view must be 'event_time' or 'group_time'")
 
-        # ponytail: event-study only this commit; plot_group_time stays matplotlib
-        # until assessed separately (#988). Cached att_lower/att_upper — no tidydraws.
-        att_et = self.att_event_time_.copy()
-        hdi_pct = int(self.hdi_prob_ * 100)
-        placebo_label = f"Placebo estimate ({hdi_pct}% HDI)"
-        att_label = f"ATT estimate ({hdi_pct}% HDI)"
-        att_et["series"] = np.where(att_et["event_time"] < 0, placebo_label, att_label)
-
-        colors = {placebo_label: "gray", att_label: "#1f77b4"}
-        shapes = {placebo_label: "s", att_label: "o"}
+        plot_data = self._prepare_event_time_plot_data()
+        estimates = plot_data.estimates
         p = (
-            ggplot(att_et, aes("event_time", "att", color="series", shape="series"))
+            ggplot(estimates, aes("event_time", "att", color="series", shape="series"))
             + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
             + geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
         )
-        event_min = att_et["event_time"].min()
-        if event_min < 0:
-            shade = pd.DataFrame(
-                {
-                    "xmin": [float(event_min) - 0.5],
-                    "xmax": [-0.5],
-                    "ymin": [-np.inf],
-                    "ymax": [np.inf],
-                }
-            )
+        if plot_data.placebo_area is not None:
             p = p + geom_rect(
-                shade,
+                plot_data.placebo_area,
                 aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
                 fill="gray",
                 alpha=0.1,
@@ -994,13 +1057,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 size=0.7,
                 fatten=6,
             )
-            + scale_color_manual(values=colors, name="")
-            + scale_shape_manual(values=shapes, name="")
-            + scale_x_continuous(breaks=list(att_et["event_time"].values))
-            + labs(
-                x="",
-                y="",
-            )
+            + scale_color_manual(values=plot_data.colors, name="")
+            + scale_shape_manual(values=plot_data.shapes, name="")
+            + scale_x_continuous(breaks=list(estimates["event_time"].values))
+            + labs(x="", y="")
             + theme(
                 figure_size=figsize or (10, 6),
                 legend_text=element_text(size=LEGEND_FONT_SIZE),
@@ -1036,27 +1096,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if layout not in {"facet", "overlay"}:
             raise ValueError("layout must be 'facet' or 'overlay'")
 
-        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
-            x_axis=x_axis, include_placebo=include_placebo
+        plot_data = self._prepare_group_time_plot_data(
+            x_axis=x_axis,
+            include_placebo=include_placebo,
         )
-        cohorts = list(att_gt["cohort"].drop_duplicates())
+        estimates = plot_data.estimates
+        cohorts = plot_data.cohorts
+        x_col = plot_data.x_col
         n_cohorts = len(cohorts)
         sharex = x_axis == "event_time"
         if figsize is None:
             figsize = (
                 (10, 6) if layout == "overlay" else (10, max(2.5 * n_cohorts, 3.0))
             )
-
-        plot_df = att_gt.copy()
-        plot_df["series"] = plot_df["type"].map(
-            {"placebo": "Placebo estimate", "ATT": "ATT estimate"}
-        )
-        plot_df["cohort_label"] = plot_df["cohort"].map(lambda c: f"Cohort {c}")
-        plot_df["cohort_label"] = pd.Categorical(
-            plot_df["cohort_label"],
-            categories=[f"Cohort {c}" for c in cohorts],
-            ordered=True,
-        )
 
         type_linetypes = {"Placebo estimate": "dashed", "ATT estimate": "solid"}
         type_shapes = {"Placebo estimate": "s", "ATT estimate": "o"}
@@ -1068,7 +1120,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             }
             p = (
                 ggplot(
-                    plot_df,
+                    estimates,
                     aes(x_col, "att", color="series", fill="series", linetype="series"),
                 )
                 + geom_ribbon(
@@ -1099,7 +1151,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             cohort_colors = {f"Cohort {c}": f"C{i % 10}" for i, c in enumerate(cohorts)}
             p = (
                 ggplot(
-                    plot_df,
+                    estimates,
                     aes(
                         x_col,
                         "att",
@@ -1136,9 +1188,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     axes[0].sharey(a)
                 for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
                     ax.set_title(f"Cohort {cohort}")
-                    ax.set_ylabel(y_label)
+                    ax.set_ylabel(plot_data.y_label)
                     xlabel = self._get_group_time_axis_label(
-                        x_label=x_label,
+                        x_label=plot_data.x_label,
                         layout=layout,
                         sharex=sharex,
                         axis_index=i,
@@ -1178,8 +1230,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     )
             else:
                 ax = axes[0]
-                ax.set_xlabel(x_label)
-                ax.set_ylabel(y_label)
+                ax.set_xlabel(plot_data.x_label)
+                ax.set_ylabel(plot_data.y_label)
                 ax.set_title("Staggered DiD Cohort Trajectories")
                 ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
