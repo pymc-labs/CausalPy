@@ -620,8 +620,9 @@ class InterruptedTimeSeries(BaseExperiment):
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
             :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"`` and ``"histogram"``, the legend shows
-            individual sample lines rather than a shaded band.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -680,12 +681,13 @@ class InterruptedTimeSeries(BaseExperiment):
     ) -> Any:
         """Overlay a median dot + HDI errorbar for a single post-period datum.
 
-        ``plot_posterior_over_x`` (and the ``arviz.plot_hdi`` it wraps) renders a degenerate
-        zero-area polygon when the post-period contains a single observation,
-        so neither the median line nor the HDI ribbon is visible. Drawing an
-        explicit point and errorbar makes both the central tendency and the
-        uncertainty plain to read in that edge case. Returns the matplotlib
-        ``ErrorbarContainer`` so callers can use it as a legend handle.
+        When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
+        HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
+        when the post-period contains a single observation, so neither the median
+        line nor the HDI ribbon is visible. Drawing an explicit point and errorbar
+        makes both the central tendency and the uncertainty plain to read in that
+        edge case. Returns the matplotlib ``ErrorbarContainer`` so callers can use
+        it as a legend handle.
         """
         Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
         median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())

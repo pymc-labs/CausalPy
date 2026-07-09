@@ -40,8 +40,9 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     """Mutate an existing Legend in place without recreating it.
 
     This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
-    built by :func:`~causalpy.plot_utils.plot_posterior_over_x`) that would be lost if the
-    legend were rebuilt with ``ax.legend()``.
+    built by :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+    ``kind="ribbon"``) that would be lost if the legend were rebuilt with
+    ``ax.legend()``.
 
     Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
     with ``bbox_to_anchor``), ``fontsize``, ``frameon``, ``title``.
@@ -331,7 +332,8 @@ class BaseExperiment(ABC):
             Keyword arguments to adjust legend placement and styling. The
             existing legend is modified **in place** so that custom
             handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`) are preserved.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+            ``kind="ribbon"``) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
@@ -375,7 +377,8 @@ class BaseExperiment(ABC):
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
-        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x — are preserved
+        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x with
+        # kind="ribbon" — are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
             # Normalise ax to a flat list so we can iterate uniformly.

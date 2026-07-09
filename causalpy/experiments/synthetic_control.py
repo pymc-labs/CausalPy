@@ -440,8 +440,9 @@ class SyntheticControl(BaseExperiment):
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
             :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"`` and ``"histogram"``, the legend shows
-            individual sample lines rather than a shaded band.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.

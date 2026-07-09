@@ -53,22 +53,28 @@ def plot_posterior_over_x(
     # Backward compatibility: hdi_prob was in original API
     hdi_prob: float | None = None,
 ) -> tuple[Line2D | list[Line2D], PolyCollection | None]:
-    """Plot posterior intervals or samples.
+    """Plot a posterior :class:`xarray.DataArray` along an x-axis.
+
+    Dispatches on ``kind`` to render ribbon (mean + interval band), spaghetti
+    (posterior draw lines), or histogram (2D density heatmap) visualizations.
 
     Parameters
     ----------
     x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
-        Pandas datetime index or numpy array of x-axis values.
+        Values for the x-axis (e.g. time, a running variable, or a prediction
+        grid). Need not be temporal.
     Y : xr.DataArray
-        Xarray data array of y-axis data.
+        Posterior samples with ``chain`` and ``draw`` dimensions and one
+        dimension aligned with ``x``.
     ax : plt.Axes
         Matplotlib axes object.
     plot_hdi_kwargs : dict, optional
         Keyword arguments for line, band, heatmap, or sample styling (passed through
         to matplotlib / ArviZ helpers depending on ``kind`` and ``ci_kind``).
     ci_prob : float, optional
-        The size of the credible interval. Defaults to
-        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        Credible interval width when ``kind="ribbon"``. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94). Ignored for
+        other kinds.
     label : str, optional
         The plot label.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -253,8 +259,8 @@ def _plot_histogram(
 ) -> tuple[list[Line2D], None]:
     """Plot histogram visualization of the posterior as a 2D heatmap.
 
-    Columns are time points (x), rows are y-value bins; cell values are
-    per-time histogram counts, column-normalized for display. The posterior
+    Columns are positions along ``x``; rows are y-value bins. Cell values are
+    per-column histogram counts, column-normalized for display. The posterior
     mean line is overlaid on top.
     """
     if plot_hdi_kwargs is None:
