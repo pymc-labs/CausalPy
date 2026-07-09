@@ -178,6 +178,12 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
+:::{grid-item-card} Temperature and mortality: a UK causal analysis (draft)
+:class-card: sd-card-h-100
+:link: its_temperature_mortality
+:link-type: doc
+:::
+
 :::{grid-item-card} Lift Testing with Interrupted Time Series
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/its_lift_test.png
@@ -443,6 +449,7 @@ its_skl.ipynb
 its_pymc.ipynb
 its_post_intervention_analysis.ipynb
 its_covid.ipynb
+its_temperature_mortality.ipynb
 its_lift_test.ipynb
 its_placebo_in_time_analysis.ipynb
 :::
