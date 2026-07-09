@@ -31,8 +31,8 @@ from pandas.api.extensions import ExtensionArray
 from causalpy.constants import HDI_PROB
 
 
-class _PlotXYStyle(TypedDict):
-    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_xY`` call."""
+class _PosteriorPlotStyle(TypedDict):
+    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_posterior_over_x`` call."""
 
     ci_prob: float
     kind: Literal["ribbon", "histogram", "spaghetti"]
@@ -40,7 +40,7 @@ class _PlotXYStyle(TypedDict):
     num_samples: int
 
 
-def plot_xY(
+def plot_posterior_over_x(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
     ax: plt.Axes,
@@ -53,22 +53,28 @@ def plot_xY(
     # Backward compatibility: hdi_prob was in original API
     hdi_prob: float | None = None,
 ) -> tuple[Line2D | list[Line2D], PolyCollection | None]:
-    """Plot posterior intervals or samples.
+    """Plot a posterior :class:`xarray.DataArray` along an x-axis.
+
+    Dispatches on ``kind`` to render ribbon (mean + interval band), spaghetti
+    (posterior draw lines), or histogram (2D density heatmap) visualizations.
 
     Parameters
     ----------
     x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
-        Pandas datetime index or numpy array of x-axis values.
+        Values for the x-axis (e.g. time, a running variable, or a prediction
+        grid). Need not be temporal.
     Y : xr.DataArray
-        Xarray data array of y-axis data.
+        Posterior samples with ``chain`` and ``draw`` dimensions and one
+        dimension aligned with ``x``.
     ax : plt.Axes
         Matplotlib axes object.
     plot_hdi_kwargs : dict, optional
         Keyword arguments for line, band, heatmap, or sample styling (passed through
         to matplotlib / ArviZ helpers depending on ``kind`` and ``ci_kind``).
     ci_prob : float, optional
-        The size of the credible interval. Defaults to
-        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        Credible interval width when ``kind="ribbon"``. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94). Ignored for
+        other kinds.
     label : str, optional
         The plot label.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -93,9 +99,9 @@ def plot_xY(
           sample/mean lines and no single band patch.
 
         Experiment :meth:`~causalpy.experiments.base.BaseExperiment.plot` code
-        that builds legends from ``plot_xY`` return values should only assume
+        that builds legends from ``plot_posterior_over_x`` return values should only assume
         the ribbon shape when it passes ``kind="ribbon"`` (the default) through
-        to :func:`plot_xY`.
+        to :func:`plot_posterior_over_x`.
     """
     # Handle backward compatibility: hdi_prob was in original API
     if hdi_prob is not None:
@@ -253,8 +259,8 @@ def _plot_histogram(
 ) -> tuple[list[Line2D], None]:
     """Plot histogram visualization of the posterior as a 2D heatmap.
 
-    Columns are time points (x), rows are y-value bins; cell values are
-    per-time histogram counts, column-normalized for display. The posterior
+    Columns are positions along ``x``; rows are y-value bins. Cell values are
+    per-column histogram counts, column-normalized for display. The posterior
     mean line is overlaid on top.
     """
     if plot_hdi_kwargs is None:
@@ -264,7 +270,7 @@ def _plot_histogram(
     time_dims = [d for d in Y.dims if d not in ("chain", "draw")]
     if len(time_dims) != 1:
         msg = (
-            "plot_xY histogram expects Y with exactly one non-chain/draw dimension; "
+            "plot_posterior_over_x histogram expects Y with exactly one non-chain/draw dimension; "
             f"got {time_dims!r}"
         )
         raise ValueError(msg)

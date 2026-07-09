@@ -28,7 +28,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
@@ -325,9 +325,10 @@ class RegressionDiscontinuity(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"`` and ``"histogram"``, the legend shows
-            individual sample lines rather than a shaded band.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -401,7 +402,7 @@ class RegressionDiscontinuity(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -430,7 +431,7 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Plot model fit to data
-        plot_xY(
+        plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,

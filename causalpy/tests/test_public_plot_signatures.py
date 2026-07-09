@@ -125,7 +125,7 @@ def test_every_concrete_subclass_declares_plot() -> None:
     )
 
 
-_POSTERIOR_PLOT_XY_CLASSES = [
+_POSTERIOR_OVER_X_PLOT_CLASSES = [
     "InterruptedTimeSeries",
     "DifferenceInDifferences",
     "PrePostNEGD",
@@ -137,14 +137,14 @@ _POSTERIOR_PLOT_XY_CLASSES = [
 ]
 
 
-@pytest.mark.parametrize("class_name", _POSTERIOR_PLOT_XY_CLASSES)
+@pytest.mark.parametrize("class_name", _POSTERIOR_OVER_X_PLOT_CLASSES)
 def test_posterior_plot_exposes_viz_kind(class_name: str) -> None:
     cls = next(c for c in _OVERRIDING_SUBCLASSES if c.__name__ == class_name)
     plot_method = cls.__dict__["plot"]
     sig = inspect.signature(plot_method).parameters
     for param in ("kind", "ci_kind", "num_samples"):
         assert param in sig, (
-            f"{class_name}.plot() is missing '{param}'; all plot_xY-backed classes "
+            f"{class_name}.plot() is missing '{param}'; all posterior-over-x plot classes "
             "must expose kind, ci_kind, and num_samples."
         )
 

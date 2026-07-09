@@ -28,7 +28,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -451,9 +451,10 @@ class PiecewiseITS(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"`` and ``"histogram"``, the legend shows
-            individual sample lines rather than a shaded band.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -532,7 +533,7 @@ class PiecewiseITS(BaseExperiment):
         ax : list[plt.Axes]
             List of axes objects.
         """
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -555,7 +556,7 @@ class PiecewiseITS(BaseExperiment):
         y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
         if "treated_units" in y_pred_mu.dims:
             y_pred_mu = y_pred_mu.isel(treated_units=0)
-        h_line_fit, h_patch_fit = plot_xY(
+        h_line_fit, h_patch_fit = plot_posterior_over_x(
             time_values,
             y_pred_mu,
             ax=ax[0],
@@ -567,7 +568,7 @@ class PiecewiseITS(BaseExperiment):
         y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
         if "treated_units" in y_cf_mu.dims:
             y_cf_mu = y_cf_mu.isel(treated_units=0)
-        h_line_cf, h_patch_cf = plot_xY(
+        h_line_cf, h_patch_cf = plot_posterior_over_x(
             time_values,
             y_cf_mu,
             ax=ax[0],
@@ -595,7 +596,7 @@ class PiecewiseITS(BaseExperiment):
         labels_legend = ["Observations", "Fitted", "Counterfactual"]
 
         # MIDDLE PLOT: Causal Effect
-        plot_xY(
+        plot_posterior_over_x(
             time_values,
             self.effect,
             ax=ax[1],
@@ -612,7 +613,7 @@ class PiecewiseITS(BaseExperiment):
         ax[1].set(title="Causal Effect", ylabel="Effect")
 
         # BOTTOM PLOT: Cumulative Effect
-        plot_xY(
+        plot_posterior_over_x(
             time_values,
             self.cumulative_effect,
             ax=ax[2],

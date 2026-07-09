@@ -19,7 +19,7 @@ values actually change the rendered credible-interval bands.
 These tests guard against the regression described in GitHub issue
 `pymc-labs/CausalPy#890`_, where ``result.plot(hdi_prob=...)`` was silently
 swallowed by ``**kwargs`` rather than reaching the underlying
-:func:`causalpy.plot_utils.plot_xY` (and equivalent) calls.
+:func:`causalpy.plot_utils.plot_posterior_over_x` (and equivalent) calls.
 
 ``hdi_prob`` was the original parameter name. It was renamed to ``ci_prob``
 when ETI support was added (since the parameter controls the *credible interval*
@@ -49,7 +49,7 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # Each entry maps a "spy target" (dotted import path of the callable used by
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
-# ``plot_xY`` targets use ``"ci_prob"`` (the canonical name); other callables
+# ``plot_posterior_over_x`` targets use ``"ci_prob"`` (the canonical name); other callables
 # such as ``az.plot_posterior`` and ``az.plot_forest`` use ``"hdi_prob"``.
 _SpyTarget = tuple[str, str]
 
@@ -329,26 +329,26 @@ def _check_default(
 
 
 _ITS_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.interrupted_time_series.plot_xY", "ci_prob"),
+    ("causalpy.experiments.interrupted_time_series.plot_posterior_over_x", "ci_prob"),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_xY", "ci_prob"),
+    ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.diff_in_diff.plot_xY", "ci_prob"),
+    ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),
 ]
 _RD_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_discontinuity.plot_xY", "ci_prob"),
+    ("causalpy.experiments.regression_discontinuity.plot_posterior_over_x", "ci_prob"),
 ]
 _RKINK_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_kink.plot_xY", "ci_prob"),
+    ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),
 ]
 _PREPOST_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.prepostnegd.plot_xY", "ci_prob"),
+    ("causalpy.experiments.prepostnegd.plot_posterior_over_x", "ci_prob"),
     ("causalpy.experiments.prepostnegd.az.plot_posterior", "hdi_prob"),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.piecewise_its.plot_xY", "ci_prob"),
+    ("causalpy.experiments.piecewise_its.plot_posterior_over_x", "ci_prob"),
 ]
 _PANEL_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.panel_regression.az.plot_forest", "hdi_prob"),
@@ -358,20 +358,20 @@ _PANEL_TARGETS: list[_SpyTarget] = [
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_its_plot_threads_ci_prob(mock_pymc_sample, fitted_its, ci_prob):
-    """ITS ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """ITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_its, _ITS_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
 def test_its_plot_default_ci_prob(mock_pymc_sample, fitted_its):
-    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_xY`` call (as ``ci_prob``)."""
+    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_posterior_over_x`` call (as ``ci_prob``)."""
     _check_default(fitted_its, _ITS_TARGETS)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
-    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_sc, _SC_TARGETS, ci_prob)
 
 
@@ -384,7 +384,7 @@ def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_did_plot_threads_ci_prob(mock_pymc_sample, fitted_did, ci_prob):
-    """DiD ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """DiD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_did, _DID_TARGETS, ci_prob)
 
 
@@ -397,7 +397,7 @@ def test_did_plot_default_ci_prob(mock_pymc_sample, fitted_did):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rd_plot_threads_ci_prob(mock_pymc_sample, fitted_rd, ci_prob):
-    """RD ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """RD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_rd, _RD_TARGETS, ci_prob)
 
 
@@ -410,7 +410,7 @@ def test_rd_plot_default_ci_prob(mock_pymc_sample, fitted_rd):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rkink_plot_threads_ci_prob(mock_pymc_sample, fitted_rkink, ci_prob):
-    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_rkink, _RKINK_TARGETS, ci_prob)
 
 
@@ -423,7 +423,7 @@ def test_rkink_plot_default_ci_prob(mock_pymc_sample, fitted_rkink):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_prepost_plot_threads_ci_prob(mock_pymc_sample, fitted_prepost, ci_prob):
-    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``plot_xY`` and ``az.plot_posterior``."""
+    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``plot_posterior_over_x`` and ``az.plot_posterior``."""
     _check_threading(fitted_prepost, _PREPOST_TARGETS, ci_prob)
 
 
@@ -436,7 +436,7 @@ def test_prepost_plot_default_ci_prob(mock_pymc_sample, fitted_prepost):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_piecewise_plot_threads_ci_prob(mock_pymc_sample, fitted_piecewise, ci_prob):
-    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_xY`` call."""
+    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
     _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, ci_prob)
 
 
@@ -470,14 +470,19 @@ def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
 
 @pytest.mark.integration
 def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
-    """``plot(hdi_prob=...)`` still reaches ``plot_xY`` via the deprecated alias.
+    """``plot(hdi_prob=...)`` still reaches ``plot_posterior_over_x`` via the deprecated alias.
 
     Ensures that existing user code does not silently break after the rename
     to ``ci_prob``. The deprecated alias must emit a ``FutureWarning`` and
-    forward the value to ``plot_xY`` as ``ci_prob``.
+    forward the value to ``plot_posterior_over_x`` as ``ci_prob``.
     """
     stack, recorded = _record_hdi_prob_calls(
-        [("causalpy.experiments.interrupted_time_series.plot_xY", "ci_prob")]
+        [
+            (
+                "causalpy.experiments.interrupted_time_series.plot_posterior_over_x",
+                "ci_prob",
+            )
+        ]
     )
     import warnings
 

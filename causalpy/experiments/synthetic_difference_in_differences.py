@@ -28,7 +28,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import _PlotXYStyle, plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -621,9 +621,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_xY`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"`` and ``"histogram"``, the legend shows
-            individual sample lines rather than a shaded band.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -708,7 +709,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : list of matplotlib.axes.Axes
             The three axes (counterfactual, impact, cumulative impact).
         """
-        style: _PlotXYStyle = {
+        style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
@@ -727,7 +728,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
 
         # Pre-intervention synthetic control fit
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_pred,
             ax=ax[0],
@@ -748,7 +749,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         labels.append("Observations")
 
         # Post-intervention counterfactual
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapost.index,
             post_pred,
             ax=ax[0],
@@ -781,14 +782,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax[0].set(title=f"SDiD: ATT = {round(tau_mean, r_to)}")
 
         # ---- MIDDLE PLOT: Impact ----
-        plot_xY(
+        plot_posterior_over_x(
             self.datapre.index,
             self.pre_impact.sel(treated_units=treated_unit),
             ax=ax[1],
             **style,
             plot_hdi_kwargs={"color": "C0"},
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             self.post_impact.sel(treated_units=treated_unit),
             ax=ax[1],
@@ -809,7 +810,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         # ---- BOTTOM PLOT: Cumulative impact ----
         ax[2].set(title="Cumulative Causal Impact")
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             self.post_impact_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],

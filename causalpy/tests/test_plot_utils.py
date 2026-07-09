@@ -22,7 +22,7 @@ import pytest
 import xarray as xr
 from matplotlib.collections import PolyCollection
 
-from causalpy.plot_utils import get_hdi_to_df, plot_xY
+from causalpy.plot_utils import get_hdi_to_df, plot_posterior_over_x
 
 
 @pytest.mark.integration
@@ -101,7 +101,7 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
 
 @pytest.fixture
 def synthetic_posterior_data():
-    """Create synthetic posterior data for testing plot_xY."""
+    """Create synthetic posterior data for testing plot_posterior_over_x."""
     np.random.seed(42)
     n_chains = 2
     n_draws = 100
@@ -182,12 +182,12 @@ def synthetic_posterior_data_numeric():
 
 
 @pytest.mark.integration
-def test_plot_xY_ribbon_hdi(synthetic_posterior_data):
+def test_plot_posterior_over_x_ribbon_hdi(synthetic_posterior_data):
     """Test ribbon plot with HDI (default behavior)."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
-    h_line, h_patch = plot_xY(
+    h_line, h_patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -212,12 +212,12 @@ def test_plot_xY_ribbon_hdi(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_ribbon_eti(synthetic_posterior_data):
+def test_plot_posterior_over_x_ribbon_eti(synthetic_posterior_data):
     """Test ribbon plot with ETI."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
-    h_line, h_patch = plot_xY(
+    h_line, h_patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -242,12 +242,12 @@ def test_plot_xY_ribbon_eti(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram(synthetic_posterior_data):
+def test_plot_posterior_over_x_histogram(synthetic_posterior_data):
     """Test histogram visualization (2D heatmap)."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
-    handles, patch = plot_xY(
+    handles, patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -271,12 +271,12 @@ def test_plot_xY_histogram(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_numeric(synthetic_posterior_data_numeric):
+def test_plot_posterior_over_x_histogram_numeric(synthetic_posterior_data_numeric):
     """Test histogram visualization with numeric x values."""
     x, Y = synthetic_posterior_data_numeric
     fig, ax = plt.subplots()
 
-    handles, patch = plot_xY(
+    handles, patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -299,12 +299,12 @@ def test_plot_xY_histogram_numeric(synthetic_posterior_data_numeric):
 
 
 @pytest.mark.integration
-def test_plot_xY_spaghetti(synthetic_posterior_data):
+def test_plot_posterior_over_x_spaghetti(synthetic_posterior_data):
     """Test spaghetti plot visualization."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
-    handles, patch = plot_xY(
+    handles, patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -326,13 +326,13 @@ def test_plot_xY_spaghetti(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_default_behavior(synthetic_posterior_data):
+def test_plot_posterior_over_x_default_behavior(synthetic_posterior_data):
     """Test that default behavior matches original (ribbon with HDI)."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
     # Test with no parameters (should default to ribbon, hdi, 0.94)
-    h_line, h_patch = plot_xY(x, Y, ax=ax)
+    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax)
 
     # Check return types
     assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
@@ -342,13 +342,15 @@ def test_plot_xY_default_behavior(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_backward_compatibility_hdi_prob(synthetic_posterior_data):
+def test_plot_posterior_over_x_backward_compatibility_hdi_prob(
+    synthetic_posterior_data,
+):
     """Test backward compatibility with hdi_prob parameter."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
     # Test that hdi_prob still works (should override ci_prob)
-    h_line, h_patch = plot_xY(x, Y, ax=ax, hdi_prob=0.95)
+    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax, hdi_prob=0.95)
 
     # Check return types
     assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
@@ -358,14 +360,14 @@ def test_plot_xY_backward_compatibility_hdi_prob(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_different_ci_prob(synthetic_posterior_data):
+def test_plot_posterior_over_x_different_ci_prob(synthetic_posterior_data):
     """Test different ci_prob values."""
     x, Y = synthetic_posterior_data
 
     for ci_prob in [0.80, 0.89, 0.94, 0.95, 0.99]:
         fig, ax = plt.subplots()
 
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             x,
             Y,
             ax=ax,
@@ -386,26 +388,26 @@ def test_plot_xY_different_ci_prob(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_invalid_kind(synthetic_posterior_data):
+def test_plot_posterior_over_x_invalid_kind(synthetic_posterior_data):
     """Test that invalid kind parameter raises ValueError."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
     with pytest.raises(ValueError, match="Unknown kind"):
-        plot_xY(x, Y, ax=ax, kind="invalid_kind")
+        plot_posterior_over_x(x, Y, ax=ax, kind="invalid_kind")
 
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_spaghetti_num_samples(synthetic_posterior_data):
+def test_plot_posterior_over_x_spaghetti_num_samples(synthetic_posterior_data):
     """Test spaghetti plot with different num_samples values."""
     x, Y = synthetic_posterior_data
 
     for num_samples in [10, 50, 100]:
         fig, ax = plt.subplots()
 
-        handles, patch = plot_xY(
+        handles, patch = plot_posterior_over_x(
             x,
             Y,
             ax=ax,
@@ -429,12 +431,12 @@ def test_plot_xY_spaghetti_num_samples(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_custom_colormap(synthetic_posterior_data):
+def test_plot_posterior_over_x_histogram_custom_colormap(synthetic_posterior_data):
     """Test histogram with custom colormap."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
 
-    handles, patch = plot_xY(
+    handles, patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -450,7 +452,7 @@ def test_plot_xY_histogram_custom_colormap(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_requires_single_time_dim():
+def test_plot_posterior_over_x_histogram_requires_single_time_dim():
     """Histogram rejects Y with more than one non-chain/draw dimension."""
     rng = np.random.default_rng(0)
     Y = xr.DataArray(
@@ -465,22 +467,24 @@ def test_plot_xY_histogram_requires_single_time_dim():
     )
     fig, ax = plt.subplots()
     with pytest.raises(ValueError, match="exactly one non-chain/draw"):
-        plot_xY(np.arange(4), Y, ax=ax, kind="histogram")
+        plot_posterior_over_x(np.arange(4), Y, ax=ax, kind="histogram")
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_x_length_mismatch_raises(synthetic_posterior_data):
+def test_plot_posterior_over_x_histogram_x_length_mismatch_raises(
+    synthetic_posterior_data,
+):
     """Histogram rejects x length differing from the posterior time dimension."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
     with pytest.raises(ValueError, match="Length of x"):
-        plot_xY(x[:3], Y, ax=ax, kind="histogram")
+        plot_posterior_over_x(x[:3], Y, ax=ax, kind="histogram")
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_single_time_point():
+def test_plot_posterior_over_x_histogram_single_time_point():
     """Histogram with one time point exercises single-edge x bin construction."""
     rng = np.random.default_rng(2)
     x = pd.date_range("2020-01-01", periods=1, freq="D")
@@ -494,30 +498,32 @@ def test_plot_xY_histogram_single_time_point():
         },
     )
     fig, ax = plt.subplots()
-    handles, patch = plot_xY(x, Y, ax=ax, kind="histogram")
+    handles, patch = plot_posterior_over_x(x, Y, ax=ax, kind="histogram")
     assert isinstance(handles, list)
     assert patch is None
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_histogram_object_dtype_datetime_strings(synthetic_posterior_data):
+def test_plot_posterior_over_x_histogram_object_dtype_datetime_strings(
+    synthetic_posterior_data,
+):
     """Object-dtype x of ISO strings hits datetime parsing in _x_as_numeric_mesh."""
     x, Y = synthetic_posterior_data
     x_obj = np.array([str(t) for t in x], dtype=object)
     fig, ax = plt.subplots()
-    handles, patch = plot_xY(x_obj, Y, ax=ax, kind="histogram")
+    handles, patch = plot_posterior_over_x(x_obj, Y, ax=ax, kind="histogram")
     assert isinstance(handles, list)
     assert patch is None
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_ribbon_fill_kwargs_eti(synthetic_posterior_data):
+def test_plot_posterior_over_x_ribbon_fill_kwargs_eti(synthetic_posterior_data):
     """Ribbon ETI path uses fill_kwargs and default label when label is None."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
-    h_line, h_patch = plot_xY(
+    h_line, h_patch = plot_posterior_over_x(
         x,
         Y,
         ax=ax,
@@ -535,20 +541,24 @@ def test_plot_xY_ribbon_fill_kwargs_eti(synthetic_posterior_data):
 
 
 @pytest.mark.integration
-def test_plot_xY_warns_ci_kind_ignored_for_non_ribbon(synthetic_posterior_data):
+def test_plot_posterior_over_x_warns_ci_kind_ignored_for_non_ribbon(
+    synthetic_posterior_data,
+):
     """ci_kind is ignored for histogram/spaghetti; a UserWarning must be raised."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
     with pytest.warns(UserWarning, match="ci_kind.*ignored"):
-        plot_xY(x, Y, ax=ax, kind="histogram", ci_kind="eti")
+        plot_posterior_over_x(x, Y, ax=ax, kind="histogram", ci_kind="eti")
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_warns_num_samples_ignored_for_non_spaghetti(synthetic_posterior_data):
+def test_plot_posterior_over_x_warns_num_samples_ignored_for_non_spaghetti(
+    synthetic_posterior_data,
+):
     """num_samples is ignored for ribbon/histogram; a UserWarning must be raised."""
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
     with pytest.warns(UserWarning, match="num_samples.*ignored"):
-        plot_xY(x, Y, ax=ax, kind="ribbon", num_samples=100)
+        plot_posterior_over_x(x, Y, ax=ax, kind="ribbon", num_samples=100)
     plt.close(fig)
