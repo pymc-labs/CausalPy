@@ -39,9 +39,9 @@ dependencies:
   - scipy
   - seaborn>=0.11.2
   - statsmodels
-  - tidydraws==0.4.0
   - twine
   - xarray>=v2022.11.0
   - pip
   - pip:
       - marimo[mcp]
+      - tidydraws==0.4.0

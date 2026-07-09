@@ -26,20 +26,15 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
-    element_blank,
-    element_rect,
     facet_wrap,
     geom_density,
-    geom_line,
     geom_point,
-    geom_ribbon,
     geom_vline,
     ggplot,
     guides,
     labs,
     scale_color_manual,
     scale_fill_manual,
-    theme,
 )
 
 from causalpy.constants import HDI_PROB
@@ -48,8 +43,13 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _plot_histogram,
+    HISTOGRAM_PANEL_THEME,
+    add_posterior_kind,
     histogram_y_edges,
+    interval_kind,
+    plot_posterior_histogram,
+    prediction_summary,
+    sample_draw_lines,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -361,7 +361,7 @@ class PrePostNEGD(BaseExperiment):
         """
         top = "Pretest vs posttest"
         bottom = "Estimated treatment effect"
-        interval = "eti" if ci_kind == "eti" else "hdi"
+        interval = interval_kind(ci_kind)
 
         # Top facet: observed data as (_x=pre, _y=post). Relabel the two group
         # levels to the same names as the posterior bands so points, lines and
@@ -379,42 +379,29 @@ class PrePostNEGD(BaseExperiment):
         def _band(pred, series):
             newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
             newdata["obs_ind"] = range(len(newdata))
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
-            summ = (
-                td.point_interval(
-                    draws,
-                    "mu",
-                    group_by="pre",
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort("pre")
-                .to_pandas()
-                .rename(columns={"pre": "_x", "mu": "_y"})
-            )
-            summ["series"] = series
-            summ["panel"] = top
-            return summ
-
-        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
-            tagged = draws.with_columns(
-                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-            )
-            ids = tagged.select("_draw_id").unique()
-            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            return tagged.join(chosen, on="_draw_id").sort(["_draw_id", "pre"])
+            summ = prediction_summary(
+                pred,
+                newdata,
+                group_by="pre",
+                ci_prob=ci_prob,
+                interval=interval,
+            ).rename(columns={"pre": "_x", "mu": "_y"})
+            return summ.assign(series=series, panel=top)
 
         def _band_spaghetti(pred, series):
             newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
             newdata["obs_ind"] = range(len(newdata))
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
             sampled = (
-                _sample_draw_lines(draws, num_samples)
+                sample_draw_lines(
+                    td.prediction_draws(
+                        pred,
+                        newdata=newdata,
+                        var_name="mu",
+                        idata_group="posterior_predictive",
+                    ),
+                    num_samples,
+                    sort_by=["_draw_id", "pre"],
+                )
                 .to_pandas()
                 .rename(columns={"pre": "_x", "mu": "_y"})
             )
@@ -484,31 +471,17 @@ class PrePostNEGD(BaseExperiment):
 
         colors = {"Control group": "#1f77b4", "Treatment group": "#ff7f0e"}
         p = ggplot() + geom_point(scatter, aes("_x", "_y", color="series"), alpha=0.5)
-        if kind == "histogram":
-            p = p + geom_line(bands, aes("_x", "_y", color="series"))
-        elif kind == "spaghetti":
-            p = (
-                p
-                + geom_line(
-                    spaghetti_df,
-                    aes("_x", "_y", group="_line_id", color="series"),
-                    alpha=0.1,
-                    size=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("_x", "_y", color="series"))
-            )
-        else:
-            p = (
-                p
-                + geom_ribbon(
-                    bands,
-                    aes("_x", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                    alpha=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("_x", "_y", color="series"))
-            )
+        p = add_posterior_kind(
+            p,
+            bands,
+            kind,
+            x="_x",
+            y="_y",
+            ymin="mu_lower",
+            ymax="mu_upper",
+            spaghetti_df=spaghetti_df,
+            spaghetti_group="_line_id",
+        )
         p = (
             p
             + geom_density(effect_df, aes("_x"))
@@ -528,11 +501,7 @@ class PrePostNEGD(BaseExperiment):
             + labs(x="", y="", title=mean_label)
         )
         if kind == "histogram":
-            p = p + theme(
-                panel_background=element_rect(fill="white"),
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-            )
+            p = p + HISTOGRAM_PANEL_THEME
 
         if kind == "ribbon":
             return p
@@ -541,22 +510,19 @@ class PrePostNEGD(BaseExperiment):
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
         ax = np.asarray(axes[:2])
         if kind == "histogram":
-            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
-            _plot_histogram(
+            plot_posterior_histogram(
                 self.pred_xi,
                 untreated_mu,
                 ax[0],
-                {**hist_kwargs, "color": "C0"},
-                None,
+                {"color": "C0"},
                 y_edges=hist_edges,
                 draw_mean=False,
             )
-            _plot_histogram(
+            plot_posterior_histogram(
                 self.pred_xi,
                 treated_mu,
                 ax[0],
-                {**hist_kwargs, "color": "C1"},
-                None,
+                {"color": "C1"},
                 y_edges=hist_edges,
                 draw_mean=False,
             )

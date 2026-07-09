@@ -19,8 +19,6 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
-import polars as pl
-import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -29,10 +27,8 @@ from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
     element_blank,
-    element_rect,
     facet_wrap,
     geom_hline,
-    geom_line,
     geom_point,
     geom_ribbon,
     ggplot,
@@ -49,9 +45,16 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _plot_histogram,
+    HISTOGRAM_PANEL_THEME,
+    add_posterior_kind,
     concat_x_y,
+    da_spaghetti,
+    da_summary,
     get_hdi_to_df,
+    interval_kind,
+    overlay_posterior_histograms,
+    prediction_spaghetti,
+    prediction_summary,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -747,7 +750,7 @@ class InterruptedTimeSeries(BaseExperiment):
         matplotlib after ``.draw()``.
         """
         single_post_obs = len(self.datapost) <= 1
-        interval = "eti" if ci_kind == "eti" else "hdi"
+        interval = interval_kind(ci_kind)
         top, mid, bot = (
             "Pre-intervention Bayesian $R^2$",
             "Causal Impact",
@@ -774,68 +777,28 @@ class InterruptedTimeSeries(BaseExperiment):
 
         def _pred_band(pred, index, series, panel):
             newdata = pd.DataFrame({"obs_ind": index})
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
-            return (
-                td.point_interval(
-                    draws,
-                    "mu",
-                    group_by="obs_ind",
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort("obs_ind")
-                .to_pandas()
-                .assign(series=series, panel=panel)
-            )
+            return prediction_summary(
+                pred,
+                newdata,
+                group_by="obs_ind",
+                ci_prob=ci_prob,
+                interval=interval,
+            ).assign(series=series, panel=panel)
 
         def _da_band(da, series, panel):
-            if hasattr(da, "dims") and "treated_units" in da.dims:
-                da = da.isel(treated_units=0)
-            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
-            return (
-                td.point_interval(
-                    tidy,
-                    "mu",
-                    group_by="obs_ind",
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort("obs_ind")
-                .to_pandas()
-                .assign(series=series, panel=panel)
-            )
-
-        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
-            tagged = draws.with_columns(
-                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-            )
-            ids = tagged.select("_draw_id").unique()
-            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            return tagged.join(chosen, on="_draw_id").sort("obs_ind")
+            return da_summary(
+                da, group_by="obs_ind", ci_prob=ci_prob, interval=interval
+            ).assign(series=series, panel=panel)
 
         def _pred_spaghetti(pred, index, series, panel):
             newdata = pd.DataFrame({"obs_ind": index})
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
-            return (
-                _sample_draw_lines(draws, num_samples)
-                .to_pandas()
-                .assign(series=series, panel=panel)
-            )
+            return prediction_spaghetti(
+                pred, newdata, group_by="obs_ind", num_samples=num_samples
+            ).assign(series=series, panel=panel)
 
         def _da_spaghetti(da, series, panel):
-            if hasattr(da, "dims") and "treated_units" in da.dims:
-                da = da.isel(treated_units=0)
-            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
-            return (
-                _sample_draw_lines(tidy, num_samples)
-                .to_pandas()
-                .assign(series=series, panel=panel)
+            return da_spaghetti(da, group_by="obs_ind", num_samples=num_samples).assign(
+                series=series, panel=panel
             )
 
         pre_band = _pred_band(
@@ -970,31 +933,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 fill="#1f77b4",
                 alpha=0.25,
             )
-        if kind == "histogram":
-            p = p + geom_line(bands, aes("obs_ind", "mu", color="series"))
-        elif kind == "spaghetti":
-            p = (
-                p
-                + geom_line(
-                    spaghetti_df,
-                    aes("obs_ind", "mu", group="_draw_id", color="series"),
-                    alpha=0.1,
-                    size=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("obs_ind", "mu", color="series"))
-            )
-        else:
-            p = (
-                p
-                + geom_ribbon(
-                    bands,
-                    aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                    alpha=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("obs_ind", "mu", color="series"))
-            )
+        p = add_posterior_kind(p, bands, kind, x="obs_ind", spaghetti_df=spaghetti_df)
         p = (
             p
             + geom_point(obs, aes("obs_ind", "y", color="series"), size=1)
@@ -1014,17 +953,10 @@ class InterruptedTimeSeries(BaseExperiment):
                 figure_size=figsize,
                 panel_spacing_y=0.06,
                 plot_margin_bottom=0.08,
-                **(
-                    {
-                        "panel_background": element_rect(fill="white"),
-                        "panel_grid_major": element_blank(),
-                        "panel_grid_minor": element_blank(),
-                    }
-                    if kind == "histogram"
-                    else {}
-                ),
             )
         )
+        if kind == "histogram":
+            p = p + HISTOGRAM_PANEL_THEME
 
         # Escape hatch: labelled treatment vlines, singleton HDI markers, and
         # date formatting need a real Axes (and tests look for axvline labels).
@@ -1032,16 +964,7 @@ class InterruptedTimeSeries(BaseExperiment):
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
         ax = np.asarray(axes[:3])
         if hist_layers is not None:
-            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
-            for panel_ax, (x_vals, y_da, extra) in zip(ax, hist_layers, strict=True):
-                _plot_histogram(
-                    x_vals,
-                    y_da,
-                    panel_ax,
-                    {**hist_kwargs, **extra},
-                    None,
-                    draw_mean=False,
-                )
+            overlay_posterior_histograms(list(ax), hist_layers)
         for i, a in enumerate(ax):
             a.axvline(
                 x=self.treatment_time,

@@ -19,9 +19,7 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
-import polars as pl
 import seaborn as sns
-import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -30,18 +28,13 @@ from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
     coord_cartesian,
-    element_blank,
-    element_rect,
-    geom_line,
     geom_point,
-    geom_ribbon,
     ggplot,
     guides,
     labs,
     scale_color_manual,
     scale_fill_manual,
     scale_x_continuous,
-    theme,
 )
 from sklearn.base import RegressorMixin
 
@@ -52,8 +45,13 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _plot_histogram,
+    HISTOGRAM_PANEL_THEME,
+    add_posterior_kind,
     histogram_y_edges,
+    interval_kind,
+    plot_posterior_histogram,
+    prediction_spaghetti,
+    prediction_summary,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -504,7 +502,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         tcol = self.time_variable_name
         ycol = self.outcome_variable_name
-        interval = "eti" if ci_kind == "eti" else "hdi"
+        interval = interval_kind(ci_kind)
         colors = {
             "Control group": "#1f77b4",
             "Treatment group": "#ff7f0e",
@@ -522,40 +520,20 @@ class DifferenceInDifferences(BaseExperiment):
         def _band(pred, newdata, series):
             grid = newdata.reset_index(drop=True).copy()
             grid["obs_ind"] = range(len(grid))
-            draws = td.prediction_draws(
-                pred, newdata=grid, var_name="mu", idata_group="posterior_predictive"
-            )
-            return (
-                td.point_interval(
-                    draws,
-                    "mu",
-                    group_by=tcol,
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort(tcol)
-                .to_pandas()
-                .assign(series=series)
-            )
-
-        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
-            tagged = draws.with_columns(
-                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-            )
-            ids = tagged.select("_draw_id").unique()
-            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            return tagged.join(chosen, on="_draw_id").sort(tcol)
+            return prediction_summary(
+                pred,
+                grid,
+                group_by=tcol,
+                ci_prob=ci_prob,
+                interval=interval,
+            ).assign(series=series)
 
         def _pred_spaghetti(pred, newdata, series):
             grid = newdata.reset_index(drop=True).copy()
             grid["obs_ind"] = range(len(grid))
-            draws = td.prediction_draws(
-                pred, newdata=grid, var_name="mu", idata_group="posterior_predictive"
-            )
-            return (
-                _sample_draw_lines(draws, num_samples).to_pandas().assign(series=series)
-            )
+            return prediction_spaghetti(
+                pred, grid, group_by=tcol, num_samples=num_samples
+            ).assign(series=series)
 
         bands = pd.concat(
             [
@@ -613,31 +591,7 @@ class DifferenceInDifferences(BaseExperiment):
             spaghetti_df = pd.concat(spaghetti_parts)
 
         p = ggplot() + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
-        if kind == "histogram":
-            p = p + geom_line(bands, aes(tcol, "mu", color="series"))
-        elif kind == "spaghetti":
-            p = (
-                p
-                + geom_line(
-                    spaghetti_df,
-                    aes(tcol, "mu", group="_draw_id", color="series"),
-                    alpha=0.1,
-                    size=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes(tcol, "mu", color="series"))
-            )
-        else:
-            p = (
-                p
-                + geom_ribbon(
-                    bands,
-                    aes(tcol, ymin="mu_lower", ymax="mu_upper", fill="series"),
-                    alpha=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes(tcol, "mu", color="series"))
-            )
+        p = add_posterior_kind(p, bands, kind, x=tcol, spaghetti_df=spaghetti_df)
         p = (
             p
             + scale_color_manual(values=colors, name="")
@@ -662,11 +616,7 @@ class DifferenceInDifferences(BaseExperiment):
             + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
         if kind == "histogram":
-            p = p + theme(
-                panel_background=element_rect(fill="white"),
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-            )
+            p = p + HISTOGRAM_PANEL_THEME
 
         # Escape hatch: continuous-x violin + arrow need a real Axes.
         # Rebuild a matplotlib legend so ``legend_kwargs`` in ``_render_plot``
@@ -674,33 +624,25 @@ class DifferenceInDifferences(BaseExperiment):
         fig = p.draw()
         ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
         if kind == "histogram":
-            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
+            hist_kwargs = {"color": "C0"}
             ctrl_t = self.x_pred_control[tcol].values
-            _plot_histogram(
-                ctrl_t,
-                control_mu,
-                ax,
-                {**hist_kwargs, "color": "C0"},
-                None,
-                y_edges=hist_edges,
-                draw_mean=False,
+            plot_posterior_histogram(
+                ctrl_t, control_mu, ax, hist_kwargs, y_edges=hist_edges, draw_mean=False
             )
-            _plot_histogram(
+            plot_posterior_histogram(
                 self.x_pred_treatment[tcol].values,
                 treatment_mu,
                 ax,
-                {**hist_kwargs, "color": "C1"},
-                None,
+                {"color": "C1"},
                 y_edges=hist_edges,
                 draw_mean=False,
             )
             if len(time_points) > 1:
-                _plot_histogram(
+                plot_posterior_histogram(
                     self.x_pred_counterfactual[tcol].values,
                     counterfactual_mu,
                     ax,
-                    {**hist_kwargs, "color": "C2"},
-                    None,
+                    {"color": "C2"},
                     y_edges=hist_edges,
                     draw_mean=False,
                 )

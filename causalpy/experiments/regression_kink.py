@@ -19,27 +19,28 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
-    element_blank,
-    element_rect,
-    geom_line,
     geom_point,
-    geom_ribbon,
     geom_vline,
     ggplot,
     labs,
     scale_color_manual,
-    theme,
 )
 
 from causalpy.constants import HDI_PROB
-from causalpy.plot_utils import _plot_histogram
+from causalpy.plot_utils import (
+    HISTOGRAM_PANEL_THEME,
+    add_posterior_kind,
+    interval_kind,
+    plot_posterior_histogram,
+    prediction_summary,
+    sample_draw_lines,
+)
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -365,20 +366,21 @@ class RegressionKink(BaseExperiment):
             var_name="mu",
             idata_group="posterior_predictive",
         )
-        interval = "eti" if ci_kind == "eti" else "hdi"
-        summary = (
-            td.point_interval(
-                draws,
-                "mu",
-                group_by=xcol,
-                probs=(ci_prob,),
-                point="mean",
-                interval=interval,
-            )
-            .sort(xcol)
-            .to_pandas()
+        summary = prediction_summary(
+            self.pred,
+            newdata,
+            group_by=xcol,
+            ci_prob=ci_prob,
+            interval=interval_kind(ci_kind),
         )
         summary["series"] = "Posterior mean"
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_df = (
+                sample_draw_lines(draws, num_samples, sort_by=xcol)
+                .to_pandas()
+                .assign(series="Posterior mean")
+            )
 
         color_values = {
             "data": "black",
@@ -387,30 +389,7 @@ class RegressionKink(BaseExperiment):
         }
 
         p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
-        if kind == "histogram":
-            p = p + geom_line(summary, aes(x=xcol, y="mu", color="series"))
-        elif kind == "spaghetti":
-            sample = draws.with_columns(
-                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-            )
-            ids = sample.select("_draw_id").unique()
-            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            spaghetti = sample.join(chosen, on="_draw_id").sort(xcol).to_pandas()
-            p = p + geom_line(
-                spaghetti,
-                aes(xcol, "mu", group="_draw_id"),
-                color="#ff7f0e",
-                alpha=0.1,
-                size=0.3,
-            )
-        else:
-            p = p + geom_ribbon(
-                summary,
-                aes(x=xcol, ymin="mu_lower", ymax="mu_upper"),
-                fill="#ff7f0e",
-                alpha=0.3,
-            )
-        p = p + geom_line(summary, aes(x=xcol, y="mu", color="series"))
+        p = add_posterior_kind(p, summary, kind, x=xcol, spaghetti_df=spaghetti_df)
 
         title_info = (
             f"{round_num(self.score['unit_0_r2'], round_digits)} "
@@ -440,21 +419,12 @@ class RegressionKink(BaseExperiment):
             + labs(title=r2 + "\n" + grad_change + ci, x=xcol, y=ycol)
         )
         if kind == "histogram":
-            p = p + theme(
-                panel_background=element_rect(fill="white"),
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-            )
+            p = p + HISTOGRAM_PANEL_THEME
             fig = p.draw()
             ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
             mu = self.pred["posterior_predictive"].mu.isel(treated_units=0)
-            _plot_histogram(
-                self.x_pred[xcol],
-                mu,
-                ax,
-                {"cmap": "Greys", "alpha": 0.85, "color": "C1"},
-                None,
-                draw_mean=False,
+            plot_posterior_histogram(
+                self.x_pred[xcol], mu, ax, {"color": "C1"}, draw_mean=False
             )
             return fig, ax
 

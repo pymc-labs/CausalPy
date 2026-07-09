@@ -20,8 +20,6 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
-import polars as pl
-import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -30,10 +28,8 @@ from patsy import dmatrices
 from plotnine import (
     aes,
     element_blank,
-    element_rect,
     facet_wrap,
     geom_hline,
-    geom_line,
     geom_point,
     geom_ribbon,
     ggplot,
@@ -49,8 +45,15 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _plot_histogram,
+    HISTOGRAM_PANEL_THEME,
+    add_posterior_kind,
+    da_spaghetti,
+    da_summary,
     histogram_y_edges,
+    interval_kind,
+    plot_posterior_histogram,
+    prediction_spaghetti,
+    prediction_summary,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -539,7 +542,7 @@ class PiecewiseITS(BaseExperiment):
 
         ponytail: interruption vlines stay on matplotlib after ``.draw()``.
         """
-        interval = "eti" if ci_kind == "eti" else "hdi"
+        interval = interval_kind(ci_kind)
         time_values = self.data[self.time_col].values
         obs_to_t = pd.DataFrame({"obs_ind": range(len(time_values)), "t": time_values})
         mid, bot = "Causal Effect", "Cumulative Causal Effect"
@@ -560,82 +563,30 @@ class PiecewiseITS(BaseExperiment):
 
         def _pred_band(pred, series, panel):
             newdata = pd.DataFrame({"obs_ind": self.data.index})
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
-            if "treated_units" in draws.columns:
-                draws = draws.filter(
-                    pl.col("treated_units") == draws["treated_units"][0]
-                )
-            band = (
-                td.point_interval(
-                    draws,
-                    "mu",
-                    group_by="obs_ind",
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort("obs_ind")
-                .to_pandas()
+            band = prediction_summary(
+                pred, newdata, group_by="obs_ind", ci_prob=ci_prob, interval=interval
             )
             band["t"] = time_values
             return band.assign(series=series, panel=panel)
 
         def _da_band(da, series, panel):
-            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
-            if "treated_units" in tidy.columns:
-                first = tidy["treated_units"][0]
-                tidy = tidy.filter(pl.col("treated_units") == first)
-            band = (
-                td.point_interval(
-                    tidy,
-                    "mu",
-                    group_by="obs_ind",
-                    probs=(ci_prob,),
-                    point="mean",
-                    interval=interval,
-                )
-                .sort("obs_ind")
-                .to_pandas()
+            band = da_summary(
+                da, group_by="obs_ind", ci_prob=ci_prob, interval=interval
             )
             band["t"] = time_values
             return band.assign(series=series, panel=panel)
 
-        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
-            tagged = draws.with_columns(
-                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-            )
-            ids = tagged.select("_draw_id").unique()
-            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-            return tagged.join(chosen, on="_draw_id").sort("obs_ind")
-
         def _pred_spaghetti(pred, series, panel):
             newdata = pd.DataFrame({"obs_ind": self.data.index})
-            draws = td.prediction_draws(
-                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
-            )
-            if "treated_units" in draws.columns:
-                draws = draws.filter(
-                    pl.col("treated_units") == draws["treated_units"][0]
-                )
-            sampled = (
-                _sample_draw_lines(draws, num_samples)
-                .to_pandas()
-                .merge(obs_to_t, on="obs_ind")
-            )
+            sampled = prediction_spaghetti(
+                pred, newdata, group_by="obs_ind", num_samples=num_samples
+            ).merge(obs_to_t, on="obs_ind")
             return sampled.assign(series=series, panel=panel)
 
         def _da_spaghetti(da, series, panel):
-            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
-            if "treated_units" in tidy.columns:
-                first = tidy["treated_units"][0]
-                tidy = tidy.filter(pl.col("treated_units") == first)
-            sampled = (
-                _sample_draw_lines(tidy, num_samples)
-                .to_pandas()
-                .merge(obs_to_t, on="obs_ind")
-            )
+            sampled = da_spaghetti(
+                da, group_by="obs_ind", num_samples=num_samples
+            ).merge(obs_to_t, on="obs_ind")
             return sampled.assign(series=series, panel=panel)
 
         fit_band = _pred_band(self.y_pred, "Fitted", top)
@@ -726,31 +677,7 @@ class PiecewiseITS(BaseExperiment):
             fill="#2ca02c",
             alpha=0.25,
         )
-        if kind == "histogram":
-            p = p + geom_line(bands, aes("t", "mu", color="series"))
-        elif kind == "spaghetti":
-            p = (
-                p
-                + geom_line(
-                    spaghetti_df,
-                    aes("t", "mu", group="_draw_id", color="series"),
-                    alpha=0.1,
-                    size=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("t", "mu", color="series"))
-            )
-        else:
-            p = (
-                p
-                + geom_ribbon(
-                    bands,
-                    aes("t", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                    alpha=0.3,
-                    show_legend=False,
-                )
-                + geom_line(bands, aes("t", "mu", color="series"))
-            )
+        p = add_posterior_kind(p, bands, kind, x="t", spaghetti_df=spaghetti_df)
         p = (
             p
             + geom_point(obs, aes("t", "y", color="series"), size=1)
@@ -772,30 +699,21 @@ class PiecewiseITS(BaseExperiment):
                 figure_size=figsize,
                 panel_spacing_y=0.06,
                 plot_margin_bottom=0.08,
-                **(
-                    {
-                        "panel_background": element_rect(fill="white"),
-                        "panel_grid_major": element_blank(),
-                        "panel_grid_minor": element_blank(),
-                    }
-                    if kind == "histogram"
-                    else {}
-                ),
             )
         )
+        if kind == "histogram":
+            p = p + HISTOGRAM_PANEL_THEME
 
         fig = p.draw()
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
         ax = np.asarray(axes[:3])
         if hist_layers is not None:
-            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
             for panel_idx, x_vals, y_da, extra, y_edges in hist_layers:
-                _plot_histogram(
+                plot_posterior_histogram(
                     x_vals,
                     y_da,
                     ax[panel_idx],
-                    {**hist_kwargs, **extra},
-                    None,
+                    extra,
                     y_edges=y_edges,
                     draw_mean=False,
                 )

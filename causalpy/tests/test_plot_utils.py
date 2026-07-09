@@ -20,9 +20,8 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from matplotlib.collections import PolyCollection
 
-from causalpy.plot_utils import concat_x_y, get_hdi_to_df, histogram_tile_df, plot_xY
+from causalpy.plot_utils import concat_x_y, get_hdi_to_df, plot_posterior_histogram
 
 
 @pytest.mark.integration
@@ -101,7 +100,7 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
 
 @pytest.fixture
 def synthetic_posterior_data():
-    """Create synthetic posterior data for testing plot_xY."""
+    """Create synthetic posterior data for histogram tests."""
     np.random.seed(42)
     n_chains = 2
     n_draws = 100
@@ -182,398 +181,32 @@ def synthetic_posterior_data_numeric():
 
 
 @pytest.mark.integration
-def test_plot_xY_ribbon_hdi(synthetic_posterior_data):
-    """Test ribbon plot with HDI (default behavior)."""
+def test_plot_posterior_histogram_renders_heatmap(synthetic_posterior_data):
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
-
-    h_line, h_patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="hdi",
-        ci_prob=0.94,
-        label="Test HDI",
-    )
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-    assert isinstance(h_patch, PolyCollection), (
-        "Should return PolyCollection for HDI ribbon"
-    )
-
-    # Check that plot was created
-    assert len(ax.lines) > 0, "Should have at least one line (mean)"
-    assert len(ax.collections) > 0, "Should have at least one collection (HDI ribbon)"
-
+    handles, patch = plot_posterior_histogram(x, Y, ax)
+    assert len(handles) == 1
+    assert patch is None
+    assert ax.collections
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_ribbon_eti(synthetic_posterior_data):
-    """Test ribbon plot with ETI."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    h_line, h_patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="eti",
-        ci_prob=0.89,
-        label="Test ETI",
-    )
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for ETI ribbon"
-    assert isinstance(h_patch, PolyCollection), (
-        "Should return PolyCollection for ETI ribbon"
-    )
-
-    # Check that plot was created
-    assert len(ax.lines) > 0, "Should have at least one line (mean)"
-    assert len(ax.collections) > 0, "Should have at least one collection (ETI ribbon)"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram(synthetic_posterior_data):
-    """Test histogram visualization (2D heatmap)."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        label="Test Histogram",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    # Check that plot was created
-    # Histogram uses pcolormesh which creates a QuadMesh
-    assert len(ax.collections) > 0 or len(ax.images) > 0, (
-        "Should have collections or images (pcolormesh/heatmap)"
-    )
-    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
-    assert ax.collections[0].get_cmap().name == "Greys"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_numeric(synthetic_posterior_data_numeric):
-    """Test histogram visualization with numeric x values."""
+def test_plot_posterior_histogram_numeric_x(synthetic_posterior_data_numeric):
     x, Y = synthetic_posterior_data_numeric
     fig, ax = plt.subplots()
-
-    handles, patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        label="Test Histogram Numeric",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    # Check that plot was created
-    assert len(ax.collections) > 0 or len(ax.images) > 0, (
-        "Should have collections or images (pcolormesh/heatmap)"
-    )
-    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
-
+    plot_posterior_histogram(x, Y, ax, draw_mean=False)
+    assert ax.collections
     plt.close(fig)
 
 
 @pytest.mark.integration
-def test_plot_xY_spaghetti(synthetic_posterior_data):
-    """Test spaghetti plot visualization."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="spaghetti",
-        num_samples=30,
-        label="Test Spaghetti",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Spaghetti should not return PolyCollection"
-
-    # Check that plot was created
-    # Spaghetti plot should have multiple lines (samples + mean)
-    assert len(ax.lines) >= 30, "Should have at least 30 lines (samples + mean)"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_default_behavior(synthetic_posterior_data):
-    """Test that default behavior matches original (ribbon with HDI)."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    # Test with no parameters (should default to ribbon, hdi, 0.94)
-    h_line, h_patch = plot_xY(x, Y, ax=ax)
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_backward_compatibility_hdi_prob(synthetic_posterior_data):
-    """Test backward compatibility with hdi_prob parameter."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    # Test that hdi_prob still works (should override ci_prob)
-    h_line, h_patch = plot_xY(x, Y, ax=ax, hdi_prob=0.95)
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_different_ci_prob(synthetic_posterior_data):
-    """Test different ci_prob values."""
-    x, Y = synthetic_posterior_data
-
-    for ci_prob in [0.80, 0.89, 0.94, 0.95, 0.99]:
-        fig, ax = plt.subplots()
-
-        h_line, h_patch = plot_xY(
-            x,
-            Y,
-            ax=ax,
-            kind="ribbon",
-            ci_kind="hdi",
-            ci_prob=ci_prob,
-        )
-
-        # Check return types
-        assert isinstance(h_line, plt.Line2D), (
-            f"Should return Line2D for ci_prob={ci_prob}"
-        )
-        assert h_patch is not None, (
-            f"Should return PolyCollection for ci_prob={ci_prob}"
-        )
-
-        plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_invalid_kind(synthetic_posterior_data):
-    """Test that invalid kind parameter raises ValueError."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    with pytest.raises(ValueError, match="Unknown kind"):
-        plot_xY(x, Y, ax=ax, kind="invalid_kind")
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_spaghetti_num_samples(synthetic_posterior_data):
-    """Test spaghetti plot with different num_samples values."""
-    x, Y = synthetic_posterior_data
-
-    for num_samples in [10, 50, 100]:
-        fig, ax = plt.subplots()
-
-        handles, patch = plot_xY(
-            x,
-            Y,
-            ax=ax,
-            kind="spaghetti",
-            num_samples=num_samples,
-        )
-
-        # Check return types
-        assert isinstance(handles, list), (
-            f"Should return list for num_samples={num_samples}"
-        )
-        assert patch is None, (
-            f"Should not return PolyCollection for num_samples={num_samples}"
-        )
-
-        # Check that we have approximately the right number of lines
-        # (samples + mean line, but may be less if num_samples > total samples)
-        assert len(ax.lines) > 0, f"Should have lines for num_samples={num_samples}"
-
-        plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_custom_colormap(synthetic_posterior_data):
-    """Test histogram with custom colormap."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        plot_hdi_kwargs={"cmap": "plasma", "alpha": 0.6},
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_requires_single_time_dim():
-    """Histogram rejects Y with more than one non-chain/draw dimension."""
-    rng = np.random.default_rng(0)
-    Y = xr.DataArray(
-        rng.standard_normal((2, 30, 4, 5)),
-        dims=["chain", "draw", "a", "b"],
-        coords={
-            "chain": [0, 1],
-            "draw": np.arange(30),
-            "a": np.arange(4),
-            "b": np.arange(5),
-        },
-    )
-    fig, ax = plt.subplots()
-    with pytest.raises(ValueError, match="exactly one non-chain/draw"):
-        plot_xY(np.arange(4), Y, ax=ax, kind="histogram")
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_x_length_mismatch_raises(synthetic_posterior_data):
-    """Histogram rejects x length differing from the posterior time dimension."""
+def test_plot_posterior_histogram_x_length_mismatch_raises(synthetic_posterior_data):
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
     with pytest.raises(ValueError, match="Length of x"):
-        plot_xY(x[:3], Y, ax=ax, kind="histogram")
+        plot_posterior_histogram(x[:3], Y, ax)
     plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_single_time_point():
-    """Histogram with one time point exercises single-edge x bin construction."""
-    rng = np.random.default_rng(2)
-    x = pd.date_range("2020-01-01", periods=1, freq="D")
-    Y = xr.DataArray(
-        rng.standard_normal((2, 40, 1)),
-        dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": [0, 1],
-            "draw": np.arange(40),
-            "obs_ind": x,
-        },
-    )
-    fig, ax = plt.subplots()
-    handles, patch = plot_xY(x, Y, ax=ax, kind="histogram")
-    assert isinstance(handles, list)
-    assert patch is None
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_histogram_object_dtype_datetime_strings(synthetic_posterior_data):
-    """Object-dtype x of ISO strings hits datetime parsing in _x_as_numeric_mesh."""
-    x, Y = synthetic_posterior_data
-    x_obj = np.array([str(t) for t in x], dtype=object)
-    fig, ax = plt.subplots()
-    handles, patch = plot_xY(x_obj, Y, ax=ax, kind="histogram")
-    assert isinstance(handles, list)
-    assert patch is None
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_ribbon_fill_kwargs_eti(synthetic_posterior_data):
-    """Ribbon ETI path uses fill_kwargs and default label when label is None."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    h_line, h_patch = plot_xY(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="eti",
-        plot_hdi_kwargs={
-            "color": "C2",
-            "fill_kwargs": {"color": "C2", "alpha": 0.4},
-        },
-        label=None,
-    )
-    assert isinstance(h_line, plt.Line2D)
-    assert h_patch is not None
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_warns_ci_kind_ignored_for_non_ribbon(synthetic_posterior_data):
-    """ci_kind is ignored for histogram/spaghetti; a UserWarning must be raised."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.warns(UserWarning, match="ci_kind.*ignored"):
-        plot_xY(x, Y, ax=ax, kind="histogram", ci_kind="eti")
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_xY_warns_num_samples_ignored_for_non_spaghetti(synthetic_posterior_data):
-    """num_samples is ignored for ribbon/histogram; a UserWarning must be raised."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.warns(UserWarning, match="num_samples.*ignored"):
-        plot_xY(x, Y, ax=ax, kind="ribbon", num_samples=100)
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_histogram_tile_df_matches_density_grid(synthetic_posterior_data):
-    """Tile long data carries the same normalized counts as the matplotlib grid."""
-    x, Y = synthetic_posterior_data
-    from causalpy.plot_utils import _histogram_density_grid
-
-    _, grid = _histogram_density_grid(Y)
-    tiles = histogram_tile_df(x, Y, series="s", panel="p")
-    assert tiles["density"].max() <= 1.0 + 1e-12
-    assert len(tiles) == grid.size
-    assert set(tiles.columns) >= {
-        "xmin",
-        "xmax",
-        "ymin",
-        "ymax",
-        "density",
-        "series",
-        "panel",
-    }
 
 
 @pytest.mark.integration
@@ -593,8 +226,8 @@ def test_concat_x_y_histogram_shares_y_bin_edges():
     )
 
     fig, ax = plt.subplots()
-    plot_xY(x_pre, Y_pre, ax=ax, kind="histogram")
-    plot_xY(x_post, Y_post, ax=ax, kind="histogram")
+    plot_posterior_histogram(x_pre, Y_pre, ax, draw_mean=False)
+    plot_posterior_histogram(x_post, Y_post, ax, draw_mean=False)
     separate_ranges = [
         (coords[:, 1].min(), coords[:, 1].max())
         for col in ax.collections
@@ -604,7 +237,7 @@ def test_concat_x_y_histogram_shares_y_bin_edges():
 
     fig, ax = plt.subplots()
     x_all, Y_all = concat_x_y(x_pre, Y_pre, x_post, Y_post)
-    plot_xY(x_all, Y_all, ax=ax, kind="histogram")
+    plot_posterior_histogram(x_all, Y_all, ax, draw_mean=False)
     combined_range = ax.collections[0].get_coordinates()[:, 1]
     plt.close(fig)
 
