@@ -20,9 +20,25 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from patsy import build_design_matrices, dmatrices
+from plotnine import (
+    aes,
+    coord_cartesian,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    ggplot,
+    guides,
+    labs,
+    scale_color_manual,
+    scale_fill_manual,
+    scale_x_continuous,
+)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -31,7 +47,6 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -356,18 +371,16 @@ class DifferenceInDifferences(BaseExperiment):
             (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
+            not yet migrated and raise ``ValueError``; tracked in issue #988.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
+            Unused until ``kind="spaghetti"`` is migrated; retained for API
+            compatibility.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -419,29 +432,23 @@ class DifferenceInDifferences(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results.
+        """Plot DiD results via plotnine plus a small matplotlib overlay.
 
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive bands for the control, treatment, and
-            counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
+        Builds scatter + control/treatment (and multi-period counterfactual)
+        ribbons as a shared :class:`plotnine.ggplot`, then ``.draw()``s and
+        reuses the existing continuous-x violin and causal-impact arrow
+        snippets. Returns ``(fig, ax)``.
+
+        ponytail: single-period counterfactual stays on ``ax.violinplot``
+        (no plotnine continuous-x violin); arrow/text stay on ``ax.annotate``.
+        ``kind`` other than ``"ribbon"`` raises until migrated (#988).
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
+        if kind != "ribbon":
+            raise ValueError(
+                f"kind={kind!r} is not yet supported for the plotnine "
+                "DifferenceInDifferences plot; use kind='ribbon'. "
+                "Tracked in issue #988."
+            )
 
         def _plot_causal_impact_arrow(results, ax):
             """
@@ -495,49 +502,115 @@ class DifferenceInDifferences(BaseExperiment):
                 va="center",
             )
 
-        fig, ax = plt.subplots(figsize=figsize)
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        interval = "eti" if ci_kind == "eti" else "hdi"
+        colors = {
+            "Control group": "#1f77b4",
+            "Treatment group": "#ff7f0e",
+            "Counterfactual": "#2ca02c",
+        }
 
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.time_variable_name,
-            y=self.outcome_variable_name,
-            hue=self.group_variable_name,
-            alpha=1,
-            legend=False,
-            markers=True,
-            ax=ax,
+        # Scatter: map group codes to the same series names as the bands.
+        levels = sorted(self.data[self.group_variable_name].unique())
+        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
+        scatter = self.data[[tcol, ycol]].copy()
+        scatter["series"] = (
+            self.data[self.group_variable_name].map(group_to_series).values
         )
 
-        # Plot model fit to control group
-        time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_posterior_over_x(
-            time_points,
-            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-            label="Control group",
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Control group"]
+        def _band(pred, newdata, series):
+            grid = newdata.reset_index(drop=True).copy()
+            grid["obs_ind"] = range(len(grid))
+            draws = td.prediction_draws(
+                pred, newdata=grid, var_name="mu", idata_group="posterior_predictive"
+            )
+            return (
+                td.point_interval(
+                    draws,
+                    "mu",
+                    group_by=tcol,
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort(tcol)
+                .to_pandas()
+                .assign(series=series)
+            )
 
-        # Plot model fit to treatment group
-        time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_posterior_over_x(
-            time_points,
-            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Treatment group",
+        bands = pd.concat(
+            [
+                _band(self.y_pred_control, self.x_pred_control, "Control group"),
+                _band(self.y_pred_treatment, self.x_pred_treatment, "Treatment group"),
+            ]
         )
-        handles.append((h_line, h_patch))
-        labels.append("Treatment group")
 
-        # Plot counterfactual - post-test for treatment group IF no treatment
-        # had occurred.
-        time_points = self.x_pred_counterfactual[self.time_variable_name].values
+        time_points = self.x_pred_counterfactual[tcol].values
+        if len(time_points) > 1:
+            bands = pd.concat(
+                [
+                    bands,
+                    _band(
+                        self.y_pred_counterfactual,
+                        self.x_pred_counterfactual,
+                        "Counterfactual",
+                    ),
+                ]
+            )
+
+        p = (
+            ggplot()
+            + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
+            + geom_ribbon(
+                bands,
+                aes(tcol, ymin="mu_lower", ymax="mu_upper", fill="series"),
+                alpha=0.3,
+                show_legend=False,
+            )
+            + geom_line(bands, aes(tcol, "mu", color="series"))
+            + scale_color_manual(values=colors, name="")
+            + scale_fill_manual(values=colors, name="")
+            # Drop plotnine's guide; rebuild a matplotlib legend after .draw()
+            # so ``legend_kwargs`` in ``_render_plot`` can still mutate it.
+            + guides(color="none", fill="none")
+            + scale_x_continuous(
+                breaks=list(self.x_pred_treatment[tcol].values.astype(float))
+            )
+            # Room for the causal-impact arrow drawn just past the last time point.
+            + coord_cartesian(
+                xlim=(
+                    float(np.min(self.x_pred_treatment[tcol].values)) - 0.05,
+                    float(np.max(self.x_pred_treatment[tcol].values))
+                    + 0.15
+                    * float(
+                        np.ptp(self.x_pred_treatment[tcol].values.astype(float)) or 1.0
+                    ),
+                )
+            )
+            + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
+        )
+
+        # Escape hatch: continuous-x violin + arrow need a real Axes.
+        # Rebuild a matplotlib legend so ``legend_kwargs`` in ``_render_plot``
+        # can still mutate it (plotnine's guide is not an ``Axes`` legend).
+        fig = p.draw()
+        ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
+        legend_labels = ["Control group", "Treatment group"]
+        if len(time_points) > 1:
+            legend_labels.append("Counterfactual")
+        ax.legend(
+            handles=[
+                (
+                    Line2D([0], [0], color=colors[label]),
+                    Patch(facecolor=colors[label], alpha=0.3),
+                )
+                for label in legend_labels
+            ],
+            labels=legend_labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+
         if len(time_points) == 1:
             y_pred_cf = az.extract(
                 self.y_pred_counterfactual,
@@ -553,7 +626,7 @@ class DifferenceInDifferences(BaseExperiment):
             )
             parts = ax.violinplot(
                 violin_data.T,
-                positions=self.x_pred_counterfactual[self.time_variable_name].values,
+                positions=self.x_pred_counterfactual[tcol].values,
                 showmeans=False,
                 showmedians=False,
                 widths=0.2,
@@ -562,33 +635,8 @@ class DifferenceInDifferences(BaseExperiment):
                 pc.set_facecolor("C0")
                 pc.set_edgecolor("None")
                 pc.set_alpha(0.5)
-        else:
-            h_line, h_patch = plot_posterior_over_x(
-                time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu.isel(
-                    treated_units=0
-                ),
-                ax=ax,
-                **style,
-                plot_hdi_kwargs={"color": "C2"},
-                label="Counterfactual",
-            )
-            handles.append((h_line, h_patch))
-            labels.append("Counterfactual")
 
-        # arrow to label the causal impact
         _plot_causal_impact_arrow(self, ax)
-
-        # formatting
-        ax.set(
-            xticks=self.x_pred_treatment[self.time_variable_name].values,
-            title=self._causal_impact_summary_stat(round_to),
-        )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
         return fig, ax
 
     def _ols_plot(

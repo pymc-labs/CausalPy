@@ -342,7 +342,11 @@ _SC_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.diff_in_diff.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _RD_TARGETS: list[_SpyTarget] = [
     (
@@ -398,7 +402,7 @@ def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_did_plot_threads_ci_prob(mock_pymc_sample, fitted_did, ci_prob):
-    """DiD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """DiD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_did, _DID_TARGETS, ci_prob)
 
 
