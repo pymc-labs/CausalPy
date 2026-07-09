@@ -29,14 +29,21 @@ from matplotlib.lines import Line2D
 from patsy import dmatrices
 from plotnine import (
     aes,
+    element_blank,
+    facet_wrap,
     geom_hline,
+    geom_line,
+    geom_point,
     geom_pointrange,
     geom_rect,
+    geom_ribbon,
     geom_vline,
     ggplot,
     guides,
     labs,
     scale_color_manual,
+    scale_fill_manual,
+    scale_linetype_manual,
     scale_shape_manual,
     scale_x_continuous,
     theme,
@@ -1036,62 +1043,168 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories."""
+        """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories via plotnine.
+
+        Builds ribbons/lines/points as one ggplot (facet or overlay), then
+        ``.draw()``s and applies axis titles, treatment vlines, shared-y, and
+        legends. OLS helpers (``_make_group_time_axes``, etc.) are unused here.
+
+        ponytail: axis chrome and per-panel legends stay on matplotlib after
+        ``.draw()`` so existing tests and ``legend_kwargs`` keep working.
+        """
+        if layout not in {"facet", "overlay"}:
+            raise ValueError("layout must be 'facet' or 'overlay'")
+
         att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
             x_axis=x_axis, include_placebo=include_placebo
         )
-        cohort_groups = list(att_gt.groupby("cohort", sort=True))
+        cohorts = list(att_gt["cohort"].drop_duplicates())
+        n_cohorts = len(cohorts)
         sharex = x_axis == "event_time"
-        fig, axes = self._make_group_time_axes(
-            att_gt=att_gt,
-            layout=layout,
-            figsize=figsize,
-            sharex=sharex,
-            sharey=layout == "facet",
+        if figsize is None:
+            figsize = (
+                (10, 6) if layout == "overlay" else (10, max(2.5 * n_cohorts, 3.0))
+            )
+
+        plot_df = att_gt.copy()
+        plot_df["series"] = plot_df["type"].map(
+            {"placebo": "Placebo estimate", "ATT": "ATT estimate"}
+        )
+        plot_df["cohort_label"] = plot_df["cohort"].map(lambda c: f"Cohort {c}")
+        plot_df["cohort_label"] = pd.Categorical(
+            plot_df["cohort_label"],
+            categories=[f"Cohort {c}" for c in cohorts],
+            ordered=True,
         )
 
-        for cohort_idx, (cohort, cohort_data) in enumerate(cohort_groups):
-            ax = axes[cohort] if layout == "facet" else axes["overlay"]
-            self._plot_bayesian_group_time_segment(
-                ax=ax,
-                cohort_data=cohort_data[cohort_data["type"] == "placebo"],
-                x_col=x_col,
-                line_type="placebo",
-                color="gray" if layout == "facet" else f"C{cohort_idx % 10}",
-                label=(
-                    "Placebo estimate"
-                    if layout == "facet"
-                    else f"Cohort {cohort} placebo"
-                ),
+        type_linetypes = {"Placebo estimate": "dashed", "ATT estimate": "solid"}
+        type_shapes = {"Placebo estimate": "s", "ATT estimate": "o"}
+
+        if layout == "facet":
+            type_colors = {
+                "Placebo estimate": "gray",
+                "ATT estimate": "#1f77b4",
+            }
+            p = (
+                ggplot(
+                    plot_df,
+                    aes(x_col, "att", color="series", fill="series", linetype="series"),
+                )
+                + geom_ribbon(
+                    aes(ymin="att_lower", ymax="att_upper", group="series"),
+                    alpha=0.2,
+                    color="none",
+                    show_legend=False,
+                )
+                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
+                + geom_line()
+                + geom_point(aes(shape="series"), size=2)
+                + facet_wrap("cohort_label", ncol=1, scales="free_y")
+                + scale_color_manual(values=type_colors, name="")
+                + scale_fill_manual(values=type_colors, name="")
+                + scale_linetype_manual(values=type_linetypes, name="")
+                + scale_shape_manual(values=type_shapes, name="")
+                + guides(color="none", fill="none", linetype="none", shape="none")
+                + labs(x="", y="")
+                + theme(
+                    strip_text=element_blank(),
+                    strip_background=element_blank(),
+                    figure_size=figsize,
+                    panel_spacing_y=0.06,
+                )
             )
-            self._plot_bayesian_group_time_segment(
-                ax=ax,
-                cohort_data=cohort_data[cohort_data["type"] == "ATT"],
-                x_col=x_col,
-                line_type="ATT",
-                color="C0" if layout == "facet" else f"C{cohort_idx % 10}",
-                label="ATT estimate" if layout == "facet" else f"Cohort {cohort} ATT",
+        else:
+            # Overlay: color by cohort; dashed placebo / solid ATT.
+            cohort_colors = {f"Cohort {c}": f"C{i % 10}" for i, c in enumerate(cohorts)}
+            p = (
+                ggplot(
+                    plot_df,
+                    aes(
+                        x_col,
+                        "att",
+                        color="cohort_label",
+                        fill="cohort_label",
+                        linetype="series",
+                        shape="series",
+                        group="cohort_label",
+                    ),
+                )
+                + geom_ribbon(
+                    aes(ymin="att_lower", ymax="att_upper", group="cohort_label"),
+                    alpha=0.15,
+                    color="none",
+                    show_legend=False,
+                )
+                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
+                + geom_line()
+                + geom_point(size=2)
+                + scale_color_manual(values=cohort_colors, name="Treatment cohort")
+                + scale_fill_manual(values=cohort_colors, name="Treatment cohort")
+                + scale_linetype_manual(values=type_linetypes, name="")
+                + scale_shape_manual(values=type_shapes, name="")
+                + labs(x="", y="", title="Staggered DiD Cohort Trajectories")
+                + theme(figure_size=figsize)
             )
-            self._format_group_time_axis(
-                ax=ax,
-                cohort=cohort if layout == "facet" else None,
-                x_label=self._get_group_time_axis_label(
+
+        if x_axis == "event_time":
+            p = p + geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
+
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+
+        if layout == "facet":
+            for a in axes[1:]:
+                axes[0].sharey(a)
+            for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
+                ax.set_title(f"Cohort {cohort}")
+                ax.set_ylabel(y_label)
+                xlabel = self._get_group_time_axis_label(
                     x_label=x_label,
                     layout=layout,
                     sharex=sharex,
-                    axis_index=cohort_idx,
-                    n_axes=len(cohort_groups),
-                ),
-                y_label=y_label,
-                x_axis=x_axis,
-                treatment_time=cohort,
-            )
-            ax.legend(fontsize=LEGEND_FONT_SIZE)
+                    axis_index=i,
+                    n_axes=n_cohorts,
+                )
+                ax.set_xlabel(xlabel)
+                if x_axis == "calendar_time":
+                    ax.axvline(
+                        x=cohort - 0.5,
+                        color="red",
+                        linestyle="-",
+                        linewidth=1,
+                        alpha=0.5,
+                    )
+                handles = [
+                    Line2D(
+                        [0],
+                        [0],
+                        color="gray",
+                        marker="s",
+                        linestyle="--",
+                        markersize=7,
+                    ),
+                    Line2D(
+                        [0],
+                        [0],
+                        color="#1f77b4",
+                        marker="o",
+                        linestyle="-",
+                        markersize=7,
+                    ),
+                ]
+                ax.legend(
+                    handles=handles,
+                    labels=["Placebo estimate", "ATT estimate"],
+                    fontsize=LEGEND_FONT_SIZE,
+                )
+        else:
+            ax = axes[0]
+            ax.set_xlabel(x_label)
+            ax.set_ylabel(y_label)
+            ax.set_title("Staggered DiD Cohort Trajectories")
+            ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
-        if layout == "overlay":
-            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
-
-        return fig, list(axes.values())
+        return fig, axes
 
     def _ols_plot(
         self,
@@ -1453,38 +1566,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if layout == "facet" and sharex and axis_index < n_axes - 1:
             return ""
         return x_label
-
-    def _plot_bayesian_group_time_segment(
-        self,
-        ax: plt.Axes,
-        cohort_data: pd.DataFrame,
-        x_col: str,
-        line_type: Literal["placebo", "ATT"],
-        color: str,
-        label: str,
-    ) -> None:
-        """Plot one Bayesian placebo or ATT segment for a cohort."""
-        if len(cohort_data) == 0:
-            return
-
-        marker = "s" if line_type == "placebo" else "o"
-        linestyle = "--" if line_type == "placebo" else "-"
-        alpha = 0.15 if line_type == "placebo" else 0.2
-        ax.plot(
-            cohort_data[x_col],
-            cohort_data["att"],
-            marker=marker,
-            linestyle=linestyle,
-            color=color,
-            label=label,
-        )
-        ax.fill_between(
-            cohort_data[x_col],
-            cohort_data["att_lower"],
-            cohort_data["att_upper"],
-            color=color,
-            alpha=alpha,
-        )
 
     def _plot_ols_group_time_segment(
         self,
