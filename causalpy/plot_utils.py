@@ -368,7 +368,7 @@ def histogram_tile_df(
     y_edges: np.ndarray | None = None,
     n_bins: int = 50,
 ) -> pd.DataFrame:
-    """Long dataframe of posterior density tiles for plotnine ``geom_tile``.
+    """Long dataframe of posterior density rectangles for plotnine ``geom_rect``.
 
     Parameters
     ----------
@@ -388,7 +388,8 @@ def histogram_tile_df(
     Returns
     -------
     pd.DataFrame
-        Columns ``obs_ind``, ``y``, ``density``, ``series``, ``panel``.
+        Columns ``xmin``, ``xmax``, ``ymin``, ``ymax``, ``density``, ``series``,
+        ``panel``.
     """
     x_arr = np.asarray(x)
     if len(x_arr) != Y.sizes[_time_dim_name(Y)]:
@@ -398,14 +399,16 @@ def histogram_tile_df(
         )
         raise ValueError(msg)
     y_edges, hist2d_norm = _histogram_density_grid(Y, y_edges=y_edges, n_bins=n_bins)
-    y_mids = (y_edges[:-1] + y_edges[1:]) / 2
+    x_left, x_right = _x_mesh_edges(x)
     rows: list[dict[str, Any]] = []
-    for t_idx, obs in enumerate(x_arr):
-        for b_idx, y_mid in enumerate(y_mids):
+    for t_idx in range(len(x_arr)):
+        for b_idx in range(len(y_edges) - 1):
             rows.append(
                 {
-                    "obs_ind": obs,
-                    "y": y_mid,
+                    "xmin": x_left[t_idx],
+                    "xmax": x_right[t_idx],
+                    "ymin": float(y_edges[b_idx]),
+                    "ymax": float(y_edges[b_idx + 1]),
                     "density": float(hist2d_norm[b_idx, t_idx]),
                     "series": series,
                     "panel": panel,
@@ -433,6 +436,37 @@ def _x_as_numeric_mesh(
     return np.asarray(x_arr, dtype=float), False
 
 
+def _x_mesh_edges(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Left/right x bounds per observation for heatmap cells."""
+    x_num, is_dt = _x_as_numeric_mesh(x)
+    if len(x_num) == 1:
+        x_edges = np.array([x_num[0] - 0.5, x_num[0] + 0.5])
+    else:
+        dx = np.diff(x_num)
+        x_edges = np.zeros(len(x_num) + 1)
+        x_edges[0] = x_num[0] - dx[0] / 2
+        x_edges[-1] = x_num[-1] + dx[-1] / 2
+        x_edges[1:-1] = x_num[:-1] + dx / 2
+    if is_dt:
+        idx = pd.DatetimeIndex(pd.to_datetime(np.asarray(x)))
+        x_left = pd.DatetimeIndex(
+            [pd.Timestamp(t) for t in mdates.num2date(x_edges[:-1])]
+        )
+        x_right = pd.DatetimeIndex(
+            [pd.Timestamp(t) for t in mdates.num2date(x_edges[1:])]
+        )
+        if idx.tz is None:
+            x_left = x_left.tz_localize(None)
+            x_right = x_right.tz_localize(None)
+        else:
+            x_left = x_left.tz_convert(idx.tz)
+            x_right = x_right.tz_convert(idx.tz)
+        return np.asarray(x_left), np.asarray(x_right)
+    return x_edges[:-1], x_edges[1:]
+
+
 def _plot_histogram(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
@@ -440,6 +474,8 @@ def _plot_histogram(
     plot_hdi_kwargs: dict[str, Any] | None,
     label: str | None,
     y_edges: np.ndarray | None = None,
+    *,
+    draw_mean: bool = True,
 ) -> tuple[list[Line2D], None]:
     """Plot histogram visualization of the posterior as a 2D heatmap.
 
@@ -461,15 +497,14 @@ def _plot_histogram(
 
     y_edges, hist2d_norm = _histogram_density_grid(Y, y_edges=y_edges)
 
+    x_left, x_right = _x_mesh_edges(x)
     x_num, is_dt = _x_as_numeric_mesh(x)
-    if len(x_num) == 1:
-        x_edges = np.array([x_num[0] - 0.5, x_num[0] + 0.5])
+    if is_dt:
+        x_edges = np.concatenate(
+            [[mdates.date2num(x_left[0])], mdates.date2num(x_right)]
+        )
     else:
-        dx = np.diff(x_num)
-        x_edges = np.zeros(len(x_num) + 1)
-        x_edges[0] = x_num[0] - dx[0] / 2
-        x_edges[-1] = x_num[-1] + dx[-1] / 2
-        x_edges[1:-1] = x_num[:-1] + dx / 2
+        x_edges = np.concatenate([[x_left[0]], x_right])
 
     cmap = plot_hdi_kwargs.get("cmap", "Greys")
     alpha = float(plot_hdi_kwargs.get("alpha", 0.85))
@@ -484,9 +519,13 @@ def _plot_histogram(
         vmax=1.0,
         shading="flat",
         alpha=alpha,
+        zorder=0.5,
     )
     if is_dt:
         ax.xaxis_date()
+
+    if not draw_mean:
+        return [], None
 
     mean_y = Y.mean(dim=["chain", "draw"])
     mean_vals = np.asarray(mean_y.values, dtype=float).ravel()

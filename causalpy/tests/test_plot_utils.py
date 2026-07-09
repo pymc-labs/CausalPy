@@ -565,7 +565,15 @@ def test_histogram_tile_df_matches_density_grid(synthetic_posterior_data):
     tiles = histogram_tile_df(x, Y, series="s", panel="p")
     assert tiles["density"].max() <= 1.0 + 1e-12
     assert len(tiles) == grid.size
-    assert set(tiles.columns) >= {"obs_ind", "y", "density", "series", "panel"}
+    assert set(tiles.columns) >= {
+        "xmin",
+        "xmax",
+        "ymin",
+        "ymax",
+        "density",
+        "series",
+        "panel",
+    }
 
 
 @pytest.mark.integration
