@@ -411,7 +411,7 @@ def test_did_plot_default_ci_prob(mock_pymc_sample, fitted_did):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rd_plot_threads_ci_prob(mock_pymc_sample, fitted_rd, ci_prob):
-    """RD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """RD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_rd, _RD_TARGETS, ci_prob)
 
 
@@ -437,7 +437,7 @@ def test_rkink_plot_default_ci_prob(mock_pymc_sample, fitted_rkink):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_prepost_plot_threads_ci_prob(mock_pymc_sample, fitted_prepost, ci_prob):
-    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``plot_posterior_over_x`` and ``az.plot_posterior``."""
+    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_prepost, _PREPOST_TARGETS, ci_prob)
 
 

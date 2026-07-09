@@ -20,10 +20,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import polars as pl
-import seaborn as sns
 import tidydraws as td
 import xarray as xr
-from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
@@ -39,12 +37,11 @@ from plotnine import (
     scale_fill_manual,
 )
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -264,7 +261,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot | tuple[plt.Figure, list[plt.Axes]]:
+    ) -> ggplot:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -281,39 +278,35 @@ class PrePostNEGD(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
+            not yet migrated to plotnine and raise ``ValueError``; tracked in
+            issue #988.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
-
+            Unused until ``kind="spaghetti"`` is migrated; retained for API
+            compatibility.
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 9)``.
+            Unused for the plotnine path; retained for API compatibility.
+            Defaults to ``(7, 9)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). The existing legend is modified **in
-            place** so that custom handles are preserved.
+            ``bbox_to_anchor``). Applied only when the return value is a
+            matplotlib ``(fig, ax)`` tuple.
 
         Returns
         -------
-        plotnine.ggplot or tuple[matplotlib.figure.Figure, list[matplotlib.axes.Axes]]
-            For ``kind="ribbon"`` (default), a two-facet :class:`plotnine.ggplot`
-            (top: scatter + posterior predictive bands; bottom: estimated
-            treatment effect posterior). Call ``.draw()`` for the matplotlib
-            figure. For ``kind="spaghetti"`` or ``"histogram"`` a ``(fig, ax)``
-            tuple is returned (legacy matplotlib path).
+        plotnine.ggplot
+            A two-facet :class:`plotnine.ggplot` (top: scatter + posterior
+            predictive bands; bottom: estimated treatment effect posterior).
+            Call ``.draw()`` for the matplotlib figure.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -343,7 +336,7 @@ class PrePostNEGD(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
-    ) -> ggplot | tuple[plt.Figure, list[plt.Axes]]:
+    ) -> ggplot:
         """Generate a plotnine plot for pretest/posttest nonequivalent group designs.
 
         Returns a two-facet :class:`plotnine.ggplot` for ``kind="ribbon"``: the
@@ -352,18 +345,13 @@ class PrePostNEGD(BaseExperiment):
         treatment effect posterior as a density with a reference line at zero
         and the credible interval bounds (replacing ``az.plot_posterior``).
 
-        ponytail: ``spaghetti`` and ``histogram`` route to the legacy matplotlib
-        method (multi-panel spaghetti/heatmap have no clean plotnine form);
-        upgrade path tracked in #988. Both return a ``(fig, ax)`` tuple.
+        ponytail: ``spaghetti`` / ``histogram`` not migrated yet — raise until
+        a clean plotnine form exists (#988).
         """
         if kind != "ribbon":
-            return self._bayesian_plot_mpl(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
+            raise ValueError(
+                f"kind={kind!r} is not yet supported for the plotnine "
+                "PrePostNEGD plot; use kind='ribbon'. Tracked in issue #988."
             )
 
         top = "Pretest vs posttest"
@@ -474,95 +462,6 @@ class PrePostNEGD(BaseExperiment):
             + scale_fill_manual(values=colors, name="")
             + labs(x="", y="", title=mean_label)
         )
-
-    def _bayesian_plot_mpl(
-        self,
-        round_to: int | None = None,
-        ci_prob: float = HDI_PROB,
-        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-        ci_kind: Literal["hdi", "eti"] = "hdi",
-        num_samples: int = 50,
-        figsize: tuple[float, float] = (7, 9),
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Legacy matplotlib plot, retained for the ``spaghetti`` and ``histogram`` kinds.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive bands for the control and treatment groups,
-            and around the posterior of the estimated treatment effect.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(7, 9)``.
-        """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-        fig, ax = plt.subplots(
-            2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
-        )
-
-        # Plot raw data
-        sns.scatterplot(
-            x="pre",
-            y="post",
-            hue="group",
-            alpha=0.5,
-            data=self.data,
-            legend=True,
-            ax=ax[0],
-        )
-        ax[0].set(xlabel="Pretest", ylabel="Posttest")
-
-        # plot posterior predictive of untreated
-        h_line, h_patch = plot_posterior_over_x(
-            self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-            label="Control group",
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Control group"]
-
-        # plot posterior predictive of treated
-        h_line, h_patch = plot_posterior_over_x(
-            self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Treatment group",
-        )
-        handles.append((h_line, h_patch))
-        labels.append("Treatment group")
-
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-
-        # Plot estimated caual impact / treatment effect
-        az.plot_posterior(
-            self.causal_impact,
-            ref_val=0,
-            ax=ax[1],
-            round_to=round_to,
-            hdi_prob=ci_prob,
-        )
-        ax[1].set(title="Estimated treatment effect")
-        return fig, ax
 
     def effect_summary(
         self,

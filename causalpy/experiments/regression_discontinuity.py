@@ -40,7 +40,6 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
@@ -335,12 +334,12 @@ class RegressionDiscontinuity(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` draws individual posterior
+            predictive lines. ``"histogram"`` (per-column 2D density heatmap)
+            is not yet migrated to plotnine and raises ``ValueError``; tracked
+            in issue #988.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -349,25 +348,22 @@ class RegressionDiscontinuity(BaseExperiment):
             to 50. Ignored for other kinds.
 
         figsize : tuple of (float, float), optional
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
-            matplotlib's default).
+            Unused for the plotnine path; retained for API compatibility.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). The existing legend is modified **in
-            place** so that custom handles are preserved.
+            ``bbox_to_anchor``). Applied only when the return value is a
+            matplotlib ``(fig, ax)`` tuple (e.g. OLS plots).
 
         Returns
         -------
         plotnine.ggplot or tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-            For ``kind="ribbon"`` (default) and ``kind="spaghetti"``, a
-            :class:`plotnine.ggplot` object. Call ``.draw()`` on it to obtain
-            the matplotlib figure. For ``kind="histogram"`` a
-            ``(fig, ax)`` tuple is returned (legacy matplotlib path).
+            A :class:`plotnine.ggplot` for Bayesian ``ribbon`` / ``spaghetti``
+            plots (call ``.draw()`` for the matplotlib figure). OLS plots
+            still return a ``(fig, ax)`` tuple.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -397,26 +393,21 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
+    ) -> ggplot:
         """Generate a plotnine plot for regression discontinuity designs.
 
         Returns a :class:`plotnine.ggplot` for the ``"ribbon"`` and
-        ``"spaghetti"`` kinds. The ``"histogram"`` kind (a per-column
-        normalised 2D density heatmap) has no plotnine geom, so it falls back
-        to the legacy matplotlib implementation via the ``p.draw()`` escape
-        hatch and returns a ``(fig, ax)`` tuple.
+        ``"spaghetti"`` kinds.
 
-        ponytail: histogram heatmap kept on matplotlib; upgrade path is a
-        tidydraws temporal-density helper + ``geom_tile`` (tracked in #988).
+        ponytail: ``kind="histogram"`` (per-column 2D density heatmap) has no
+        plotnine geom yet — raises until a tidydraws + ``geom_tile`` path lands
+        (#988).
         """
         if kind == "histogram":
-            return self._bayesian_plot_mpl(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
+            raise ValueError(
+                "kind='histogram' is not yet supported for the plotnine "
+                "RegressionDiscontinuity plot; use kind='ribbon' or "
+                "kind='spaghetti'. Tracked in issue #988."
             )
 
         xcol = self.running_variable_name
@@ -535,114 +526,6 @@ class RegressionDiscontinuity(BaseExperiment):
             + scale_color_manual(values=color_values, name="")
             + labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
         )
-
-    def _bayesian_plot_mpl(
-        self,
-        round_to: int | None = 2,
-        ci_prob: float = HDI_PROB,
-        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-        ci_kind: Literal["hdi", "eti"] = "hdi",
-        num_samples: int = 50,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Legacy matplotlib plot, retained for the ``histogram`` kind.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive band, and the central credible interval
-            reported in the figure title for the discontinuity at threshold.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot data: use two layers only when there are excluded observations
-        has_exclusion = len(self.fit_data) < len(self.data)
-        if has_exclusion:
-            sns.scatterplot(
-                self.data,
-                x=self.running_variable_name,
-                y=self.outcome_variable_name,
-                color="lightgray",
-                ax=ax,
-                label="excluded data",
-            )
-        sns.scatterplot(
-            self.fit_data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="k",
-            ax=ax,
-            label="fit data" if has_exclusion else "data",
-        )
-
-        # Plot model fit to data
-        plot_posterior_over_x(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Posterior mean",
-        )
-
-        # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
-        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-        ).values
-        ci = (
-            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        discon = f"""
-            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
-            """
-        ax.set(title=r2 + "\n" + discon + ci)
-
-        # Treatment threshold line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-
-        # Add donut hole boundary lines if donut_hole > 0
-        if self.donut_hole > 0:
-            ax.axvline(
-                x=self.treatment_threshold - self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-                label="donut boundary",
-            )
-            ax.axvline(
-                x=self.treatment_threshold + self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-            )
-
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
 
     def _ols_plot(
         self,
