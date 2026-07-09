@@ -22,7 +22,6 @@ import pandas as pd
 import polars as pl
 import tidydraws as td
 import xarray as xr
-from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
@@ -44,12 +43,12 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
+    HistogramLayer,
     add_posterior_kind,
+    concat_histogram_tiles,
     histogram_y_edges,
     interval_kind,
-    plot_posterior_histogram,
-    prediction_summary,
-    sample_draw_lines,
+    prediction_bundle,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -270,7 +269,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot | tuple[plt.Figure, np.ndarray]:
+    ) -> ggplot:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -344,7 +343,7 @@ class PrePostNEGD(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
-    ) -> ggplot | tuple[plt.Figure, np.ndarray]:
+    ) -> ggplot:
         """Generate a plotnine plot for pretest/posttest nonequivalent group designs.
 
         Returns a two-facet plot for ``kind="ribbon"``: the top facet shows the
@@ -353,11 +352,8 @@ class PrePostNEGD(BaseExperiment):
         density with a reference line at zero and the credible interval bounds
         (replacing ``az.plot_posterior``).
 
-        ``kind="spaghetti"`` and ``kind="histogram"`` return ``(fig, ax)``
-        after drawing; the top facet uses sampled draws or a matplotlib
-        ``pcolormesh`` density layer respectively.
-
-        ponytail: bottom-facet effect density is unchanged across ``kind`` values.
+        ``kind="spaghetti"`` and ``kind="histogram"`` add draw-line or
+        ``geom_tile`` heatmap layers declaratively on the top facet.
         """
         top = "Pretest vs posttest"
         bottom = "Estimated treatment effect"
@@ -376,35 +372,35 @@ class PrePostNEGD(BaseExperiment):
 
         # Top facet: posterior predictive bands for each group. tidydraws keeps
         # the pretest grid as a column, dropping the isel(treated_units=0) guard.
-        def _band(pred, series):
+        def _pred_newdata():
             newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
             newdata["obs_ind"] = range(len(newdata))
-            summ = prediction_summary(
+            return newdata
+
+        def _band(pred, series):
+            summ, _ = prediction_bundle(
                 pred,
-                newdata,
+                _pred_newdata(),
                 group_by="pre",
                 ci_prob=ci_prob,
                 interval=interval,
-            ).rename(columns={"pre": "_x", "mu": "_y"})
-            return summ.assign(series=series, panel=top)
+                kind="ribbon",
+            )
+            return summ.rename(columns={"pre": "_x", "mu": "_y"}).assign(
+                series=series, panel=top
+            )
 
         def _band_spaghetti(pred, series):
-            newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
-            newdata["obs_ind"] = range(len(newdata))
-            sampled = (
-                sample_draw_lines(
-                    td.prediction_draws(
-                        pred,
-                        newdata=newdata,
-                        var_name="mu",
-                        idata_group="posterior_predictive",
-                    ),
-                    num_samples,
-                    sort_by=["_draw_id", "pre"],
-                )
-                .to_pandas()
-                .rename(columns={"pre": "_x", "mu": "_y"})
+            _, sampled = prediction_bundle(
+                pred,
+                _pred_newdata(),
+                group_by="pre",
+                ci_prob=ci_prob,
+                interval=interval,
+                kind="spaghetti",
+                num_samples=num_samples,
             )
+            sampled = sampled.rename(columns={"pre": "_x", "mu": "_y"})
             sampled["_line_id"] = f"{series}_" + sampled["_draw_id"].astype(str)
             return sampled.assign(series=series, panel=top)
 
@@ -425,6 +421,8 @@ class PrePostNEGD(BaseExperiment):
             )
 
         hist_edges = None
+        untreated_mu = None
+        treated_mu = None
         if kind == "histogram":
             untreated_mu = self.pred_untreated["posterior_predictive"].mu.isel(
                 treated_units=0
@@ -470,6 +468,20 @@ class PrePostNEGD(BaseExperiment):
             )
 
         colors = {"Control group": "#1f77b4", "Treatment group": "#ff7f0e"}
+        histogram_tiles = None
+        if kind == "histogram":
+            histogram_tiles = concat_histogram_tiles(
+                [
+                    HistogramLayer(
+                        self.pred_xi, untreated_mu, panel=top, y_edges=hist_edges
+                    ),
+                    HistogramLayer(
+                        self.pred_xi, treated_mu, panel=top, y_edges=hist_edges
+                    ),
+                ],
+                x_col="_x",
+                y_col="_y",
+            )
         p = ggplot() + geom_point(scatter, aes("_x", "_y", color="series"), alpha=0.5)
         p = add_posterior_kind(
             p,
@@ -480,6 +492,7 @@ class PrePostNEGD(BaseExperiment):
             ymin="mu_lower",
             ymax="mu_upper",
             spaghetti_df=spaghetti_df,
+            histogram_tiles=histogram_tiles,
             spaghetti_group="_line_id",
         )
         p = (
@@ -496,37 +509,18 @@ class PrePostNEGD(BaseExperiment):
             )
             + facet_wrap("panel", ncol=1, scales="free")
             + scale_color_manual(values=colors, name="")
-            + scale_fill_manual(values=colors, name="")
+            + (
+                scale_fill_manual(values=colors, name="")
+                if kind != "histogram"
+                else guides()
+            )
             + guides(color="none", fill="none")
             + labs(x="", y="", title=mean_label)
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 
-        if kind == "ribbon":
-            return p
-
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-        ax = np.asarray(axes[:2])
-        if kind == "histogram":
-            plot_posterior_histogram(
-                self.pred_xi,
-                untreated_mu,
-                ax[0],
-                {"color": "C0"},
-                y_edges=hist_edges,
-                draw_mean=False,
-            )
-            plot_posterior_histogram(
-                self.pred_xi,
-                treated_mu,
-                ax[0],
-                {"color": "C1"},
-                y_edges=hist_edges,
-                draw_mean=False,
-            )
-        return fig, ax
+        return p
 
     def effect_summary(
         self,

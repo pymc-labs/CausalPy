@@ -53,6 +53,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import PlotSpec, to_axes_list
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -809,12 +810,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ax : list[matplotlib.axes.Axes]
             A single-element list containing the event-study axes.
         """
-        return self._render_plot(
+        fig, ax = self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
             figsize=figsize,
         )
+        return fig, to_axes_list(ax)
 
     def plot_group_time(
         self,
@@ -875,7 +877,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             per cohort when ``layout="facet"`` and one axes when
             ``layout="overlay"``.
         """
-        return self._render_plot(
+        fig, ax = self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
@@ -885,6 +887,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
             view="group_time",
         )
+        return fig, to_axes_list(ax)
 
     def _bayesian_plot(
         self,
@@ -895,7 +898,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> PlotSpec:
         """Plot results for Bayesian model.
 
         Parameters
@@ -928,10 +931,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
-            Figure and axes objects. The event-study view is built with
-            plotnine then ``.draw()``; ``plot_group_time`` remains on
-            matplotlib until migrated separately (issue #988).
+        :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative plot spec for the event-study or group-time view.
+            The event-study view is built with plotnine; ``plot_group_time``
+            uses the same overlay path.
         """
         if hdi_prob is not None and hdi_prob != self.hdi_prob_:
             raise ValueError(
@@ -999,42 +1002,41 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             + theme(figure_size=figsize or (10, 6))
         )
 
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-        ax = axes[0]
-        ax.set_xlabel("Event Time (periods relative to treatment)")
-        ax.set_ylabel("Effect Estimate")
-        ax.set_title("Staggered DiD Event Study")
-        # Rebuild legend so legend_kwargs / tests see matplotlib handles.
-        handles = []
-        labels = []
-        if (att_et["event_time"] < 0).any():
-            handles.append(
-                Line2D(
-                    [0],
-                    [0],
-                    color="gray",
-                    marker="s",
-                    linestyle="",
-                    markersize=9,
-                    alpha=0.7,
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            ax = axes[0]
+            ax.set_xlabel("Event Time (periods relative to treatment)")
+            ax.set_ylabel("Effect Estimate")
+            ax.set_title("Staggered DiD Event Study")
+            handles = []
+            labels = []
+            if (att_et["event_time"] < 0).any():
+                handles.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="gray",
+                        marker="s",
+                        linestyle="",
+                        markersize=9,
+                        alpha=0.7,
+                    )
                 )
-            )
-            labels.append(placebo_label)
-        if (att_et["event_time"] >= 0).any():
-            handles.append(
-                Line2D(
-                    [0],
-                    [0],
-                    color="#1f77b4",
-                    marker="o",
-                    linestyle="",
-                    markersize=10,
+                labels.append(placebo_label)
+            if (att_et["event_time"] >= 0).any():
+                handles.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="#1f77b4",
+                        marker="o",
+                        linestyle="",
+                        markersize=10,
+                    )
                 )
-            )
-            labels.append(att_label)
-        ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
-        return fig, [ax]
+                labels.append(att_label)
+            ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
+
+        return PlotSpec(p, overlay=overlay, n_panels=1)
 
     def _bayesian_plot_group_time(
         self,
@@ -1042,12 +1044,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> PlotSpec:
         """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories via plotnine.
 
         Builds ribbons/lines/points as one ggplot (facet or overlay), then
-        ``.draw()``s and applies axis titles, treatment vlines, shared-y, and
-        legends. OLS helpers (``_make_group_time_axes``, etc.) are unused here.
+        applies axis titles, treatment vlines, shared-y, and legends in an
+        overlay callback. OLS helpers (``_make_group_time_axes``, etc.) are
+        unused here.
 
         ponytail: axis chrome and per-panel legends stay on matplotlib after
         ``.draw()`` so existing tests and ``legend_kwargs`` keep working.
@@ -1149,62 +1152,61 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if x_axis == "event_time":
             p = p + geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
 
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-
-        if layout == "facet":
-            for a in axes[1:]:
-                axes[0].sharey(a)
-            for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
-                ax.set_title(f"Cohort {cohort}")
-                ax.set_ylabel(y_label)
-                xlabel = self._get_group_time_axis_label(
-                    x_label=x_label,
-                    layout=layout,
-                    sharex=sharex,
-                    axis_index=i,
-                    n_axes=n_cohorts,
-                )
-                ax.set_xlabel(xlabel)
-                if x_axis == "calendar_time":
-                    ax.axvline(
-                        x=cohort - 0.5,
-                        color="red",
-                        linestyle="-",
-                        linewidth=1,
-                        alpha=0.5,
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            if layout == "facet":
+                for a in axes[1:]:
+                    axes[0].sharey(a)
+                for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
+                    ax.set_title(f"Cohort {cohort}")
+                    ax.set_ylabel(y_label)
+                    xlabel = self._get_group_time_axis_label(
+                        x_label=x_label,
+                        layout=layout,
+                        sharex=sharex,
+                        axis_index=i,
+                        n_axes=n_cohorts,
                     )
-                handles = [
-                    Line2D(
-                        [0],
-                        [0],
-                        color="gray",
-                        marker="s",
-                        linestyle="--",
-                        markersize=7,
-                    ),
-                    Line2D(
-                        [0],
-                        [0],
-                        color="#1f77b4",
-                        marker="o",
-                        linestyle="-",
-                        markersize=7,
-                    ),
-                ]
-                ax.legend(
-                    handles=handles,
-                    labels=["Placebo estimate", "ATT estimate"],
-                    fontsize=LEGEND_FONT_SIZE,
-                )
-        else:
-            ax = axes[0]
-            ax.set_xlabel(x_label)
-            ax.set_ylabel(y_label)
-            ax.set_title("Staggered DiD Cohort Trajectories")
-            ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+                    ax.set_xlabel(xlabel)
+                    if x_axis == "calendar_time":
+                        ax.axvline(
+                            x=cohort - 0.5,
+                            color="red",
+                            linestyle="-",
+                            linewidth=1,
+                            alpha=0.5,
+                        )
+                    handles = [
+                        Line2D(
+                            [0],
+                            [0],
+                            color="gray",
+                            marker="s",
+                            linestyle="--",
+                            markersize=7,
+                        ),
+                        Line2D(
+                            [0],
+                            [0],
+                            color="#1f77b4",
+                            marker="o",
+                            linestyle="-",
+                            markersize=7,
+                        ),
+                    ]
+                    ax.legend(
+                        handles=handles,
+                        labels=["Placebo estimate", "ATT estimate"],
+                        fontsize=LEGEND_FONT_SIZE,
+                    )
+            else:
+                ax = axes[0]
+                ax.set_xlabel(x_label)
+                ax.set_ylabel(y_label)
+                ax.set_title("Staggered DiD Cohort Trajectories")
+                ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
-        return fig, axes
+        n_panels = n_cohorts if layout == "facet" else 1
+        return PlotSpec(p, overlay=overlay, n_panels=n_panels)
 
     def _ols_plot(
         self,

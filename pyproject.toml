@@ -48,7 +48,7 @@ dependencies = [
     "numpy",
     "pandas",
     "patsy",
-    "plotnine>=0.15.0",
+    "plotnine>=0.15.7",
     "pymc>=5.15.1,<6",
     "pytensor>=2.38.1,<3",
     "scikit-learn>=1",

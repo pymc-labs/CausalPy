@@ -762,8 +762,9 @@ def test_rd_bayesian_plot_with_donut_hole():
         donut_hole=0.1,
     )
 
-    fig = result.plot(show=False).draw()
-    ax = fig.axes[0]
+    fig, ax = result.plot(show=False)
+    if isinstance(ax, np.ndarray):
+        ax = ax.flat[0]
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 

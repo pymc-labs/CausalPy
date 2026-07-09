@@ -333,62 +333,27 @@ def _check_default(
     )
 
 
-_ITS_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.interrupted_time_series.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
-_SC_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.synthetic_control.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
-_SDID_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.synthetic_difference_in_differences.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
-_DID_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.diff_in_diff.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
-_RD_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.regression_discontinuity.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
-_RKINK_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.regression_kink.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
+_POINT_INTERVAL_TARGET: _SpyTarget = (
+    "causalpy.plot_utils.td.point_interval",
+    "probs",
+    lambda probs: probs[0] if probs else None,
+)
+
+_ITS_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_SC_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_SDID_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_DID_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_RD_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_RKINK_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
 _PREPOST_TARGETS: list[_SpyTarget] = [
+    _POINT_INTERVAL_TARGET,
     (
         "causalpy.experiments.prepostnegd.td.point_interval",
         "probs",
         lambda probs: probs[0] if probs else None,
     ),
 ]
-_PIECEWISE_TARGETS: list[_SpyTarget] = [
-    (
-        "causalpy.experiments.piecewise_its.td.point_interval",
-        "probs",
-        lambda probs: probs[0] if probs else None,
-    ),
-]
+_PIECEWISE_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
 _PANEL_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.panel_regression.az.hdi", "hdi_prob"),
 ]
@@ -528,15 +493,7 @@ def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
     to ``ci_prob``. The deprecated alias must emit a ``FutureWarning`` and
     forward the value to ``td.point_interval`` as ``probs``.
     """
-    stack, recorded = _record_hdi_prob_calls(
-        [
-            (
-                "causalpy.experiments.interrupted_time_series.td.point_interval",
-                "probs",
-                lambda probs: probs[0] if probs else None,
-            )
-        ]
-    )
+    stack, recorded = _record_hdi_prob_calls([_POINT_INTERVAL_TARGET])
     import warnings
 
     with stack, warnings.catch_warnings(record=True) as caught:

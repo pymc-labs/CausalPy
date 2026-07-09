@@ -15,6 +15,10 @@
 Plotting utility functions.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -27,7 +31,23 @@ import tidydraws as td
 import xarray as xr
 from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
-from plotnine import aes, element_blank, element_rect, geom_line, geom_ribbon, theme
+from plotnine import (
+    aes,
+    element_blank,
+    element_rect,
+    facet_wrap,
+    geom_hline,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    geom_tile,
+    guides,
+    labs,
+    scale_color_manual,
+    scale_fill_continuous,
+    scale_fill_manual,
+    theme,
+)
 
 from causalpy.constants import HDI_PROB
 
@@ -36,6 +56,57 @@ HISTOGRAM_PANEL_THEME = theme(
     panel_grid_major=element_blank(),
     panel_grid_minor=element_blank(),
 )
+
+
+@dataclass(frozen=True)
+class PlotSpec:
+    """Declarative plot plus optional post-draw matplotlib overlay."""
+
+    plot: Any
+    overlay: Callable[[plt.Figure, list[plt.Axes]], None] | None = None
+    n_panels: int | None = None
+
+
+def panel_axes(fig: plt.Figure, n: int | None = None) -> list[plt.Axes]:
+    """Facet axes from a plotnine ``.draw()`` figure, excluding colorbars.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure returned by :meth:`plotnine.ggplot.draw`.
+    n : int, optional
+        When set, return at most this many panel axes.
+    """
+    axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+    return axes[:n] if n is not None else axes
+
+
+def as_axes_result(axes: list[plt.Axes]) -> plt.Axes | np.ndarray:
+    """Normalize a panel list to a single Axes or ndarray for public return.
+
+    Parameters
+    ----------
+    axes : list of matplotlib.axes.Axes
+        Panel axes discovered via :func:`panel_axes`.
+    """
+    if len(axes) == 1:
+        return axes[0]
+    return np.asarray(axes)
+
+
+def to_axes_list(ax: plt.Axes | np.ndarray | list[plt.Axes]) -> list[plt.Axes]:
+    """Normalize public multi-panel returns that promise a list of axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes, numpy.ndarray, or list
+        Single axes, ndarray of axes, or list from :func:`as_axes_result`.
+    """
+    if isinstance(ax, list):
+        return ax
+    if isinstance(ax, np.ndarray):
+        return list(ax.flat)
+    return [ax]
 
 
 def interval_kind(ci_kind: Literal["hdi", "eti"]) -> Literal["hdi", "eti"]:
@@ -74,6 +145,38 @@ def sample_draw_lines(
     return tagged.join(chosen, on="_draw_id").sort(sort_by)
 
 
+def _filter_treated_unit(draws: pl.DataFrame, treated_unit: str | None) -> pl.DataFrame:
+    if treated_unit is not None and "treated_units" in draws.columns:
+        return draws.filter(pl.col("treated_units") == treated_unit)
+    return draws
+
+
+def prediction_draws(
+    pred: Any,
+    newdata: pd.DataFrame,
+    *,
+    var_name: str = "mu",
+    treated_unit: str | None = None,
+) -> pl.DataFrame:
+    """Extract posterior predictive draws once for summary and spaghetti.
+
+    Parameters
+    ----------
+    pred : Any
+        Prediction container for :func:`tidydraws.prediction_draws`.
+    newdata : pandas.DataFrame
+        Grid passed as ``newdata`` to tidydraws.
+    var_name : str, optional
+        Posterior variable name. Defaults to ``"mu"``.
+    treated_unit : str, optional
+        When draws include ``treated_units``, filter to this unit.
+    """
+    draws = td.prediction_draws(
+        pred, newdata=newdata, var_name=var_name, idata_group="posterior_predictive"
+    )
+    return _filter_treated_unit(draws, treated_unit)
+
+
 def prediction_summary(
     pred: Any,
     newdata: pd.DataFrame,
@@ -83,6 +186,7 @@ def prediction_summary(
     interval: Literal["hdi", "eti"] = "hdi",
     var_name: str = "mu",
     treated_unit: str | None = None,
+    draws: pl.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Tidy mean + credible interval from posterior predictive draws.
 
@@ -103,12 +207,13 @@ def prediction_summary(
         Posterior variable name. Defaults to ``"mu"``.
     treated_unit : str, optional
         When draws include ``treated_units``, filter to this unit.
+    draws : polars.DataFrame, optional
+        Pre-extracted draws from :func:`prediction_draws`.
     """
-    draws = td.prediction_draws(
-        pred, newdata=newdata, var_name=var_name, idata_group="posterior_predictive"
-    )
-    if treated_unit is not None and "treated_units" in draws.columns:
-        draws = draws.filter(pl.col("treated_units") == treated_unit)
+    if draws is None:
+        draws = prediction_draws(
+            pred, newdata, var_name=var_name, treated_unit=treated_unit
+        )
     return (
         td.point_interval(
             draws,
@@ -132,6 +237,7 @@ def prediction_spaghetti(
     var_name: str = "mu",
     treated_unit: str | None = None,
     sort_by: str | list[str] | None = None,
+    draws: pl.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Sampled posterior draw lines from a prediction object.
 
@@ -151,15 +257,76 @@ def prediction_spaghetti(
         When draws include ``treated_units``, filter to this unit.
     sort_by : str or list of str, optional
         Sort columns; defaults to ``group_by``.
+    draws : polars.DataFrame, optional
+        Pre-extracted draws from :func:`prediction_draws`.
     """
-    draws = td.prediction_draws(
-        pred, newdata=newdata, var_name=var_name, idata_group="posterior_predictive"
-    )
-    if treated_unit is not None and "treated_units" in draws.columns:
-        draws = draws.filter(pl.col("treated_units") == treated_unit)
+    if draws is None:
+        draws = prediction_draws(
+            pred, newdata, var_name=var_name, treated_unit=treated_unit
+        )
     return sample_draw_lines(
         draws, num_samples, sort_by=sort_by or group_by
     ).to_pandas()
+
+
+def prediction_bundle(
+    pred: Any,
+    newdata: pd.DataFrame,
+    *,
+    group_by: str,
+    ci_prob: float,
+    interval: Literal["hdi", "eti"] = "hdi",
+    var_name: str = "mu",
+    treated_unit: str | None = None,
+    kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+    num_samples: int = 50,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Summary and optional spaghetti from a single tidydraws extraction.
+
+    Parameters
+    ----------
+    pred : Any
+        Prediction container for :func:`prediction_draws`.
+    newdata : pandas.DataFrame
+        Grid passed as ``newdata`` to tidydraws.
+    group_by : str
+        Column to summarise over.
+    ci_prob : float
+        Credible interval probability mass.
+    interval : {"hdi", "eti"}, optional
+        Interval type for :func:`tidydraws.point_interval`.
+    var_name : str, optional
+        Posterior variable name. Defaults to ``"mu"``.
+    treated_unit : str, optional
+        When draws include ``treated_units``, filter to this unit.
+    kind : {"ribbon", "histogram", "spaghetti"}, optional
+        When ``"spaghetti"``, also return sampled draw lines.
+    num_samples : int, optional
+        Number of draw lines when ``kind="spaghetti"``.
+    """
+    draws = prediction_draws(
+        pred, newdata, var_name=var_name, treated_unit=treated_unit
+    )
+    summary = prediction_summary(
+        pred,
+        newdata,
+        group_by=group_by,
+        ci_prob=ci_prob,
+        interval=interval,
+        var_name=var_name,
+        draws=draws,
+    )
+    spaghetti_df = None
+    if kind == "spaghetti":
+        spaghetti_df = prediction_spaghetti(
+            pred,
+            newdata,
+            group_by=group_by,
+            num_samples=num_samples,
+            var_name=var_name,
+            draws=draws,
+        )
+    return summary, spaghetti_df
 
 
 def da_summary(
@@ -235,6 +402,16 @@ def da_spaghetti(
     return sample_draw_lines(tidy, num_samples, sort_by=sort_by or group_by).to_pandas()
 
 
+@dataclass(frozen=True)
+class HistogramLayer:
+    """One posterior heatmap source for :func:`concat_histogram_tiles`."""
+
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray
+    Y: xr.DataArray
+    panel: str | None = None
+    y_edges: np.ndarray | None = None
+
+
 def posterior_kind_layers(
     bands: pd.DataFrame,
     kind: Literal["ribbon", "histogram", "spaghetti"],
@@ -242,6 +419,7 @@ def posterior_kind_layers(
     x: str,
     y: str = "mu",
     spaghetti_df: pd.DataFrame | None = None,
+    histogram_tiles: pd.DataFrame | None = None,
     ymin: str = "mu_lower",
     ymax: str = "mu_upper",
     spaghetti_group: str = "_draw_id",
@@ -258,13 +436,20 @@ def posterior_kind_layers(
         Column names for the x axis and mean line.
     spaghetti_df : pandas.DataFrame, optional
         Sampled draws when ``kind="spaghetti"``.
+    histogram_tiles : pandas.DataFrame, optional
+        Tidy tile grid from :func:`concat_histogram_tiles` when
+        ``kind="histogram"``.
     ymin, ymax : str, optional
         Interval bound columns for ribbon mode.
     spaghetti_group : str, optional
         Grouping column for spaghetti lines.
     """
     if kind == "histogram":
-        return [geom_line(bands, aes(x, y, color="series"))]
+        layers: list[Any] = []
+        if histogram_tiles is not None:
+            layers.extend(histogram_tile_layers(histogram_tiles, x))
+        layers.append(geom_line(bands, aes(x, y, color="series")))
+        return layers
     if kind == "spaghetti":
         if spaghetti_df is None:
             msg = "spaghetti_df is required when kind='spaghetti'"
@@ -298,6 +483,7 @@ def add_posterior_kind(
     x: str,
     y: str = "mu",
     spaghetti_df: pd.DataFrame | None = None,
+    histogram_tiles: pd.DataFrame | None = None,
     ymin: str = "mu_lower",
     ymax: str = "mu_upper",
     spaghetti_group: str = "_draw_id",
@@ -316,6 +502,8 @@ def add_posterior_kind(
         Column names for the x axis and mean line.
     spaghetti_df : pandas.DataFrame, optional
         Sampled draws when ``kind="spaghetti"``.
+    histogram_tiles : pandas.DataFrame, optional
+        Tidy tile grid when ``kind="histogram"``.
     ymin, ymax : str, optional
         Interval bound columns for ribbon mode.
     spaghetti_group : str, optional
@@ -327,12 +515,306 @@ def add_posterior_kind(
         x=x,
         y=y,
         spaghetti_df=spaghetti_df,
+        histogram_tiles=histogram_tiles,
         ymin=ymin,
         ymax=ymax,
         spaghetti_group=spaghetti_group,
     ):
         p = p + layer
     return p
+
+
+def _categorize_panels(frames: list[pd.DataFrame], panels: list[str]) -> None:
+    for frame in frames:
+        frame["panel"] = pd.Categorical(frame["panel"], categories=panels, ordered=True)
+
+
+def build_causal_panel_plot(
+    bands: pd.DataFrame,
+    obs: pd.DataFrame,
+    *,
+    panels: list[str],
+    colors: dict[str, str],
+    kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+    x: str = "obs_ind",
+    shade_df: pd.DataFrame | None = None,
+    shade_fill: str = "#1f77b4",
+    spaghetti_df: pd.DataFrame | None = None,
+    histogram_tiles: pd.DataFrame | None = None,
+    figsize: tuple[float, float] = (7, 11),
+    zero_linetype: str | None = None,
+    zero_alpha: float = 1.0,
+) -> Any:
+    """Three-panel causal-impact layout shared by ITS, SC, SDiD, and PiecewiseITS.
+
+    Parameters
+    ----------
+    bands : pandas.DataFrame
+        Mean + interval summaries with ``panel`` and ``series`` columns.
+    obs : pandas.DataFrame
+        Observed points for the top panel.
+    panels : list of str
+        Ordered facet labels (top, middle, bottom).
+    colors : dict
+        Series name to color mapping.
+    kind : {"ribbon", "histogram", "spaghetti"}, optional
+        Posterior rendering mode.
+    x : str, optional
+        Shared x column name. Defaults to ``"obs_ind"``.
+    shade_df : pandas.DataFrame, optional
+        Ribbon data for causal-impact shading.
+    shade_fill : str, optional
+        Fill color for the shade ribbon.
+    spaghetti_df : pandas.DataFrame, optional
+        Sampled draws when ``kind="spaghetti"``.
+    histogram_tiles : pandas.DataFrame, optional
+        Tidy posterior heatmap tiles when ``kind="histogram"``.
+    figsize : tuple of float, optional
+        plotnine ``figure_size``.
+    zero_linetype : str, optional
+        ``geom_hline`` linetype for zero reference lines.
+    zero_alpha : float, optional
+        Alpha for zero reference lines.
+    """
+    from plotnine import ggplot
+
+    frames = [bands, obs]
+    if shade_df is not None:
+        frames.append(shade_df)
+    if spaghetti_df is not None:
+        frames.append(spaghetti_df)
+    _categorize_panels(frames, panels)
+
+    mid, bot = panels[1], panels[2]
+    zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
+    _categorize_panels([zero_df], panels)
+
+    p = ggplot()
+    if shade_df is not None:
+        p = p + geom_ribbon(
+            shade_df,
+            aes(x, ymin="y1", ymax="y2"),
+            fill=shade_fill,
+            alpha=0.25,
+        )
+    p = add_posterior_kind(
+        p,
+        bands,
+        kind,
+        x=x,
+        spaghetti_df=spaghetti_df,
+        histogram_tiles=histogram_tiles,
+    )
+    hline_kwargs: dict[str, Any] = {"color": "black", "alpha": zero_alpha}
+    if zero_linetype is not None:
+        hline_kwargs["linetype"] = zero_linetype
+    scales = [scale_color_manual(values=colors, name="")]
+    if kind != "histogram":
+        scales.append(scale_fill_manual(values=colors, name=""))
+    p = (
+        p
+        + geom_point(obs, aes(x, "y", color="series"), size=1)
+        + geom_hline(zero_df, aes(yintercept="yintercept"), **hline_kwargs)
+        + facet_wrap("panel", ncol=1, scales="free_y")
+        + scales[0]
+        + (scales[1] if len(scales) > 1 else guides())
+        + guides(color="none", fill="none")
+        + labs(x="", y="")
+        + theme(
+            strip_text=element_blank(),
+            strip_background=element_blank(),
+            figure_size=figsize,
+            panel_spacing_y=0.06,
+            plot_margin_bottom=0.08,
+        )
+    )
+    if kind == "histogram":
+        p = p + HISTOGRAM_PANEL_THEME
+    return p
+
+
+def histogram_tile_layers(
+    tiles: pd.DataFrame,
+    x: str,
+    *,
+    y: str | None = None,
+    alpha: float = 0.85,
+) -> list[Any]:
+    """plotnine layers for a posterior heatmap grid.
+
+    Parameters
+    ----------
+    tiles : pandas.DataFrame
+        Tidy tile grid from :func:`posterior_histogram_tiles`.
+    x : str
+        Column name for tile x centers.
+    y : str, optional
+        Column name for tile y centers; inferred when omitted.
+    alpha : float, optional
+        Tile opacity.
+    """
+    y_col = y or next(col for col in ("y", "_y", "mu") if col in tiles.columns)
+    fill_max = float(tiles["density"].max()) if len(tiles) else 1.0
+    return [
+        geom_tile(
+            tiles,
+            aes(x, y_col, fill="density", width="width", height="height"),
+            alpha=alpha,
+            show_legend=False,
+            inherit_aes=False,
+        ),
+        scale_fill_continuous(
+            cmap_name="Greys",
+            limits=(0.0, fill_max if fill_max > 0 else 1.0),
+        ),
+    ]
+
+
+def _histogram_count_grid(
+    Y: xr.DataArray,
+    y_edges: np.ndarray | None = None,
+    *,
+    n_bins: int = 50,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Posterior draw counts per (y-bin, x-index) for one xarray series."""
+    Y_flat = Y.stack(sample=("chain", "draw"))
+    time_dim = _time_dim_name(Y)
+    n_time = Y.sizes[time_dim]
+    if y_edges is None:
+        vals = Y_flat.values
+        y_min = float(np.nanmin(vals))
+        y_max = float(np.nanmax(vals))
+        y_pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
+        y_edges = np.linspace(y_min - y_pad, y_max + y_pad, n_bins + 1)
+    n_bins_actual = len(y_edges) - 1
+    hist2d = np.zeros((n_bins_actual, n_time), dtype=float)
+    for t in range(n_time):
+        col = Y_flat.isel({time_dim: t}).values.ravel()
+        counts, _ = np.histogram(col, bins=y_edges)
+        hist2d[:, t] = counts
+    return y_edges, hist2d
+
+
+def posterior_histogram_tiles(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
+    *,
+    x_col: str = "x",
+    y_col: str = "y",
+    y_edges: np.ndarray | None = None,
+    panel: str | None = None,
+    normalize: Literal["proportion", "column"] = "proportion",
+) -> pd.DataFrame:
+    """Tidy tile grid for ``geom_tile`` posterior heatmaps.
+
+    Parameters
+    ----------
+    x : array-like
+        x-axis values aligned with ``Y``'s time dimension.
+    Y : xarray.DataArray
+        Posterior samples with ``chain`` and ``draw`` dimensions.
+    x_col, y_col : str
+        Column names in the returned frame.
+    y_edges : numpy.ndarray, optional
+        Shared bin edges from :func:`histogram_y_edges`.
+    panel : str, optional
+        Facet label when plotting faceted panels.
+    normalize : {"proportion", "column"}, optional
+        ``proportion`` divides counts by the MCMC sample size at each x;
+        ``column`` scales each x column by its own maximum (legacy look).
+    """
+    n_x = len(np.asarray(x))
+    if n_x != Y.sizes[_time_dim_name(Y)]:
+        msg = (
+            f"Length of x ({n_x}) != length of time dimension "
+            f"{_time_dim_name(Y)!r} ({Y.sizes[_time_dim_name(Y)]})"
+        )
+        raise ValueError(msg)
+
+    y_edges, hist2d = _histogram_count_grid(Y, y_edges=y_edges)
+    if normalize == "column":
+        col_max = hist2d.max(axis=0, keepdims=True)
+        density = np.divide(
+            hist2d,
+            col_max + 1e-12,
+            out=np.zeros_like(hist2d, dtype=float),
+            where=col_max > 0,
+        )
+    else:
+        n_samples = float(Y.stack(sample=("chain", "draw")).sizes["sample"])
+        density = hist2d / n_samples
+
+    x_left, x_right = _x_mesh_edges(x)
+    x_arr = np.asarray(x)
+    x_centers: Any
+    if isinstance(x, pd.DatetimeIndex):
+        x_centers = x_arr
+    elif np.issubdtype(np.asarray(x_arr).dtype, np.datetime64):
+        x_centers = pd.to_datetime(x_arr)
+    else:
+        x_centers = (x_left + x_right) / 2.0
+
+    y_centers = (y_edges[:-1] + y_edges[1:]) / 2.0
+    heights = np.diff(y_edges)
+    _, is_dt = _x_as_numeric_mesh(x)
+    widths: Any
+    if is_dt:
+        widths = (pd.to_datetime(x_right) - pd.to_datetime(x_left)) / np.timedelta64(
+            1, "D"
+        )
+        widths = np.asarray(widths, dtype=float)
+    else:
+        widths = x_right - x_left
+
+    rows: list[dict[str, Any]] = []
+    for t in range(n_x):
+        for b in range(len(y_centers)):
+            row = {
+                x_col: x_centers[t],
+                y_col: float(y_centers[b]),
+                "width": float(widths[t]),
+                "height": float(heights[b]),
+                "density": float(density[b, t]),
+            }
+            if panel is not None:
+                row["panel"] = panel
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def concat_histogram_tiles(
+    layers: list[HistogramLayer],
+    *,
+    x_col: str = "x",
+    y_col: str = "y",
+    normalize: Literal["proportion", "column"] = "proportion",
+) -> pd.DataFrame:
+    """Concatenate tidy heatmap tiles for multiple posterior series/panels.
+
+    Parameters
+    ----------
+    layers : list of HistogramLayer
+        One heatmap source per series or facet panel.
+    x_col, y_col : str
+        Column names passed through to :func:`posterior_histogram_tiles`.
+    normalize : {"proportion", "column"}, optional
+        Density scaling passed through to :func:`posterior_histogram_tiles`.
+    """
+    if not layers:
+        raise ValueError("concat_histogram_tiles requires at least one layer")
+    parts = [
+        posterior_histogram_tiles(
+            layer.x,
+            layer.Y,
+            x_col=x_col,
+            y_col=y_col,
+            y_edges=layer.y_edges,
+            panel=layer.panel,
+            normalize=normalize,
+        )
+        for layer in layers
+    ]
+    return pd.concat(parts, ignore_index=True)
 
 
 def _time_dim_name(Y: xr.DataArray) -> str:
@@ -413,42 +895,125 @@ def histogram_y_edges(*Ys: xr.DataArray, n_bins: int = 50) -> np.ndarray:
     return np.linspace(y_min - y_pad, y_max + y_pad, n_bins + 1)
 
 
-def _histogram_density_grid(
+def plot_posterior_histogram(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
     Y: xr.DataArray,
+    ax: plt.Axes,
+    style: dict[str, Any] | None = None,
+    label: str | None = None,
     y_edges: np.ndarray | None = None,
     *,
-    n_bins: int = 50,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Column-normalized posterior histogram grid for one xarray series."""
-    Y_flat = Y.stack(sample=("chain", "draw"))
-    time_dim = _time_dim_name(Y)
-    n_time = Y.sizes[time_dim]
-    if y_edges is None:
-        vals = Y_flat.values
-        y_min = float(np.nanmin(vals))
-        y_max = float(np.nanmax(vals))
-        y_pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
-        y_edges = np.linspace(y_min - y_pad, y_max + y_pad, n_bins + 1)
-    n_bins_actual = len(y_edges) - 1
-    hist2d = np.zeros((n_bins_actual, n_time), dtype=float)
-    for t in range(n_time):
-        col = Y_flat.isel({time_dim: t}).values.ravel()
-        counts, _ = np.histogram(col, bins=y_edges)
-        hist2d[:, t] = counts
-    col_max = hist2d.max(axis=0, keepdims=True)
-    hist2d_norm = np.divide(
-        hist2d,
-        col_max + 1e-12,
-        out=np.zeros_like(hist2d, dtype=float),
-        where=col_max > 0,
+    draw_mean: bool = True,
+    normalize: Literal["proportion", "column"] = "proportion",
+) -> tuple[list[Line2D], None]:
+    """Draw a posterior heatmap on matplotlib axes (test/legacy helper).
+
+    Production plots use :func:`posterior_histogram_tiles` with ``geom_tile``.
+
+    Parameters
+    ----------
+    x : array-like
+        x-axis values aligned with ``Y``'s time dimension.
+    Y : xarray.DataArray
+        Posterior samples with ``chain`` and ``draw`` dimensions.
+    ax : matplotlib.axes.Axes
+        Target axes for the heatmap.
+    style : dict, optional
+        Matplotlib style overrides (``cmap``, ``alpha``, ``color``).
+    label : str, optional
+        Legend label for the posterior mean line.
+    y_edges : numpy.ndarray, optional
+        Shared bin edges from :func:`histogram_y_edges`.
+    draw_mean : bool, optional
+        Whether to overlay the posterior mean line.
+    normalize : {"proportion", "column"}, optional
+        Density scaling for the heatmap cells.
+    """
+    style = style or {}
+    n_x = len(np.asarray(x))
+    if n_x != Y.sizes[_time_dim_name(Y)]:
+        msg = (
+            f"Length of x ({n_x}) != length of time dimension "
+            f"{_time_dim_name(Y)!r} ({Y.sizes[_time_dim_name(Y)]})"
+        )
+        raise ValueError(msg)
+
+    y_edges_arr, hist2d = _histogram_count_grid(Y, y_edges=y_edges)
+    if normalize == "column":
+        col_max = hist2d.max(axis=0, keepdims=True)
+        density = np.divide(
+            hist2d,
+            col_max + 1e-12,
+            out=np.zeros_like(hist2d, dtype=float),
+            where=col_max > 0,
+        )
+    else:
+        n_samples = float(Y.stack(sample=("chain", "draw")).sizes["sample"])
+        density = hist2d / n_samples
+
+    x_left, x_right = _x_mesh_edges(x)
+    x_num, is_dt = _x_as_numeric_mesh(x)
+    if is_dt:
+        x_edges = np.concatenate(
+            [[mdates.date2num(x_left[0])], mdates.date2num(x_right)]
+        )
+    else:
+        x_edges = np.concatenate([[x_left[0]], x_right])
+
+    ax.pcolormesh(
+        x_edges,
+        y_edges_arr,
+        density,
+        cmap=style.get("cmap", "Greys"),
+        vmin=0.0,
+        vmax=float(density.max()) if density.size else 1.0,
+        shading="flat",
+        alpha=float(style.get("alpha", 0.85)),
+        zorder=0.5,
     )
-    return y_edges, hist2d_norm
+    if is_dt:
+        ax.xaxis_date()
+
+    if not draw_mean:
+        return [], None
+
+    mean_vals = np.asarray(Y.mean(dim=["chain", "draw"]).values, dtype=float).ravel()
+    (mean_line,) = ax.plot(
+        x_num,
+        mean_vals,
+        ls="-",
+        color=style.get("color", "C0"),
+        label=label or "Posterior mean",
+    )
+    return ([mean_line], None)
+
+
+def overlay_posterior_histograms(
+    axes: list[plt.Axes],
+    layers: list[tuple[Any, xr.DataArray, dict[str, Any]]],
+    *,
+    style: dict[str, Any] | None = None,
+) -> None:
+    """Legacy matplotlib overlay helper kept for compatibility tests.
+
+    Parameters
+    ----------
+    axes : list of matplotlib.axes.Axes
+        Target axes, one per layer.
+    layers : list of tuple
+        Each ``(x, Y, style)`` triple for :func:`plot_posterior_histogram`.
+    style : dict, optional
+        Base style merged into each layer's style dict.
+    """
+    base = {"cmap": "Greys", "alpha": 0.85, **(style or {})}
+    for ax, (x_vals, y_da, extra) in zip(axes, layers, strict=True):
+        plot_posterior_histogram(x_vals, y_da, ax, {**base, **extra}, draw_mean=False)
 
 
 def _x_as_numeric_mesh(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
 ) -> tuple[np.ndarray, bool]:
-    """Convert x to floats for pcolormesh edges; return (values, is_datetime)."""
+    """Convert x to floats for mesh edges; return (values, is_datetime)."""
     if isinstance(x, pd.DatetimeIndex):
         return mdates.date2num(x.to_numpy()), True
     x_arr = np.asarray(x)
@@ -493,107 +1058,6 @@ def _x_mesh_edges(
             x_right = x_right.tz_convert(idx.tz)
         return np.asarray(x_left), np.asarray(x_right)
     return x_edges[:-1], x_edges[1:]
-
-
-def plot_posterior_histogram(
-    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
-    Y: xr.DataArray,
-    ax: plt.Axes,
-    style: dict[str, Any] | None = None,
-    label: str | None = None,
-    y_edges: np.ndarray | None = None,
-    *,
-    draw_mean: bool = True,
-) -> tuple[list[Line2D], None]:
-    """Overlay a column-normalised posterior density heatmap on matplotlib axes.
-
-    plotnine has no satisfactory geom for this; experiments call this after
-    ``ggplot.draw()`` when ``kind="histogram"``.
-
-    Parameters
-    ----------
-    x : array-like
-        x-axis values aligned with ``Y``'s time dimension.
-    Y : xarray.DataArray
-        Posterior samples with ``chain`` and ``draw`` dimensions.
-    ax : matplotlib.axes.Axes
-        Target axes (typically from ``ggplot.draw()``).
-    style : dict, optional
-        ``cmap``, ``alpha``, and ``color`` for the heatmap / mean line.
-    label : str, optional
-        Mean-line legend label when ``draw_mean=True``.
-    y_edges : numpy.ndarray, optional
-        Shared bin edges from :func:`histogram_y_edges`.
-    draw_mean : bool, optional
-        When ``False``, only the density heatmap is drawn.
-    """
-    style = style or {}
-    n_x = len(np.asarray(x))
-    if n_x != Y.sizes[_time_dim_name(Y)]:
-        msg = (
-            f"Length of x ({n_x}) != length of time dimension "
-            f"{_time_dim_name(Y)!r} ({Y.sizes[_time_dim_name(Y)]})"
-        )
-        raise ValueError(msg)
-
-    y_edges, hist2d_norm = _histogram_density_grid(Y, y_edges=y_edges)
-    x_left, x_right = _x_mesh_edges(x)
-    x_num, is_dt = _x_as_numeric_mesh(x)
-    if is_dt:
-        x_edges = np.concatenate(
-            [[mdates.date2num(x_left[0])], mdates.date2num(x_right)]
-        )
-    else:
-        x_edges = np.concatenate([[x_left[0]], x_right])
-
-    ax.pcolormesh(
-        x_edges,
-        y_edges,
-        hist2d_norm,
-        cmap=style.get("cmap", "Greys"),
-        vmin=0.0,
-        vmax=1.0,
-        shading="flat",
-        alpha=float(style.get("alpha", 0.85)),
-        zorder=0.5,
-    )
-    if is_dt:
-        ax.xaxis_date()
-
-    if not draw_mean:
-        return [], None
-
-    mean_vals = np.asarray(Y.mean(dim=["chain", "draw"]).values, dtype=float).ravel()
-    (mean_line,) = ax.plot(
-        x_num,
-        mean_vals,
-        ls="-",
-        color=style.get("color", "C0"),
-        label=label or "Posterior mean",
-    )
-    return ([mean_line], None)
-
-
-def overlay_posterior_histograms(
-    axes: list[plt.Axes],
-    layers: list[tuple[Any, xr.DataArray, dict[str, Any]]],
-    *,
-    style: dict[str, Any] | None = None,
-) -> None:
-    """Apply :func:`plot_posterior_histogram` to each axes/layer pair.
-
-    Parameters
-    ----------
-    axes : list of matplotlib.axes.Axes
-        Facet axes in panel order.
-    layers : list of tuple
-        Each ``(x, DataArray, style_dict)`` triplet for one panel.
-    style : dict, optional
-        Base heatmap style merged into each layer's style dict.
-    """
-    base = {"cmap": "Greys", "alpha": 0.85, **(style or {})}
-    for ax, (x_vals, y_da, extra) in zip(axes, layers, strict=True):
-        plot_posterior_histogram(x_vals, y_da, ax, {**base, **extra}, draw_mean=False)
 
 
 def get_hdi_to_df(

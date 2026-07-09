@@ -24,20 +24,6 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from patsy import build_design_matrices, dmatrices
-from plotnine import (
-    aes,
-    element_blank,
-    facet_wrap,
-    geom_hline,
-    geom_point,
-    geom_ribbon,
-    ggplot,
-    guides,
-    labs,
-    scale_color_manual,
-    scale_fill_manual,
-    theme,
-)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -45,14 +31,15 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    HISTOGRAM_PANEL_THEME,
-    add_posterior_kind,
+    HistogramLayer,
+    PlotSpec,
+    build_causal_panel_plot,
+    concat_histogram_tiles,
     concat_x_y,
     da_spaghetti,
     da_summary,
     get_hdi_to_df,
     interval_kind,
-    overlay_posterior_histograms,
     prediction_spaghetti,
     prediction_summary,
 )
@@ -737,14 +724,8 @@ class InterruptedTimeSeries(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
+    ) -> PlotSpec:
         """Plot ITS results via a faceted plotnine base plus matplotlib overlays.
-
-        Builds the three-panel (counterfactual / period impact / cumulative
-        impact) layout as one ``facet_wrap`` ggplot, then ``.draw()``s and
-        reuses ``_draw_singleton_hdi_marker`` for the single-post-period edge
-        case and ``format_date_axes`` for DatetimeIndex data. Returns
-        ``(fig, ax)``.
 
         ponytail: singleton HDI marker and date-axis formatting stay on
         matplotlib after ``.draw()``.
@@ -840,7 +821,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 ]
             )
 
-        hist_layers: list[tuple[Any, xr.DataArray, dict[str, Any]]] | None = None
+        histogram_tiles = None
         if kind == "histogram":
 
             def _isel_treated(da):
@@ -859,15 +840,18 @@ class InterruptedTimeSeries(BaseExperiment):
                 self.datapost.index,
                 _isel_treated(self.post_impact),
             )
-            hist_layers = [
-                (x_top, mu_top, {}),
-                (x_mid, impact_mid, {"color": "C0"}),
-                (
-                    self.datapost.index,
-                    _isel_treated(self.post_impact_cumulative),
-                    {"color": "C1"},
-                ),
-            ]
+            histogram_tiles = concat_histogram_tiles(
+                [
+                    HistogramLayer(x_top, mu_top, panel=top),
+                    HistogramLayer(x_mid, impact_mid, panel=mid),
+                    HistogramLayer(
+                        self.datapost.index,
+                        _isel_treated(self.post_impact_cumulative),
+                        panel=bot,
+                    ),
+                ],
+                x_col="obs_ind",
+            )
 
         obs = pd.concat(
             [
@@ -906,14 +890,6 @@ class InterruptedTimeSeries(BaseExperiment):
             shade_df = pd.concat([shade_top, shade_mid])
 
         panels = [top, mid, bot]
-        frames = [bands, obs] + ([shade_df] if shade_df is not None else [])
-        if spaghetti_df is not None:
-            frames.append(spaghetti_df)
-        for frame in frames:
-            frame["panel"] = pd.Categorical(
-                frame["panel"], categories=panels, ordered=True
-            )
-
         colors = {
             "Pre-intervention period": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -921,129 +897,100 @@ class InterruptedTimeSeries(BaseExperiment):
             "pre": "#1f77b4",
             "post": "#ff7f0e",
         }
-        zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
-        zero_df["panel"] = pd.Categorical(
-            zero_df["panel"], categories=panels, ordered=True
+        p = build_causal_panel_plot(
+            bands,
+            obs,
+            panels=panels,
+            colors=colors,
+            kind=kind,
+            shade_df=shade_df,
+            spaghetti_df=spaghetti_df,
+            histogram_tiles=histogram_tiles,
+            figsize=figsize,
         )
-        p = ggplot()
-        if shade_df is not None:
-            p = p + geom_ribbon(
-                shade_df,
-                aes("obs_ind", ymin="y1", ymax="y2"),
-                fill="#1f77b4",
-                alpha=0.25,
-            )
-        p = add_posterior_kind(p, bands, kind, x="obs_ind", spaghetti_df=spaghetti_df)
-        p = (
-            p
-            + geom_point(obs, aes("obs_ind", "y", color="series"), size=1)
-            + geom_hline(zero_df, aes(yintercept="yintercept"), color="black")
-            + facet_wrap("panel", ncol=1, scales="free_y")
-            + scale_color_manual(values=colors, name="")
-            + scale_fill_manual(values=colors, name="")
-            + guides(color="none", fill="none")
-            + labs(x="", y="")
-            # Panel titles come from ax.set_title after .draw() (matches the
-            # legacy matplotlib layout); hide plotnine's facet strips.
-            # Taller default so each panel gets more height; modest spacing
-            # keeps titles from colliding without wasting the extra inches.
-            + theme(
-                strip_text=element_blank(),
-                strip_background=element_blank(),
-                figure_size=figsize,
-                panel_spacing_y=0.06,
-                plot_margin_bottom=0.08,
-            )
-        )
-        if kind == "histogram":
-            p = p + HISTOGRAM_PANEL_THEME
 
-        # Escape hatch: labelled treatment vlines, singleton HDI markers, and
-        # date formatting need a real Axes (and tests look for axvline labels).
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-        ax = np.asarray(axes[:3])
-        if hist_layers is not None:
-            overlay_posterior_histograms(list(ax), hist_layers)
-        for i, a in enumerate(ax):
-            a.axvline(
-                x=self.treatment_time,
-                ls="--",
-                lw=1.5,
-                color="k",
-                zorder=1.5,
-                label="Treatment start" if i == 0 else None,
-            )
-            if self.treatment_end_time is not None:
+        def overlay(fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            ax = np.asarray(axes[:3])
+            for i, a in enumerate(ax):
                 a.axvline(
-                    x=self.treatment_end_time,
-                    ls=":",
+                    x=self.treatment_time,
+                    ls="--",
                     lw=1.5,
                     color="k",
                     zorder=1.5,
-                    label="Treatment end" if i == 0 else None,
+                    label="Treatment start" if i == 0 else None,
                 )
-        if single_post_obs:
-            post_mu = self.post_pred["posterior_predictive"].mu
-            self._draw_singleton_hdi_marker(
-                ax[0], self.datapost.index, post_mu, color="C1"
-            )
-            self._draw_singleton_hdi_marker(
-                ax[1], self.datapost.index, self.post_impact, color="C1"
-            )
-            self._draw_singleton_hdi_marker(
-                ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
-            )
-
-        # Rebuild a matplotlib legend on the top panel for legend_kwargs.
-        legend_labels = ["Pre-intervention period", "Observations", "Counterfactual"]
-        if not single_post_obs:
-            legend_labels.append("Causal impact")
-        legend_colors = {
-            "Pre-intervention period": "#1f77b4",
-            "Observations": "black",
-            "Counterfactual": "#ff7f0e",
-            "Causal impact": "#1f77b4",
-        }
-        handles = []
-        for label in legend_labels:
-            if label == "Observations":
-                handles.append(
-                    Line2D([0], [0], color="black", marker=".", linestyle="")
-                )
-            elif label == "Causal impact":
-                handles.append(Patch(facecolor="#1f77b4", alpha=0.25))
-            else:
-                handles.append(
-                    (
-                        Line2D([0], [0], color=legend_colors[label]),
-                        Patch(facecolor=legend_colors[label], alpha=0.3),
+                if self.treatment_end_time is not None:
+                    a.axvline(
+                        x=self.treatment_end_time,
+                        ls=":",
+                        lw=1.5,
+                        color="k",
+                        zorder=1.5,
+                        label="Treatment end" if i == 0 else None,
                     )
+            if single_post_obs:
+                post_mu = self.post_pred["posterior_predictive"].mu
+                self._draw_singleton_hdi_marker(
+                    ax[0], self.datapost.index, post_mu, color="C1"
                 )
-        ax[0].legend(handles=handles, labels=legend_labels, fontsize=LEGEND_FONT_SIZE)
-        ax[0].set_title(title_str)
-        ax[1].set_title(mid)
-        ax[2].set_title(bot)
-        # Faceted plotnine axes each keep their own x tick labels; hide the
-        # upper two so only the bottom panel shows dates (legacy sharex look).
-        for a in ax[:-1]:
-            a.tick_params(axis="x", labelbottom=False)
+                self._draw_singleton_hdi_marker(
+                    ax[1], self.datapost.index, self.post_impact, color="C1"
+                )
+                self._draw_singleton_hdi_marker(
+                    ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+                )
 
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
+            legend_labels = [
+                "Pre-intervention period",
+                "Observations",
+                "Counterfactual",
+            ]
+            if not single_post_obs:
+                legend_labels.append("Causal impact")
+            legend_colors = {
+                "Pre-intervention period": "#1f77b4",
+                "Observations": "black",
+                "Counterfactual": "#ff7f0e",
+                "Causal impact": "#1f77b4",
+            }
+            handles = []
+            for label in legend_labels:
+                if label == "Observations":
+                    handles.append(
+                        Line2D([0], [0], color="black", marker=".", linestyle="")
+                    )
+                elif label == "Causal impact":
+                    handles.append(Patch(facecolor="#1f77b4", alpha=0.25))
+                else:
+                    handles.append(
+                        (
+                            Line2D([0], [0], color=legend_colors[label]),
+                            Patch(facecolor=legend_colors[label], alpha=0.3),
+                        )
+                    )
+            ax[0].legend(
+                handles=handles, labels=legend_labels, fontsize=LEGEND_FONT_SIZE
             )
-            format_date_axes(list(ax), full_index)
-            # plotnine facets + ConciseDateFormatter's -90° labels look cramped;
-            # 45° reads cleaner and needs less bottom margin.
-            for label in ax[-1].get_xticklabels():
-                label.set_rotation(45)
-                label.set_ha("right")
-                label.set_va("top")
-            fig.subplots_adjust(bottom=0.12)
+            ax[0].set_title(title_str)
+            ax[1].set_title(mid)
+            ax[2].set_title(bot)
+            for a in ax[:-1]:
+                a.tick_params(axis="x", labelbottom=False)
 
-        return fig, ax
+            if isinstance(self.datapre.index, pd.DatetimeIndex):
+                full_index = _combine_datetime_indices(
+                    pd.DatetimeIndex(self.datapre.index),
+                    pd.DatetimeIndex(self.datapost.index),
+                )
+                format_date_axes(list(ax), full_index)
+                for label in ax[-1].get_xticklabels():
+                    label.set_rotation(45)
+                    label.set_ha("right")
+                    label.set_va("top")
+                fig.subplots_adjust(bottom=0.12)
+
+        return PlotSpec(p, overlay=overlay, n_panels=3)
 
     def _ols_plot(
         self,

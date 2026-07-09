@@ -25,33 +25,20 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from patsy import dmatrices
-from plotnine import (
-    aes,
-    element_blank,
-    facet_wrap,
-    geom_hline,
-    geom_point,
-    geom_ribbon,
-    ggplot,
-    guides,
-    labs,
-    scale_color_manual,
-    scale_fill_manual,
-    theme,
-)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    HISTOGRAM_PANEL_THEME,
-    add_posterior_kind,
+    HistogramLayer,
+    PlotSpec,
+    build_causal_panel_plot,
+    concat_histogram_tiles,
     da_spaghetti,
     da_summary,
     histogram_y_edges,
     interval_kind,
-    plot_posterior_histogram,
     prediction_spaghetti,
     prediction_summary,
 )
@@ -460,7 +447,7 @@ class PiecewiseITS(BaseExperiment):
         figsize: tuple[float, float] = (10, 10),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray | list[plt.Axes]]:
         """Plot the piecewise interrupted time-series results.
 
         Parameters
@@ -533,12 +520,12 @@ class PiecewiseITS(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, np.ndarray | list[plt.Axes]]:
+    ) -> PlotSpec:
         """Plot PiecewiseITS via a faceted plotnine base plus matplotlib overlays.
 
-        Builds the three-panel layout as one ``facet_wrap`` ggplot over the
-        full time series, then ``.draw()``s and overlays interruption lines,
-        titles, and the legend. Returns ``(fig, ax)``.
+        Builds the three-panel layout with :func:`~causalpy.plot_utils.build_causal_panel_plot`,
+        then applies interruption lines, titles, and the legend in an overlay
+        callback after the base ``plot()`` draws the ggplot.
 
         ponytail: interruption vlines stay on matplotlib after ``.draw()``.
         """
@@ -612,10 +599,7 @@ class PiecewiseITS(BaseExperiment):
                 ]
             )
 
-        hist_layers: (
-            list[tuple[int, Any, xr.DataArray, dict[str, Any], np.ndarray | None]]
-            | None
-        ) = None
+        histogram_tiles = None
         if kind == "histogram":
             y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
             if "treated_units" in y_pred_mu.dims:
@@ -630,12 +614,19 @@ class PiecewiseITS(BaseExperiment):
             if hasattr(cum_mu, "dims") and "treated_units" in cum_mu.dims:
                 cum_mu = cum_mu.isel(treated_units=0)
             hist_top_edges = histogram_y_edges(y_pred_mu, y_cf_mu)
-            hist_layers = [
-                (0, time_values, y_pred_mu, {"color": "C0"}, hist_top_edges),
-                (0, time_values, y_cf_mu, {"color": "C1"}, hist_top_edges),
-                (1, time_values, effect_mu, {"color": "C2"}, None),
-                (2, time_values, cum_mu, {"color": "C3"}, None),
-            ]
+            histogram_tiles = concat_histogram_tiles(
+                [
+                    HistogramLayer(
+                        time_values, y_pred_mu, panel=top, y_edges=hist_top_edges
+                    ),
+                    HistogramLayer(
+                        time_values, y_cf_mu, panel=top, y_edges=hist_top_edges
+                    ),
+                    HistogramLayer(time_values, effect_mu, panel=mid),
+                    HistogramLayer(time_values, cum_mu, panel=bot),
+                ],
+                x_col="t",
+            )
 
         obs = pd.DataFrame(
             {
@@ -651,14 +642,6 @@ class PiecewiseITS(BaseExperiment):
         )
 
         panels = [top, mid, bot]
-        frames = [bands, obs, shade_mid]
-        if spaghetti_df is not None:
-            frames.append(spaghetti_df)
-        for frame in frames:
-            frame["panel"] = pd.Categorical(
-                frame["panel"], categories=panels, ordered=True
-            )
-
         colors = {
             "Fitted": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -666,91 +649,60 @@ class PiecewiseITS(BaseExperiment):
             "effect": "#2ca02c",
             "cumulative": "#d62728",
         }
-        zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
-        zero_df["panel"] = pd.Categorical(
-            zero_df["panel"], categories=panels, ordered=True
+
+        p = build_causal_panel_plot(
+            bands,
+            obs,
+            panels=panels,
+            colors=colors,
+            kind=kind,
+            x="t",
+            shade_df=shade_mid,
+            shade_fill="#2ca02c",
+            spaghetti_df=spaghetti_df,
+            histogram_tiles=histogram_tiles,
+            figsize=figsize,
+            zero_linetype="dashed",
+            zero_alpha=0.5,
         )
 
-        p = ggplot() + geom_ribbon(
-            shade_mid,
-            aes("t", ymin="y1", ymax="y2"),
-            fill="#2ca02c",
-            alpha=0.25,
-        )
-        p = add_posterior_kind(p, bands, kind, x="t", spaghetti_df=spaghetti_df)
-        p = (
-            p
-            + geom_point(obs, aes("t", "y", color="series"), size=1)
-            + geom_hline(
-                zero_df,
-                aes(yintercept="yintercept"),
-                color="black",
-                linetype="dashed",
-                alpha=0.5,
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            ax = np.asarray(axes[:3])
+            handles: list[Any] = [
+                Line2D([0], [0], color="black", marker=".", linestyle=""),
+                (
+                    Line2D([0], [0], color=colors["Fitted"]),
+                    Patch(facecolor=colors["Fitted"], alpha=0.3),
+                ),
+                (
+                    Line2D([0], [0], color=colors["Counterfactual"]),
+                    Patch(facecolor=colors["Counterfactual"], alpha=0.3),
+                ),
+            ]
+            labels_legend = ["Observations", "Fitted", "Counterfactual"]
+            for i, t_k in enumerate(self.interruption_times):
+                for a in ax:
+                    a.axvline(x=t_k, ls="-", lw=2, color="red", alpha=0.7)
+                handles.append(Line2D([0], [0], color="red", lw=2))
+                labels_legend.append(f"Interruption {i}")
+
+            ax[0].legend(
+                handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE
             )
-            + facet_wrap("panel", ncol=1, scales="free_y")
-            + scale_color_manual(values=colors, name="")
-            + scale_fill_manual(values=colors, name="")
-            + guides(color="none", fill="none")
-            + labs(x="", y="")
-            + theme(
-                strip_text=element_blank(),
-                strip_background=element_blank(),
-                figure_size=figsize,
-                panel_spacing_y=0.06,
-                plot_margin_bottom=0.08,
-            )
-        )
-        if kind == "histogram":
-            p = p + HISTOGRAM_PANEL_THEME
+            ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
+            ax[1].set(title=mid, ylabel="Effect")
+            ax[2].set(title=bot, ylabel="Cumulative Effect")
+            for a in ax[:-1]:
+                a.tick_params(axis="x", labelbottom=False)
 
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-        ax = np.asarray(axes[:3])
-        if hist_layers is not None:
-            for panel_idx, x_vals, y_da, extra, y_edges in hist_layers:
-                plot_posterior_histogram(
-                    x_vals,
-                    y_da,
-                    ax[panel_idx],
-                    extra,
-                    y_edges=y_edges,
-                    draw_mean=False,
-                )
-
-        handles: list[Any] = [
-            Line2D([0], [0], color="black", marker=".", linestyle=""),
-            (
-                Line2D([0], [0], color=colors["Fitted"]),
-                Patch(facecolor=colors["Fitted"], alpha=0.3),
-            ),
-            (
-                Line2D([0], [0], color=colors["Counterfactual"]),
-                Patch(facecolor=colors["Counterfactual"], alpha=0.3),
-            ),
-        ]
-        labels_legend = ["Observations", "Fitted", "Counterfactual"]
-        for i, t_k in enumerate(self.interruption_times):
-            for a in ax:
-                a.axvline(x=t_k, ls="-", lw=2, color="red", alpha=0.7)
-            handles.append(Line2D([0], [0], color="red", lw=2))
-            labels_legend.append(f"Interruption {i}")
-
-        ax[0].legend(handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE)
-        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
-        ax[1].set(title=mid, ylabel="Effect")
-        ax[2].set(title=bot, ylabel="Cumulative Effect")
-        for a in ax[:-1]:
-            a.tick_params(axis="x", labelbottom=False)
-
-        return fig, ax
+        return PlotSpec(p, overlay=overlay, n_panels=3)
 
     def _ols_plot(
         self,
         round_to: int | None = 2,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray | list[plt.Axes]]:
         """
         Plot the results for OLS models.
 

@@ -19,7 +19,6 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import tidydraws as td
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
@@ -41,9 +40,8 @@ from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     add_posterior_kind,
     interval_kind,
-    plot_posterior_histogram,
-    prediction_summary,
-    sample_draw_lines,
+    posterior_histogram_tiles,
+    prediction_bundle,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
@@ -397,12 +395,11 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
+    ) -> ggplot:
         """Generate a plotnine plot for regression discontinuity designs.
 
-        Returns a :class:`plotnine.ggplot` for ``"ribbon"`` and
-        ``"spaghetti"``. ``"histogram"`` returns ``(fig, ax)`` after drawing
-        with a matplotlib ``pcolormesh`` density overlay.
+        Returns a :class:`plotnine.ggplot` or :class:`~causalpy.plot_utils.PlotSpec`
+        when ``kind="histogram"`` needs a matplotlib density overlay.
         """
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
@@ -419,39 +416,42 @@ class RegressionDiscontinuity(BaseExperiment):
             else "data"
         )
 
-        # Posterior predictive draws → tidy point + interval summary. tidydraws
-        # flattens chain/draw and keeps the running variable as a column, so the
-        # old ``isel(treated_units=0)`` / ``stack`` guards disappear.
+        # Posterior predictive draws → tidy point + interval summary.
         newdata = self.x_pred.reset_index(drop=True)
         newdata["obs_ind"] = range(len(newdata))
-        draws = td.prediction_draws(
-            self.pred,
-            newdata=newdata,
-            var_name="mu",
-            idata_group="posterior_predictive",
-        )
-        summary = prediction_summary(
+        interval = interval_kind(ci_kind)
+        summary, spaghetti_df = prediction_bundle(
             self.pred,
             newdata,
             group_by=xcol,
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
+            interval=interval,
+            kind=kind,
+            num_samples=num_samples,
         )
         summary["series"] = "Posterior mean"
-        spaghetti_df = None
-        if kind == "spaghetti":
-            spaghetti_df = (
-                sample_draw_lines(draws, num_samples, sort_by=xcol)
-                .to_pandas()
-                .assign(series="Posterior mean")
-            )
+        if spaghetti_df is not None:
+            spaghetti_df = spaghetti_df.assign(series="Posterior mean")
 
         color_values = {point_label: "black", "Posterior mean": "#ff7f0e"}
         if has_exclusion:
             color_values["excluded data"] = "lightgray"
 
         p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
-        p = add_posterior_kind(p, summary, kind, x=xcol, spaghetti_df=spaghetti_df)
+        histogram_tiles = None
+        if kind == "histogram":
+            mu = self.pred["posterior_predictive"].mu.isel(treated_units=0)
+            histogram_tiles = posterior_histogram_tiles(
+                self.x_pred[xcol], mu, x_col=xcol
+            )
+        p = add_posterior_kind(
+            p,
+            summary,
+            kind,
+            x=xcol,
+            spaghetti_df=spaghetti_df,
+            histogram_tiles=histogram_tiles,
+        )
 
         # Title: Bayesian R^2 on fit data + discontinuity credible interval.
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
@@ -502,17 +502,6 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
-            fig = p.draw()
-            ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
-            mu = self.pred["posterior_predictive"].mu.isel(treated_units=0)
-            plot_posterior_histogram(
-                self.x_pred[xcol],
-                mu,
-                ax,
-                {"color": "C1"},
-                draw_mean=False,
-            )
-            return fig, ax
 
         return p
 

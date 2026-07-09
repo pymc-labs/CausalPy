@@ -25,6 +25,40 @@ from causalpy.plot_utils import concat_x_y, get_hdi_to_df, plot_posterior_histog
 
 
 @pytest.mark.integration
+def test_panel_axes_filters_colorbars():
+    from plotnine import aes, geom_point, ggplot
+
+    from causalpy.plot_utils import panel_axes
+
+    p = ggplot() + geom_point(pd.DataFrame({"x": [1, 2], "y": [1, 2]}), aes("x", "y"))
+    fig = p.draw(show=False)
+    axes = panel_axes(fig)
+    assert axes
+    assert all(a.get_subplotspec() is not None for a in axes)
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_spec_overlay_runs_once():
+    from plotnine import aes, geom_point, ggplot
+
+    from causalpy.plot_utils import PlotSpec, panel_axes
+
+    calls: list[int] = []
+
+    def overlay(_fig, axes):
+        calls.append(len(axes))
+
+    p = ggplot() + geom_point(pd.DataFrame({"x": [1], "y": [1]}), aes("x", "y"))
+    spec = PlotSpec(p, overlay=overlay, n_panels=1)
+    fig = spec.plot.draw(show=False)
+    axes = panel_axes(fig, spec.n_panels)
+    spec.overlay(fig, axes)
+    assert calls == [1]
+    plt.close(fig)
+
+
+@pytest.mark.integration
 def test_get_hdi_to_df_with_coordinate_dimensions():
     """
     Regression test for bug where get_hdi_to_df returned string coordinate values
@@ -181,6 +215,41 @@ def synthetic_posterior_data_numeric():
 
 
 @pytest.mark.integration
+def test_posterior_histogram_tiles_geom_tile_draws(synthetic_posterior_data):
+    from plotnine import aes, geom_line, ggplot
+
+    from causalpy.plot_utils import histogram_tile_layers, posterior_histogram_tiles
+
+    x, Y = synthetic_posterior_data
+    tiles = posterior_histogram_tiles(x, Y, x_col="x", y_col="y")
+    assert not tiles.empty
+    assert {"x", "y", "width", "height", "density"}.issubset(tiles.columns)
+
+    bands = pd.DataFrame({"x": x, "mu": Y.mean(dim=["chain", "draw"]).values})
+    p = ggplot()
+    for layer in histogram_tile_layers(tiles, "x"):
+        p = p + layer
+    p = p + geom_line(bands, aes("x", "mu"), color="#ff7f0e")
+    fig = p.draw(show=False)
+    assert fig.axes
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_posterior_histogram_tiles_use_draw_proportions(synthetic_posterior_data):
+    from causalpy.plot_utils import posterior_histogram_tiles
+
+    x, Y = synthetic_posterior_data
+    tiles = posterior_histogram_tiles(
+        x, Y, x_col="x", y_col="y", normalize="proportion"
+    )
+    n_samples = Y.sizes["chain"] * Y.sizes["draw"]
+    for x_val in np.unique(tiles["x"]):
+        col_sum = tiles.loc[tiles["x"] == x_val, "density"].sum()
+        assert np.isclose(col_sum, 1.0, rtol=0, atol=1.0 / n_samples)
+
+
+@pytest.mark.integration
 def test_plot_posterior_histogram_renders_heatmap(synthetic_posterior_data):
     x, Y = synthetic_posterior_data
     fig, ax = plt.subplots()
@@ -245,3 +314,63 @@ def test_concat_x_y_histogram_shares_y_bin_edges():
     assert separate_ranges[0][1] < separate_ranges[1][0]  # disjoint y grids
     assert combined_range.min() < separate_ranges[0][0]
     assert combined_range.max() > separate_ranges[1][1]
+
+
+@pytest.mark.integration
+def test_concat_histogram_tiles_empty_raises():
+    from causalpy.plot_utils import concat_histogram_tiles
+
+    with pytest.raises(ValueError, match="at least one layer"):
+        concat_histogram_tiles([])
+
+
+@pytest.mark.integration
+def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_data):
+    from causalpy.plot_utils import posterior_kind_layers
+
+    x, Y = synthetic_posterior_data
+    bands = pd.DataFrame(
+        {"x": x, "mu": Y.mean(dim=["chain", "draw"]).values, "series": "a"}
+    )
+    with pytest.raises(ValueError, match="spaghetti_df"):
+        posterior_kind_layers(bands, "spaghetti", x="x", y="mu")
+
+
+@pytest.mark.integration
+def test_posterior_histogram_tiles_length_mismatch_raises(synthetic_posterior_data):
+    from causalpy.plot_utils import posterior_histogram_tiles
+
+    x, Y = synthetic_posterior_data
+    with pytest.raises(ValueError, match="Length of x"):
+        posterior_histogram_tiles(x[:3], Y)
+
+
+@pytest.mark.integration
+def test_posterior_histogram_tiles_column_normalize(synthetic_posterior_data):
+    from causalpy.plot_utils import posterior_histogram_tiles
+
+    x, Y = synthetic_posterior_data
+    tiles = posterior_histogram_tiles(x, Y, normalize="column")
+    for x_val in np.unique(tiles["x"]):
+        col_max = tiles.loc[tiles["x"] == x_val, "density"].max()
+        assert np.isclose(col_max, 1.0, rtol=0, atol=1e-6)
+
+
+@pytest.mark.integration
+def test_posterior_histogram_tiles_datetime_x(synthetic_posterior_data):
+    from causalpy.plot_utils import (
+        HistogramLayer,
+        concat_histogram_tiles,
+        posterior_histogram_tiles,
+    )
+
+    x, Y = synthetic_posterior_data
+    dt_x = pd.date_range("2020-01-01", periods=len(x), freq="D")
+    tiles = posterior_histogram_tiles(dt_x, Y, panel="main")
+    assert "panel" in tiles.columns
+    assert pd.api.types.is_datetime64_any_dtype(tiles["x"])
+
+    layered = concat_histogram_tiles(
+        [HistogramLayer(dt_x, Y, panel="main"), HistogramLayer(dt_x, Y, panel="other")]
+    )
+    assert set(layered["panel"]) == {"main", "other"}

@@ -21,7 +21,6 @@ import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
-from plotnine import ggplot
 
 import causalpy as cp
 from causalpy.tests.conftest import setup_regression_kink_data
@@ -149,7 +148,9 @@ def test_rd(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
 
@@ -179,7 +180,9 @@ def test_rd_bandwidth(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -217,7 +220,9 @@ def test_rd_bandwidth_custom_running_variable(mock_pymc_sample):
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -248,7 +253,9 @@ def test_rd_drinking(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -275,7 +282,9 @@ def test_rkink(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
 
@@ -305,7 +314,9 @@ def test_rkink_bandwidth(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
 
 
 @pytest.mark.integration
@@ -791,7 +802,11 @@ def test_ancova(mock_pymc_sample, anova1_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    assert isinstance(result.plot(), ggplot)
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, (plt.Axes, np.ndarray))
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration

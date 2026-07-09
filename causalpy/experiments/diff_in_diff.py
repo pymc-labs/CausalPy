@@ -46,10 +46,12 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
+    HistogramLayer,
+    PlotSpec,
     add_posterior_kind,
+    concat_histogram_tiles,
     histogram_y_edges,
     interval_kind,
-    plot_posterior_histogram,
     prediction_spaghetti,
     prediction_summary,
 )
@@ -436,13 +438,12 @@ class DifferenceInDifferences(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> PlotSpec:
         """Plot DiD results via plotnine plus a small matplotlib overlay.
 
         Builds scatter + control/treatment (and multi-period counterfactual)
-        ribbons as a shared :class:`plotnine.ggplot`, then ``.draw()``s and
-        reuses the existing continuous-x violin and causal-impact arrow
-        snippets. Returns ``(fig, ax)``.
+        ribbons as a shared :class:`plotnine.ggplot`, then applies histogram,
+        legend, violin, and causal-impact arrow overlays after the base draw.
 
         ponytail: single-period counterfactual stays on ``ax.violinplot``
         (no plotnine continuous-x violin); arrow/text stay on ``ax.annotate``.
@@ -590,12 +591,47 @@ class DifferenceInDifferences(BaseExperiment):
                 )
             spaghetti_df = pd.concat(spaghetti_parts)
 
+        histogram_tiles = None
+        if kind == "histogram":
+            layers = [
+                HistogramLayer(
+                    self.x_pred_control[tcol].values,
+                    control_mu,
+                    y_edges=hist_edges,
+                ),
+                HistogramLayer(
+                    self.x_pred_treatment[tcol].values,
+                    treatment_mu,
+                    y_edges=hist_edges,
+                ),
+            ]
+            if len(time_points) > 1:
+                layers.append(
+                    HistogramLayer(
+                        self.x_pred_counterfactual[tcol].values,
+                        counterfactual_mu,
+                        y_edges=hist_edges,
+                    )
+                )
+            histogram_tiles = concat_histogram_tiles(layers, x_col=tcol)
+
         p = ggplot() + geom_point(scatter, aes(tcol, ycol, color="series"), size=1.5)
-        p = add_posterior_kind(p, bands, kind, x=tcol, spaghetti_df=spaghetti_df)
+        p = add_posterior_kind(
+            p,
+            bands,
+            kind,
+            x=tcol,
+            spaghetti_df=spaghetti_df,
+            histogram_tiles=histogram_tiles,
+        )
         p = (
             p
             + scale_color_manual(values=colors, name="")
-            + scale_fill_manual(values=colors, name="")
+            + (
+                scale_fill_manual(values=colors, name="")
+                if kind != "histogram"
+                else guides()
+            )
             # Drop plotnine's guide; rebuild a matplotlib legend after .draw()
             # so ``legend_kwargs`` in ``_render_plot`` can still mutate it.
             + guides(color="none", fill="none")
@@ -618,76 +654,50 @@ class DifferenceInDifferences(BaseExperiment):
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 
-        # Escape hatch: continuous-x violin + arrow need a real Axes.
-        # Rebuild a matplotlib legend so ``legend_kwargs`` in ``_render_plot``
-        # can still mutate it (plotnine's guide is not an ``Axes`` legend).
-        fig = p.draw()
-        ax = next(a for a in fig.axes if a.get_subplotspec() is not None)
-        if kind == "histogram":
-            hist_kwargs = {"color": "C0"}
-            ctrl_t = self.x_pred_control[tcol].values
-            plot_posterior_histogram(
-                ctrl_t, control_mu, ax, hist_kwargs, y_edges=hist_edges, draw_mean=False
-            )
-            plot_posterior_histogram(
-                self.x_pred_treatment[tcol].values,
-                treatment_mu,
-                ax,
-                {"color": "C1"},
-                y_edges=hist_edges,
-                draw_mean=False,
-            )
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            ax = axes[0]
+            legend_labels = ["Control group", "Treatment group"]
             if len(time_points) > 1:
-                plot_posterior_histogram(
-                    self.x_pred_counterfactual[tcol].values,
-                    counterfactual_mu,
-                    ax,
-                    {"color": "C2"},
-                    y_edges=hist_edges,
-                    draw_mean=False,
-                )
-        legend_labels = ["Control group", "Treatment group"]
-        if len(time_points) > 1:
-            legend_labels.append("Counterfactual")
-        ax.legend(
-            handles=[
-                (
-                    Line2D([0], [0], color=colors[label]),
-                    Patch(facecolor=colors[label], alpha=0.3),
-                )
-                for label in legend_labels
-            ],
-            labels=legend_labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+                legend_labels.append("Counterfactual")
+            ax.legend(
+                handles=[
+                    (
+                        Line2D([0], [0], color=colors[label]),
+                        Patch(facecolor=colors[label], alpha=0.3),
+                    )
+                    for label in legend_labels
+                ],
+                labels=legend_labels,
+                fontsize=LEGEND_FONT_SIZE,
+            )
 
-        if len(time_points) == 1:
-            y_pred_cf = az.extract(
-                self.y_pred_counterfactual,
-                group="posterior_predictive",
-                var_names="mu",
-            )
-            # Select single unit data for plotting
-            y_pred_cf_single = y_pred_cf.isel(treated_units=0)
-            violin_data = (
-                y_pred_cf_single.values
-                if hasattr(y_pred_cf_single, "values")
-                else y_pred_cf_single
-            )
-            parts = ax.violinplot(
-                violin_data.T,
-                positions=self.x_pred_counterfactual[tcol].values,
-                showmeans=False,
-                showmedians=False,
-                widths=0.2,
-            )
-            for pc in parts["bodies"]:
-                pc.set_facecolor("C0")
-                pc.set_edgecolor("None")
-                pc.set_alpha(0.5)
+            if len(time_points) == 1:
+                y_pred_cf = az.extract(
+                    self.y_pred_counterfactual,
+                    group="posterior_predictive",
+                    var_names="mu",
+                )
+                y_pred_cf_single = y_pred_cf.isel(treated_units=0)
+                violin_data = (
+                    y_pred_cf_single.values
+                    if hasattr(y_pred_cf_single, "values")
+                    else y_pred_cf_single
+                )
+                parts = ax.violinplot(
+                    violin_data.T,
+                    positions=self.x_pred_counterfactual[tcol].values,
+                    showmeans=False,
+                    showmedians=False,
+                    widths=0.2,
+                )
+                for pc in parts["bodies"]:
+                    pc.set_facecolor("C0")
+                    pc.set_edgecolor("None")
+                    pc.set_alpha(0.5)
 
-        _plot_causal_impact_arrow(self, ax)
-        return fig, ax
+            _plot_causal_impact_arrow(self, ax)
+
+        return PlotSpec(p, overlay=overlay, n_panels=1)
 
     def _ols_plot(
         self,

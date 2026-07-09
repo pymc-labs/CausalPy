@@ -33,6 +33,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.plot_utils import PlotSpec, as_axes_result, panel_axes
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -301,7 +302,7 @@ class BaseExperiment(ABC):
         show: bool,
         legend_kwargs: dict[str, Any] | None,
         **draw_kwargs: Any,
-    ) -> ggplot | tuple:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Template Method shared by every subclass's public ``plot``.
 
         Each :class:`BaseExperiment` subclass exposes its own explicit,
@@ -362,15 +363,17 @@ class BaseExperiment(ABC):
             else:
                 raise ValueError("Unsupported model type")
 
-        # plotnine path (issue #988): ribbon/spaghetti return a ``ggplot``;
-        # ``kind="histogram"`` still returns ``(fig, ax)`` after a matplotlib
-        # pcolormesh overlay. ggplot theming/legend live on the object itself.
-        if isinstance(result, ggplot):
-            if show:
-                result.show()
-            return result
-
-        fig, ax = result
+        if isinstance(result, PlotSpec):
+            fig = result.plot.draw(show=False)
+            axes = panel_axes(fig, result.n_panels)
+            if result.overlay is not None:
+                result.overlay(fig, axes)
+            ax = as_axes_result(axes)
+        elif isinstance(result, ggplot):
+            fig = result.draw(show=False)
+            ax = as_axes_result(panel_axes(fig))
+        else:
+            fig, ax = result
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles are preserved
@@ -398,15 +401,15 @@ class BaseExperiment(ABC):
 
         return fig, ax
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> ggplot | tuple:
+    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> ggplot | PlotSpec | tuple:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian.
 
-        Returns a :class:`plotnine.ggplot` for ribbon/spaghetti, or
-        ``(fig, ax)`` for ``kind="histogram"`` (matplotlib density overlay).
+        Returns a :class:`plotnine.ggplot`, :class:`~causalpy.plot_utils.PlotSpec`,
+        or legacy ``(fig, ax)`` for OLS-style matplotlib plots.
         """
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> ggplot | tuple:
+    def _ols_plot(self, *args: Any, **kwargs: Any) -> ggplot | PlotSpec | tuple:
         """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 

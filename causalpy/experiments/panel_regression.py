@@ -45,6 +45,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import PlotSpec, as_axes_result, panel_axes
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -556,7 +557,7 @@ class PanelRegression(BaseExperiment):
 
     def _bayesian_plot(
         self, hdi_prob: float = HDI_PROB, **kwargs: Any
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> ggplot | PlotSpec:
         """Create coefficient plot for Bayesian model.
 
         Parameters
@@ -569,12 +570,14 @@ class PanelRegression(BaseExperiment):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
+        plotnine.ggplot or :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative coefficient plot for the base ``plot()`` draw path.
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
-    def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(
+        self, **kwargs: Any
+    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot for OLS model.
 
         Returns
@@ -586,7 +589,7 @@ class PanelRegression(BaseExperiment):
 
     def _plot_coefficients_internal(
         self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
         Parameters
@@ -629,8 +632,14 @@ class PanelRegression(BaseExperiment):
                 + geom_errorbarh(aes(xmin="lower", xmax="higher"), height=0.2, size=0.6)
                 + geom_point(size=2)
                 + geom_vline(xintercept=0, color="black", linetype="dashed", alpha=0.8)
-                + labs(title="", x="Coefficient Value", y="")
+                + labs(x="Coefficient Value", y="")
                 + theme(figure_size=figsize)
+            )
+
+            return PlotSpec(
+                p,
+                overlay=lambda _fig, axes: axes[0].set_title(title),
+                n_panels=1,
             )
         else:
             coef_indices = [self.labels.index(c) for c in coeff_names]
@@ -648,12 +657,26 @@ class PanelRegression(BaseExperiment):
                 + labs(title="", x="Coefficient Value", y="")
                 + theme(figure_size=figsize)
             )
+            fig = p.draw()
+            axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+            ax = axes[0]
+            ax.set_title(title)
+            return fig, ax
 
-        fig = p.draw()
-        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-        ax = axes[0]
-        ax.set_title(title)
-        return fig, ax
+    def _draw_plot_result(
+        self, result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Draw a ggplot or PlotSpec returned by coefficient plot helpers."""
+        if isinstance(result, PlotSpec):
+            fig = result.plot.draw(show=False)
+            axes = panel_axes(fig, result.n_panels)
+            if result.overlay is not None:
+                result.overlay(fig, axes)
+            return fig, as_axes_result(axes)
+        if isinstance(result, ggplot):
+            fig = result.draw(show=False)
+            return fig, as_axes_result(panel_axes(fig))
+        return result
 
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for Bayesian model.
@@ -749,7 +772,9 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
+        return self._draw_plot_result(
+            self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
+        )
 
     def plot_unit_effects(
         self, highlight: list[str] | None = None, label_extreme: int = 0
