@@ -30,6 +30,7 @@ from matplotlib.patches import Patch
 from plotnine import (
     aes,
     element_blank,
+    element_rect,
     facet_wrap,
     geom_hline,
     geom_line,
@@ -47,7 +48,7 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import _PlotXYStyle, concat_x_y, plot_xY
+from causalpy.plot_utils import _plot_histogram, _PlotXYStyle, concat_x_y, plot_xY
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -639,16 +640,15 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon"}, optional
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` and ``"histogram"`` are
-            not yet migrated and raise ``ValueError``; tracked in issue #988.
+            (mean + credible band).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Unused until ``kind="spaghetti"`` is migrated; retained for API
-            compatibility.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
         figsize : tuple of (float, float)
             Width and height of the figure in inches. Defaults to ``(7, 11)``
             so the three panels and date tick labels have room.
@@ -920,18 +920,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Returns ``(fig, ax)``.
 
         ponytail: treatment vline and date formatting stay on matplotlib after
-        ``.draw()``. ``kind`` other than ``"ribbon"`` raises until migrated
-        (#988). No shared helper with ITS/SC yet — assess SDiD alone.
+        ``.draw()``.
         """
-        if kind != "ribbon":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-            )
-
         treated_unit = self.treated_units[0]
         interval = "eti" if ci_kind == "eti" else "hdi"
         mid, bot = "Causal Impact", "Cumulative Causal Impact"
@@ -978,6 +968,36 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 .assign(series=series, panel=panel)
             )
 
+        def _sample_draw_lines(draws: pl.DataFrame, num_samples: int) -> pl.DataFrame:
+            tagged = draws.with_columns(
+                (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
+            )
+            ids = tagged.select("_draw_id").unique()
+            chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
+            return tagged.join(chosen, on="_draw_id").sort("obs_ind")
+
+        def _pred_spaghetti(pred, index, series, panel):
+            newdata = pd.DataFrame({"obs_ind": index})
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            if "treated_units" in draws.columns:
+                draws = draws.filter(pl.col("treated_units") == treated_unit)
+            return (
+                _sample_draw_lines(draws, num_samples)
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
+        def _da_spaghetti(da, series, panel):
+            da = da.sel(treated_units=treated_unit)
+            tidy = pl.from_pandas(da.to_dataframe(name="mu").reset_index())
+            return (
+                _sample_draw_lines(tidy, num_samples)
+                .to_pandas()
+                .assign(series=series, panel=panel)
+            )
+
         pre_band = _pred_band(
             self.pre_pred, self.datapre.index, "Pre-intervention fit", top
         )
@@ -994,6 +1014,55 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 _da_band(self.post_impact_cumulative, "post", bot),
             ]
         )
+
+        spaghetti_df = None
+        if kind == "spaghetti":
+            spaghetti_df = pd.concat(
+                [
+                    _pred_spaghetti(
+                        self.pre_pred,
+                        self.datapre.index,
+                        "Pre-intervention fit",
+                        top,
+                    ),
+                    _pred_spaghetti(
+                        self.post_pred,
+                        self.datapost.index,
+                        "Counterfactual",
+                        top,
+                    ),
+                    _da_spaghetti(self.pre_impact, "pre", mid),
+                    _da_spaghetti(self.post_impact, "post", mid),
+                    _da_spaghetti(self.post_impact_cumulative, "post", bot),
+                ]
+            )
+
+        hist_layers: list[tuple[Any, xr.DataArray, dict[str, Any]]] | None = None
+        if kind == "histogram":
+            pre_mu = self.pre_pred["posterior_predictive"].mu.sel(
+                treated_units=treated_unit
+            )
+            post_mu = self.post_pred["posterior_predictive"].mu.sel(
+                treated_units=treated_unit
+            )
+            x_top, mu_top = concat_x_y(
+                self.datapre.index, pre_mu, self.datapost.index, post_mu
+            )
+            x_mid, impact_mid = concat_x_y(
+                self.datapre.index,
+                self.pre_impact.sel(treated_units=treated_unit),
+                self.datapost.index,
+                self.post_impact.sel(treated_units=treated_unit),
+            )
+            hist_layers = [
+                (x_top, mu_top, {}),
+                (x_mid, impact_mid, {"color": "C0"}),
+                (
+                    self.datapost.index,
+                    self.post_impact_cumulative.sel(treated_units=treated_unit),
+                    {"color": "C1"},
+                ),
+            ]
 
         obs = pd.concat(
             [
@@ -1027,7 +1096,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         shade_df = pd.concat([shade_top, shade_mid])
 
         panels = [top, mid, bot]
-        for frame in (bands, obs, shade_df):
+        frames = [bands, obs, shade_df]
+        if spaghetti_df is not None:
+            frames.append(spaghetti_df)
+        for frame in frames:
             frame["panel"] = pd.Categorical(
                 frame["panel"], categories=panels, ordered=True
             )
@@ -1044,21 +1116,39 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             zero_df["panel"], categories=panels, ordered=True
         )
 
+        p = ggplot() + geom_ribbon(
+            shade_df,
+            aes("obs_ind", ymin="y1", ymax="y2"),
+            fill="#1f77b4",
+            alpha=0.25,
+        )
+        if kind == "histogram":
+            p = p + geom_line(bands, aes("obs_ind", "mu", color="series"))
+        elif kind == "spaghetti":
+            p = (
+                p
+                + geom_line(
+                    spaghetti_df,
+                    aes("obs_ind", "mu", group="_draw_id", color="series"),
+                    alpha=0.1,
+                    size=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            )
+        else:
+            p = (
+                p
+                + geom_ribbon(
+                    bands,
+                    aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                    alpha=0.3,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            )
         p = (
-            ggplot()
-            + geom_ribbon(
-                shade_df,
-                aes("obs_ind", ymin="y1", ymax="y2"),
-                fill="#1f77b4",
-                alpha=0.25,
-            )
-            + geom_ribbon(
-                bands,
-                aes("obs_ind", ymin="mu_lower", ymax="mu_upper", fill="series"),
-                alpha=0.3,
-                show_legend=False,
-            )
-            + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            p
             + geom_point(obs, aes("obs_ind", "y", color="series"), size=1)
             + geom_hline(zero_df, aes(yintercept="yintercept"), color="black")
             + facet_wrap("panel", ncol=1, scales="free_y")
@@ -1072,12 +1162,32 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 figure_size=figsize,
                 panel_spacing_y=0.06,
                 plot_margin_bottom=0.08,
+                **(
+                    {
+                        "panel_background": element_rect(fill="white"),
+                        "panel_grid_major": element_blank(),
+                        "panel_grid_minor": element_blank(),
+                    }
+                    if kind == "histogram"
+                    else {}
+                ),
             )
         )
 
         fig = p.draw()
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
         ax = np.asarray(axes[:3])
+        if hist_layers is not None:
+            hist_kwargs = {"cmap": "Greys", "alpha": 0.85}
+            for panel_ax, (x_vals, y_da, extra) in zip(ax, hist_layers, strict=True):
+                _plot_histogram(
+                    x_vals,
+                    y_da,
+                    panel_ax,
+                    {**hist_kwargs, **extra},
+                    None,
+                    draw_mean=False,
+                )
         for a in ax:
             treatment_time = self._convert_treatment_time_for_axis(
                 a, self.treatment_time
