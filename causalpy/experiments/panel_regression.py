@@ -19,17 +19,21 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.gridspec import GridSpec
 from patsy import dmatrices
 from plotnine import (
     aes,
     coord_flip,
+    element_blank,
+    facet_wrap,
     geom_col,
     geom_errorbarh,
     geom_histogram,
+    geom_line,
     geom_point,
+    geom_ribbon,
     geom_vline,
     ggplot,
+    guides,
     labs,
     theme,
 )
@@ -922,47 +926,34 @@ class PanelRegression(BaseExperiment):
                 ].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()
 
-        # Create only the subplots we need
+        # Build tidy frames for a faceted plotnine base.
         n_units_plot = len(selected_units)
         ncols = min(3, n_units_plot)
         nrows = (n_units_plot + ncols - 1) // ncols
+        figsize = (5 * ncols, 3 * nrows)
 
-        fig = plt.figure(figsize=(5 * ncols, 3 * nrows))
-        gs = GridSpec(nrows, ncols, figure=fig)
-        axes = [
-            fig.add_subplot(gs[idx // ncols, idx % ncols])
-            for idx in range(n_units_plot)
-        ]
+        obs_rows: list[dict[str, Any]] = []
+        fit_rows: list[dict[str, Any]] = []
+        ribbon_rows: list[dict[str, Any]] = []
 
-        # Plot each unit
-        for idx, unit in enumerate(selected_units):
-            ax = axes[idx]
-
-            # Get indices for this unit in original data order
+        for unit in selected_units:
+            unit_label = f"Unit: {unit}"
             unit_mask = self.data[self.unit_fe_variable] == unit
             unit_obs_indices = np.where(unit_mask)[0]
-
-            # Get time values and compute sort order
-            time_vals = self.data.loc[unit_mask, self.time_fe_variable].values
+            time_vals = np.asarray(
+                self.data.loc[unit_mask, self.time_fe_variable].values
+            )
             sort_order = np.argsort(time_vals)
             sorted_time_vals = time_vals[sort_order]
             sorted_obs_indices = unit_obs_indices[sort_order]
-
-            # Get actual y values (sorted by time)
             y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
 
-            # Plot actual
-            ax.plot(
-                sorted_time_vals,
-                y_actual,
-                "o-",
-                label="Actual",
-                alpha=0.7,
-            )
+            for t, y in zip(sorted_time_vals, y_actual, strict=True):
+                obs_rows.append(
+                    {"unit_label": unit_label, "time": t, "y": y, "series": "Actual"}
+                )
 
             if is_bayesian:
-                # Get posterior mu for this unit's observations in sorted order
-                # Squeeze out treated_units dimension
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
                     unit_mu = unit_mu.squeeze("treated_units", drop=True)
@@ -971,46 +962,92 @@ class PanelRegression(BaseExperiment):
                 )
                 if "treated_units" in unit_interval.dims:
                     unit_interval = unit_interval.squeeze("treated_units", drop=True)
-
-                # Plot fitted mean
-                ax.plot(
-                    sorted_time_vals,
-                    unit_mu.mean(dim=["chain", "draw"]).values,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
-
-                # Plot HDI using az.plot_hdi
-                az.plot_hdi(
-                    sorted_time_vals,
-                    unit_interval,
-                    hdi_prob=hdi_prob,
-                    ax=ax,
-                    smooth=False,
-                    fill_kwargs={"alpha": 0.2},
-                )
+                hdi = az.hdi(unit_interval, hdi_prob=hdi_prob)
+                var_name = next(iter(hdi.data_vars))
+                fit_mean = unit_mu.mean(dim=["chain", "draw"]).values
+                lower = hdi[var_name].sel(hdi="lower").values
+                upper = hdi[var_name].sel(hdi="higher").values
+                for t, y, ymin, ymax in zip(
+                    sorted_time_vals, fit_mean, lower, upper, strict=True
+                ):
+                    fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
+                    ribbon_rows.append(
+                        {
+                            "unit_label": unit_label,
+                            "time": t,
+                            "ymin": ymin,
+                            "ymax": ymax,
+                        }
+                    )
             else:
-                # OLS: get fitted values for this unit
                 y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
                     sorted_obs_indices
-                ]  # type: ignore[union-attr]
-                ax.plot(
-                    sorted_time_vals,
-                    y_fitted,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
+                ]
+                for t, y in zip(sorted_time_vals, y_fitted, strict=True):
+                    fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
 
+        unit_labels = [f"Unit: {u}" for u in selected_units]
+        obs_df = pd.DataFrame(obs_rows)
+        fit_df = pd.DataFrame(fit_rows)
+        obs_df["unit_label"] = pd.Categorical(
+            obs_df["unit_label"], categories=unit_labels, ordered=True
+        )
+        fit_df["unit_label"] = pd.Categorical(
+            fit_df["unit_label"], categories=unit_labels, ordered=True
+        )
+
+        p = ggplot()
+        if is_bayesian and ribbon_rows:
+            ribbon_df = pd.DataFrame(ribbon_rows)
+            ribbon_df["unit_label"] = pd.Categorical(
+                ribbon_df["unit_label"], categories=unit_labels, ordered=True
+            )
+            p = p + geom_ribbon(
+                ribbon_df,
+                aes("time", ymin="ymin", ymax="ymax"),
+                fill="#1f77b4",
+                alpha=0.2,
+                inherit_aes=False,
+            )
+        p = (
+            p
+            + geom_line(
+                fit_df,
+                aes("time", "y"),
+                color="#ff7f0e",
+                linetype="dashed",
+                alpha=0.7,
+            )
+            + geom_point(obs_df, aes("time", "y"), color="black", alpha=0.7)
+            + geom_line(obs_df, aes("time", "y"), color="black", alpha=0.7)
+            + facet_wrap("unit_label", ncol=ncols, scales="free_y")
+            + guides(color="none")
+            + labs(x="", y="")
+            + theme(
+                strip_text=element_blank(),
+                strip_background=element_blank(),
+                figure_size=figsize,
+            )
+        )
+
+        fig = p.draw()
+        axes = np.asarray(
+            [a for a in fig.axes if a.get_subplotspec() is not None][:n_units_plot]
+        )
+        for ax, unit in zip(axes, selected_units, strict=True):
             ax.set_title(f"Unit: {unit}", fontsize=10)
             ax.set_xlabel(self.time_fe_variable)
             ax.set_ylabel(self.outcome_variable_name)
-            if idx == 0:
-                ax.legend(fontsize=8)
-
-        plt.tight_layout()
-        return fig, np.array(axes)
+        if len(axes) > 0:
+            axes[0].legend(
+                handles=[
+                    plt.Line2D([0], [0], color="black", marker="o", linestyle="-"),
+                    plt.Line2D([0], [0], color="#ff7f0e", marker="s", linestyle="--"),
+                ],
+                labels=["Actual", "Fitted"],
+                fontsize=8,
+            )
+        return fig, axes
 
     def plot_residuals(
         self,
