@@ -22,7 +22,7 @@ import pytest
 import xarray as xr
 from matplotlib.collections import PolyCollection
 
-from causalpy.plot_utils import concat_x_y, get_hdi_to_df, plot_xY
+from causalpy.plot_utils import concat_x_y, get_hdi_to_df, histogram_tile_df, plot_xY
 
 
 @pytest.mark.integration
@@ -553,6 +553,19 @@ def test_plot_xY_warns_num_samples_ignored_for_non_spaghetti(synthetic_posterior
     with pytest.warns(UserWarning, match="num_samples.*ignored"):
         plot_xY(x, Y, ax=ax, kind="ribbon", num_samples=100)
     plt.close(fig)
+
+
+@pytest.mark.integration
+def test_histogram_tile_df_matches_density_grid(synthetic_posterior_data):
+    """Tile long data carries the same normalized counts as the matplotlib grid."""
+    x, Y = synthetic_posterior_data
+    from causalpy.plot_utils import _histogram_density_grid
+
+    _, grid = _histogram_density_grid(Y)
+    tiles = histogram_tile_df(x, Y, series="s", panel="p")
+    assert tiles["density"].max() <= 1.0 + 1e-12
+    assert len(tiles) == grid.size
+    assert set(tiles.columns) >= {"obs_ind", "y", "density", "series", "panel"}
 
 
 @pytest.mark.integration

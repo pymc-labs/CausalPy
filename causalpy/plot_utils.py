@@ -327,6 +327,93 @@ def histogram_y_edges(*Ys: xr.DataArray, n_bins: int = 50) -> np.ndarray:
     return np.linspace(y_min - y_pad, y_max + y_pad, n_bins + 1)
 
 
+def _histogram_density_grid(
+    Y: xr.DataArray,
+    y_edges: np.ndarray | None = None,
+    *,
+    n_bins: int = 50,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Column-normalized posterior histogram grid for one xarray series."""
+    Y_flat = Y.stack(sample=("chain", "draw"))
+    time_dim = _time_dim_name(Y)
+    n_time = Y.sizes[time_dim]
+    if y_edges is None:
+        vals = Y_flat.values
+        y_min = float(np.nanmin(vals))
+        y_max = float(np.nanmax(vals))
+        y_pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
+        y_edges = np.linspace(y_min - y_pad, y_max + y_pad, n_bins + 1)
+    n_bins_actual = len(y_edges) - 1
+    hist2d = np.zeros((n_bins_actual, n_time), dtype=float)
+    for t in range(n_time):
+        col = Y_flat.isel({time_dim: t}).values.ravel()
+        counts, _ = np.histogram(col, bins=y_edges)
+        hist2d[:, t] = counts
+    col_max = hist2d.max(axis=0, keepdims=True)
+    hist2d_norm = np.divide(
+        hist2d,
+        col_max + 1e-12,
+        out=np.zeros_like(hist2d, dtype=float),
+        where=col_max > 0,
+    )
+    return y_edges, hist2d_norm
+
+
+def histogram_tile_df(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
+    *,
+    series: str,
+    panel: str,
+    y_edges: np.ndarray | None = None,
+    n_bins: int = 50,
+) -> pd.DataFrame:
+    """Long dataframe of posterior density tiles for plotnine ``geom_tile``.
+
+    Parameters
+    ----------
+    x : array-like
+        Values for the x-axis (aligned with ``Y``'s time dimension).
+    Y : xr.DataArray
+        Posterior samples with ``chain`` and ``draw`` dimensions.
+    series : str
+        Label column carried through for faceting/legends.
+    panel : str
+        Facet panel name.
+    y_edges : np.ndarray, optional
+        Shared bin edges from :func:`histogram_y_edges` or a prior call.
+    n_bins : int, optional
+        Bin count when ``y_edges`` is omitted. Defaults to 50.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``obs_ind``, ``y``, ``density``, ``series``, ``panel``.
+    """
+    x_arr = np.asarray(x)
+    if len(x_arr) != Y.sizes[_time_dim_name(Y)]:
+        msg = (
+            f"histogram_tile_df length mismatch: x has {len(x_arr)} points, "
+            f"Y has {Y.sizes[_time_dim_name(Y)]} along time"
+        )
+        raise ValueError(msg)
+    y_edges, hist2d_norm = _histogram_density_grid(Y, y_edges=y_edges, n_bins=n_bins)
+    y_mids = (y_edges[:-1] + y_edges[1:]) / 2
+    rows: list[dict[str, Any]] = []
+    for t_idx, obs in enumerate(x_arr):
+        for b_idx, y_mid in enumerate(y_mids):
+            rows.append(
+                {
+                    "obs_ind": obs,
+                    "y": y_mid,
+                    "density": float(hist2d_norm[b_idx, t_idx]),
+                    "series": series,
+                    "panel": panel,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _x_as_numeric_mesh(
     x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
 ) -> tuple[np.ndarray, bool]:
@@ -364,41 +451,15 @@ def _plot_histogram(
     if plot_hdi_kwargs is None:
         plot_hdi_kwargs = {}
 
-    Y_flat = Y.stack(sample=("chain", "draw"))
-    time_dims = [d for d in Y.dims if d not in ("chain", "draw")]
-    if len(time_dims) != 1:
+    n_x = len(np.asarray(x))
+    if n_x != Y.sizes[_time_dim_name(Y)]:
         msg = (
-            "plot_xY histogram expects Y with exactly one non-chain/draw dimension; "
-            f"got {time_dims!r}"
+            f"Length of x ({n_x}) != length of time dimension "
+            f"{_time_dim_name(Y)!r} ({Y.sizes[_time_dim_name(Y)]})"
         )
         raise ValueError(msg)
-    time_dim = time_dims[0]
-    n_time = Y.sizes[time_dim]
-    n_x = len(np.asarray(x))
-    if n_x != n_time:
-        msg = f"Length of x ({n_x}) != length of time dimension {time_dim!r} ({n_time})"
-        raise ValueError(msg)
 
-    if y_edges is None:
-        y_min = float(np.nanmin(Y_flat.values))
-        y_max = float(np.nanmax(Y_flat.values))
-        y_pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
-        y_edges = np.linspace(y_min - y_pad, y_max + y_pad, 51)
-    n_bins = len(y_edges) - 1
-
-    hist2d = np.zeros((n_bins, n_time), dtype=float)
-    for t in range(n_time):
-        col = Y_flat.isel({time_dim: t}).values.ravel()
-        counts, _ = np.histogram(col, bins=y_edges)
-        hist2d[:, t] = counts
-
-    col_max = hist2d.max(axis=0, keepdims=True)
-    hist2d_norm = np.divide(
-        hist2d,
-        col_max + 1e-12,
-        out=np.zeros_like(hist2d, dtype=float),
-        where=col_max > 0,
-    )
+    y_edges, hist2d_norm = _histogram_density_grid(Y, y_edges=y_edges)
 
     x_num, is_dt = _x_as_numeric_mesh(x)
     if len(x_num) == 1:
@@ -429,6 +490,7 @@ def _plot_histogram(
 
     mean_y = Y.mean(dim=["chain", "draw"])
     mean_vals = np.asarray(mean_y.values, dtype=float).ravel()
+    n_time = Y.sizes[_time_dim_name(Y)]
     if mean_vals.size != n_time:
         msg = f"Mean line length {mean_vals.size} != n_time {n_time}"
         raise ValueError(msg)

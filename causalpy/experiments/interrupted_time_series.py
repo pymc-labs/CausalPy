@@ -34,10 +34,12 @@ from plotnine import (
     geom_line,
     geom_point,
     geom_ribbon,
+    geom_tile,
     ggplot,
     guides,
     labs,
     scale_color_manual,
+    scale_fill_gradient,
     scale_fill_manual,
     theme,
 )
@@ -51,6 +53,7 @@ from causalpy.plot_utils import (
     _PlotXYStyle,
     concat_x_y,
     get_hdi_to_df,
+    histogram_tile_df,
     plot_xY,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -640,8 +643,8 @@ class InterruptedTimeSeries(BaseExperiment):
         kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
             (mean + credible band). ``"spaghetti"`` draws posterior sample
-            lines via plotnine. ``"histogram"`` uses the matplotlib heatmap
-            path until plotnine ``geom_tile`` lands (#988).
+            lines via plotnine. ``"histogram"`` renders a density heatmap via
+            plotnine ``geom_tile`` (Greys scale).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -1031,20 +1034,8 @@ class InterruptedTimeSeries(BaseExperiment):
         ``(fig, ax)``.
 
         ponytail: singleton HDI marker and date-axis formatting stay on
-        matplotlib after ``.draw()``. ``kind="histogram"`` delegates to
-        matplotlib until ``geom_tile`` (#988).
+        matplotlib after ``.draw()``.
         """
-        if kind == "histogram":
-            return self._bayesian_plot_matplotlib(
-                round_to=round_to,
-                ci_prob=ci_prob,
-                kind=kind,
-                ci_kind=ci_kind,
-                num_samples=num_samples,
-                figsize=figsize,
-                **kwargs,
-            )
-
         single_post_obs = len(self.datapost) <= 1
         interval = "eti" if ci_kind == "eti" else "hdi"
         top, mid, bot = (
@@ -1176,6 +1167,40 @@ class InterruptedTimeSeries(BaseExperiment):
                 ]
             )
 
+        tile_df = None
+        if kind == "histogram":
+
+            def _isel_treated(da):
+                if hasattr(da, "dims") and "treated_units" in da.dims:
+                    return da.isel(treated_units=0)
+                return da
+
+            pre_mu = _isel_treated(self.pre_pred["posterior_predictive"].mu)
+            post_mu = _isel_treated(self.post_pred["posterior_predictive"].mu)
+            x_top, mu_top = concat_x_y(
+                self.datapre.index, pre_mu, self.datapost.index, post_mu
+            )
+            x_mid, impact_mid = concat_x_y(
+                self.datapre.index,
+                _isel_treated(self.pre_impact),
+                self.datapost.index,
+                _isel_treated(self.post_impact),
+            )
+            tile_df = pd.concat(
+                [
+                    histogram_tile_df(
+                        x_top, mu_top, series="Posterior density", panel=top
+                    ),
+                    histogram_tile_df(x_mid, impact_mid, series="pre", panel=mid),
+                    histogram_tile_df(
+                        self.datapost.index,
+                        _isel_treated(self.post_impact_cumulative),
+                        series="post",
+                        panel=bot,
+                    ),
+                ]
+            )
+
         obs = pd.concat(
             [
                 pd.DataFrame(
@@ -1216,6 +1241,8 @@ class InterruptedTimeSeries(BaseExperiment):
         frames = [bands, obs] + ([shade_df] if shade_df is not None else [])
         if spaghetti_df is not None:
             frames.append(spaghetti_df)
+        if tile_df is not None:
+            frames.append(tile_df)
         for frame in frames:
             frame["panel"] = pd.Categorical(
                 frame["panel"], categories=panels, ordered=True
@@ -1240,7 +1267,18 @@ class InterruptedTimeSeries(BaseExperiment):
                 fill="#1f77b4",
                 alpha=0.25,
             )
-        if kind == "spaghetti":
+        if kind == "histogram":
+            p = (
+                p
+                + geom_tile(
+                    tile_df,
+                    aes("obs_ind", "y", fill="density"),
+                    alpha=0.85,
+                    show_legend=False,
+                )
+                + geom_line(bands, aes("obs_ind", "mu", color="series"))
+            )
+        elif kind == "spaghetti":
             p = (
                 p
                 + geom_line(
@@ -1269,7 +1307,11 @@ class InterruptedTimeSeries(BaseExperiment):
             + geom_hline(zero_df, aes(yintercept="yintercept"), color="black")
             + facet_wrap("panel", ncol=1, scales="free_y")
             + scale_color_manual(values=colors, name="")
-            + scale_fill_manual(values=colors, name="")
+            + (
+                scale_fill_gradient(low="white", high="black", limits=(0, 1))
+                if kind == "histogram"
+                else scale_fill_manual(values=colors, name="")
+            )
             + guides(color="none", fill="none")
             + labs(x="", y="")
             # Panel titles come from ax.set_title after .draw() (matches the
