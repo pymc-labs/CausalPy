@@ -16,9 +16,9 @@
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -29,6 +29,7 @@ from plotnine import (
     aes,
     coord_cartesian,
     geom_point,
+    geom_violin,
     ggplot,
     guides,
     labs,
@@ -52,8 +53,10 @@ from causalpy.plot_utils import (
     concat_histogram_tiles,
     histogram_y_edges,
     interval_kind,
-    prediction_spaghetti,
-    prediction_summary,
+    label_draws,
+    prediction_draws,
+    spaghetti_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -518,98 +521,72 @@ class DifferenceInDifferences(BaseExperiment):
             self.data[self.group_variable_name].map(group_to_series).values
         )
 
-        def _band(pred, newdata, series):
+        def _draws(pred, newdata):
             grid = newdata.reset_index(drop=True).copy()
             grid["obs_ind"] = range(len(grid))
-            return prediction_summary(
-                pred,
-                grid,
-                group_by=tcol,
-                ci_prob=ci_prob,
-                interval=interval,
-            ).assign(series=series)
+            return prediction_draws(pred, grid)
 
-        def _pred_spaghetti(pred, newdata, series):
-            grid = newdata.reset_index(drop=True).copy()
-            grid["obs_ind"] = range(len(grid))
-            return prediction_spaghetti(
-                pred, grid, group_by=tcol, num_samples=num_samples
-            ).assign(series=series)
-
-        bands = pd.concat(
-            [
-                _band(self.y_pred_control, self.x_pred_control, "Control group"),
-                _band(self.y_pred_treatment, self.x_pred_treatment, "Treatment group"),
-            ]
+        control_draws = _draws(self.y_pred_control, self.x_pred_control)
+        treatment_draws = _draws(self.y_pred_treatment, self.x_pred_treatment)
+        counterfactual_draws = _draws(
+            self.y_pred_counterfactual, self.x_pred_counterfactual
         )
 
         time_points = self.x_pred_counterfactual[tcol].values
+        draw_parts = [
+            label_draws(control_draws, series="Control group"),
+            label_draws(treatment_draws, series="Treatment group"),
+        ]
         if len(time_points) > 1:
-            bands = pd.concat(
-                [
-                    bands,
-                    _band(
-                        self.y_pred_counterfactual,
-                        self.x_pred_counterfactual,
-                        "Counterfactual",
-                    ),
-                ]
+            draw_parts.append(
+                label_draws(counterfactual_draws, series="Counterfactual")
             )
+        all_draws = pl.concat(draw_parts, how="diagonal_relaxed")
+        group_by = ["series", tcol]
+        bands = summarize_draws(
+            all_draws,
+            group_by=group_by,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
 
-        control_mu = self.y_pred_control["posterior_predictive"].mu.isel(
-            treated_units=0
-        )
-        treatment_mu = self.y_pred_treatment["posterior_predictive"].mu.isel(
-            treated_units=0
-        )
-        counterfactual_mu = self.y_pred_counterfactual.posterior_predictive.mu.isel(
-            treated_units=0
-        )
         hist_edges = (
-            histogram_y_edges(control_mu, treatment_mu, counterfactual_mu)
+            histogram_y_edges(
+                control_draws,
+                treatment_draws,
+                counterfactual_draws,
+            )
             if kind == "histogram"
             else None
         )
 
         spaghetti_df = None
         if kind == "spaghetti":
-            spaghetti_parts = [
-                _pred_spaghetti(
-                    self.y_pred_control, self.x_pred_control, "Control group"
-                ),
-                _pred_spaghetti(
-                    self.y_pred_treatment, self.x_pred_treatment, "Treatment group"
-                ),
-            ]
-            if len(time_points) > 1:
-                spaghetti_parts.append(
-                    _pred_spaghetti(
-                        self.y_pred_counterfactual,
-                        self.x_pred_counterfactual,
-                        "Counterfactual",
-                    )
-                )
-            spaghetti_df = pd.concat(spaghetti_parts)
+            spaghetti_df = spaghetti_draws(
+                all_draws,
+                group_by=group_by,
+                num_samples=num_samples,
+            )
 
         histogram_tiles = None
         if kind == "histogram":
             layers = [
                 HistogramLayer(
-                    self.x_pred_control[tcol].values,
-                    control_mu,
+                    control_draws,
+                    tcol,
                     y_edges=hist_edges,
                 ),
                 HistogramLayer(
-                    self.x_pred_treatment[tcol].values,
-                    treatment_mu,
+                    treatment_draws,
+                    tcol,
                     y_edges=hist_edges,
                 ),
             ]
             if len(time_points) > 1:
                 layers.append(
                     HistogramLayer(
-                        self.x_pred_counterfactual[tcol].values,
-                        counterfactual_mu,
+                        counterfactual_draws,
+                        tcol,
                         y_edges=hist_edges,
                     )
                 )
@@ -629,12 +606,9 @@ class DifferenceInDifferences(BaseExperiment):
             + scale_color_manual(values=colors, name="")
             + (
                 scale_fill_manual(values=colors, name="")
-                if kind != "histogram"
+                if kind == "ribbon"
                 else guides()
             )
-            # Drop plotnine's guide; rebuild a matplotlib legend after .draw()
-            # so ``legend_kwargs`` in ``_render_plot`` can still mutate it.
-            + guides(color="none", fill="none")
             + scale_x_continuous(
                 breaks=list(self.x_pred_treatment[tcol].values.astype(float))
             )
@@ -653,6 +627,17 @@ class DifferenceInDifferences(BaseExperiment):
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
+        if len(time_points) == 1:
+            p = p + geom_violin(
+                counterfactual_draws.to_pandas(),
+                aes(tcol, "mu"),
+                width=0.2,
+                fill="#1f77b4",
+                color=None,
+                alpha=0.5,
+                show_legend=False,
+                inherit_aes=False,
+            )
 
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             ax = axes[0]
@@ -670,31 +655,6 @@ class DifferenceInDifferences(BaseExperiment):
                 labels=legend_labels,
                 fontsize=LEGEND_FONT_SIZE,
             )
-
-            if len(time_points) == 1:
-                y_pred_cf = az.extract(
-                    self.y_pred_counterfactual,
-                    group="posterior_predictive",
-                    var_names="mu",
-                )
-                y_pred_cf_single = y_pred_cf.isel(treated_units=0)
-                violin_data = (
-                    y_pred_cf_single.values
-                    if hasattr(y_pred_cf_single, "values")
-                    else y_pred_cf_single
-                )
-                parts = ax.violinplot(
-                    violin_data.T,
-                    positions=self.x_pred_counterfactual[tcol].values,
-                    showmeans=False,
-                    showmedians=False,
-                    widths=0.2,
-                )
-                for pc in parts["bodies"]:
-                    pc.set_facecolor("C0")
-                    pc.set_edgecolor("None")
-                    pc.set_alpha(0.5)
-
             _plot_causal_impact_arrow(self, ax)
 
         return PlotSpec(p, overlay=overlay, n_panels=1)

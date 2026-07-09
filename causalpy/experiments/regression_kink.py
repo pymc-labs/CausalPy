@@ -37,7 +37,9 @@ from causalpy.plot_utils import (
     add_posterior_kind,
     interval_kind,
     posterior_histogram_tiles,
-    prediction_bundle,
+    prediction_draws,
+    spaghetti_draws,
+    summarize_draws,
 )
 from causalpy.custom_exceptions import (
     DataException,
@@ -353,14 +355,21 @@ class RegressionKink(BaseExperiment):
 
         newdata = self.x_pred.reset_index(drop=True)
         newdata["obs_ind"] = range(len(newdata))
-        summary, spaghetti_df = prediction_bundle(
-            self.pred,
-            newdata,
+        draws = prediction_draws(self.pred, newdata)
+        summary = summarize_draws(
+            draws,
             group_by=xcol,
             ci_prob=ci_prob,
             interval=interval_kind(ci_kind),
-            kind=kind,
-            num_samples=num_samples,
+        )
+        spaghetti_df = (
+            spaghetti_draws(
+                draws,
+                group_by=xcol,
+                num_samples=num_samples,
+            )
+            if kind == "spaghetti"
+            else None
         )
         summary["series"] = "Posterior mean"
         if spaghetti_df is not None:
@@ -375,10 +384,7 @@ class RegressionKink(BaseExperiment):
         p = ggplot() + geom_point(points, aes(xcol, ycol, color="series"), size=1.5)
         histogram_tiles = None
         if kind == "histogram":
-            mu = self.pred["posterior_predictive"].mu.isel(treated_units=0)
-            histogram_tiles = posterior_histogram_tiles(
-                self.x_pred[xcol], mu, x_col=xcol
-            )
+            histogram_tiles = posterior_histogram_tiles(draws, xcol)
         p = add_posterior_kind(
             p,
             summary,

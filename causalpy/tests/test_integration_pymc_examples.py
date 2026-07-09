@@ -431,13 +431,13 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
     """Regression test: ITS plot must remain readable when the post-period
     contains a single observation.
 
-    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
-    zero-area polygon, the median line has no neighbours to connect to, and
+    With one post-period datum the posterior ribbon collapses to a zero-area
+    polygon, the mean line has no neighbours to connect to, and
     the (then top-of-zorder) treatment ``axvline`` covers the only datum -
     leaving the bottom two panels visually empty. The fix
         1. lowers the treatment-line zorder and switches it to a thin dashed
            style so it reads as an annotation, never as data;
-        2. overlays an explicit median-plus-HDI errorbar on every panel;
+        2. overlays an explicit point-and-interval errorbar on every panel;
         3. swaps the legend handle to that errorbar so the legend matches
            what is drawn (and drops the "Causal impact" entry whose
            ``fill_between`` collapses to nothing).
@@ -455,7 +455,7 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert len(result.datapost) == 1
-    fig, ax = result.plot()
+    fig, ax = result.plot(ci_prob=0.5, ci_kind="eti")
 
     treatment_axvlines = [
         ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
@@ -480,6 +480,15 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
             f"panel {i} should have a LineCollection from the singleton "
             "errorbar overlay; otherwise the post-period is invisible"
         )
+
+    narrow_widths = [
+        max(segment[:, 1]) - min(segment[:, 1])
+        for a in ax
+        for collection in a.collections
+        if isinstance(collection, LineCollection)
+        for segment in collection.get_segments()
+        if len(segment) == 2 and segment[0, 0] == segment[1, 0]
+    ]
 
     # Top-panel legend must reflect what is actually drawn: a Counterfactual
     # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
@@ -513,6 +522,21 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
         f"got {type(cf_handle).__name__}"
     )
     plt.close(fig)
+
+    wide_fig, wide_axes = result.plot(ci_prob=0.9, ci_kind="eti")
+    wide_widths = [
+        max(segment[:, 1]) - min(segment[:, 1])
+        for a in wide_axes
+        for collection in a.collections
+        if isinstance(collection, LineCollection)
+        for segment in collection.get_segments()
+        if len(segment) == 2 and segment[0, 0] == segment[1, 0]
+    ]
+    assert len(narrow_widths) == len(wide_widths) == 3
+    assert all(
+        wide > narrow for narrow, wide in zip(narrow_widths, wide_widths, strict=True)
+    )
+    plt.close(wide_fig)
 
 
 @pytest.mark.integration

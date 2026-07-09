@@ -21,7 +21,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from causalpy.plot_utils import concat_x_y, get_hdi_to_df, plot_posterior_histogram
+from causalpy.plot_utils import dataarray_draws, get_hdi_to_df
 
 
 @pytest.mark.integration
@@ -133,190 +133,127 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
 
 
 @pytest.fixture
-def synthetic_posterior_data():
-    """Create synthetic posterior data for histogram tests."""
-    np.random.seed(42)
-    n_chains = 2
-    n_draws = 100
-    n_time_points = 20
-
-    # Generate synthetic posterior: trend + noise
-    true_mean = (
-        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
+def synthetic_posterior_draws():
+    rng = np.random.default_rng(42)
+    obs_ind = pd.date_range("2020-01-01", periods=20, freq="D")
+    values = rng.normal(
+        loc=np.linspace(10, 12, len(obs_ind)),
+        scale=1,
+        size=(2, 100, len(obs_ind)),
     )
-
-    # Create posterior samples with uncertainty
-    rng = np.random.default_rng(seed=42)
-    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
-
-    for chain in range(n_chains):
-        for draw in range(n_draws):
-            # Add some variation to the mean for each draw
-            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
-            # Add observation-level noise
-            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
-                0, 1.0, n_time_points
-            )
-
-    # Create xarray DataArray with proper dimensions and coordinates
-    time_index = pd.date_range(start="2020-01-01", periods=n_time_points, freq="D")
-    Y = xr.DataArray(
-        posterior_samples,
+    da = xr.DataArray(
+        values,
         dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": np.arange(n_chains),
-            "draw": np.arange(n_draws),
-            "obs_ind": time_index,
-        },
+        coords={"chain": range(2), "draw": range(100), "obs_ind": obs_ind},
+    )
+    return dataarray_draws(da)
+
+
+def test_dataarray_draws_selects_requested_treated_unit():
+    da = xr.DataArray(
+        np.arange(16).reshape(1, 2, 2, 4),
+        dims=["chain", "draw", "treated_units", "obs_ind"],
+        coords={"treated_units": ["a", "b"]},
     )
 
-    return time_index, Y
+    draws = dataarray_draws(da, treated_unit="b")
+
+    assert "treated_units" not in draws.columns
+    assert draws["mu"].to_list() == [4, 5, 6, 7, 12, 13, 14, 15]
 
 
-@pytest.fixture
-def synthetic_posterior_data_numeric():
-    """Create synthetic posterior data with numeric x values."""
-    np.random.seed(42)
-    n_chains = 2
-    n_draws = 100
-    n_time_points = 20
+def test_summarize_draws_preserves_requested_interval_mass(synthetic_posterior_draws):
+    from causalpy.plot_utils import summarize_draws
 
-    # Generate synthetic posterior: trend + noise
-    true_mean = (
-        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
+    narrow = summarize_draws(
+        synthetic_posterior_draws,
+        group_by="obs_ind",
+        ci_prob=0.5,
+        interval="eti",
+    )
+    wide = summarize_draws(
+        synthetic_posterior_draws,
+        group_by="obs_ind",
+        ci_prob=0.9,
+        interval="eti",
     )
 
-    # Create posterior samples with uncertainty
-    rng = np.random.default_rng(seed=42)
-    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
+    assert np.allclose(narrow["mu"], wide["mu"])
+    assert (wide["mu_lower"] <= narrow["mu_lower"]).all()
+    assert (wide["mu_upper"] >= narrow["mu_upper"]).all()
 
-    for chain in range(n_chains):
-        for draw in range(n_draws):
-            # Add some variation to the mean for each draw
-            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
-            # Add observation-level noise
-            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
-                0, 1.0, n_time_points
-            )
 
-    # Create xarray DataArray with proper dimensions and coordinates
-    x = np.arange(n_time_points)
-    Y = xr.DataArray(
-        posterior_samples,
-        dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": np.arange(n_chains),
-            "draw": np.arange(n_draws),
-            "obs_ind": x,
-        },
+def test_spaghetti_draws_samples_complete_paths(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, spaghetti_draws
+
+    sampled = spaghetti_draws(
+        label_draws(synthetic_posterior_draws, series="posterior", panel="top"),
+        group_by=["panel", "series", "obs_ind"],
+        num_samples=3,
     )
 
-    return x, Y
+    assert sampled["_draw_id"].nunique() == 3
+    assert sampled.groupby("_draw_id").size().eq(20).all()
+    assert sampled["_line_id"].nunique() == 3
+    assert sampled.groupby("_line_id")[["panel", "series"]].nunique().eq(1).all().all()
+
+
+def test_posterior_histogram_tiles_use_draw_proportions(synthetic_posterior_draws):
+    from causalpy.plot_utils import posterior_histogram_tiles
+
+    tiles = posterior_histogram_tiles(synthetic_posterior_draws, "obs_ind")
+    assert {"obs_ind", "y", "width", "height", "density"} <= set(tiles.columns)
+    assert pd.api.types.is_datetime64_any_dtype(tiles["obs_ind"])
+    assert (
+        tiles.groupby("obs_ind")["density"]
+        .sum()
+        .between(0.99, 1.01, inclusive="both")
+        .all()
+    )
+
+
+def test_histogram_layers_share_explicit_y_grid(synthetic_posterior_draws):
+    from causalpy.plot_utils import (
+        HistogramLayer,
+        concat_histogram_tiles,
+        histogram_y_edges,
+    )
+
+    shifted = synthetic_posterior_draws.with_columns(
+        mu=synthetic_posterior_draws["mu"] + 10
+    )
+    edges = histogram_y_edges(synthetic_posterior_draws, shifted)
+    tiles = concat_histogram_tiles(
+        [
+            HistogramLayer(
+                synthetic_posterior_draws,
+                "obs_ind",
+                panel="first",
+                y_edges=edges,
+            ),
+            HistogramLayer(shifted, "obs_ind", panel="second", y_edges=edges),
+        ]
+    )
+
+    assert set(tiles["panel"]) == {"first", "second"}
+    assert tiles.groupby("panel")["y"].agg(["min", "max"]).nunique().eq(1).all()
 
 
 @pytest.mark.integration
-def test_posterior_histogram_tiles_geom_tile_draws(synthetic_posterior_data):
-    from plotnine import aes, geom_line, ggplot
+def test_posterior_histogram_tiles_render_with_plotnine(synthetic_posterior_draws):
+    from plotnine import ggplot
 
     from causalpy.plot_utils import histogram_tile_layers, posterior_histogram_tiles
 
-    x, Y = synthetic_posterior_data
-    tiles = posterior_histogram_tiles(x, Y, x_col="x", y_col="y")
-    assert not tiles.empty
-    assert {"x", "y", "width", "height", "density"}.issubset(tiles.columns)
-
-    bands = pd.DataFrame({"x": x, "mu": Y.mean(dim=["chain", "draw"]).values})
+    tiles = posterior_histogram_tiles(synthetic_posterior_draws, "obs_ind")
     p = ggplot()
-    for layer in histogram_tile_layers(tiles, "x"):
-        p = p + layer
-    p = p + geom_line(bands, aes("x", "mu"), color="#ff7f0e")
+    for layer in histogram_tile_layers(tiles, "obs_ind"):
+        p += layer
     fig = p.draw(show=False)
     assert fig.axes
     plt.close(fig)
 
 
-@pytest.mark.integration
-def test_posterior_histogram_tiles_use_draw_proportions(synthetic_posterior_data):
-    from causalpy.plot_utils import posterior_histogram_tiles
-
-    x, Y = synthetic_posterior_data
-    tiles = posterior_histogram_tiles(
-        x, Y, x_col="x", y_col="y", normalize="proportion"
-    )
-    n_samples = Y.sizes["chain"] * Y.sizes["draw"]
-    for x_val in np.unique(tiles["x"]):
-        col_sum = tiles.loc[tiles["x"] == x_val, "density"].sum()
-        assert np.isclose(col_sum, 1.0, rtol=0, atol=1.0 / n_samples)
-
-
-@pytest.mark.integration
-def test_plot_posterior_histogram_renders_heatmap(synthetic_posterior_data):
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    handles, patch = plot_posterior_histogram(x, Y, ax)
-    assert len(handles) == 1
-    assert patch is None
-    assert ax.collections
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_histogram_numeric_x(synthetic_posterior_data_numeric):
-    x, Y = synthetic_posterior_data_numeric
-    fig, ax = plt.subplots()
-    plot_posterior_histogram(x, Y, ax, draw_mean=False)
-    assert ax.collections
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_histogram_x_length_mismatch_raises(synthetic_posterior_data):
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.raises(ValueError, match="Length of x"):
-        plot_posterior_histogram(x[:3], Y, ax)
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_concat_x_y_histogram_shares_y_bin_edges():
-    """Concatenated pre/post posterior uses one y grid spanning both periods."""
-    rng = np.random.default_rng(0)
-    n_pre, n_post = 8, 6
-    x_pre = np.arange(n_pre)
-    x_post = np.arange(n_pre, n_pre + n_post)
-    Y_pre = xr.DataArray(
-        rng.normal(0, 1, (2, 10, n_pre)),
-        dims=["chain", "draw", "obs_ind"],
-    )
-    Y_post = xr.DataArray(
-        rng.normal(10, 1, (2, 10, n_post)),
-        dims=["chain", "draw", "obs_ind"],
-    )
-
-    fig, ax = plt.subplots()
-    plot_posterior_histogram(x_pre, Y_pre, ax, draw_mean=False)
-    plot_posterior_histogram(x_post, Y_post, ax, draw_mean=False)
-    separate_ranges = [
-        (coords[:, 1].min(), coords[:, 1].max())
-        for col in ax.collections
-        if (coords := col.get_coordinates()).size
-    ]
-    plt.close(fig)
-
-    fig, ax = plt.subplots()
-    x_all, Y_all = concat_x_y(x_pre, Y_pre, x_post, Y_post)
-    plot_posterior_histogram(x_all, Y_all, ax, draw_mean=False)
-    combined_range = ax.collections[0].get_coordinates()[:, 1]
-    plt.close(fig)
-
-    assert len(np.asarray(x_all)) == n_pre + n_post
-    assert separate_ranges[0][1] < separate_ranges[1][0]  # disjoint y grids
-    assert combined_range.min() < separate_ranges[0][0]
-    assert combined_range.max() > separate_ranges[1][1]
-
-
-@pytest.mark.integration
 def test_concat_histogram_tiles_empty_raises():
     from causalpy.plot_utils import concat_histogram_tiles
 
@@ -324,53 +261,13 @@ def test_concat_histogram_tiles_empty_raises():
         concat_histogram_tiles([])
 
 
-@pytest.mark.integration
-def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_data):
-    from causalpy.plot_utils import posterior_kind_layers
+def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_draws):
+    from causalpy.plot_utils import posterior_kind_layers, summarize_draws
 
-    x, Y = synthetic_posterior_data
-    bands = pd.DataFrame(
-        {"x": x, "mu": Y.mean(dim=["chain", "draw"]).values, "series": "a"}
-    )
+    bands = summarize_draws(
+        synthetic_posterior_draws,
+        group_by="obs_ind",
+        ci_prob=0.94,
+    ).assign(series="a")
     with pytest.raises(ValueError, match="spaghetti_df"):
-        posterior_kind_layers(bands, "spaghetti", x="x", y="mu")
-
-
-@pytest.mark.integration
-def test_posterior_histogram_tiles_length_mismatch_raises(synthetic_posterior_data):
-    from causalpy.plot_utils import posterior_histogram_tiles
-
-    x, Y = synthetic_posterior_data
-    with pytest.raises(ValueError, match="Length of x"):
-        posterior_histogram_tiles(x[:3], Y)
-
-
-@pytest.mark.integration
-def test_posterior_histogram_tiles_column_normalize(synthetic_posterior_data):
-    from causalpy.plot_utils import posterior_histogram_tiles
-
-    x, Y = synthetic_posterior_data
-    tiles = posterior_histogram_tiles(x, Y, normalize="column")
-    for x_val in np.unique(tiles["x"]):
-        col_max = tiles.loc[tiles["x"] == x_val, "density"].max()
-        assert np.isclose(col_max, 1.0, rtol=0, atol=1e-6)
-
-
-@pytest.mark.integration
-def test_posterior_histogram_tiles_datetime_x(synthetic_posterior_data):
-    from causalpy.plot_utils import (
-        HistogramLayer,
-        concat_histogram_tiles,
-        posterior_histogram_tiles,
-    )
-
-    x, Y = synthetic_posterior_data
-    dt_x = pd.date_range("2020-01-01", periods=len(x), freq="D")
-    tiles = posterior_histogram_tiles(dt_x, Y, panel="main")
-    assert "panel" in tiles.columns
-    assert pd.api.types.is_datetime64_any_dtype(tiles["x"])
-
-    layered = concat_histogram_tiles(
-        [HistogramLayer(dt_x, Y, panel="main"), HistogramLayer(dt_x, Y, panel="other")]
-    )
-    assert set(layered["panel"]) == {"main", "other"}
+        posterior_kind_layers(bands, "spaghetti", x="obs_ind", y="mu")

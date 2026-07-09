@@ -15,10 +15,10 @@
 
 from typing import Any, Literal
 
-import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
 from patsy import dmatrices
 from plotnine import (
     aes,
@@ -45,7 +45,13 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import PlotSpec, as_axes_result, panel_axes
+from causalpy.plot_utils import (
+    PlotSpec,
+    as_axes_result,
+    dataarray_draws,
+    panel_axes,
+    summarize_draws,
+)
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -613,14 +619,16 @@ class PanelRegression(BaseExperiment):
             beta = self.model.idata.posterior["beta"].sel(coeffs=coeff_names)  # type: ignore[union-attr]
             if "treated_units" in beta.dims:
                 beta = beta.squeeze("treated_units", drop=True)
-            hdi = az.hdi(beta, hdi_prob=hdi_prob)
-            means = beta.mean(dim=["chain", "draw"])
-            tidy = pd.DataFrame(
-                {
-                    "coeffs": coeff_names,
-                    "mean": means.values,
-                    "lower": hdi["beta"].sel(hdi="lower").values,
-                    "higher": hdi["beta"].sel(hdi="higher").values,
+            tidy = summarize_draws(
+                dataarray_draws(beta, var_name="beta"),
+                group_by="coeffs",
+                ci_prob=hdi_prob,
+                var_name="beta",
+            ).rename(
+                columns={
+                    "beta": "mean",
+                    "beta_lower": "lower",
+                    "beta_upper": "higher",
                 }
             )
             tidy["coeffs"] = pd.Categorical(
@@ -635,7 +643,6 @@ class PanelRegression(BaseExperiment):
                 + labs(x="Coefficient Value", y="")
                 + theme(figure_size=figsize)
             )
-
             return PlotSpec(
                 p,
                 overlay=lambda _fig, axes: axes[0].set_title(title),
@@ -924,6 +931,19 @@ class PanelRegression(BaseExperiment):
                 interval_source = posterior_predictive["y_hat"]
             else:
                 interval_source = mu
+            mu_draws = dataarray_draws(mu, var_name="value")
+            mean_by_obs = (
+                mu_draws.group_by("obs_ind")
+                .agg(pl.col("value").mean())
+                .to_pandas()
+                .set_index("obs_ind")
+            )
+            interval_by_obs = summarize_draws(
+                dataarray_draws(interval_source, var_name="value"),
+                group_by="obs_ind",
+                ci_prob=hdi_prob,
+                var_name="value",
+            ).set_index("obs_ind")
 
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
@@ -981,21 +1001,15 @@ class PanelRegression(BaseExperiment):
                 )
 
             if is_bayesian:
-                unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
-                if "treated_units" in unit_mu.dims:
-                    unit_mu = unit_mu.squeeze("treated_units", drop=True)
-                unit_interval = interval_source.isel(
-                    obs_ind=sorted_obs_indices.tolist()
-                )
-                if "treated_units" in unit_interval.dims:
-                    unit_interval = unit_interval.squeeze("treated_units", drop=True)
-                hdi = az.hdi(unit_interval, hdi_prob=hdi_prob)
-                var_name = next(iter(hdi.data_vars))
-                fit_mean = unit_mu.mean(dim=["chain", "draw"]).values
-                lower = hdi[var_name].sel(hdi="lower").values
-                upper = hdi[var_name].sel(hdi="higher").values
+                obs_labels = np.asarray(mu.coords["obs_ind"])[sorted_obs_indices]
+                fit_mean = mean_by_obs.loc[obs_labels, "value"].to_numpy()
+                interval = interval_by_obs.loc[obs_labels]
                 for t, y, ymin, ymax in zip(
-                    sorted_time_vals, fit_mean, lower, upper, strict=True
+                    sorted_time_vals,
+                    fit_mean,
+                    interval["value_lower"],
+                    interval["value_upper"],
+                    strict=True,
                 ):
                     fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
                     ribbon_rows.append(

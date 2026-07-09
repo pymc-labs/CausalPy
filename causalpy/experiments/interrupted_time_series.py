@@ -19,6 +19,7 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -35,13 +36,13 @@ from causalpy.plot_utils import (
     PlotSpec,
     build_causal_panel_plot,
     concat_histogram_tiles,
-    concat_x_y,
-    da_spaghetti,
-    da_summary,
+    dataarray_draws,
     get_hdi_to_df,
     interval_kind,
-    prediction_spaghetti,
-    prediction_summary,
+    label_draws,
+    prediction_draws,
+    spaghetti_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -681,33 +682,19 @@ class InterruptedTimeSeries(BaseExperiment):
         )
 
     @staticmethod
-    def _draw_singleton_hdi_marker(
+    def _draw_singleton_interval_marker(
         ax: plt.Axes,
-        x: Any,
-        Y: xr.DataArray,
+        summary: pd.Series,
         color: str,
-        hdi_prob: float = HDI_PROB,
     ) -> Any:
-        """Overlay a median dot + HDI errorbar for a single post-period datum.
-
-        When a posterior ribbon is drawn with ``az.plot_hdi`` and HDI intervals,
-        HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
-        when the post-period contains a single observation, so neither the median
-        line nor the HDI ribbon is visible. Drawing an explicit point and errorbar
-        makes both the central tendency and the uncertainty plain to read in that
-        edge case. Returns the matplotlib ``ErrorbarContainer`` so callers can use
-        it as a legend handle.
-        """
-        Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
-        median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
-        hdi = az.hdi(Y_plot, hdi_prob=hdi_prob)
-        data_var = list(hdi.data_vars)[0]
-        bounds = np.asarray(hdi[data_var].values).reshape(-1)
-        lower, upper = float(bounds[0]), float(bounds[1])
+        """Overlay a precomputed point and interval for one post-period datum."""
+        point = float(summary["mu"])
+        lower = float(summary["mu_lower"])
+        upper = float(summary["mu_upper"])
         return ax.errorbar(
-            x,
-            [median],
-            yerr=[[median - lower], [upper - median]],
+            [summary["obs_ind"]],
+            [point],
+            yerr=[[point - lower], [upper - point]],
             fmt="o",
             color=color,
             ecolor=color,
@@ -756,97 +743,66 @@ class InterruptedTimeSeries(BaseExperiment):
             if r2_std_val is not None:
                 title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
 
-        def _pred_band(pred, index, series, panel):
+        def _pred_draws(pred, index):
             newdata = pd.DataFrame({"obs_ind": index})
-            return prediction_summary(
-                pred,
-                newdata,
-                group_by="obs_ind",
-                ci_prob=ci_prob,
-                interval=interval,
-            ).assign(series=series, panel=panel)
+            return prediction_draws(pred, newdata)
 
-        def _da_band(da, series, panel):
-            return da_summary(
-                da, group_by="obs_ind", ci_prob=ci_prob, interval=interval
-            ).assign(series=series, panel=panel)
+        pre_pred_draws = _pred_draws(self.pre_pred, self.datapre.index)
+        post_pred_draws = _pred_draws(self.post_pred, self.datapost.index)
+        pre_impact_draws = dataarray_draws(self.pre_impact)
+        post_impact_draws = dataarray_draws(self.post_impact)
+        cumulative_draws = dataarray_draws(self.post_impact_cumulative)
 
-        def _pred_spaghetti(pred, index, series, panel):
-            newdata = pd.DataFrame({"obs_ind": index})
-            return prediction_spaghetti(
-                pred, newdata, group_by="obs_ind", num_samples=num_samples
-            ).assign(series=series, panel=panel)
-
-        def _da_spaghetti(da, series, panel):
-            return da_spaghetti(da, group_by="obs_ind", num_samples=num_samples).assign(
-                series=series, panel=panel
-            )
-
-        pre_band = _pred_band(
-            self.pre_pred, self.datapre.index, "Pre-intervention period", top
-        )
-        post_band = _pred_band(
-            self.post_pred, self.datapost.index, "Counterfactual", top
-        )
-        post_impact_band = _da_band(self.post_impact, "post", mid)
-        bands = pd.concat(
+        all_draws = pl.concat(
             [
-                pre_band,
-                post_band,
-                _da_band(self.pre_impact, "pre", mid),
-                post_impact_band,
-                _da_band(self.post_impact_cumulative, "post", bot),
-            ]
+                label_draws(
+                    pre_pred_draws,
+                    series="Pre-intervention period",
+                    panel=top,
+                ),
+                label_draws(post_pred_draws, series="Counterfactual", panel=top),
+                label_draws(pre_impact_draws, series="pre", panel=mid),
+                label_draws(post_impact_draws, series="post", panel=mid),
+                label_draws(cumulative_draws, series="post", panel=bot),
+            ],
+            how="diagonal_relaxed",
         )
+        group_by = ["panel", "series", "obs_ind"]
+        bands = summarize_draws(
+            all_draws,
+            group_by=group_by,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+        post_band = bands.query("panel == @top and series == 'Counterfactual'")
+        post_impact_band = bands.query("panel == @mid and series == 'post'")
+        cumulative_band = bands.query("panel == @bot and series == 'post'")
 
         spaghetti_df = None
         if kind == "spaghetti":
-            spaghetti_df = pd.concat(
-                [
-                    _pred_spaghetti(
-                        self.pre_pred,
-                        self.datapre.index,
-                        "Pre-intervention period",
-                        top,
-                    ),
-                    _pred_spaghetti(
-                        self.post_pred,
-                        self.datapost.index,
-                        "Counterfactual",
-                        top,
-                    ),
-                    _da_spaghetti(self.pre_impact, "pre", mid),
-                    _da_spaghetti(self.post_impact, "post", mid),
-                    _da_spaghetti(self.post_impact_cumulative, "post", bot),
-                ]
+            spaghetti_df = spaghetti_draws(
+                all_draws,
+                group_by=group_by,
+                num_samples=num_samples,
             )
 
         histogram_tiles = None
         if kind == "histogram":
-
-            def _isel_treated(da):
-                if hasattr(da, "dims") and "treated_units" in da.dims:
-                    return da.isel(treated_units=0)
-                return da
-
-            pre_mu = _isel_treated(self.pre_pred["posterior_predictive"].mu)
-            post_mu = _isel_treated(self.post_pred["posterior_predictive"].mu)
-            x_top, mu_top = concat_x_y(
-                self.datapre.index, pre_mu, self.datapost.index, post_mu
-            )
-            x_mid, impact_mid = concat_x_y(
-                self.datapre.index,
-                _isel_treated(self.pre_impact),
-                self.datapost.index,
-                _isel_treated(self.post_impact),
-            )
             histogram_tiles = concat_histogram_tiles(
                 [
-                    HistogramLayer(x_top, mu_top, panel=top),
-                    HistogramLayer(x_mid, impact_mid, panel=mid),
                     HistogramLayer(
-                        self.datapost.index,
-                        _isel_treated(self.post_impact_cumulative),
+                        pl.concat([pre_pred_draws, post_pred_draws]),
+                        "obs_ind",
+                        panel=top,
+                    ),
+                    HistogramLayer(
+                        pl.concat([pre_impact_draws, post_impact_draws]),
+                        "obs_ind",
+                        panel=mid,
+                    ),
+                    HistogramLayer(
+                        cumulative_draws,
+                        "obs_ind",
                         panel=bot,
                     ),
                 ],
@@ -930,15 +886,20 @@ class InterruptedTimeSeries(BaseExperiment):
                         label="Treatment end" if i == 0 else None,
                     )
             if single_post_obs:
-                post_mu = self.post_pred["posterior_predictive"].mu
-                self._draw_singleton_hdi_marker(
-                    ax[0], self.datapost.index, post_mu, color="C1"
+                self._draw_singleton_interval_marker(
+                    ax[0],
+                    post_band.iloc[0],
+                    color="C1",
                 )
-                self._draw_singleton_hdi_marker(
-                    ax[1], self.datapost.index, self.post_impact, color="C1"
+                self._draw_singleton_interval_marker(
+                    ax[1],
+                    post_impact_band.iloc[0],
+                    color="C1",
                 )
-                self._draw_singleton_hdi_marker(
-                    ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+                self._draw_singleton_interval_marker(
+                    ax[2],
+                    cumulative_band.iloc[0],
+                    color="C1",
                 )
 
             legend_labels = [

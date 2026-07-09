@@ -354,9 +354,7 @@ _PREPOST_TARGETS: list[_SpyTarget] = [
     ),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
-_PANEL_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.panel_regression.az.hdi", "hdi_prob"),
-]
+_PANEL_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
 
 
 @pytest.mark.integration
@@ -466,7 +464,7 @@ def test_piecewise_plot_default_ci_prob(mock_pymc_sample, fitted_piecewise):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
-    """PanelRegression ``plot(hdi_prob=...)`` reaches ``az.hdi``.
+    """PanelRegression ``plot(hdi_prob=...)`` reaches ``td.point_interval``.
 
     PanelRegression has not yet been migrated to ``ci_prob`` (it does not
     support ETI/spaghetti/histogram), so we call ``plot(hdi_prob=...)`` here.
@@ -476,7 +474,7 @@ def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
 
 @pytest.mark.integration
 def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
-    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to ``az.hdi``."""
+    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to tidydraws."""
     _check_default(fitted_panel, _PANEL_TARGETS)
 
 

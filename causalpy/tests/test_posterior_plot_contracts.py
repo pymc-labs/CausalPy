@@ -118,6 +118,23 @@ def test_sc_plot_kinds_return_three_panels(mock_pymc_sample, sc_data, kind):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("kind", POSTERIOR_KINDS)
+def test_sdid_plot_kinds_return_three_panels(mock_pymc_sample, sc_data, kind):
+    result = cp.SyntheticDifferenceInDifferences(
+        sc_data,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    fig, ax = result.plot(show=False, kind=kind, num_samples=10)
+    axes = assert_figure_axes_contract(fig, ax, min_axes=3)
+    assert len(axes) == 3
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("kind", POSTERIOR_KINDS)
 def test_did_plot_kinds_return_figure_axes(mock_pymc_sample, did_data, kind):
     result = cp.DifferenceInDifferences(
         did_data,

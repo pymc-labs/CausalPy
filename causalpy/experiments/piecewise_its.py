@@ -20,6 +20,7 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -35,12 +36,13 @@ from causalpy.plot_utils import (
     PlotSpec,
     build_causal_panel_plot,
     concat_histogram_tiles,
-    da_spaghetti,
-    da_summary,
+    dataarray_draws,
     histogram_y_edges,
     interval_kind,
-    prediction_spaghetti,
-    prediction_summary,
+    label_draws,
+    prediction_draws,
+    spaghetti_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -531,7 +533,6 @@ class PiecewiseITS(BaseExperiment):
         """
         interval = interval_kind(ci_kind)
         time_values = self.data[self.time_col].values
-        obs_to_t = pd.DataFrame({"obs_ind": range(len(time_values)), "t": time_values})
         mid, bot = "Causal Effect", "Cumulative Causal Effect"
 
         r2_val = None
@@ -548,82 +549,62 @@ class PiecewiseITS(BaseExperiment):
             title_str += f" = {round_num(r2_val, round_to)}"
         top = title_str  # facet key; real title set on ax after .draw()
 
-        def _pred_band(pred, series, panel):
-            newdata = pd.DataFrame({"obs_ind": self.data.index})
-            band = prediction_summary(
-                pred, newdata, group_by="obs_ind", ci_prob=ci_prob, interval=interval
-            )
-            band["t"] = time_values
-            return band.assign(series=series, panel=panel)
-
-        def _da_band(da, series, panel):
-            band = da_summary(
-                da, group_by="obs_ind", ci_prob=ci_prob, interval=interval
-            )
-            band["t"] = time_values
-            return band.assign(series=series, panel=panel)
-
-        def _pred_spaghetti(pred, series, panel):
-            newdata = pd.DataFrame({"obs_ind": self.data.index})
-            sampled = prediction_spaghetti(
-                pred, newdata, group_by="obs_ind", num_samples=num_samples
-            ).merge(obs_to_t, on="obs_ind")
-            return sampled.assign(series=series, panel=panel)
-
-        def _da_spaghetti(da, series, panel):
-            sampled = da_spaghetti(
-                da, group_by="obs_ind", num_samples=num_samples
-            ).merge(obs_to_t, on="obs_ind")
-            return sampled.assign(series=series, panel=panel)
-
-        fit_band = _pred_band(self.y_pred, "Fitted", top)
-        cf_band = _pred_band(self.y_counterfactual, "Counterfactual", top)
-        effect_band = _da_band(self.effect, "effect", mid)
-        bands = pd.concat(
-            [
-                fit_band,
-                cf_band,
-                effect_band,
-                _da_band(self.cumulative_effect, "cumulative", bot),
-            ]
+        newdata = pd.DataFrame({"obs_ind": self.data.index, "t": time_values})
+        time_lookup = pl.from_pandas(newdata)
+        fit_draws = prediction_draws(self.y_pred, newdata)
+        counterfactual_draws = prediction_draws(self.y_counterfactual, newdata)
+        effect_draws = dataarray_draws(self.effect).join(time_lookup, on="obs_ind")
+        cumulative_draws = dataarray_draws(self.cumulative_effect).join(
+            time_lookup, on="obs_ind"
         )
+
+        all_draws = pl.concat(
+            [
+                label_draws(fit_draws, series="Fitted", panel=top),
+                label_draws(
+                    counterfactual_draws,
+                    series="Counterfactual",
+                    panel=top,
+                ),
+                label_draws(effect_draws, series="effect", panel=mid),
+                label_draws(cumulative_draws, series="cumulative", panel=bot),
+            ],
+            how="diagonal_relaxed",
+        )
+        group_by = ["panel", "series", "t"]
+        bands = summarize_draws(
+            all_draws,
+            group_by=group_by,
+            ci_prob=ci_prob,
+            interval=interval,
+        )
+        effect_band = bands.query("panel == @mid and series == 'effect'")
 
         spaghetti_df = None
         if kind == "spaghetti":
-            spaghetti_df = pd.concat(
-                [
-                    _pred_spaghetti(self.y_pred, "Fitted", top),
-                    _pred_spaghetti(self.y_counterfactual, "Counterfactual", top),
-                    _da_spaghetti(self.effect, "effect", mid),
-                    _da_spaghetti(self.cumulative_effect, "cumulative", bot),
-                ]
+            spaghetti_df = spaghetti_draws(
+                all_draws,
+                group_by=group_by,
+                num_samples=num_samples,
             )
 
         histogram_tiles = None
         if kind == "histogram":
-            y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-            if "treated_units" in y_pred_mu.dims:
-                y_pred_mu = y_pred_mu.isel(treated_units=0)
-            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-            if "treated_units" in y_cf_mu.dims:
-                y_cf_mu = y_cf_mu.isel(treated_units=0)
-            effect_mu = self.effect
-            if hasattr(effect_mu, "dims") and "treated_units" in effect_mu.dims:
-                effect_mu = effect_mu.isel(treated_units=0)
-            cum_mu = self.cumulative_effect
-            if hasattr(cum_mu, "dims") and "treated_units" in cum_mu.dims:
-                cum_mu = cum_mu.isel(treated_units=0)
-            hist_top_edges = histogram_y_edges(y_pred_mu, y_cf_mu)
+            hist_top_edges = histogram_y_edges(
+                fit_draws,
+                counterfactual_draws,
+            )
             histogram_tiles = concat_histogram_tiles(
                 [
+                    HistogramLayer(fit_draws, "t", panel=top, y_edges=hist_top_edges),
                     HistogramLayer(
-                        time_values, y_pred_mu, panel=top, y_edges=hist_top_edges
+                        counterfactual_draws,
+                        "t",
+                        panel=top,
+                        y_edges=hist_top_edges,
                     ),
-                    HistogramLayer(
-                        time_values, y_cf_mu, panel=top, y_edges=hist_top_edges
-                    ),
-                    HistogramLayer(time_values, effect_mu, panel=mid),
-                    HistogramLayer(time_values, cum_mu, panel=bot),
+                    HistogramLayer(effect_draws, "t", panel=mid),
+                    HistogramLayer(cumulative_draws, "t", panel=bot),
                 ],
                 x_col="t",
             )

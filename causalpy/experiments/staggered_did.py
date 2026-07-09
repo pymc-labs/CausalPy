@@ -30,6 +30,7 @@ from patsy import dmatrices
 from plotnine import (
     aes,
     element_blank,
+    element_text,
     facet_wrap,
     geom_hline,
     geom_line,
@@ -898,7 +899,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
         **kwargs: Any,
-    ) -> PlotSpec:
+    ) -> ggplot | PlotSpec:
         """Plot results for Bayesian model.
 
         Parameters
@@ -931,10 +932,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        :class:`~causalpy.plot_utils.PlotSpec`
-            Declarative plot spec for the event-study or group-time view.
-            The event-study view is built with plotnine; ``plot_group_time``
-            uses the same overlay path.
+        plotnine.ggplot or :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative event-study plot, or a group-time spec when
+            matplotlib axis post-processing remains necessary.
         """
         if hdi_prob is not None and hdi_prob != self.hdi_prob_:
             raise ValueError(
@@ -997,44 +997,22 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             + scale_color_manual(values=colors, name="")
             + scale_shape_manual(values=shapes, name="")
             + scale_x_continuous(breaks=list(att_et["event_time"].values))
-            + guides(color="none", shape="none")
-            + labs(x="", y="")
-            + theme(figure_size=figsize or (10, 6))
+            + labs(
+                x="",
+                y="",
+            )
+            + theme(
+                figure_size=figsize or (10, 6),
+                legend_text=element_text(size=LEGEND_FONT_SIZE),
+            )
         )
 
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            ax = axes[0]
-            ax.set_xlabel("Event Time (periods relative to treatment)")
-            ax.set_ylabel("Effect Estimate")
-            ax.set_title("Staggered DiD Event Study")
-            handles = []
-            labels = []
-            if (att_et["event_time"] < 0).any():
-                handles.append(
-                    Line2D(
-                        [0],
-                        [0],
-                        color="gray",
-                        marker="s",
-                        linestyle="",
-                        markersize=9,
-                        alpha=0.7,
-                    )
-                )
-                labels.append(placebo_label)
-            if (att_et["event_time"] >= 0).any():
-                handles.append(
-                    Line2D(
-                        [0],
-                        [0],
-                        color="#1f77b4",
-                        marker="o",
-                        linestyle="",
-                        markersize=10,
-                    )
-                )
-                labels.append(att_label)
-            ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
+            axes[0].set(
+                xlabel="Event Time (periods relative to treatment)",
+                ylabel="Effect Estimate",
+                title="Staggered DiD Event Study",
+            )
 
         return PlotSpec(p, overlay=overlay, n_panels=1)
 

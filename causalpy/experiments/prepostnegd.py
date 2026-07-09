@@ -48,7 +48,10 @@ from causalpy.plot_utils import (
     concat_histogram_tiles,
     histogram_y_edges,
     interval_kind,
-    prediction_bundle,
+    label_draws,
+    prediction_draws,
+    spaghetti_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -377,60 +380,39 @@ class PrePostNEGD(BaseExperiment):
             newdata["obs_ind"] = range(len(newdata))
             return newdata
 
-        def _band(pred, series):
-            summ, _ = prediction_bundle(
-                pred,
-                _pred_newdata(),
-                group_by="pre",
-                ci_prob=ci_prob,
-                interval=interval,
-                kind="ribbon",
-            )
-            return summ.rename(columns={"pre": "_x", "mu": "_y"}).assign(
-                series=series, panel=top
-            )
+        newdata = _pred_newdata()
+        untreated_draws = prediction_draws(self.pred_untreated, newdata)
+        treated_draws = prediction_draws(self.pred_treated, newdata)
 
-        def _band_spaghetti(pred, series):
-            _, sampled = prediction_bundle(
-                pred,
-                _pred_newdata(),
-                group_by="pre",
-                ci_prob=ci_prob,
-                interval=interval,
-                kind="spaghetti",
-                num_samples=num_samples,
-            )
-            sampled = sampled.rename(columns={"pre": "_x", "mu": "_y"})
-            sampled["_line_id"] = f"{series}_" + sampled["_draw_id"].astype(str)
-            return sampled.assign(series=series, panel=top)
-
-        bands = pd.concat(
+        all_draws = pl.concat(
             [
-                _band(self.pred_untreated, "Control group"),
-                _band(self.pred_treated, "Treatment group"),
-            ]
+                label_draws(untreated_draws, series="Control group"),
+                label_draws(treated_draws, series="Treatment group"),
+            ],
+            how="diagonal_relaxed",
         )
+        bands = summarize_draws(
+            all_draws,
+            group_by=["series", "pre"],
+            ci_prob=ci_prob,
+            interval=interval,
+        ).rename(columns={"pre": "_x", "mu": "_y"})
+        bands["panel"] = top
 
         spaghetti_df = None
         if kind == "spaghetti":
-            spaghetti_df = pd.concat(
-                [
-                    _band_spaghetti(self.pred_untreated, "Control group"),
-                    _band_spaghetti(self.pred_treated, "Treatment group"),
-                ]
-            )
+            spaghetti_df = spaghetti_draws(
+                all_draws,
+                group_by=["series", "pre"],
+                num_samples=num_samples,
+            ).rename(columns={"pre": "_x", "mu": "_y"})
+            spaghetti_df["panel"] = top
 
-        hist_edges = None
-        untreated_mu = None
-        treated_mu = None
-        if kind == "histogram":
-            untreated_mu = self.pred_untreated["posterior_predictive"].mu.isel(
-                treated_units=0
-            )
-            treated_mu = self.pred_treated["posterior_predictive"].mu.isel(
-                treated_units=0
-            )
-            hist_edges = histogram_y_edges(untreated_mu, treated_mu)
+        hist_edges = (
+            histogram_y_edges(untreated_draws, treated_draws)
+            if kind == "histogram"
+            else None
+        )
 
         # Bottom facet: treatment effect posterior samples + interval summary.
         effect = np.asarray(self.causal_impact).ravel()
@@ -473,11 +455,9 @@ class PrePostNEGD(BaseExperiment):
             histogram_tiles = concat_histogram_tiles(
                 [
                     HistogramLayer(
-                        self.pred_xi, untreated_mu, panel=top, y_edges=hist_edges
+                        untreated_draws, "pre", panel=top, y_edges=hist_edges
                     ),
-                    HistogramLayer(
-                        self.pred_xi, treated_mu, panel=top, y_edges=hist_edges
-                    ),
+                    HistogramLayer(treated_draws, "pre", panel=top, y_edges=hist_edges),
                 ],
                 x_col="_x",
                 y_col="_y",
