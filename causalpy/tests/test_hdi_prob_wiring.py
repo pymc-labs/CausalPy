@@ -356,7 +356,11 @@ _RD_TARGETS: list[_SpyTarget] = [
     ),
 ]
 _RKINK_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),
+    (
+        "causalpy.experiments.regression_kink.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _PREPOST_TARGETS: list[_SpyTarget] = [
     (
@@ -428,7 +432,7 @@ def test_rd_plot_default_ci_prob(mock_pymc_sample, fitted_rd):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rkink_plot_threads_ci_prob(mock_pymc_sample, fitted_rkink, ci_prob):
-    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """Regression Kink ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_rkink, _RKINK_TARGETS, ci_prob)
 
 

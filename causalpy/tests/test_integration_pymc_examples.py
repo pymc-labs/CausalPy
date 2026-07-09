@@ -275,9 +275,7 @@ def test_rkink(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
     with pytest.raises(NotImplementedError):
         result.get_plot_data()
 
@@ -307,9 +305,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    assert isinstance(result.plot(), ggplot)
 
 
 @pytest.mark.integration
