@@ -674,8 +674,8 @@ def test_plot_unit_effects_ols(small_panel_data):
 
     fig, ax = result.plot_unit_effects()
     assert isinstance(fig, plt.Figure)
-    # Histogram should have at least one patch
-    assert len(ax.patches) > 0
+    assert "Unit Fixed Effects" in ax.get_title()
+    assert len(ax.patches) + len(ax.collections) > 0
     plt.close(fig)
 
 

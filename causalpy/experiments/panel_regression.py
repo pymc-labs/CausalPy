@@ -26,6 +26,7 @@ from plotnine import (
     coord_flip,
     geom_col,
     geom_errorbarh,
+    geom_histogram,
     geom_point,
     geom_vline,
     ggplot,
@@ -783,43 +784,37 @@ class PanelRegression(BaseExperiment):
         if not unit_fe_names:
             raise ValueError("No unit fixed effects found in model coefficients")
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
         if self._model_backend.is_bayesian:
-            # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-
-            # Get mean and std for each unit FE
-            fe_means = []
-            for idx in unit_fe_indices:
-                fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
-                    .mean(dim=["chain", "draw"])
-                    .squeeze("treated_units", drop=True)
-                    .item()
-                )
-
-            ax.hist(
-                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
-            )
-            ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
-
+            fe_means = [
+                beta.sel(coeffs=self.labels[idx])
+                .mean(dim=["chain", "draw"])
+                .squeeze("treated_units", drop=True)
+                .item()
+                for idx in unit_fe_indices
+            ]
+            x_label = "Unit Fixed Effect (Posterior Mean)"
+            values = fe_means
         else:
-            # OLS: get point estimates
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
             coefs = self.model.get_coeffs()
-            fe_values = [coefs[idx] for idx in unit_fe_indices]
+            values = [coefs[idx] for idx in unit_fe_indices]
+            x_label = "Unit Fixed Effect"
 
-            ax.hist(
-                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
-            )
-            ax.set_xlabel("Unit Fixed Effect")
-
-        ax.set_ylabel("Count")
-        ax.set_title(f"Distribution of Unit Fixed Effects (N={self.n_units})")
-        plt.tight_layout()
-
+        n_bins = min(30, max(1, len(values) // 2))
+        tidy = pd.DataFrame({"value": values})
+        title = f"Distribution of Unit Fixed Effects (N={self.n_units})"
+        p = (
+            ggplot(tidy, aes(x="value"))
+            + geom_histogram(bins=n_bins, fill="#1f77b4", color="black", alpha=0.7)
+            + labs(x=x_label, y="Count", title="")
+            + theme(figure_size=(10, 6))
+        )
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
+        ax.set_title(title)
         return fig, ax
 
     def plot_trajectories(
