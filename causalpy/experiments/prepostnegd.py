@@ -19,10 +19,26 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import polars as pl
 import seaborn as sns
+import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
+from plotnine import (
+    aes,
+    facet_wrap,
+    geom_density,
+    geom_line,
+    geom_point,
+    geom_ribbon,
+    geom_vline,
+    ggplot,
+    labs,
+    scale_color_manual,
+    scale_fill_manual,
+    theme,
+)
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
@@ -249,7 +265,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> ggplot | tuple[plt.Figure, list[plt.Axes]]:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -293,11 +309,12 @@ class PrePostNEGD(BaseExperiment):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
-            The two axes (top: scatter and posterior predictive bands,
-            bottom: estimated treatment effect posterior).
+        plotnine.ggplot or tuple[matplotlib.figure.Figure, list[matplotlib.axes.Axes]]
+            For ``kind="ribbon"`` (default), a two-facet :class:`plotnine.ggplot`
+            (top: scatter + posterior predictive bands; bottom: estimated
+            treatment effect posterior). Call ``.draw()`` for the matplotlib
+            figure. For ``kind="spaghetti"`` or ``"histogram"`` a ``(fig, ax)``
+            tuple is returned (legacy matplotlib path).
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -327,8 +344,150 @@ class PrePostNEGD(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
+    ) -> ggplot | tuple[plt.Figure, list[plt.Axes]]:
+        """Generate a plotnine plot for pretest/posttest nonequivalent group designs.
+
+        Returns a two-facet :class:`plotnine.ggplot` for ``kind="ribbon"``: the
+        top facet shows the pre/post scatter plus control and treatment
+        posterior predictive bands; the bottom facet shows the estimated
+        treatment effect posterior as a density with a reference line at zero
+        and the credible interval bounds (replacing ``az.plot_posterior``).
+
+        ponytail: ``spaghetti`` and ``histogram`` route to the legacy matplotlib
+        method (multi-panel spaghetti/heatmap have no clean plotnine form);
+        upgrade path tracked in #988. Both return a ``(fig, ax)`` tuple.
+        """
+        if kind != "ribbon":
+            return self._bayesian_plot_mpl(
+                round_to=round_to,
+                ci_prob=ci_prob,
+                kind=kind,
+                ci_kind=ci_kind,
+                num_samples=num_samples,
+                figsize=figsize,
+            )
+
+        top = "Pretest vs posttest"
+        bottom = "Estimated treatment effect"
+        interval = "eti" if ci_kind == "eti" else "hdi"
+
+        # Top facet: observed data as (_x=pre, _y=post).
+        scatter = self.data[["pre", "post", "group"]].rename(
+            columns={"pre": "_x", "post": "_y"}
+        )
+        scatter["group"] = scatter["group"].astype(str)
+        scatter["panel"] = top
+
+        # Top facet: posterior predictive bands for each group. tidydraws keeps
+        # the pretest grid as a column, dropping the isel(treated_units=0) guard.
+        def _band(pred, series):
+            newdata = pd.DataFrame({"pre": np.asarray(self.pred_xi)})
+            newdata["obs_ind"] = range(len(newdata))
+            draws = td.prediction_draws(
+                pred, newdata=newdata, var_name="mu", idata_group="posterior_predictive"
+            )
+            summ = (
+                td.point_interval(
+                    draws,
+                    "mu",
+                    group_by="pre",
+                    probs=(ci_prob,),
+                    point="mean",
+                    interval=interval,
+                )
+                .sort("pre")
+                .to_pandas()
+                .rename(columns={"pre": "_x", "mu": "_y"})
+            )
+            summ["series"] = series
+            summ["panel"] = top
+            return summ
+
+        bands = pd.concat(
+            [
+                _band(self.pred_untreated, "Control group"),
+                _band(self.pred_treated, "Treatment group"),
+            ]
+        )
+
+        # Bottom facet: treatment effect posterior samples + interval summary.
+        effect = np.asarray(self.causal_impact).ravel()
+        eff_summary = td.point_interval(
+            pl.DataFrame({"effect": effect, "_g": 0}),
+            "effect",
+            group_by="_g",
+            probs=(ci_prob,),
+            point="mean",
+            interval=interval,
+        )
+        effect_df = pd.DataFrame({"_x": effect, "panel": bottom})
+        refs = pd.DataFrame(
+            {
+                "_x": [
+                    0.0,
+                    float(eff_summary["effect_lower"][0]),
+                    float(eff_summary["effect_upper"][0]),
+                ],
+                "panel": bottom,
+                "ref": ["zero", "hdi", "hdi"],
+            }
+        )
+        mean_label = (
+            f"mean = {round_num(eff_summary['effect'][0], round_to)}\n"
+            f"{ci_prob * 100:.0f}% CI [{round_num(eff_summary['effect_lower'][0], round_to)}, "
+            f"{round_num(eff_summary['effect_upper'][0], round_to)}]"
+        )
+
+        # Order facets so the scatter is on top (plotnine follows factor levels).
+        panels = [top, bottom]
+        for frame in (scatter, bands, effect_df, refs):
+            frame["panel"] = pd.Categorical(
+                frame["panel"], categories=panels, ordered=True
+            )
+
+        colors = {
+            "0": "#1f77b4",
+            "1": "#ff7f0e",
+            "Control group": "#1f77b4",
+            "Treatment group": "#ff7f0e",
+        }
+        return (
+            ggplot()
+            + geom_point(scatter, aes("_x", "_y", color="group"), alpha=0.5)
+            + geom_ribbon(
+                bands,
+                aes("_x", ymin="mu_lower", ymax="mu_upper", fill="series"),
+                alpha=0.3,
+            )
+            + geom_line(bands, aes("_x", "_y", color="series"))
+            + geom_density(effect_df, aes("_x"))
+            + geom_vline(
+                refs[refs["ref"] == "zero"], aes(xintercept="_x"), color="grey"
+            )
+            + geom_vline(
+                refs[refs["ref"] == "hdi"],
+                aes(xintercept="_x"),
+                color="black",
+                linetype="dashed",
+            )
+            + facet_wrap("panel", ncol=1, scales="free")
+            + scale_color_manual(values=colors, name="")
+            + scale_fill_manual(values=colors, name="")
+            + labs(x="", y="", title=mean_label)
+            + theme(panel_spacing=0.25)
+        )
+
+    def _bayesian_plot_mpl(
+        self,
+        round_to: int | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] = (7, 9),
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Generate plot for ANOVA-like experiments with non-equivalent group designs.
+        """Legacy matplotlib plot, retained for the ``spaghetti`` and ``histogram`` kinds.
 
         Parameters
         ----------

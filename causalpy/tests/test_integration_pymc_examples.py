@@ -795,12 +795,7 @@ def test_ancova(mock_pymc_sample, anova1_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    # For multi-panel plots, ax should be an array of axes
-    assert isinstance(ax, np.ndarray) and all(
-        isinstance(item, plt.Axes) for item in ax
-    ), "ax must be a numpy.ndarray of plt.Axes"
+    assert isinstance(result.plot(), ggplot)
 
 
 @pytest.mark.integration

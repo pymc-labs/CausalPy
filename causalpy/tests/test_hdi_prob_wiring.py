@@ -355,8 +355,11 @@ _RKINK_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),
 ]
 _PREPOST_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.prepostnegd.plot_posterior_over_x", "ci_prob"),
-    ("causalpy.experiments.prepostnegd.az.plot_posterior", "hdi_prob"),
+    (
+        "causalpy.experiments.prepostnegd.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.piecewise_its.plot_posterior_over_x", "ci_prob"),
