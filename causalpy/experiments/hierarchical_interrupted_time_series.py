@@ -13,7 +13,8 @@
 #   limitations under the License.
 """
 Hierarchical interrupted time series for multi-unit panels with unit-specific
-launch times (event-study-style).
+launch times. Supports instant level-shift, event-study/placebo, and
+saturating (Hill-curve) treatment-effect parameterizations.
 """
 
 from __future__ import annotations
@@ -71,7 +72,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     and produces a population-level predictive distribution useful for
     forecasting the effect of a *new* unit.
 
-    Three effect parameterizations are available:
+    Four effect parameterizations are available:
 
     - ``effect_type="instant"`` — a single post-launch lift per unit,
       ``lift[unit] ~ Normal(mu_lift, sigma_lift)``.
@@ -79,6 +80,10 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
       event time (pre-launch is the implicit reference).
     - ``effect_type="placebo"`` — the event-study form extended with pre-launch
       "leads" used as placebos to test the no-anticipation assumption.
+    - ``effect_type="saturation"`` — the post-launch effect follows a Hill
+      (logistic-type) saturation curve in event time, ramping up smoothly and
+      asymptoting at a per-unit ceiling lift ``L``, rather than jumping
+      instantly to its final size. See :class:`~causalpy.pymc_models.HierarchicalLaunchITS`.
 
     Parameters
     ----------
@@ -97,7 +102,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         supported directly; convert to an integer index first.
     treatment_time_col : str
         Numeric column with each unit's launch time (same units as ``time_col``).
-    effect_type : {"instant", "event_study", "placebo"}, default="instant"
+    effect_type : {"instant", "event_study", "placebo", "saturation"}, default="instant"
         The effect parameterization.
     bin_edges : sequence of float, optional
         Post-launch bin edges (in units of ``time_col``). Required for
@@ -130,7 +135,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         unit_col: str,
         time_col: str,
         treatment_time_col: str,
-        effect_type: Literal["instant", "event_study", "placebo"] = "instant",
+        effect_type: Literal[
+            "instant", "event_study", "placebo", "saturation"
+        ] = "instant",
         bin_edges: Sequence[float] | None = None,
         placebo_edges: Sequence[float] | None = None,
         seasonality: dict | None = None,
@@ -181,10 +188,15 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
                     "integer time index first)."
                 )
 
-        if self.effect_type not in ("instant", "event_study", "placebo"):
+        if self.effect_type not in (
+            "instant",
+            "event_study",
+            "placebo",
+            "saturation",
+        ):
             raise ValueError(
-                f"effect_type must be 'instant', 'event_study' or 'placebo', "
-                f"got {self.effect_type!r}"
+                "effect_type must be 'instant', 'event_study', 'placebo' or "
+                f"'saturation', got {self.effect_type!r}"
             )
         if self.effect_type in ("event_study", "placebo") and not self.bin_edges:
             raise ValueError(
@@ -273,6 +285,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         # Event time
         tau = (df[self.time_col] - df[self.treatment_time_col]).to_numpy()
         self._tau = tau
+        self._tau_since = np.clip(tau, 0, None)
 
         # Standardised time index for hierarchical time trends
         t_raw = df[self.time_col].to_numpy(dtype=float)
@@ -287,7 +300,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             period = float(self.seasonality["period"])
             K = int(self.seasonality["K"])
             F = _fourier_terms(df[self.time_col].to_numpy(), period=period, K=K)
-            fourier_labels = [f"f{i}" for i in range(F.shape[1])]
+            fourier_labels = [
+                f"f_{trig}_{k}" for k in range(1, K + 1) for trig in ("sin", "cos")
+            ]
         else:
             F = None
             fourier_labels = None
@@ -308,6 +323,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             event_bin_labels = [
                 f"[{edges[k]:g},{edges[k + 1]:g})" for k in range(K_bins)
             ]
+        elif self.effect_type == "saturation":
+            post = (tau >= 0).astype(float)
         else:  # placebo
             pre = [float(e) for e in self.placebo_edges]  # type: ignore[union-attr]
             post_edges = [float(e) for e in self.bin_edges]  # type: ignore[union-attr]
@@ -381,11 +398,13 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             aux["n_time_steps"] = self._n_time_steps
         if self._F is not None:
             aux["F"] = self._F
-        if self.effect_type == "instant":
+        if self.effect_type in ("instant", "saturation"):
             post = self._post
             if not effect_on and post is not None:
                 post = np.zeros_like(post)
             aux["post"] = post
+            if self.effect_type == "saturation":
+                aux["tau_since"] = self._tau_since
         else:
             D = self._D
             if not effect_on and D is not None:
@@ -406,13 +425,33 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         model.fit(
             X=self.X, y=self.y, coords=self._coords, aux=self._aux(effect_on=True)
         )
-        self.score = model.score(X=self.X, y=self.y)
-        # Posterior predictive for observed design and counterfactual
+        # Posterior predictive for observed design and counterfactual. `score`
+        # is derived from `observed_pred` (rather than calling `model.score()`,
+        # which would internally re-run `predict()`) to avoid sampling the
+        # posterior predictive distribution a third time.
         self.observed_pred = model.predict(X=self.X, aux=self._aux(effect_on=True))
+        self.score = self._score_from_prediction(self.observed_pred, self.y)
         self.counterfactual_pred = model.predict(
             X=self.X, aux=self._aux(effect_on=False)
         )
         self.impact = model.calculate_impact(self.y, self.counterfactual_pred)
+
+    @staticmethod
+    def _score_from_prediction(pp: az.InferenceData, y: xr.DataArray) -> pd.Series:
+        """Compute the Bayesian R2 score from an already-sampled posterior predictive.
+
+        Mirrors :meth:`PyMCModel.score`, but reuses a prediction that has
+        already been drawn instead of calling ``predict()`` again.
+        """
+        mu_data = az.extract(pp, group="posterior_predictive", var_names="mu")
+        scores = {}
+        for i, unit in enumerate(mu_data.coords["treated_units"].values):
+            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_y = y.sel(treated_units=unit).data
+            unit_score = az.r2_score(unit_y, unit_mu.data)
+            scores[f"unit_{i}_r2"] = unit_score["r2"]
+            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+        return pd.Series(scores)
 
     # ---------------------------------------------------------------- output
 
@@ -427,6 +466,16 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             mu = float(post["mu_lift"].mean())
             sd = float(post["sigma_lift"].mean())
             print(f"E[mu_lift] = {mu:.3g}   E[sigma_lift] = {sd:.3g}")
+        elif self.effect_type == "saturation":
+            post = self.model.idata.posterior  # type: ignore[union-attr]
+            L = float(np.exp(post["mu_logL"]).mean())
+            k = float(np.exp(post["mu_logk"]).mean())
+            s = float(post["s"].mean())
+            print(
+                f"E[L] (ceiling lift) = {L:.3g}   "
+                f"E[k] (half-saturation time) = {k:.3g}   "
+                f"E[s] (Hill exponent) = {s:.3g}"
+            )
         else:
             post = self.model.idata.posterior  # type: ignore[union-attr]
             mu_delta = post["mu_delta"].mean(("chain", "draw")).values
@@ -461,7 +510,10 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         For ``effect_type='instant'`` returns samples from
         ``Normal(mu_lift, sigma_lift)``; for event-study / placebo variants
         returns an array shaped ``(draws, n_bins)`` from
-        ``Normal(mu_delta, sigma_delta)``.
+        ``Normal(mu_delta, sigma_delta)``; for ``effect_type='saturation'``
+        returns an array shaped ``(draws, 3)`` with columns ``[L, k, s]``
+        (ceiling lift, half-saturation time, Hill exponent) for a
+        hypothetical new unit.
         """
         if self.model.idata is None:
             raise RuntimeError("Model is not fitted")
@@ -473,6 +525,17 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             n = size or mu.size
             idx = rng.integers(0, mu.size, size=n)
             return rng.normal(mu[idx], sd[idx])
+        if self.effect_type == "saturation":
+            mu_logL = post["mu_logL"].values.flatten()
+            sigma_logL = post["sigma_logL"].values.flatten()
+            mu_logk = post["mu_logk"].values.flatten()
+            sigma_logk = post["sigma_logk"].values.flatten()
+            s_samples = post["s"].values.flatten()
+            n = size or mu_logL.size
+            idx = rng.integers(0, mu_logL.size, size=n)
+            L = np.exp(rng.normal(mu_logL[idx], sigma_logL[idx]))
+            k = np.exp(rng.normal(mu_logk[idx], sigma_logk[idx]))
+            return np.column_stack([L, k, s_samples[idx]])
         mu = (
             post["mu_delta"]
             .stack(sample=("chain", "draw"))
@@ -495,6 +558,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         """Dispatch to the appropriate plot method based on effect type."""
         if self.effect_type == "instant":
             return self._plot_instant()
+        if self.effect_type == "saturation":
+            return self._plot_saturation()
         return self._plot_event_study()
 
     def _plot_instant(self):
@@ -521,6 +586,40 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         az.plot_posterior(self.model.idata, var_names=["mu_lift"], ax=axes[1])
         axes[1].set_title(r"Population mean $\mu_{lift}$")
         return fig, axes
+
+    def _plot_saturation(self):
+        """Plot the population-level Hill saturation curve with an HDI band."""
+        post = self.model.idata.posterior  # type: ignore[union-attr]
+        max_tau = float(np.nanmax(self._tau_since)) if len(self._tau_since) else 1.0
+        grid = xr.DataArray(np.linspace(0, max(max_tau, 1.0), 100), dims="tau_since")
+
+        L = np.exp(post["mu_logL"])
+        k = np.exp(post["mu_logk"])
+        s = post["s"]
+        hill_curve = grid**s / (k**s + grid**s + 1e-6)
+        effect_draws = L * hill_curve
+        mean = effect_draws.mean(("chain", "draw")).values
+        lo = effect_draws.quantile((1 - HDI_PROB) / 2, ("chain", "draw")).values
+        hi = effect_draws.quantile(1 - (1 - HDI_PROB) / 2, ("chain", "draw")).values
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(grid.values, mean, color="C0")
+        ax.fill_between(
+            grid.values,
+            lo,
+            hi,
+            color="C0",
+            alpha=0.2,
+            label=f"{int(HDI_PROB * 100)}% HDI",
+        )
+        ax.axvline(0, color="red", ls="--", label="launch")
+        ax.axhline(0, color="grey", lw=0.8, ls="--")
+        ax.set_xlabel("weeks since launch (time_col units)")
+        ax.set_ylabel("population effect (ceiling-scaled Hill curve)")
+        ax.set_title("Dynamic launch effect (saturation)")
+        ax.legend()
+        fig.tight_layout()
+        return fig, ax
 
     def _plot_event_study(self):
         """Event-study plot of population bin effects with HDI error bars."""
@@ -645,13 +744,24 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     # ------------------------------------------------------------ reporting
 
     def print_coefficients(self, round_to: int | None = None) -> None:
-        """Print population-level coefficient summaries for the hierarchical model."""
+        """Print population-level coefficient summaries for the hierarchical model.
+
+        ``mu_beta``/``sigma_beta`` are fit on the internally standardized
+        (z-scored) covariate design, so an additional "original scale" block
+        is printed by dividing back through the per-column standard
+        deviation recorded during :meth:`_prepare_data`.
+        """
         post = self.model.idata.posterior  # type: ignore[union-attr]
         print("Model coefficients (population level):")
         for name in ("mu_beta", "sigma_beta"):
             if name in post:
                 vals = post[name].mean(("chain", "draw")).values
                 print(f"  {name}: {vals}")
+        if "mu_beta" in post and len(self._x_std):
+            orig = post["mu_beta"].mean(("chain", "draw")).values / self._x_std
+            print("  mu_beta (original scale, i.e. per unit of raw covariate):")
+            for label, val in zip(self.labels, orig, strict=False):
+                print(f"    {label}: {val:.4g}")
         if "mu_lift" in post:
             print(f"  mu_lift: {float(post['mu_lift'].mean()):.4g}")
         if "sigma_lift" in post:
@@ -660,6 +770,12 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             for i, label in enumerate(self._event_bin_labels or []):
                 val = float(post["mu_delta"].isel(event_bin=i).mean())
                 print(f"  mu_delta[{label}]: {val:.4g}")
+        if "mu_logL" in post:
+            print(f"  L (ceiling lift): {float(np.exp(post['mu_logL']).mean()):.4g}")
+            print(
+                f"  k (half-saturation time): {float(np.exp(post['mu_logk']).mean()):.4g}"
+            )
+            print(f"  s (Hill exponent): {float(post['s'].mean()):.4g}")
 
     def effect_summary(
         self,
@@ -677,8 +793,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     ) -> EffectSummary:
         """Return a compact summary of the population-level effect.
 
-        Reports posterior mean and HDI for ``mu_lift`` (instant) or each
-        ``mu_delta`` bin (event-study / placebo).
+        Reports posterior mean and HDI for ``mu_lift`` (instant), each
+        ``mu_delta`` bin (event-study / placebo), or ``L``/``k``/``s``
+        (saturation).
         """
         _unsupported = {
             "window": (window, "post"),
@@ -726,6 +843,10 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         if self.effect_type == "instant":
             rows.append(_row("mu_lift", post["mu_lift"]))
             rows.append(_row("sigma_lift", post["sigma_lift"]))
+        elif self.effect_type == "saturation":
+            rows.append(_row("L (ceiling lift)", np.exp(post["mu_logL"])))
+            rows.append(_row("k (half-saturation time)", np.exp(post["mu_logk"])))
+            rows.append(_row("s (Hill exponent)", post["s"]))
         else:
             for i, label in enumerate(self._event_bin_labels or []):
                 rows.append(

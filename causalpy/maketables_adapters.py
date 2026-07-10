@@ -169,12 +169,16 @@ def _resolve_pymc_coef_draws(experiment: Any) -> xr.DataArray:
     posterior = experiment.model.idata.posterior
     labels = list(getattr(experiment, "labels", []))
 
-    coef_var_candidates = ("beta", "b", "beta_z")
+    # "mu_beta" is checked first: hierarchical models (e.g. HierarchicalLaunchITS)
+    # expose per-unit "beta" with an extra "unit" dim that this resolver can't
+    # collapse unambiguously, but "mu_beta" is the population-level analogue
+    # with the same ["coeffs"]-only shape as a non-hierarchical "beta".
+    coef_var_candidates = ("mu_beta", "beta", "b", "beta_z")
     coef_name = next((name for name in coef_var_candidates if name in posterior), None)
     if coef_name is None:
         msg = (
-            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' for "
-            "maketables coefficient export."
+            "PyMC posterior must expose one of 'mu_beta', 'beta', 'b', or "
+            "'beta_z' for maketables coefficient export."
         )
         raise ValueError(msg)
 

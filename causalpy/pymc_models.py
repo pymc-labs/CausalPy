@@ -2103,7 +2103,7 @@ class HierarchicalLaunchITS(PyMCModel):
     from well-observed ones and yields a posterior distribution over the
     population lift that can be used to forecast the effect of a *new* unit.
 
-    Three effect parameterizations are supported via the experiment layer:
+    Four effect parameterizations are supported via the experiment layer:
 
     - ``"instant"``: a single post-launch level shift per unit,
       ``lift[unit] ~ Normal(mu_lift, sigma_lift)``.
@@ -2113,6 +2113,15 @@ class HierarchicalLaunchITS(PyMCModel):
     - ``"placebo"``: the event-study form extended with pre-launch leads; the
       most negative leads serve as placebos that should be indistinguishable
       from zero if the no-anticipation assumption holds.
+    - ``"saturation"``: the post-launch effect follows a Hill (logistic-type)
+      saturation curve in event time rather than an instant level shift,
+      ``effect(t) = post_t * L[unit] * tau^s / (k[unit]^s + tau^s)`` where
+      ``tau = max(t - launch, 0)``. ``L`` (ceiling lift) and ``k``
+      (half-saturation time) are hierarchical per-unit (log scale,
+      non-centered); the Hill exponent ``s`` is a single shared
+      population-level shape parameter. This describes an effect that ramps
+      up smoothly after launch and asymptotes, rather than jumping instantly
+      to its final size.
 
     All hierarchical parameters use a non-centered parametrization.
 
@@ -2128,8 +2137,9 @@ class HierarchicalLaunchITS(PyMCModel):
       coord instead.
     - ``aux`` (passed to :meth:`fit`/:meth:`predict`) : dict with keys
       ``effect_type``, ``unit_idx`` (int array of length ``n_obs``) and, as
-      appropriate, ``F`` (Fourier basis), ``post`` (0/1 indicator) and ``D``
-      (one-hot event-bin design).
+      appropriate, ``F`` (Fourier basis), ``post`` (0/1 indicator), ``D``
+      (one-hot event-bin design) and ``tau_since`` (event time clipped at 0,
+      for ``"saturation"``).
 
     See :class:`causalpy.experiments.hierarchical_interrupted_time_series.HierarchicalInterruptedTimeSeries`
     for the user-facing experiment wrapper that assembles ``aux`` from a long
@@ -2169,6 +2179,17 @@ class HierarchicalLaunchITS(PyMCModel):
             "mu_rho": Prior("Normal", mu=0.0, sigma=0.5),
             "sigma_rho": Prior("HalfNormal", sigma=0.25),
             "sigma_ar": Prior("HalfNormal", sigma=y_std),
+            # Saturation (Hill-curve) effect priors. `mu_logL` is data-adaptive,
+            # centering the ceiling lift `L` near the outcome's scale (same
+            # spirit as `mu_lift`). `mu_logk`/`s` use fixed, generic defaults
+            # on the log/natural scale (like `mu_rho`/`sigma_rho` above) —
+            # override via `priors=` if `time_col` isn't in "a handful of
+            # periods to ramp up" units (e.g. daily rather than weekly data).
+            "mu_logL": Prior("Normal", mu=float(np.log(max(y_std, 1e-3))), sigma=1.5),
+            "sigma_logL": Prior("HalfNormal", sigma=1.0),
+            "mu_logk": Prior("Normal", mu=float(np.log(5.0)), sigma=1.5),
+            "sigma_logk": Prior("HalfNormal", sigma=0.75),
+            "s": Prior("Gamma", mu=2.0, sigma=1.5),
             "sigma": Prior("HalfNormal", sigma=y_std),
         }
 
@@ -2307,10 +2328,49 @@ class HierarchicalLaunchITS(PyMCModel):
                     dims=["unit", "event_bin"],
                 )
                 effect_contrib = pt.sum(D_ * delta[unit_idx_], axis=1)
+            elif effect_type == "saturation":
+                tau_since_np = aux.get("tau_since")
+                if post_np is None or tau_since_np is None:
+                    raise ValueError(
+                        "effect_type='saturation' requires aux['post'] and "
+                        "aux['tau_since']"
+                    )
+                post_ = pm.Data(
+                    "post", np.asarray(post_np, dtype=np.float64), dims="obs_ind"
+                )
+                tau_since_ = pm.Data(
+                    "tau_since",
+                    np.asarray(tau_since_np, dtype=np.float64),
+                    dims="obs_ind",
+                )
+
+                # Ceiling lift L[unit], hierarchical on the log scale (non-centered)
+                mu_logL = self.priors["mu_logL"].create_variable("mu_logL")
+                sigma_logL = self.priors["sigma_logL"].create_variable("sigma_logL")
+                z_logL = pm.Normal("z_logL", 0.0, 1.0, dims="unit")
+                L = pm.Deterministic(
+                    "L", pt.exp(mu_logL + z_logL * sigma_logL), dims="unit"
+                )
+
+                # Half-saturation time k[unit], hierarchical on the log scale
+                mu_logk = self.priors["mu_logk"].create_variable("mu_logk")
+                sigma_logk = self.priors["sigma_logk"].create_variable("sigma_logk")
+                z_logk = pm.Normal("z_logk", 0.0, 1.0, dims="unit")
+                k = pm.Deterministic(
+                    "k", pt.exp(mu_logk + z_logk * sigma_logk), dims="unit"
+                )
+
+                # Hill exponent s: shared population-level shape parameter
+                s = self.priors["s"].create_variable("s")
+
+                tau_safe = pt.maximum(tau_since_, 0.0)
+                k_obs = k[unit_idx_]
+                hill_curve = tau_safe**s / (k_obs**s + tau_safe**s + 1e-6)
+                effect_contrib = post_ * L[unit_idx_] * hill_curve
             else:
                 raise ValueError(
                     f"Unknown effect_type {effect_type!r}; expected "
-                    "'instant', 'event_study' or 'placebo'"
+                    "'instant', 'event_study', 'placebo' or 'saturation'"
                 )
 
             # Optional hierarchical AR(1) residuals via scan
@@ -2407,6 +2467,13 @@ class HierarchicalLaunchITS(PyMCModel):
             if D_val is None:
                 raise ValueError("Model has D data but aux['D'] is missing")
             data_to_set["D"] = np.asarray(D_val, dtype=np.float64)
+        if "tau_since" in named:
+            tau_val = aux.get("tau_since")
+            if tau_val is None:
+                raise ValueError(
+                    "Model has tau_since data but aux['tau_since'] is missing"
+                )
+            data_to_set["tau_since"] = np.asarray(tau_val, dtype=np.float64)
         if "within_unit_tidx" in named:
             tidx_val = aux.get("within_unit_tidx")
             if tidx_val is None:

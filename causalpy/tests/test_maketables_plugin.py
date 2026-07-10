@@ -262,6 +262,56 @@ def test_maketables_regression_kink_pymc_contract(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_maketables_hierarchical_its_pymc_contract(mock_pymc_sample):
+    """HierarchicalInterruptedTimeSeries should expose a maketables coef table.
+
+    Regression test: the generic PyMC resolver used to pick up the per-unit
+    ``beta`` (dims ``["unit", "coeffs"]``), which is ambiguous for a single
+    coefficient table. It should instead resolve to the population-level
+    ``mu_beta`` (dims ``["coeffs"]``).
+    """
+    rng = np.random.default_rng(42)
+    rows = []
+    for i in range(3):
+        launch = rng.integers(10, 20)
+        for t in range(30):
+            emails = rng.normal(100, 10)
+            y = 50 + 0.2 * emails + 8.0 * float(t >= launch) + rng.normal(0, 2)
+            rows.append(
+                {
+                    "product": i,
+                    "week_idx": t,
+                    "launch_week": launch,
+                    "sales": y,
+                    "emails": emails,
+                }
+            )
+    df = pd.DataFrame(rows)
+
+    result = cp.HierarchicalInterruptedTimeSeries(
+        data=df,
+        formula="sales ~ 0 + emails",
+        unit_col="product",
+        time_col="week_idx",
+        treatment_time_col="launch_week",
+        effect_type="instant",
+        model=cp.pymc_models.HierarchicalLaunchITS(sample_kwargs=sample_kwargs),
+    )
+
+    table = result.__maketables_coef_table__
+    assert table.index.name == "Coefficient"
+    assert list(table.index) == list(result.labels)
+    assert {"b", "se", "p", "ci95l", "ci95u"}.issubset(set(table.columns))
+
+    result.set_maketables_options(hdi_prob=0.8)
+    narrower_table = result.__maketables_coef_table__
+    assert (
+        narrower_table["ci95u"] - narrower_table["ci95l"]
+        <= table["ci95u"] - table["ci95l"]
+    ).all()
+
+
+@pytest.mark.integration
 def test_maketables_piecewise_its_pymc_contract(mock_pymc_sample):
     """PiecewiseITS should expose maketables coefficient table for PyMC backend."""
     df, _ = generate_piecewise_its_data(N=120, seed=42)
@@ -521,7 +571,7 @@ def test_maketables_missing_pymc_coef_variable_raises(mock_pymc_sample):
 
     with pytest.raises(
         ValueError,
-        match="must expose one of 'beta', 'b', or 'beta_z'",
+        match="must expose one of 'mu_beta', 'beta', 'b', or 'beta_z'",
     ):
         _ = result.__maketables_coef_table__
 

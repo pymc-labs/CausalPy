@@ -256,6 +256,136 @@ class TestPlacebo:
         assert (aux_cf["D"][:, n_pre:] == 0).all()
 
 
+class TestSaturation:
+    """Tests for the saturation (Hill-curve) effect type."""
+
+    def test_fit_and_attributes(self, panel, mock_pymc_sample):
+        """Fit saturation model and verify key posterior variables exist."""
+        result = _fit(panel, "saturation")
+        assert isinstance(result, cp.HierarchicalInterruptedTimeSeries)
+        assert result.effect_type == "saturation"
+        post = result.model.idata.posterior
+        for name in ("L", "k", "s", "mu_logL", "sigma_logL", "mu_logk", "sigma_logk"):
+            assert name in post
+        assert result.impact.shape[-1] == len(panel)
+
+    def test_plot(self, panel, mock_pymc_sample):
+        """Plot saturation model and verify figure is returned."""
+        result = _fit(panel, "saturation")
+        fig, _ = result.plot(show=False)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_plot_unit(self, panel, mock_pymc_sample):
+        """plot_unit works for the saturation effect type (generic mu-based plot)."""
+        result = _fit(panel, "saturation")
+        fig, (ax1, ax2) = result.plot_unit(unit_id=0)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_predictive_new_unit(self, panel, mock_pymc_sample):
+        """Draw (L, k, s) samples for a hypothetical new unit."""
+        result = _fit(panel, "saturation")
+        draws = result.predictive_for_new_unit(size=50, random_seed=0)
+        assert draws.shape == (50, 3)
+        assert np.isfinite(draws).all()
+        # L and k must be positive (log-scale parameterization)
+        assert (draws[:, 0] > 0).all()
+        assert (draws[:, 1] > 0).all()
+
+    def test_summary(self, panel, mock_pymc_sample, capsys):
+        """Summary prints ceiling lift / half-saturation time / Hill exponent."""
+        result = _fit(panel, "saturation")
+        result.summary()
+        out = capsys.readouterr().out
+        assert "ceiling lift" in out
+        assert "half-saturation time" in out
+        assert "Hill exponent" in out
+
+    def test_print_coefficients(self, panel, mock_pymc_sample, capsys):
+        """print_coefficients prints L/k/s summaries without error."""
+        result = _fit(panel, "saturation")
+        result.print_coefficients()
+        out = capsys.readouterr().out
+        assert "ceiling lift" in out
+        assert "half-saturation time" in out
+
+    def test_effect_summary(self, panel, mock_pymc_sample):
+        """Effect summary table contains L/k/s rows for saturation model."""
+        result = _fit(panel, "saturation")
+        es = result.effect_summary()
+        assert "L (ceiling lift)" in es.table.index
+        assert "k (half-saturation time)" in es.table.index
+        assert "s (Hill exponent)" in es.table.index
+
+    def test_counterfactual_zeroes_effect(self, panel, mock_pymc_sample):
+        """Counterfactual aux zeroes `post`, which zeroes the Hill effect entirely."""
+        result = _fit(panel, "saturation")
+        aux_cf = result._aux(effect_on=False)
+        assert (aux_cf["post"] == 0).all()
+        # tau_since is still passed through (harmless once post is zeroed)
+        np.testing.assert_array_equal(aux_cf["tau_since"], result._tau_since)
+
+
+class TestSaturationRecovery:
+    """Non-mocked recovery test for the saturation effect type."""
+
+    @staticmethod
+    def _hill(x, k, s):
+        x = np.clip(x, 0, None)
+        return x**s / (k**s + x**s)
+
+    def _make_saturation_panel(self, n_units=3, T=60, L=10.0, k=8.0, s=2.5, seed=1):
+        """Synthesize a panel with a known Hill-curve DGP."""
+        rng = np.random.default_rng(seed)
+        rows = []
+        for i in range(n_units):
+            launch = 20
+            for t in range(T):
+                post = float(t >= launch)
+                tau_since = max(t - launch, 0)
+                effect = post * L * self._hill(tau_since, k, s)
+                y = 50 + effect + rng.normal(0, 1.5)
+                rows.append(
+                    {
+                        "product": i,
+                        "week_idx": t,
+                        "launch_week": launch,
+                        "sales": y,
+                    }
+                )
+        return pd.DataFrame(rows), {"L": L, "k": k, "s": s}
+
+    @pytest.mark.slow
+    def test_recovers_saturation_parameters(self):
+        """Fit with real (non-mocked) sampling and check L/k are in a plausible range."""
+        df, truth = self._make_saturation_panel()
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=df,
+            formula="sales ~ 0",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="saturation",
+            model=HierarchicalLaunchITS(
+                sample_kwargs={
+                    "tune": 20,
+                    "draws": 20,
+                    "chains": 2,
+                    "progressbar": False,
+                    "random_seed": 42,
+                }
+            ),
+        )
+        post = result.model.idata.posterior
+        L_hat = float(np.exp(post["mu_logL"]).mean())
+        k_hat = float(np.exp(post["mu_logk"]).mean())
+        # Loose bounds given the tiny draw count - this is a smoke test for
+        # sign/indexing bugs in the Hill-curve code path, not a convergence test.
+        assert 0.25 * truth["L"] < L_hat < 4 * truth["L"]
+        assert 0.1 * truth["k"] < k_hat < 10 * truth["k"]
+
+
 class TestEdgeCases:
     """Tests for edge-case branches."""
 
@@ -311,6 +441,10 @@ class TestEdgeCases:
         """Fit with Fourier seasonality enabled."""
         result = _fit(panel, "instant", seasonality={"period": 20, "K": 2})
         assert "beta_season" in result.model.idata.posterior
+        fourier_coord = result.model.idata.posterior.coords["fourier"].values.tolist()
+        assert fourier_coord == ["f_sin_1", "f_cos_1", "f_sin_2", "f_cos_2"]
+        # Design columns should be non-degenerate (have variance), not just present.
+        assert np.all(result._F.std(axis=0) > 0)
 
     def test_time_trend_in_posterior(self, panel, mock_pymc_sample):
         """Time trend random effects appear in the posterior by default."""
