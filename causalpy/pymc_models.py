@@ -2686,8 +2686,18 @@ class HierarchicalLaunchITS(PyMCModel):
 
     All hierarchical parameters use a non-centered parametrization.
 
-    Expected inputs
-    ---------------
+    Parameters
+    ----------
+    sample_kwargs : dict, optional
+        Kwargs passed to ``pm.sample``.
+    priors : dict, optional
+        Dictionary of priors for the model. Defaults to ``None``, in which
+        case data-adaptive priors from :meth:`priors_from_data` are used.
+
+    Notes
+    -----
+    Expected inputs:
+
     - ``X`` : ``xr.DataArray`` with dims ``["obs_ind", "coeffs"]`` holding the
       standardized covariate design (built by the experiment from a patsy
       formula, *without* an intercept — the hierarchical ``alpha`` plays that
@@ -2723,7 +2733,21 @@ class HierarchicalLaunchITS(PyMCModel):
         )
 
     def priors_from_data(self, X, y) -> dict[str, Any]:
-        """Data-adaptive priors keyed to the scale of ``y``."""
+        """Data-adaptive priors keyed to the scale of ``y``.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Standardized covariate design; unused (priors are keyed only to
+            the scale of ``y``), accepted for interface parity.
+        y : xarray.DataArray
+            Outcome data used to scale the returned priors.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Dictionary of data-adaptive priors keyed by parameter name.
+        """
         y_mean = float(np.asarray(y).mean())
         y_std = float(np.asarray(y).std())
         if not np.isfinite(y_std) or y_std == 0.0:
@@ -2765,10 +2789,14 @@ class HierarchicalLaunchITS(PyMCModel):
 
         Parameters
         ----------
-        X, y, coords :
-            Standard PyMCModel inputs. ``coords`` must include a ``unit`` entry
-            (and an ``event_bin`` entry for the event-study / placebo variants).
-        aux : dict
+        X : xr.DataArray
+            Standardized covariate design; see the class docstring.
+        y : xr.DataArray
+            Outcome data; see the class docstring.
+        coords : dict, optional
+            Standard PyMCModel coords. Must include a ``unit`` entry (and an
+            ``event_bin`` entry for the event-study / placebo variants).
+        aux : dict, optional
             Auxiliary design inputs; see the class docstring.
         """
         if aux is None:
@@ -2781,6 +2809,20 @@ class HierarchicalLaunchITS(PyMCModel):
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
     ) -> None:
+        """
+        Define the hierarchical PyMC model.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Standardized covariate design; see the class docstring.
+        y : xr.DataArray
+            Outcome data; see the class docstring.
+        coords : dict or None
+            Coordinate names for the model's named dimensions. Must include
+            a ``unit`` entry (and an ``event_bin`` entry for the
+            event-study / placebo variants).
+        """
         if self._aux is None:
             raise RuntimeError(
                 "HierarchicalLaunchITS.build_model called without aux. "
@@ -3052,7 +3094,25 @@ class HierarchicalLaunchITS(PyMCModel):
         aux: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> az.InferenceData:
-        """Posterior predictive using the supplied ``aux`` bundle."""
+        """Posterior predictive using the supplied ``aux`` bundle.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Standardized covariate design; see the class docstring.
+        coords : dict, optional
+            Coordinate names for named dimensions. Forwarded to the base
+            implementation.
+        out_of_sample : bool, optional
+            Marker for out-of-sample prediction. Forwarded to the base
+            implementation, which does not act on it.
+        aux : dict, optional
+            Auxiliary design inputs for the unit(s)/effect type being
+            predicted; see the class docstring.
+        **kwargs
+            Reserved for subclass extensions; not consumed by this
+            implementation.
+        """
         self._pred_aux = aux
         try:
             return super().predict(X, coords=coords, out_of_sample=out_of_sample)
