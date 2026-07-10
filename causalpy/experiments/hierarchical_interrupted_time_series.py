@@ -120,6 +120,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         ``rho[unit] ~ tanh(Normal(mu_rho, sigma_rho))``.
     model : HierarchicalLaunchITS, optional
         A custom model instance. If ``None``, a default is constructed.
+    **kwargs
+        Not consumed; any extra keyword arguments raise a ``TypeError``.
     """
 
     supports_ols = False
@@ -456,7 +458,13 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     # ---------------------------------------------------------------- output
 
     def summary(self, round_to: int | None = None) -> None:
-        """Print a short summary of the fitted hierarchical model."""
+        """Print a short summary of the fitted hierarchical model.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Unused; accepted for interface parity with other experiments.
+        """
         print(f"{self.expt_type}")
         print(f"Formula: {self.formula}")
         print(f"Effect type: {self.effect_type}")
@@ -514,6 +522,15 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         returns an array shaped ``(draws, 3)`` with columns ``[L, k, s]``
         (ceiling lift, half-saturation time, Hill exponent) for a
         hypothetical new unit.
+
+        Parameters
+        ----------
+        size : int, optional
+            Number of draws to return. Defaults to the number of available
+            posterior samples.
+        random_seed : int, optional
+            Seed for the random number generator used to draw from the
+            population-level distribution.
         """
         if self.model.idata is None:
             raise RuntimeError("Model is not fitted")
@@ -553,6 +570,39 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         return rng.normal(mu[idx], sd[idx])
 
     # ------------------------------------------------------------------ plot
+
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple:
+        """Plot the fitted hierarchical model's population-level effect.
+
+        Dispatches on ``effect_type``: a forest plot of per-unit lifts plus
+        the population posterior for ``"instant"``, the population Hill
+        saturation curve for ``"saturation"``, or an event-study plot of
+        per-bin population effects for ``"event_study"`` / ``"placebo"``.
+        See :meth:`plot_unit` to plot a single unit's observed vs.
+        counterfactual trajectory instead.
+
+        Parameters
+        ----------
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``).
+
+        Returns
+        -------
+        fig, ax
+            Matplotlib figure and axes (a pair of axes for ``"instant"``,
+            a single axes otherwise).
+        """
+        return self._render_plot(show=show, legend_kwargs=legend_kwargs)
 
     def _bayesian_plot(self, *args: Any, **kwargs: Any):
         """Dispatch to the appropriate plot method based on effect type."""
@@ -750,6 +800,11 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         (z-scored) covariate design, so an additional "original scale" block
         is printed by dividing back through the per-column standard
         deviation recorded during :meth:`_prepare_data`.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Unused; accepted for interface parity with other experiments.
         """
         post = self.model.idata.posterior  # type: ignore[union-attr]
         print("Model coefficients (population level):")
@@ -796,6 +851,43 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         Reports posterior mean and HDI for ``mu_lift`` (instant), each
         ``mu_delta`` bin (event-study / placebo), or ``L``/``k``/``s``
         (saturation).
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default="post"
+            Not supported; passing a non-default value emits a warning and
+            is ignored.
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for the tail-probability column reported per row:
+            ``P(effect > 0)``, ``P(effect < 0)``, or ``P(effect != 0)``.
+        alpha : float, default=0.05
+            Significance level for HDI intervals; the effective HDI
+            probability is ``hdi_prob = 1 - alpha``.
+        cumulative : bool, default=True
+            Not supported; passing a non-default value emits a warning and
+            is ignored.
+        relative : bool, default=True
+            Not supported; passing a non-default value emits a warning and
+            is ignored.
+        min_effect : float, optional
+            Not supported; passing a non-``None`` value emits a warning and
+            is ignored.
+        treated_unit : str, optional
+            Not supported; passing a non-``None`` value emits a warning and
+            is ignored.
+        period : {"intervention", "post", "comparison"}, optional
+            Not supported; passing a non-``None`` value emits a warning and
+            is ignored.
+        prefix : str, optional
+            Prefix for prose generation. Defaults to ``"Post-period"``.
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
+
+        Returns
+        -------
+        EffectSummary
+            Object with .table (DataFrame) and .text (str) attributes.
         """
         _unsupported = {
             "window": (window, "post"),
