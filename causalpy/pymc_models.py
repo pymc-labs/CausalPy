@@ -443,8 +443,25 @@ class PyMCModel(pm.Model):
         **kwargs
             Reserved for subclass extensions.
         """
-        mu = self.predict(X)
-        mu_data = az.extract(mu, group="posterior_predictive", var_names="mu")
+        pp = self.predict(X)
+        return self.score_from_prediction(pp, y)
+
+    def score_from_prediction(self, pp: az.InferenceData, y: xr.DataArray) -> pd.Series:
+        """Compute the Bayesian :math:`R^2` from an already-sampled posterior predictive.
+
+        Reuses a prediction that has already been drawn (e.g. via
+        :meth:`predict`) instead of resampling the posterior predictive
+        distribution, which :meth:`score` would otherwise trigger internally.
+
+        Parameters
+        ----------
+        pp : az.InferenceData
+            Posterior predictive draws containing a ``mu`` variable with a
+            ``treated_units`` dimension, as returned by :meth:`predict`.
+        y : xr.DataArray
+            Observed targets to score against the posterior predictive mean.
+        """
+        mu_data = az.extract(pp, group="posterior_predictive", var_names="mu")
 
         scores = {}
 
@@ -2708,9 +2725,11 @@ class HierarchicalLaunchITS(PyMCModel):
       coord instead.
     - ``aux`` (passed to :meth:`fit`/:meth:`predict`) : dict with keys
       ``effect_type``, ``unit_idx`` (int array of length ``n_obs``) and, as
-      appropriate, ``F`` (Fourier basis), ``post`` (0/1 indicator), ``D``
-      (one-hot event-bin design) and ``tau_since`` (event time clipped at 0,
-      for ``"saturation"``).
+      appropriate, ``F`` (Fourier basis), ``post`` (0/1 indicator, for
+      ``"instant"``), ``D`` (one-hot event-bin design) and ``tau_since``
+      (event time clipped at 0, for ``"saturation"`` — the counterfactual
+      switch zeroes ``tau_since`` directly rather than using a ``post``
+      indicator).
 
     See :class:`causalpy.experiments.hierarchical_interrupted_time_series.HierarchicalInterruptedTimeSeries`
     for the user-facing experiment wrapper that assembles ``aux`` from a long
@@ -2933,14 +2952,10 @@ class HierarchicalLaunchITS(PyMCModel):
                 effect_contrib = pt.sum(D_ * delta[unit_idx_], axis=1)
             elif effect_type == "saturation":
                 tau_since_np = aux.get("tau_since")
-                if post_np is None or tau_since_np is None:
+                if tau_since_np is None:
                     raise ValueError(
-                        "effect_type='saturation' requires aux['post'] and "
-                        "aux['tau_since']"
+                        "effect_type='saturation' requires aux['tau_since']"
                     )
-                post_ = pm.Data(
-                    "post", np.asarray(post_np, dtype=np.float64), dims="obs_ind"
-                )
                 tau_since_ = pm.Data(
                     "tau_since",
                     np.asarray(tau_since_np, dtype=np.float64),
@@ -2966,10 +2981,12 @@ class HierarchicalLaunchITS(PyMCModel):
                 # Hill exponent s: shared population-level shape parameter
                 s = self.priors["s"].create_variable("s")
 
-                tau_safe = pt.maximum(tau_since_, 0.0)
+                # tau_since is already clipped at 0 in `_prepare_data`, so the
+                # Hill curve is exactly 0 pre-launch and the counterfactual
+                # switch is zeroing tau_since (no separate `post` indicator).
                 k_obs = k[unit_idx_]
-                hill_curve = tau_safe**s / (k_obs**s + tau_safe**s + 1e-6)
-                effect_contrib = post_ * L[unit_idx_] * hill_curve
+                hill_curve = tau_since_**s / (k_obs**s + tau_since_**s)
+                effect_contrib = L[unit_idx_] * hill_curve
             else:
                 raise ValueError(
                     f"Unknown effect_type {effect_type!r}; expected "

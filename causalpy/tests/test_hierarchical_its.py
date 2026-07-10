@@ -276,6 +276,29 @@ class TestSaturation:
         assert fig is not None
         plt.close(fig)
 
+    def test_plot_ci_prob_narrower_band(self, panel, mock_pymc_sample):
+        """A smaller ci_prob produces a narrower HDI band and a matching legend label."""
+        result = _fit(panel, "saturation")
+        fig_default, ax_default = result.plot(show=False)
+        band_default = ax_default.collections[0]
+        default_width = np.ptp(band_default.get_paths()[0].vertices[:, 1])
+
+        fig_narrow, ax_narrow = result.plot(show=False, ci_prob=0.5)
+        assert any(
+            "50% HDI" in t.get_text() for t in ax_narrow.get_legend().get_texts()
+        )
+        band_narrow = ax_narrow.collections[0]
+        narrow_width = np.ptp(band_narrow.get_paths()[0].vertices[:, 1])
+        assert narrow_width <= default_width
+        plt.close(fig_default)
+        plt.close(fig_narrow)
+
+    def test_plot_invalid_ci_prob(self, panel, mock_pymc_sample):
+        """plot raises ValueError for ci_prob outside (0, 1]."""
+        result = _fit(panel, "saturation")
+        with pytest.raises(ValueError, match="ci_prob must be in"):
+            result.plot(show=False, ci_prob=1.5)
+
     def test_plot_unit(self, panel, mock_pymc_sample):
         """plot_unit works for the saturation effect type (generic mu-based plot)."""
         result = _fit(panel, "saturation")
@@ -319,12 +342,11 @@ class TestSaturation:
         assert "s (Hill exponent)" in es.table.index
 
     def test_counterfactual_zeroes_effect(self, panel, mock_pymc_sample):
-        """Counterfactual aux zeroes `post`, which zeroes the Hill effect entirely."""
+        """Counterfactual aux zeroes `tau_since`, which zeroes the Hill effect entirely."""
         result = _fit(panel, "saturation")
         aux_cf = result._aux(effect_on=False)
-        assert (aux_cf["post"] == 0).all()
-        # tau_since is still passed through (harmless once post is zeroed)
-        np.testing.assert_array_equal(aux_cf["tau_since"], result._tau_since)
+        assert (aux_cf["tau_since"] == 0).all()
+        assert "post" not in aux_cf
 
 
 class TestSaturationRecovery:
@@ -685,5 +707,50 @@ class TestValidation:
 
     def test_unknown_kwargs_raises(self, panel):
         """Raise TypeError when unexpected keyword arguments are passed."""
-        with pytest.raises(TypeError, match="unexpected keyword arguments"):
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
             _fit(panel, "instant", seasonalty=2)  # typo: missing 'i'
+
+    def test_bin_edges_too_short(self, panel):
+        """Raise ValueError when bin_edges has fewer than 2 entries."""
+        with pytest.raises(ValueError, match="at least 2 entries"):
+            _fit(panel, "event_study", bin_edges=[4])
+
+    def test_placebo_edges_too_short(self, panel):
+        """Raise ValueError when placebo_edges has fewer than 2 entries."""
+        with pytest.raises(ValueError, match="at least 2 entries"):
+            _fit(
+                panel,
+                "placebo",
+                bin_edges=[0, 4, 8],
+                placebo_edges=[-4],
+            )
+
+    def test_placebo_edges_overlap_bin_edges(self, panel):
+        """Raise ValueError when placebo_edges extend past the first bin_edges entry."""
+        with pytest.raises(ValueError, match="must not overlap"):
+            _fit(
+                panel,
+                "placebo",
+                bin_edges=[0, 4, 8],
+                placebo_edges=[-8, -4, 2],
+            )
+
+    def test_seasonality_missing_keys(self, panel):
+        """Raise ValueError when seasonality dict is missing required keys."""
+        with pytest.raises(ValueError, match="missing required key"):
+            _fit(panel, "instant", seasonality={"period": 52})
+
+    def test_seasonality_non_positive_period(self, panel):
+        """Raise ValueError when seasonality['period'] is not > 0."""
+        with pytest.raises(ValueError, match="period.*must be > 0"):
+            _fit(panel, "instant", seasonality={"period": 0, "K": 2})
+
+    def test_seasonality_invalid_K(self, panel):
+        """Raise ValueError when seasonality['K'] is < 1."""
+        with pytest.raises(ValueError, match=r"\['K'\] must be >= 1"):
+            _fit(panel, "instant", seasonality={"period": 52, "K": 0})
+
+    def test_bin_edges_cover_no_observations(self, panel):
+        """Raise ValueError when bin_edges don't overlap the observed event-time range."""
+        with pytest.raises(ValueError, match="No observations fall within any bin"):
+            _fit(panel, "event_study", bin_edges=[1000, 1001])
