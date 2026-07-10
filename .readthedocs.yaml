@@ -14,6 +14,33 @@ build:
     # nodejs: "16"
     # rust: "1.55"
     # golang: "1.17"
+  jobs:
+    post_checkout:
+      # Skip PR preview builds when no docs-relevant files changed.
+      # exit 183 cancels the build (shown as green on the PR, not a failure).
+      # Pushes to main are unaffected — live docs always rebuild.
+      # Ref: https://docs.readthedocs.com/platform/stable/guides/build/skip-build.html
+      - git fetch origin main --depth=1
+      - |
+        if [ "$READTHEDOCS_VERSION_TYPE" = "external" ]; then
+          CHANGED_FILES=$(git diff --name-only origin/main -- docs/ .readthedocs.yaml causalpy/ 2>/dev/null || true)
+          SHOULD_SKIP=1
+
+          for FILE in $CHANGED_FILES; do
+            case "$FILE" in
+              causalpy/tests/*|causalpy/data/*|causalpy/skills/*)
+                ;;
+              *)
+                SHOULD_SKIP=0
+                break
+                ;;
+            esac
+          done
+
+          if [ "$SHOULD_SKIP" -eq 1 ]; then
+            exit 183;
+          fi
+        fi
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:

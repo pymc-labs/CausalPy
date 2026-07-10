@@ -1,0 +1,35 @@
+/* Gallery card layout for the how-to notebooks index */
+.sd-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.sd-card-body {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+}
+
+.sd-card-img-top {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    height: auto;
+    object-fit: cover;
+    background-color: #fff;
+}
+
+.sd-card-header {
+    padding: 0.75rem 0.5rem;
+    line-height: 1.3;
+    min-height: auto;
+}
+
+.sd-grid-item {
+    display: flex;
+}
+
+.sd-grid {
+    align-items: stretch;
+}

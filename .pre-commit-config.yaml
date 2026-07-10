@@ -30,25 +30,15 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.9
+    rev: v0.15.20
     hooks:
       # Run the linter
       - id: ruff
         types_or: [ python, pyi, jupyter ]
         args: [ --fix ]
-        # Exclude docs/ to avoid applying strict linting rules to example notebooks
-        # Remove this exclusion if you want to enforce strict rules on documentation
-        exclude: ^docs/
       # Run the formatter
       - id: ruff-format
         types_or: [ python, pyi, jupyter ]
-  - repo: https://github.com/econchick/interrogate
-    rev: 1.7.0
-    hooks:
-      - id: interrogate
-        # needed to make excludes in pyproject.toml work
-        # see here https://github.com/econchick/interrogate/issues/60#issuecomment-735436566
-        pass_filenames: false
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.2
     hooks:
@@ -56,8 +46,22 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
+  # Validate numpydoc-style docstrings across the package. The check set and
+  # exclude regex are configured under [tool.numpydoc_validation] in
+  # pyproject.toml. Originally introduced under #886 as a narrow check on
+  # public ``.plot`` overrides, the scope was widened under #898 to cover the
+  # whole ``causalpy`` package. The ``files`` pattern below excludes the test
+  # suite and the simulated-data helpers in ``causalpy/data/`` (those use the
+  # Sphinx ``:param:`` style for didactic clarity and are not part of the
+  # public API surface). Private members are excluded via the config-level
+  # regex in ``pyproject.toml``.
+  - repo: https://github.com/numpy/numpydoc
+    rev: v1.11.0rc0
+    hooks:
+      - id: numpydoc-validation
+        files: ^causalpy/(?!tests/|data/).*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.20.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
@@ -67,16 +71,30 @@ repos:
     rev: v0.25
     hooks:
       - id: validate-pyproject
+  # Lint repository Markdown files (issue #899). Configuration lives in
+  # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
+  # generated docs build are intentionally out of scope.
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.38
+    hooks:
+      - id: pymarkdown
+        args: [scan]
+        files: \.md$
+        exclude: ^(docs/_build/|\.scratch/|docs/source/notebooks/index\.md)$
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
-  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
+  # Dev env uses python>=3.11; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
+  # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
+  # (see check-environment-yml job in .github/workflows/ci.yml).
   - repo: https://github.com/usnistgov/pyproject2conda
-    rev: v0.22.1
+    rev: v0.23.1
     hooks:
       - id: pyproject2conda-yaml
         name: Sync environment.yml from pyproject.toml
         args:
           - -e
           - dev
+          - -e
+          - test
           - -o
           - environment.yml
           - -n
@@ -84,7 +102,7 @@ repos:
           - -w
           - force
           - --python-include
-          - "python>=3.12"
+          - "python>=3.11"
           - -d
           - make
           - -d
@@ -96,14 +114,44 @@ repos:
   - repo: local
     hooks:
       - id: validate-notebooks
-        name: Validate notebook schema
+        name: Validate notebooks
         entry: python scripts/validate_notebooks.py
         language: python
         files: \.ipynb$
         additional_dependencies: [nbformat]
+      - id: gallery-in-sync
+        name: Gallery index in sync with gallery.yaml
+        entry: python scripts/generate_gallery.py --check --no-thumbnails
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/notebooks/gallery\.yaml|docs/source/notebooks/index\.md|scripts/generate_gallery\.py|docs/source/notebooks/.*\.(ipynb|md))$
+        additional_dependencies: [PyYAML]
       - id: validate-bibtex
         name: Validate BibTeX files
         entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
         language: python
         files: \.bib$
         additional_dependencies: [pybtex]
+      # Catch the Sphinx/Napoleon "wall of prose" rendering bug from issue #892:
+      # bullet lists inside docstrings must be preceded by a blank line, otherwise
+      # they are collapsed into the introductory paragraph. Neither
+      # numpydoc-validation nor ruff/pydocstyle inspect section bodies, so we
+      # enforce this with a small AST check.
+      - id: validate-docstring-lists
+        name: Validate blank line before bullet lists in docstrings
+        entry: python scripts/validate_docstring_lists.py
+        language: python
+        files: ^causalpy/.*\.py$
+        exclude: ^causalpy/tests/
+      - id: check-public-exports
+        name: Check public API export wiring
+        entry: python scripts/check_public_exports.py --check
+        language: python
+        pass_filenames: false
+        files: ^(causalpy/__init__\.py|causalpy/experiments/.*|causalpy/checks/.*)$
+      - id: check-architecture-inventory
+        name: Check ARCHITECTURE.md experiment inventory
+        entry: python scripts/check_architecture_inventory.py --check
+        language: python
+        pass_filenames: false
+        files: ^(ARCHITECTURE\.md|causalpy/experiments/.*)$

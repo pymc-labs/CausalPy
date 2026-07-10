@@ -11,9 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Instrumental variable regression
-"""
+"""Instrumental variable regression."""
 
 import warnings  # noqa: I001
 
@@ -22,8 +20,12 @@ import pandas as pd
 from patsy import dmatrices
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
+import arviz as az
+
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.pymc_models import InstrumentalVariableRegression
+from causalpy.utils import round_num
 
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
@@ -65,8 +67,10 @@ class InstrumentalVariable(BaseExperiment):
         A indicator for whether the treatment to be modelled is binary or not.
         Determines which PyMC model we use to model the joint outcome and
         treatment.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import pandas as pd
     >>> import causalpy as cp
@@ -201,7 +205,7 @@ class InstrumentalVariable(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
+        """Validate the input data and model formula for correctness."""
         treatment = self.instruments_formula.split("~")[0]
         test = treatment.strip() in self.instruments_data.columns
         test = test & (treatment.strip() in self.data.columns)
@@ -224,8 +228,7 @@ class InstrumentalVariable(BaseExperiment):
             )
 
     def get_2SLS_fit(self) -> None:
-        """
-        Two Stage Least Squares Fit
+        """Two Stage Least Squares Fit.
 
         This function is called by the experiment, results are used for
         priors if none are provided.
@@ -246,8 +249,7 @@ class InstrumentalVariable(BaseExperiment):
         self.second_stage_reg = second_stage_reg
 
     def get_naive_OLS_fit(self) -> None:
-        """
-        Naive Ordinary Least Squares
+        """Naive Ordinary Least Squares.
 
         This function is called by the experiment.
         """
@@ -259,22 +261,79 @@ class InstrumentalVariable(BaseExperiment):
         )
         self.ols_reg = ols_reg
 
-    def plot(self, *args, **kwargs) -> None:  # type: ignore[override]
-        """
-        Plot the results
+    def plot(
+        self,
+        *,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
+        Parameters
+        ----------
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+
+        Notes
+        -----
+        Plotting is not yet implemented for instrumental variable
+        experiments. This stub exists so every experiment subclass
+        offers an explicit, kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
         """
         raise NotImplementedError("Plot method not implemented.")
 
-    def summary(self, round_to: int | None = None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
-        raise NotImplementedError("Summary method not implemented.")
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print(f"Instruments formula: {self.instruments_formula}")
+
+        print("\nNaive OLS coefficients:")
+        for name, val in self.ols_beta_params.items():
+            print(f"  {name: <20}  {round_num(val, round_to)}")
+
+        print("\n2SLS coefficients:")
+        print("  First stage:")
+        for name, val in zip(
+            self.labels_instruments, self.ols_beta_first_params, strict=False
+        ):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+        print("  Second stage:")
+        for name, val in zip(self.labels, self.ols_beta_second_params, strict=False):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+
+        print("\nBayesian coefficients:")
+        posterior = self.idata.posterior  # type: ignore[union-attr]
+        for var, dim, labels, stage in [
+            ("beta_t", "instruments", self.labels_instruments, "Instrument stage"),
+            ("beta_z", "covariates", self.labels, "Outcome stage"),
+        ]:
+            print(f"  {stage}:")
+            coeffs = az.extract(posterior, var_names=var)
+            for name in labels:
+                samples = coeffs.sel({dim: name})
+                lo = samples.quantile((1 - HDI_PROB) / 2).item()
+                hi = samples.quantile(1 - (1 - HDI_PROB) / 2).item()
+                print(
+                    f"    {name: <20}  {round_num(samples.mean().item(), round_to)}, "
+                    f"{HDI_PROB * 100:.0f}% HDI [{round_num(lo, round_to)}, "
+                    f"{round_num(hi, round_to)}]"
+                )
 
     def effect_summary(
         self,
@@ -294,6 +353,29 @@ class InstrumentalVariable(BaseExperiment):
         Generate a decision-ready summary of causal effects.
 
         Note: effect_summary is not yet implemented for InstrumentalVariable experiments.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (unused for InstrumentalVariable).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            For multi-unit experiments, the unit to analyse.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
         """
         raise NotImplementedError(
             "effect_summary is not yet implemented for InstrumentalVariable experiments."

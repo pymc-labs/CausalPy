@@ -71,7 +71,13 @@ class GenerateReport:
 
     def validate(self, context: PipelineContext) -> None:
         """GenerateReport has no strict prerequisites; it gracefully handles
-        missing data."""
+        missing data.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context (unused; required by the step interface).
+        """
 
     def _render_plot(self, experiment: Any) -> list[str]:
         """Render experiment plots as base64-encoded PNG strings."""
@@ -90,7 +96,19 @@ class GenerateReport:
         return plots
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        """Generate the HTML report and store it in the context."""
+        """Generate the HTML report and store it in the context.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context providing ``experiment``, ``effect_summary``,
+            and ``sensitivity_results`` (any of which may be ``None``).
+
+        Returns
+        -------
+        PipelineContext
+            The same context with ``report`` populated.
+        """
         env = Environment(
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),
             autoescape=True,

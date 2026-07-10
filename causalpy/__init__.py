@@ -11,6 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+"""CausalPy: causal inference for quasi-experiments in Python."""
 
 import causalpy.checks as checks  # noqa: E402
 import causalpy.pymc_models as pymc_models
@@ -28,12 +29,16 @@ from .experiments.hierarchical_interrupted_time_series import (
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.panel_regression import PanelRegression
 from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
+from .experiments.synthetic_difference_in_differences import (
+    SyntheticDifferenceInDifferences,
+)
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
 from .steps import (
     EstimateEffect,
@@ -60,6 +65,7 @@ __all__ = [
     "Pipeline",
     "PipelineContext",
     "PipelineResult",
+    "PanelRegression",
     "plot_correlations",
     "PrePostNEGD",
     "pymc_models",
@@ -73,5 +79,6 @@ __all__ = [
     "step",
     "Step",
     "SyntheticControl",
+    "SyntheticDifferenceInDifferences",
     "variable_selection_priors",
 ]

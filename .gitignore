@@ -14,7 +14,8 @@ dist/
 docs/build/
 docs/jupyter_execute/
 docs/source/api/generated/
-
+docs/source/_static/thumbnails/
+# Note: thumbnails are generated during build (see .readthedocs.yaml)
 .cursor/plans
 .marimo/
 
@@ -27,3 +28,4 @@ docs/source/api/generated/
 
 # Local scratch space (not tracked)
 .scratch/
+coverage.xml

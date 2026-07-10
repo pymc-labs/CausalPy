@@ -32,6 +32,9 @@ import pandas as pd
 import xarray as xr
 from scipy.stats import t
 
+from causalpy.constants import HDI_PROB
+from causalpy.utils import _as_scalar
+
 
 @dataclass
 class EffectSummary:
@@ -77,11 +80,11 @@ def _extract_hdi_bounds(
     """
     if isinstance(hdi_result, xr.Dataset):
         hdi_data = list(hdi_result.data_vars.values())[0]
-        lower = float(hdi_data.sel(hdi="lower").values)
-        upper = float(hdi_data.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_data.sel(hdi="lower"))
+        upper = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
-        lower = float(hdi_result.sel(hdi="lower").values)
-        upper = float(hdi_result.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_result.sel(hdi="lower"))
+        upper = _as_scalar(hdi_result.sel(hdi="higher"))
     return lower, upper
 
 
@@ -103,12 +106,12 @@ def _compute_tail_probabilities(
         Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
     """
     if direction == "increase":
-        return {"p_gt_0": float((effect > 0).mean().values)}
+        return {"p_gt_0": _as_scalar((effect > 0).mean())}
     elif direction == "decrease":
-        return {"p_lt_0": float((effect < 0).mean().values)}
+        return {"p_lt_0": _as_scalar((effect < 0).mean())}
     else:  # two-sided
-        p_gt = float((effect > 0).mean().values)
-        p_lt = float((effect < 0).mean().values)
+        p_gt = _as_scalar((effect > 0).mean())
+        p_lt = _as_scalar((effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
 
@@ -135,11 +138,11 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return float((np.abs(effect) > min_effect).mean().values)
+        return _as_scalar((np.abs(effect) > min_effect).mean())
     elif direction == "increase":
-        return float((effect > min_effect).mean().values)
+        return _as_scalar((effect > min_effect).mean())
     elif direction == "decrease":
-        return float((effect < -min_effect).mean().values)
+        return _as_scalar((effect < -min_effect).mean())
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
@@ -192,8 +195,8 @@ def _compute_statistics_scalar(
         Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
     """
     stats = {
-        "mean": float(effect.mean(dim=["chain", "draw"]).values),
-        "median": float(effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(effect.median(dim=["chain", "draw"])),
     }
 
     # HDI using helper
@@ -379,6 +382,10 @@ def _effect_summary_staggered_did(
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
     post_treatment = att_et[att_et["event_time"] >= 0]
+    if "identified" in post_treatment.columns:
+        post_treatment = post_treatment[post_treatment["identified"]]
+    if "identified" in pre_treatment.columns:
+        pre_treatment = pre_treatment[pre_treatment["identified"]]
 
     # Build summary table with all event-time effects
     table = att_et.copy()
@@ -574,7 +581,7 @@ def _extract_window(result, window, treated_unit=None):
 
     # Convert OLS xarray to numpy for consistent handling
     if not is_pymc and isinstance(post_impact, xr.DataArray):
-        post_impact = np.squeeze(post_impact.values)
+        post_impact = np.squeeze(np.asarray(post_impact))
 
     # Ensure OLS data is numpy array
     if not is_pymc and not isinstance(post_impact, np.ndarray):
@@ -706,7 +713,7 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
         # Convert window_coords to integer indices for isel
         indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred.isel(obs_ind=indices).values
+        counterfactual = np.asarray(post_pred.isel(obs_ind=indices))
         return np.squeeze(counterfactual)
     else:
         # OLS with numpy array
@@ -726,21 +733,29 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 def _compute_statistics(
     impact,
     counterfactual,
-    hdi_prob=0.95,
+    hdi_prob=HDI_PROB,
     direction="increase",
     cumulative=True,
     relative=True,
     min_effect=None,
     time_dim="obs_ind",
 ):
-    """Compute all summary statistics from posterior draws."""
+    """Compute all summary statistics from posterior draws.
+
+    Notes
+    -----
+    All in-tree callers pass ``hdi_prob`` explicitly (typically derived from
+    ``effect_summary``'s ``alpha`` as ``hdi_prob = 1 - alpha``), so this
+    default is effectively unused; it is set to :data:`HDI_PROB` to keep the
+    project-wide convention consistent.
+    """
     stats = {}
 
     # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
     stats["avg"] = {
-        "mean": float(avg_effect.mean(dim=["chain", "draw"]).values),
-        "median": float(avg_effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
     }
 
     # HDI for average
@@ -749,21 +764,21 @@ def _compute_statistics(
     # Handle both Dataset and DataArray returns
     if isinstance(hdi_avg, xr.Dataset):
         hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_data.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
         # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = float(hdi_avg.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_avg.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_avg.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_avg.sel(hdi="higher"))
 
     # Tail probabilities for average
     if direction == "increase":
-        stats["avg"]["p_gt_0"] = float((avg_effect > 0).mean().values)
+        stats["avg"]["p_gt_0"] = _as_scalar((avg_effect > 0).mean())
     elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = float((avg_effect < 0).mean().values)
+        stats["avg"]["p_lt_0"] = _as_scalar((avg_effect < 0).mean())
     else:  # two-sided
-        p_gt = float((avg_effect > 0).mean().values)
-        p_lt = float((avg_effect < 0).mean().values)
+        p_gt = _as_scalar((avg_effect > 0).mean())
+        p_lt = _as_scalar((avg_effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         stats["avg"]["p_two_sided"] = p_two_sided
         stats["avg"]["prob_of_effect"] = 1 - p_two_sided
@@ -785,28 +800,28 @@ def _compute_statistics(
         cum_final = cum_effect.isel({time_dim: -1})
 
         stats["cum"] = {
-            "mean": float(cum_final.mean(dim=["chain", "draw"]).values),
-            "median": float(cum_final.median(dim=["chain", "draw"]).values),
+            "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
+            "median": _as_scalar(cum_final.median(dim=["chain", "draw"])),
         }
 
         # HDI for cumulative
         hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
         if isinstance(hdi_cum, xr.Dataset):
             hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = float(hdi_cum_data.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum_data.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum_data.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum_data.sel(hdi="higher"))
         else:
-            stats["cum"]["hdi_lower"] = float(hdi_cum.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum.sel(hdi="higher"))
 
         # Tail probabilities for cumulative
         if direction == "increase":
-            stats["cum"]["p_gt_0"] = float((cum_final > 0).mean().values)
+            stats["cum"]["p_gt_0"] = _as_scalar((cum_final > 0).mean())
         elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = float((cum_final < 0).mean().values)
+            stats["cum"]["p_lt_0"] = _as_scalar((cum_final < 0).mean())
         else:  # two-sided
-            p_gt = float((cum_final > 0).mean().values)
-            p_lt = float((cum_final < 0).mean().values)
+            p_gt = _as_scalar((cum_final > 0).mean())
+            p_lt = _as_scalar((cum_final < 0).mean())
             p_two_sided = 2 * min(p_gt, p_lt)
             stats["cum"]["p_two_sided"] = p_two_sided
             stats["cum"]["prob_of_effect"] = 1 - p_two_sided
@@ -828,25 +843,23 @@ def _compute_statistics(
         counterfactual_mean = counterfactual.mean(dim=time_dim)
         rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
 
-        stats["avg"]["relative_mean"] = float(
-            rel_avg.mean(dim=["chain", "draw"]).values
-        )
+        stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
 
         hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
         if isinstance(hdi_rel_avg, xr.Dataset):
             hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg_data.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg_data.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="higher")
             )
         else:
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="higher")
             )
 
         if cumulative:
@@ -856,25 +869,25 @@ def _compute_statistics(
             )
             rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
 
-            stats["cum"]["relative_mean"] = float(
-                rel_cum.mean(dim=["chain", "draw"]).values
+            stats["cum"]["relative_mean"] = _as_scalar(
+                rel_cum.mean(dim=["chain", "draw"])
             )
 
             hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
             if isinstance(hdi_rel_cum, xr.Dataset):
                 hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum_data.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum_data.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="higher")
                 )
             else:
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="higher")
                 )
 
     return stats
@@ -1478,10 +1491,12 @@ def _compute_statistics_did_ols(
 
     # Calculate standard error from model residuals
     # Get fitted values and residuals
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the interaction term coefficient index
@@ -1497,8 +1512,7 @@ def _compute_statistics_did_ols(
     if coeff_idx is None:
         raise ValueError(f"Could not find interaction term {interaction_term} in model")
 
-    # Calculate standard error for this coefficient
-    X = result.X
+    X = X_da
     try:
         # Try to get X as numpy array
         if hasattr(X, "values"):
@@ -1610,10 +1624,12 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     discontinuity = result.discontinuity_at_threshold  # scalar
 
     # Calculate standard error from model
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = y_da - y_pred
     mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    n, p = X_da.shape
     df = n - p
 
     # Find the treated coefficient index
@@ -1624,11 +1640,9 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
             break
 
     if coeff_idx is None:
-        # Fallback: use simple approximation
         se = np.std(residuals) / np.sqrt(n)
     else:
-        # Calculate standard error for this coefficient
-        X = result.X
+        X = X_da
         try:
             if hasattr(X, "values"):
                 X = X.values

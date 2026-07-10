@@ -399,7 +399,7 @@ def test_iv_coords_set(iv_data, sample_kwargs):
 # =============================================================================
 
 
-@pytest.mark.parametrize("method", ["plot", "summary", "effect_summary"])
+@pytest.mark.parametrize("method", ["plot", "effect_summary"])
 def test_iv_not_implemented_methods(iv_data, sample_kwargs, method):
     """Test that unimplemented methods raise NotImplementedError."""
     result = cp.InstrumentalVariable(
