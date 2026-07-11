@@ -57,7 +57,35 @@ def _merge_base_ref() -> str | None:
     return None
 
 
-def resolve_compare_branch(explicit: str | None) -> str:
+def _fetch_origin_main() -> str | None:
+    """Fetch ``origin/main`` when missing (pre-commit.ci uses shallow clones)."""
+    for ref in ("refs/remotes/origin/main", "origin/main"):
+        if _ref_exists(ref):
+            return ref
+
+    base_ref = os.environ.get("GITHUB_BASE_REF", "main")
+    fetched_ref = f"refs/remotes/origin/{base_ref}"
+    if _ref_exists(fetched_ref):
+        return fetched_ref
+
+    fetch = subprocess.run(
+        [
+            "git",
+            "fetch",
+            "origin",
+            f"{base_ref}:{fetched_ref}",
+            "--depth=1",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+    if fetch.returncode == 0 and _ref_exists(fetched_ref):
+        return fetched_ref
+    return None
+
+
+def resolve_compare_branch(explicit: str | None) -> str | None:
     candidates = [
         explicit,
         os.environ.get("REDIRAFFE_COMPARE_BRANCH"),
@@ -68,12 +96,12 @@ def resolve_compare_branch(explicit: str | None) -> str:
         "refs/remotes/origin/main",
         "main",
         _merge_base_ref(),
+        _fetch_origin_main(),
     ]
     for candidate in candidates:
         if candidate and _ref_exists(candidate):
             return candidate
-    msg = "Could not resolve a compare branch for rediraffe redirect checks."
-    raise RuntimeError(msg)
+    return None
 
 
 def path_to_docname(path: str) -> str:
@@ -130,13 +158,20 @@ def check_redirects(compare_branch: str | None = None) -> list[str]:
     branch = resolve_compare_branch(compare_branch)
     redirects = load_redirects()
 
-    for _kind, old_path in changed_notebook_paths(branch):
-        docname = path_to_docname(old_path)
-        if docname not in redirects:
-            errors.append(
-                f"{old_path} was removed or renamed since {branch} but "
-                f"'{docname}' is missing from rediraffe_redirects in conf.py"
-            )
+    if branch is None:
+        print(
+            "Warning: could not resolve a git base ref; skipping rename/delete "
+            "redirect diff (still validating redirect targets exist).",
+            file=sys.stderr,
+        )
+    else:
+        for _kind, old_path in changed_notebook_paths(branch):
+            docname = path_to_docname(old_path)
+            if docname not in redirects:
+                errors.append(
+                    f"{old_path} was removed or renamed since {branch} but "
+                    f"'{docname}' is missing from rediraffe_redirects in conf.py"
+                )
 
     for _src, dst in redirects.items():
         if not target_exists(dst):
