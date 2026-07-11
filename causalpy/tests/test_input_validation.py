@@ -96,15 +96,15 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
-    # Test 5: Repeated interaction terms (should be invalid)
-    with pytest.raises(FormulaException):
-        _ = cp.DifferenceInDifferences(
-            df,
-            formula="y ~ 1 + group + group*post_treatment + group*post_treatment",
-            time_variable_name="t",
-            group_variable_name="group",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
+    # Test 5: Patsy collapses repeated terms into one design-matrix term
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group + group*post_treatment + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    assert result.causal_impact is not None
 
     # Test 6: Three-way interactions using * (should be invalid)
     with pytest.raises(FormulaException):
@@ -200,6 +200,30 @@ def test_did_validation_interaction_term_order_independent():
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
+    assert result.causal_impact is not None
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + I(x**2) + group*post_treatment",
+        "y ~ 1 + group*post_treatment + I(t**2)",
+        "y ~ 1 + I(x * 2) + group*post_treatment",
+        "y ~ 1 + (group + post_treatment)**2",
+    ],
+)
+def test_did_validation_uses_patsy_interaction_terms(did_data, formula):
+    """Arithmetic and power expressions must follow Patsy's term semantics."""
+    df = did_data.assign(x=np.arange(len(did_data)))
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
     assert result.causal_impact is not None
 
 
