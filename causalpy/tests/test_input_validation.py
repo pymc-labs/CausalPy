@@ -156,6 +156,52 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
+    # Test 11: No interaction term at all (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 12: Interaction term between unrelated variables, not group/post_treatment
+    # (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + post_treatment + male*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+
+def test_did_validation_interaction_term_order_independent():
+    """Test that the group*post_treatment interaction term is accepted
+    regardless of which variable is written first in the formula."""
+    df = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1],
+            "t": [0, 1, 0, 1],
+            "unit": [0, 0, 1, 1],
+            "post_treatment": [0, 1, 0, 1],
+            "y": [1, 2, 3, 4],
+        }
+    )
+
+    # group*post_treatment and post_treatment*group are statistically identical;
+    # construction must succeed either way.
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post_treatment*group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert result.causal_impact is not None
+
 
 def test_did_validation_post_treatment_data():
     """Test that we get a DataException if do not include post_treatment in the data"""

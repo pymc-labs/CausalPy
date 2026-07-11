@@ -280,8 +280,14 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _validate_formula_interaction_terms(self) -> None:
         """
-        Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
-        Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
+        Validate that the formula contains exactly one interaction term, that it
+        is between the group and post-treatment variables, and that it is not a
+        three-way or higher-order interaction.
+
+        Raises FormulaException if no interaction term is found, if more than one
+        interaction term is found, if any interaction term has more than 2
+        variables, or if the single interaction term does not involve both the
+        group and post-treatment variables.
         """
         # Define interaction indicators
         INTERACTION_INDICATORS = ["*", ":"]
@@ -306,6 +312,24 @@ class DifferenceInDifferences(BaseExperiment):
             raise FormulaException(
                 f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
                 "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
+            )
+
+        # A DiD formula must contain exactly one interaction term, and it must be
+        # between the group and post-treatment variables: that term is what
+        # identifies the causal effect (see `algorithm`, which reads it back off
+        # the fitted model). Without this check a formula with no interaction
+        # term, or an interaction between unrelated variables, would pass
+        # validation and only fail later when `causal_impact` is accessed.
+        if len(interaction_terms) == 0 or not (
+            self.group_variable_name in interaction_terms[0]
+            and self.post_treatment_variable_name in interaction_terms[0]
+        ):
+            raise FormulaException(
+                "Formula must contain exactly one interaction term between the "
+                f"group variable '{self.group_variable_name}' and the "
+                f"post-treatment variable '{self.post_treatment_variable_name}' "
+                f"(e.g. '{self.group_variable_name}*{self.post_treatment_variable_name}'). "
+                "This interaction term identifies the difference-in-differences causal effect."
             )
 
     def summary(self, round_to: int | None = 2) -> None:
