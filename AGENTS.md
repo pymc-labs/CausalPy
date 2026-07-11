@@ -74,7 +74,7 @@ When creating a new example notebook:
 Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_redirects` in `docs/source/conf.py`. At docs build time, [sphinxext-rediraffe](https://sphinxext-rediraffe.readthedocs.io/) emits redirect HTML at the old RTD path so bookmarks and blog links keep working.
 
 - **On rename**: add `"notebooks/old_stem": "notebooks/new-stem"` (no `.ipynb` suffix). Keep all prior keys; do not delete old entries when cleaning up.
-- **On delete**: add a redirect to a replacement page if one exists, or accept that the old URL will 404 and document the removal.
+- **On delete**: remove the card from `gallery.yaml`, run `make gallery`, then add a redirect from the old docname to the How-to gallery page (`"notebooks/old_stem": "notebooks/index"`) or to a closely related notebook if one supersedes it.
 - **Does not cover**: GitHub raw links to `docs/source/notebooks/old_name.ipynb` — only built RTD HTML URLs.
 - **CI**: `scripts/check_rediraffe_redirects.py` (prek hook `rediraffe-redirects`) fails if a notebook rename/delete since `main` lacks a redirect entry or if a redirect target is missing on disk.
 
