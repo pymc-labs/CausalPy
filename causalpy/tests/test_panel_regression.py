@@ -267,6 +267,82 @@ def test_panel_regression_validation_errors(small_panel_data):
         )
 
 
+@pytest.mark.parametrize(
+    ("formula", "variable"),
+    [
+        ("y ~ C( unit ) + treatment + x1", "unit"),
+        ("y ~ C(unit, Treatment) + treatment + x1", "unit"),
+        ("y ~ C( time ) + treatment + x1", "time"),
+        ("y ~ C(time, Sum) + treatment + x1", "time"),
+    ],
+)
+def test_demeaned_rejects_patsy_fe_variants(small_panel_data, formula, variable):
+    """Whitespace and coding options must not bypass the demeaned FE guard."""
+    with pytest.raises(ValueError, match=rf"do not include C\({variable}\)"):
+        cp.PanelRegression(
+            data=small_panel_data,
+            formula=formula,
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="demeaned",
+            model=LinearRegression(),
+        )
+
+
+def test_demeaned_allows_unit_interaction_without_plain_fe(small_panel_data):
+    """A unit-specific slope is not a duplicate fixed-effect intercept."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit):treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+
+    assert any("C(unit)" in label and ":treatment" in label for label in result.labels)
+
+
+def test_dummy_fe_labels_follow_patsy_term_metadata(small_panel_data):
+    """FE labels with whitespace or coding options are hidden and plottable."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C( unit ) + C(time, Sum) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    fe_labels = set(result._get_fe_labels("unit"))
+    fe_labels.update(result._get_fe_labels("time"))
+    assert fe_labels
+    assert fe_labels.isdisjoint(result._get_non_fe_labels())
+
+    fig, _ = result.plot_unit_effects()
+    plt.close(fig)
+
+
+def test_interaction_labels_are_not_plain_fixed_effects(small_panel_data, capsys):
+    """Unit interactions remain visible and are excluded from FE plots."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(unit):treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    unit_fe_labels = set(result._get_fe_labels("unit"))
+    interaction_labels = {label for label in result.labels if ":" in label}
+    assert interaction_labels
+    assert unit_fe_labels.isdisjoint(interaction_labels)
+    assert interaction_labels.issubset(result._get_non_fe_labels())
+
+    result.summary()
+    summary = capsys.readouterr().out
+    assert all(label in summary for label in interaction_labels)
+
+
 @pytest.mark.integration
 def test_panel_regression_plot_coefficients(mock_pymc_sample, small_panel_data):
     """Test plot_coefficients method."""
