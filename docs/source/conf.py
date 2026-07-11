@@ -108,8 +108,14 @@ extensions = [
     "strip_citation_labels",
 ]
 
-# -- Redirects for renamed notebooks (issue #840) ---------------------------
-# Maps old docnames to new docnames so legacy URLs keep resolving.
+# -- Redirects for renamed how-to notebooks (issue #840) --------------------
+# Permanent map of old Sphinx docnames -> current docnames. sphinxext-rediraffe
+# writes stub HTML at old RTD paths (e.g. notebooks/its_pymc.html) so legacy
+# links keep working after a rename.
+#
+# Do not delete keys when cleaning up: each key protects an old public URL.
+# On a future rename, add old -> new and keep earlier keys (chains resolve).
+# New notebooks do not need entries; only renames and deletions do.
 rediraffe_redirects = {
     "notebooks/ancova_pymc": "notebooks/ancova-pymc",
     "notebooks/did_pymc": "notebooks/difference-in-differences-pymc",

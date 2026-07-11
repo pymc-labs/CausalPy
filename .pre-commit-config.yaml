@@ -126,6 +126,12 @@ repos:
         pass_filenames: false
         files: ^(docs/source/notebooks/gallery\.yaml|docs/source/notebooks/index\.md|scripts/generate_gallery\.py|docs/source/notebooks/.*\.(ipynb|md))$
         additional_dependencies: [PyYAML]
+      - id: rediraffe-redirects
+        name: Notebook renames have rediraffe redirects
+        entry: python scripts/check_rediraffe_redirects.py
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/notebooks/.*\.(ipynb|md)|docs/source/conf\.py|scripts/check_rediraffe_redirects\.py)$
       - id: validate-bibtex
         name: Validate BibTeX files
         entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
