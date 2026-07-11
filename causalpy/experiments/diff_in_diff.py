@@ -236,16 +236,24 @@ class DifferenceInDifferences(BaseExperiment):
                         {"coeffs": i}
                     )
         elif self._model_backend.is_ols:
-            # This is the coefficient on the interaction term
-            # Store the coefficient into dictionary {intercept:value}
+            # This is the coefficient on the interaction term. Match by checking
+            # both variable names independently (as the Bayesian branch above
+            # does), rather than a single concatenated substring, since patsy
+            # may name the interaction term with either variable first (e.g.
+            # "post_treatment[T.True]:group" if the formula writes
+            # "post_treatment*group" instead of "group*post_treatment").
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
-            # Create and find the interaction term based on the values user provided
-            interaction_term = (
-                f"{self.group_variable_name}:{self.post_treatment_variable_name}"
+            matched_key = next(
+                (
+                    k
+                    for k in coef_map
+                    if self.post_treatment_variable_name in k
+                    and self.group_variable_name in k
+                ),
+                None,
             )
-            matched_key = next((k for k in coef_map if interaction_term in k), None)
             att = coef_map.get(matched_key) if matched_key is not None else None
             self.causal_impact = att
         else:
