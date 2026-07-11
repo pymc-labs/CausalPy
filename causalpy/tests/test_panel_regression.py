@@ -289,6 +289,19 @@ def test_demeaned_rejects_patsy_fe_variants(small_panel_data, formula, variable)
         )
 
 
+def test_demeaned_allows_unit_interaction_without_plain_fe(small_panel_data):
+    """A unit-specific slope is not a duplicate fixed-effect intercept."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit):treatment + x1",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+
+    assert any("C(unit)" in label and ":treatment" in label for label in result.labels)
+
+
 def test_dummy_fe_labels_follow_patsy_term_metadata(small_panel_data):
     """FE labels with whitespace or coding options are hidden and plottable."""
     result = cp.PanelRegression(

@@ -244,9 +244,9 @@ class PanelRegression(BaseExperiment):
                 (self.time_fe_variable, "time"),
             ):
                 if variable and any(
-                    self._is_fe_factor(factor.name(), variable)
+                    len(term.factors) == 1
+                    and self._is_fe_factor(term.factors[0].name(), variable)
                     for term in rhs_terms
-                    for factor in term.factors
                 ):
                     raise ValueError(
                         f"When using fe_method='demeaned', do not include C({variable}) "
