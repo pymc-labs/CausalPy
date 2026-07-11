@@ -85,10 +85,29 @@ def _fetch_origin_main() -> str | None:
     return None
 
 
+def _ensure_github_base_sha() -> str | None:
+    """Materialize ``GITHUB_BASE_SHA`` in shallow PR checkouts."""
+    sha = os.environ.get("GITHUB_BASE_SHA")
+    if not sha:
+        return None
+    if _ref_exists(sha):
+        return sha
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", sha, "--depth=1"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+    if fetch.returncode == 0 and _ref_exists(sha):
+        return sha
+    return None
+
+
 def resolve_compare_branch(explicit: str | None) -> str | None:
     candidates = [
         explicit,
         os.environ.get("REDIRAFFE_COMPARE_BRANCH"),
+        _ensure_github_base_sha(),
         os.environ.get("GITHUB_BASE_SHA"),
         os.environ.get("PRE_COMMIT_FROM_REF"),
         "upstream/main",
@@ -114,24 +133,33 @@ def target_exists(docname: str) -> bool:
     return base.with_suffix(".ipynb").exists() or base.with_suffix(".md").exists()
 
 
+def _git_diff_lines(compare_branch: str, path: str) -> list[str] | None:
+    """Return diff lines for ``compare_branch`` vs HEAD, or None if unavailable."""
+    for diff_range in (f"{compare_branch}...HEAD", f"{compare_branch}..HEAD"):
+        result = subprocess.run(
+            ["git", "diff", "--name-status", diff_range, "--", path],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        if result.returncode == 0:
+            return result.stdout.splitlines()
+    return None
+
+
 def changed_notebook_paths(compare_branch: str) -> list[tuple[str, str]]:
     """Return ``(status, old_path)`` for deletes/renames under notebooks/."""
-    result = subprocess.run(
-        [
-            "git",
-            "diff",
-            "--name-status",
-            f"{compare_branch}...HEAD",
-            "--",
-            "docs/source/notebooks",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=REPO_ROOT,
-    )
+    lines = _git_diff_lines(compare_branch, "docs/source/notebooks")
+    if lines is None:
+        print(
+            f"Warning: could not diff {compare_branch} against HEAD; skipping "
+            "rename/delete redirect check.",
+            file=sys.stderr,
+        )
+        return []
+
     changes: list[tuple[str, str]] = []
-    for line in result.stdout.splitlines():
+    for line in lines:
         if not line.strip():
             continue
         parts = line.split("\t")

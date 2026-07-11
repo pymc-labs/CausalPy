@@ -45,8 +45,7 @@ def test_rediraffe_redirect_targets_exist() -> None:
 
 def test_rediraffe_redirect_check_passes_against_main() -> None:
     checker = _load_checker_module()
-    branch = checker.resolve_compare_branch(None)
-    errors = checker.check_redirects(branch)
+    errors = checker.check_redirects(None)
     assert errors == [], "\n".join(errors)
 
 
