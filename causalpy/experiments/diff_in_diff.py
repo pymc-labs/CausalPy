@@ -22,7 +22,7 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -44,7 +44,6 @@ from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
-    get_interaction_terms,
     round_num,
 )
 
@@ -247,11 +246,6 @@ class DifferenceInDifferences(BaseExperiment):
         """Validate the input data and model formula for correctness."""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-        # Check if post_treatment_variable_name is in formula
-        if self.post_treatment_variable_name not in self.formula:
-            raise FormulaException(
-                f"Missing required variable '{self.post_treatment_variable_name}' in formula"
-            )
 
         # Check if post_treatment_variable_name is in data columns
         if self.post_treatment_variable_name not in self.data.columns:
@@ -281,28 +275,24 @@ class DifferenceInDifferences(BaseExperiment):
         variables, or if the single interaction term does not involve both the
         group and post-treatment variables.
         """
-        # Define interaction indicators
-        INTERACTION_INDICATORS = ["*", ":"]
+        interaction_terms = [
+            term
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            if len(term.factors) > 1
+        ]
 
-        # Get interaction terms
-        interaction_terms = get_interaction_terms(self.formula)
-
-        # Check for interaction terms with more than 2 variables (more than one '*' or ':')
+        # Check for interaction terms with more than 2 variables
         for term in interaction_terms:
-            total_indicators = sum(
-                term.count(indicator) for indicator in INTERACTION_INDICATORS
-            )
-            if (
-                total_indicators >= 2
-            ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
+            if len(term.factors) > 2:
                 raise FormulaException(
-                    f"Formula contains interaction term with more than 2 variables: {term}. "
+                    f"Formula contains interaction term with more than 2 variables: {term.name()}. "
                     "Three-way or higher-order interactions are not supported as they complicate interpretation of the causal effect."
                 )
 
         if len(interaction_terms) > 1:
+            interaction_term_names = [term.name() for term in interaction_terms]
             raise FormulaException(
-                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_term_names}. "
                 "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
 
@@ -313,7 +303,7 @@ class DifferenceInDifferences(BaseExperiment):
         # term, or an interaction between unrelated variables, would pass
         # validation and only fail later when `causal_impact` is accessed.
         if len(interaction_terms) == 0 or not (
-            self._is_treatment_interaction(interaction_terms[0])
+            self._is_treatment_interaction(interaction_terms[0].name())
         ):
             raise FormulaException(
                 "Formula must contain exactly one interaction term between the "
