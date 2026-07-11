@@ -215,10 +215,7 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if (
-                self.post_treatment_variable_name in label
-                and self.group_variable_name in label
-            ):
+            if self._is_treatment_interaction(label):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
@@ -228,30 +225,17 @@ class DifferenceInDifferences(BaseExperiment):
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
-                if (
-                    self.post_treatment_variable_name in label
-                    and self.group_variable_name in label
-                ):
+                if self._is_treatment_interaction(label):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
         elif self._model_backend.is_ols:
-            # This is the coefficient on the interaction term. Match by checking
-            # both variable names independently (as the Bayesian branch above
-            # does), rather than a single concatenated substring, since patsy
-            # may name the interaction term with either variable first (e.g.
-            # "post_treatment[T.True]:group" if the formula writes
-            # "post_treatment*group" instead of "group*post_treatment").
+            # This is the coefficient on the interaction term
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
             matched_key = next(
-                (
-                    k
-                    for k in coef_map
-                    if self.post_treatment_variable_name in k
-                    and self.group_variable_name in k
-                ),
+                (key for key in coef_map if self._is_treatment_interaction(key)),
                 None,
             )
             att = coef_map.get(matched_key) if matched_key is not None else None
@@ -329,8 +313,7 @@ class DifferenceInDifferences(BaseExperiment):
         # term, or an interaction between unrelated variables, would pass
         # validation and only fail later when `causal_impact` is accessed.
         if len(interaction_terms) == 0 or not (
-            self.group_variable_name in interaction_terms[0]
-            and self.post_treatment_variable_name in interaction_terms[0]
+            self._is_treatment_interaction(interaction_terms[0])
         ):
             raise FormulaException(
                 "Formula must contain exactly one interaction term between the "
@@ -339,6 +322,20 @@ class DifferenceInDifferences(BaseExperiment):
                 f"(e.g. '{self.group_variable_name}*{self.post_treatment_variable_name}'). "
                 "This interaction term identifies the difference-in-differences causal effect."
             )
+
+    def _is_treatment_interaction(self, term: str) -> bool:
+        """Whether a term is exactly the group/post-treatment interaction."""
+        factors = {
+            factor.split("[", maxsplit=1)[0]
+            for factor in term.replace("*", ":").split(":")
+        }
+        return len(factors) == 2 and all(
+            any(factor in {name, f"C({name})"} for factor in factors)
+            for name in (
+                self.group_variable_name,
+                self.post_treatment_variable_name,
+            )
+        )
 
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
