@@ -17,13 +17,14 @@ import warnings  # noqa: I001
 
 import numpy as np
 import pandas as pd
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 import arviz as az
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
@@ -153,8 +154,10 @@ class InstrumentalVariable(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
         try:
-            y, X = dmatrices(self.formula, self.data)
-            t, Z = dmatrices(self.instruments_formula, self.instruments_data)
+            y, X = build_formula_matrices(self.formula, self.data)
+            t, Z = build_formula_matrices(
+                self.instruments_formula, self.instruments_data
+            )
         except PatsyError as err:
             raise DataException(f"Unable to evaluate IV formula: {err}") from err
 
@@ -248,7 +251,7 @@ class InstrumentalVariable(BaseExperiment):
         if self.instrument_variable_name in self.data.columns:
             second_stage_data = self.data.copy(deep=True)
             second_stage_data[self.instrument_variable_name] = fitted_Z_values
-            _, X2 = dmatrices(self.formula, second_stage_data)
+            _, X2 = build_formula_matrices(self.formula, second_stage_data)
             X2 = np.asarray(X2)
         else:
             X2 = self.X.copy()

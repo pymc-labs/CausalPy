@@ -75,7 +75,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 | Topic | Detail |
 |-------|--------|
-| **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
+| **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
 | **Impact uses mu, not y_hat** | `calculate_impact()` subtracts posterior `mu` (expected value), not `y_hat` (with observation noise). |
