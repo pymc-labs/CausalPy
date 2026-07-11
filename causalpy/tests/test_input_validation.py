@@ -558,6 +558,36 @@ def test_rd_validation_treated_is_dummy():
         )
 
 
+@pytest.mark.parametrize(
+    ("experiment", "threshold_argument"),
+    [
+        (cp.RegressionDiscontinuity, "treatment_threshold"),
+        (cp.RegressionKink, "kink_point"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("formula", "extra_columns", "exception"),
+    [
+        ("y ~ 1 + x + untreated", {"untreated": [0, 0, 1, 1]}, FormulaException),
+        ("treated ~ 1 + x", {"treated": [0, 0, 1, 1]}, FormulaException),
+        ("y ~ 1 + x + treated", {}, DataException),
+    ],
+)
+def test_rd_rk_validation_requires_treated_rhs_column(
+    experiment, threshold_argument, formula, extra_columns, exception
+):
+    """The exact treated column must exist and be referenced on the RHS."""
+    df = pd.DataFrame({"x": [0, 1, 2, 3], "y": [1, 1, 2, 2], **extra_columns})
+
+    with pytest.raises(exception):
+        experiment(
+            df,
+            formula=formula,
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            **{threshold_argument: 0.5},
+        )
+
+
 def test_iv_treatment_var_is_present():
     """Test the treatment variable is present for Instrumental Variable experiment"""
     data = pd.DataFrame({"x": [1, 2, 3], "y": [2, 4, 5]})

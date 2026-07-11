@@ -13,14 +13,15 @@
 #   limitations under the License.
 """Regression discontinuity design."""
 
-import warnings  # noqa: I001
+import re  # noqa: I001
+import warnings
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices, dmatrices
 from sklearn.base import RegressorMixin
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
@@ -235,9 +236,18 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
-        if "treated" not in self.formula:
+        if not any(
+            re.search(r"\btreated\b", factor.name())
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            for factor in term.factors
+        ):
             raise FormulaException(
-                "A predictor called `treated` should be in the formula"
+                "A predictor called `treated` should be in the formula RHS"
+            )
+
+        if "treated" not in self.data.columns:
+            raise DataException(
+                "A dummy-coded `treated` column should be present in the data"
             )
 
         if not _is_variable_dummy_coded(self.data["treated"]):
