@@ -203,6 +203,80 @@ def test_did_validation_interaction_term_order_independent():
     assert result.causal_impact is not None
 
 
+def test_did_validation_rejects_substring_only_interaction(did_data):
+    """Variable-name substrings must not count as the required interaction."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["group"] = df["g"]
+    df["post_treatment"] = df["post"]
+
+    with pytest.raises(FormulaException):
+        cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="g",
+            post_treatment_variable_name="post",
+            model=LinearRegression(),
+        )
+
+
+def test_did_exact_interaction_matching_preserves_categorical_wrapper(did_data):
+    """Exact matching still accepts patsy's categorical wrapper."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(g)*post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=LinearRegression(),
+    )
+
+    assert result.causal_impact is not None
+
+
+def test_did_ols_matches_only_exact_interaction(did_data):
+    """OLS lookup and counterfactual construction use the exact interaction."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["g_post"] = np.arange(len(df))
+    df["y"] = (
+        1 + 2 * df["g"] + 3 * df["post"] + 4 * df["g"] * df["post"] + 5 * df["g_post"]
+    )
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post*g + g_post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=LinearRegression(),
+    )
+
+    assert result.causal_impact == pytest.approx(4)
+    expected_counterfactual = (
+        1 + 2 + 3 + 5 * result.x_pred_counterfactual["g_post"].to_numpy()
+    )
+    np.testing.assert_allclose(result.y_pred_counterfactual, expected_counterfactual)
+
+
+def test_did_bayesian_matches_only_exact_interaction(mock_pymc_sample, did_data):
+    """Bayesian lookup must not confuse a similarly named main effect."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["g_post"] = np.arange(len(df))
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post*g + g_post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    assert result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
+
+
 def test_did_validation_post_treatment_data():
     """Test that we get a DataException if do not include post_treatment in the data"""
     df = pd.DataFrame(
