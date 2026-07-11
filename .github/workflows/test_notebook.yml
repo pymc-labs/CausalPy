@@ -33,9 +33,9 @@ jobs:
     strategy:
       matrix:
         split:
-          - "--pattern *_pymc*.ipynb"
-          - "--pattern *_skl*.ipynb"
-          - "--exclude-pattern _pymc --exclude-pattern _skl"
+          - "--pattern *-pymc.ipynb"
+          - "--pattern *-sklearn.ipynb"
+          - "--exclude-pattern=pymc --exclude-pattern=sklearn"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

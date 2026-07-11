@@ -37,7 +37,7 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 ## Documentation
 
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
-- **Notebook naming**: Use pattern `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`), organized by causal method
+- **Notebook naming**: Use lowercase hyphen-separated words with the full method name spelled out, then the dataset/variant token (if any), then the backend (`pymc` or `sklearn`). Pattern: `{method}[-{variant}]-{backend}.ipynb` (e.g., `difference-in-differences-pymc.ipynb`, `regression-discontinuity-drinking-sklearn.ipynb`, `synthetic-control-brexit-pymc.ipynb`). Prefer descriptive words over acronyms for SEO: `interrupted-time-series` over `its`, `regression-discontinuity` over `rd`, `synthetic-control` over `sc`, `instrumental-variables` over `iv`. When renaming an existing notebook, update `docs/source/notebooks/gallery.yaml`, run `make gallery`, add an entry to `rediraffe_redirects` in `docs/source/conf.py`, and never remove older redirect keys.
 - **MyST directives**: Use `:::{note}` and other MyST features for callouts and formatting
 - **Glossary linking**: Link to glossary terms (defined in `glossary.rst`) on first mention in a file:
   - In Markdown files (`.md`, `.ipynb`): Use MyST syntax `{term}glossary term``
@@ -58,16 +58,25 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 
 When creating a new example notebook:
 
-1. **Place it** in `docs/source/notebooks/` with naming pattern `{method}_{model}.ipynb`
+1. **Place it** in `docs/source/notebooks/` using the hyphen-case naming pattern above (e.g. `difference-in-differences-pymc.ipynb`)
 2. **Include at least one plot** in the notebook outputs (the first PNG image will be used as the thumbnail)
 3. **Add an entry to `docs/source/notebooks/gallery.yaml`** in the appropriate category:
    - `title`: card title shown in the gallery grid
-   - `notebook`: stem without extension (e.g. `did_pymc`)
+   - `notebook`: stem without extension (e.g. `difference-in-differences-pymc`)
    - `thumbnail: false` for non-notebook pages such as `sensitivity_checks.md`
 4. **Regenerate the gallery index** with `make gallery`. This updates `index.md`, hidden toctrees for the left sidebar, and thumbnails.
 5. **Test locally** with `make html` and check `docs/_build/notebooks/index.html`
 
 **Important**: `gallery.yaml` is the source of truth. `index.md` is generated — do not edit it by hand. The `gallery-in-sync` prek hook fails if `gallery.yaml`, notebooks, and `index.md` drift apart.
+
+### Legacy URL redirects (rediraffe)
+
+Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_redirects` in `docs/source/conf.py`. At docs build time, [sphinxext-rediraffe](https://sphinxext-rediraffe.readthedocs.io/) emits redirect HTML at the old RTD path so bookmarks and blog links keep working.
+
+- **On rename**: add `"notebooks/old_stem": "notebooks/new-stem"` (no `.ipynb` suffix). Keep all prior keys; do not delete old entries when cleaning up.
+- **On delete**: remove the card from `gallery.yaml`, run `make gallery`, then add a redirect from the old docname to the How-to gallery page (`"notebooks/old_stem": "notebooks/index"`) or to a closely related notebook if one supersedes it.
+- **Does not cover**: GitHub raw links to `docs/source/notebooks/old_name.ipynb` — only built RTD HTML URLs.
+- **CI**: `scripts/check_rediraffe_redirects.py` (prek hook `rediraffe-redirects`) fails if a notebook rename/delete since `main` lacks a redirect entry or if a redirect target is missing on disk.
 
 ## Code quality checks
 
