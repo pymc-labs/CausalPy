@@ -1306,7 +1306,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = self._observed_outcome.to_numpy()
         tau_draws_all = y_observed - mu_draws.values
 
         att_gt_rows: list[dict[str, Any]] = []
@@ -1336,7 +1336,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             return pd.DataFrame()
 
         pretreatment_data["tau_hat"] = (
-            pretreatment_data[self.outcome_variable_name] - pretreatment_data["y_hat0"]
+            self._observed_outcome.loc[pretreatment_data.index].to_numpy()
+            - pretreatment_data["y_hat0"].to_numpy()
         )
         att_gt = (
             pretreatment_data.groupby(["G", self.time_variable_name])["tau_hat"]
@@ -1518,7 +1519,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
         # Get observed y for all observations
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = self._observed_outcome.to_numpy()
 
         # Compute tau draws for all observations
         tau_draws_all = y_observed - mu_draws.values
