@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check that notebook renames/deletes have matching rediraffe redirects.
 
-Compares ``docs/source/notebooks/`` against a base git branch (default:
-``upstream/main``, then ``origin/main``, then ``main``). Any deleted or
+Compares ``docs/source/notebooks/`` against a base git ref (default: merge-base
+with ``main``, or ``HEAD^1`` on pre-commit.ci merge commits). Any deleted or
 renamed notebook/markdown page must appear as a key in ``rediraffe_redirects``
 in ``docs/source/conf.py``. All redirect targets must exist on disk.
 
@@ -38,23 +38,39 @@ def load_redirects() -> dict[str, str]:
     raise RuntimeError("rediraffe_redirects not found in docs/source/conf.py")
 
 
+def _ref_exists(ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        ).returncode
+        == 0
+    )
+
+
+def _merge_base_ref() -> str | None:
+    """Return the first parent when HEAD is a merge commit (e.g. pre-commit.ci PR runs)."""
+    if _ref_exists("HEAD^2") and _ref_exists("HEAD^1"):
+        return "HEAD^1"
+    return None
+
+
 def resolve_compare_branch(explicit: str | None) -> str:
     candidates = [
         explicit,
         os.environ.get("REDIRAFFE_COMPARE_BRANCH"),
+        os.environ.get("GITHUB_BASE_SHA"),
+        os.environ.get("PRE_COMMIT_FROM_REF"),
         "upstream/main",
         "origin/main",
+        "refs/remotes/origin/main",
         "main",
+        _merge_base_ref(),
     ]
     for candidate in candidates:
-        if not candidate:
-            continue
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", candidate],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
+        if candidate and _ref_exists(candidate):
             return candidate
     msg = "Could not resolve a compare branch for rediraffe redirect checks."
     raise RuntimeError(msg)
