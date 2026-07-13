@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20
+    rev: v0.15.21
     hooks:
       # Run the linter
       - id: ruff
@@ -61,7 +61,7 @@ repos:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.1.0
+    rev: v2.3.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
@@ -75,7 +75,7 @@ repos:
   # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
   # generated docs build are intentionally out of scope.
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.38
+    rev: v0.9.39
     hooks:
       - id: pymarkdown
         args: [scan]
