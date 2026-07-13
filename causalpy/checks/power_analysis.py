@@ -12,33 +12,30 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Power analysis for geo-experiment and quasi-experiment designs.
+Power analysis utilities for quasi-experimental designs.
 
-Provides efficient power curve estimation via two strategies:
-
-* **grid** — evaluate detection probability at every effect size in a
-  user-supplied list (brute-force Monte Carlo).
-* **sigmoid** — evaluate at a small number of points (default 5), fit
-  a two-parameter logistic curve, and extract the MDE analytically.
-  Achieves ~40–60% computation reduction while producing smoother curves.
-
-The power analysis operates on the learned null distribution from a
-completed ``PlaceboInTime`` check.  It simulates what the design would
-conclude at each hypothetical true effect size using the same ROPE-based
-Bayesian decision rule.
+Given a completed ``PlaceboInTime`` check, estimates the probability of
+detecting a true effect as a function of effect size (i.e. a power curve).
+Two strategies are supported: brute-force grid evaluation and a faster
+sigmoid-fit approach that extracts the MDE analytically.
 
 References
 ----------
-Issue: https://github.com/pymc-labs/CausalPy/issues/820
+.. [1] Gelman, A. & Carlin, J. (2014). Beyond Power Calculations:
+   Assessing Type S (Sign) and Type M (Magnitude) Errors.
+   *Perspectives on Psychological Science*, 9(6), 641-651.
+.. [2] Kruschke, J. K. (2013). Bayesian estimation supersedes the t test.
+   *Journal of Experimental Psychology: General*, 142(2), 573-603.
 """
 
 from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
 
 from causalpy.checks.base import CheckResult
@@ -48,9 +45,10 @@ from causalpy.checks.base import CheckResult
 class LogisticFit:
     """Parameters of the fitted two-parameter logistic curve.
 
-    The model is::
+    The detection probability is modelled as:
 
-        P(detect | x) = 1 / (1 + exp(-k * (x - x0)))
+    .. math::
+        P(\\text{detect} \\mid x) = \\frac{1}{1 + \\exp(-k(x - x_0))}
 
     Attributes
     ----------
@@ -95,6 +93,8 @@ class LogisticFit:
             raise ValueError(
                 f"power_threshold must be in (0, 1), got {power_threshold}"
             )
+        if self.k == 0:
+            return np.inf
         # Invert the logistic: x = x0 + (1/k) * ln(tau / (1 - tau))
         tau = power_threshold
         return self.x0 + (1.0 / self.k) * np.log(tau / (1.0 - tau))
@@ -145,19 +145,19 @@ class PowerCurveResult:
     def plot(  # pragma: no cover
         self,
         power_threshold: float = 0.80,
-        ax: Any = None,
+        ax: plt.Axes | None = None,
         title: str = "Power Curve",
         xlabel: str = "Effect size",
         ylabel: str = "Detection probability",
         show_mde: bool = True,
-    ) -> Any:
+    ) -> plt.Figure:
         """Plot the power curve.
 
         Parameters
         ----------
         power_threshold : float, default 0.80
             Power level at which to draw a horizontal reference line.
-        ax : matplotlib.axes.Axes or None
+        ax : plt.Axes or None
             Axes to plot on.  If ``None``, creates a new figure.
         title : str
             Plot title.
@@ -170,10 +170,9 @@ class PowerCurveResult:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        plt.Figure
             The figure containing the power curve.
         """
-        import matplotlib.pyplot as plt
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -267,22 +266,7 @@ class PowerCurveResult:
 
 
 def _logistic(x: np.ndarray, k: float, x0: float) -> np.ndarray:
-    """Two-parameter logistic function.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Input values (effect sizes).
-    k : float
-        Steepness parameter.
-    x0 : float
-        Midpoint parameter.
-
-    Returns
-    -------
-    np.ndarray
-        Logistic output in [0, 1].
-    """
+    """Standard two-parameter logistic: 1 / (1 + exp(-k*(x - x0)))."""
     return 1.0 / (1.0 + np.exp(-k * (x - x0)))
 
 
@@ -296,43 +280,16 @@ def _simulate_detection_rate(
     n_posterior_samples: int,
     rng: np.random.Generator,
 ) -> float:
-    """Simulate detection probability at a single effect size.
+    """Run Monte Carlo simulation at a single effect size.
 
-    For each replication:
-    1. Draw a null component from the learned status-quo distribution.
-    2. Add the hypothetical true effect to get the "true" total effect.
-    3. Simulate a posterior by drawing from Normal(true_effect, sigma).
-    4. Apply the ROPE decision rule.
-    5. Count "positive" decisions as detections.
-
-    Parameters
-    ----------
-    effect_size : float
-        The hypothetical true absolute cumulative effect.
-    null_samples : np.ndarray
-        Posterior predictive draws from the status-quo model.
-    fold_sds : np.ndarray
-        Per-fold posterior standard deviations.
-    rope_half_width : float
-        ROPE half-width for the decision rule.
-    threshold : float
-        Posterior probability cutoff for a "positive" decision.
-    n_simulations : int
-        Number of Monte Carlo replications.
-    n_posterior_samples : int
-        Number of posterior draws per simulated experiment.
-    rng : numpy.random.Generator
-        Random number generator.
-
-    Returns
-    -------
-    float
-        Estimated detection probability (fraction of "positive" decisions).
+    Draws null noise, adds the effect, simulates a posterior, and
+    checks whether the ROPE rule fires.  Returns the fraction of
+    replications that result in a positive decision.
     """
     detections = 0
-    for i in range(n_simulations):
+    for _ in range(n_simulations):
         # Draw null component (structural noise)
-        null_component = float(null_samples[i % len(null_samples)])
+        null_component = float(rng.choice(null_samples))
         # True effect = null noise + injected effect
         true_effect = null_component + effect_size
         # Simulate estimation uncertainty
@@ -348,6 +305,117 @@ def _simulate_detection_rate(
     return detections / n_simulations
 
 
+def _extract_null_distribution(
+    pit_result: CheckResult,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Pull null_samples, fold_sds, rope_half_width, threshold from metadata.
+
+    Raises ValueError if any required key is missing.
+    """
+    meta = pit_result.metadata
+    if "null_samples" not in meta:
+        raise ValueError(
+            "pit_result does not contain a learned null distribution. "
+            "Ensure PlaceboInTime completed successfully with at least "
+            "one fold."
+        )
+
+    null_samples = np.asarray(meta["null_samples"]).ravel()
+    fold_sds_raw = meta.get("fold_sds")
+    if fold_sds_raw is None:
+        fold_results = meta.get("fold_results", [])
+        if not fold_results:
+            raise ValueError("pit_result has no fold_sds or fold_results in metadata.")
+        fold_sds_raw = [fr.fold_sd for fr in fold_results]
+    fold_sds = np.asarray(fold_sds_raw)
+
+    rope_half_width = meta.get("rope_half_width")
+    if rope_half_width is None:
+        raise ValueError(
+            "pit_result has no rope_half_width in metadata. "
+            "PlaceboInTime must be configured with a rope_half_width."
+        )
+    rope_half_width = float(rope_half_width)
+
+    threshold = float(meta.get("threshold", 0.95))
+    return null_samples, fold_sds, rope_half_width, threshold
+
+
+def _build_effect_sizes(
+    strategy: str,
+    effect_sizes: list[float] | np.ndarray | None,
+    tau: float,
+    rope_half_width: float,
+    n_evaluation_points: int,
+) -> np.ndarray:
+    """Construct the evaluation grid from user inputs or sensible defaults."""
+    if strategy == "grid":
+        if effect_sizes is None:
+            return np.linspace(0, max(4.0 * tau, 3.0 * rope_half_width), 8)
+        return np.asarray(effect_sizes, dtype=float)
+    elif strategy == "sigmoid":
+        if effect_sizes is None:
+            range_min, range_max = 0.0, max(4.0 * tau, 3.0 * rope_half_width)
+        elif len(effect_sizes) == 2:
+            range_min, range_max = float(effect_sizes[0]), float(effect_sizes[1])
+        else:
+            range_min = float(np.min(effect_sizes))
+            range_max = float(np.max(effect_sizes))
+        return np.linspace(range_min, range_max, n_evaluation_points)
+    else:
+        raise ValueError(f"strategy must be 'grid' or 'sigmoid', got {strategy!r}")
+
+
+def _fit_sigmoid(
+    effect_sizes_arr: np.ndarray,
+    detection_rates: np.ndarray,
+    tau: float,
+    power_threshold: float,
+) -> tuple[LogisticFit | None, np.ndarray | None, np.ndarray | None, float | None]:
+    """Fit a logistic to the detection rates and extract MDE.
+
+    Returns (fitted_curve, smooth_x, smooth_y, mde).  All four are None
+    if curve_fit fails.
+    """
+    try:
+        x0_guess = float(effect_sizes_arr[len(effect_sizes_arr) // 2])
+        k_guess = 1.0 / max(tau, 1e-8)
+
+        popt, _ = curve_fit(
+            _logistic,
+            effect_sizes_arr,
+            detection_rates,
+            p0=[k_guess, x0_guess],
+            bounds=([0, 0], [np.inf, np.inf]),
+            maxfev=5000,
+        )
+        fitted_curve = LogisticFit(k=popt[0], x0=popt[1])
+
+        smooth_effect_sizes = np.linspace(
+            float(effect_sizes_arr[0]),
+            float(effect_sizes_arr[-1]),
+            200,
+        )
+        smooth_detection_rates = fitted_curve.predict(smooth_effect_sizes)
+        mde = fitted_curve.mde(power_threshold)
+
+        if mde < effect_sizes_arr[0] or mde > effect_sizes_arr[-1]:
+            warnings.warn(
+                f"Fitted MDE ({mde:.4f}) is outside the evaluated range "
+                f"[{effect_sizes_arr[0]:.4f}, {effect_sizes_arr[-1]:.4f}]. "
+                f"Consider widening the effect_sizes range.",
+                stacklevel=3,
+            )
+        return fitted_curve, smooth_effect_sizes, smooth_detection_rates, mde
+    except (RuntimeError, ValueError) as e:
+        warnings.warn(
+            f"Sigmoid fitting failed: {e}. "
+            f"Returning raw evaluation points without fitted curve.",
+            stacklevel=3,
+        )
+        return None, None, None, None
+
+
 def power_analysis(
     pit_result: CheckResult,
     effect_sizes: list[float] | np.ndarray | None = None,
@@ -360,15 +428,28 @@ def power_analysis(
 ) -> PowerCurveResult:
     """Compute a power curve from a completed PlaceboInTime check.
 
-    Estimates detection probability as a function of true effect size
-    using the learned null distribution from a fitted ``PlaceboInTime``
-    check.  Supports two strategies:
+    Uses the learned null distribution to simulate what the decision
+    rule would conclude at each hypothetical effect size.  Two modes:
 
-    * ``"grid"`` — evaluate at every effect size in ``effect_sizes``
-      (brute-force).
-    * ``"sigmoid"`` — evaluate at ``n_evaluation_points`` within the
-      range of ``effect_sizes``, fit a two-parameter logistic, and
-      extract the MDE analytically.  Reduces computation by ~40–60%.
+    * ``"grid"`` — brute-force evaluation at every requested point.
+    * ``"sigmoid"`` — evaluate at a few points, fit a logistic, and
+      read off the MDE.  Faster when you only need the MDE.
+
+    How it works
+    ------------
+    At each effect size the function runs ``n_simulations`` Monte Carlo
+    replications.  Each replication draws a null component from the
+    status-quo posterior, adds the hypothetical effect, simulates a
+    posterior around that total (using the observed fold SDs), and
+    applies the ROPE rule.  The fraction of replications that trigger
+    a positive decision is the estimated power.
+
+    For the sigmoid strategy a two-parameter logistic is fitted:
+
+    .. math::
+        P(\\text{detect} \\mid x) = \\frac{1}{1 + \\exp(-k(x - x_0))}
+
+    and the MDE is obtained by inverting at the desired power level.
 
     Parameters
     ----------
@@ -415,60 +496,18 @@ def power_analysis(
     >>> # curve.mde  # Minimum Detectable Effect at 80% power
     >>> # curve.plot()
     """
-    # Validate input
-    meta = pit_result.metadata
-    if "null_samples" not in meta:
-        raise ValueError(
-            "pit_result does not contain a learned null distribution. "
-            "Ensure PlaceboInTime completed successfully with at least "
-            "one fold."
-        )
-
-    null_samples = np.asarray(meta["null_samples"]).ravel()
-    fold_sds_raw = meta.get("fold_sds")
-    if fold_sds_raw is None:
-        fold_results = meta.get("fold_results", [])
-        if not fold_results:
-            raise ValueError("pit_result has no fold_sds or fold_results in metadata.")
-        fold_sds_raw = [fr.fold_sd for fr in fold_results]
-    fold_sds = np.asarray(fold_sds_raw)
-
-    rope_half_width = meta.get("rope_half_width")
-    if rope_half_width is None:
-        raise ValueError(
-            "pit_result has no rope_half_width in metadata. "
-            "PlaceboInTime must be configured with a rope_half_width."
-        )
-    rope_half_width = float(rope_half_width)
-
-    threshold = float(meta.get("threshold", 0.95))
-
-    # Compute null scale for default ranges
+    null_samples, fold_sds, rope_half_width, threshold = _extract_null_distribution(
+        pit_result
+    )
     tau = float(null_samples.std())
 
-    # Set up effect sizes based on strategy
-    if strategy == "grid":
-        if effect_sizes is None:
-            effect_sizes_arr = np.linspace(0, max(4.0 * tau, 3.0 * rope_half_width), 8)
-        else:
-            effect_sizes_arr = np.asarray(effect_sizes, dtype=float)
-    elif strategy == "sigmoid":
-        if effect_sizes is None:
-            range_min, range_max = 0.0, max(4.0 * tau, 3.0 * rope_half_width)
-        elif len(effect_sizes) == 2:
-            range_min, range_max = float(effect_sizes[0]), float(effect_sizes[1])
-        else:
-            # Use min/max of provided list as range
-            range_min = float(np.min(effect_sizes))
-            range_max = float(np.max(effect_sizes))
-        effect_sizes_arr = np.linspace(range_min, range_max, n_evaluation_points)
-    else:
-        raise ValueError(f"strategy must be 'grid' or 'sigmoid', got {strategy!r}")
+    effect_sizes_arr = _build_effect_sizes(
+        strategy, effect_sizes, tau, rope_half_width, n_evaluation_points
+    )
 
     # Run Monte Carlo simulation at each evaluation point
     rng = np.random.default_rng(random_seed)
     detection_rates = np.zeros(len(effect_sizes_arr))
-
     for i, eff in enumerate(effect_sizes_arr):
         detection_rates[i] = _simulate_detection_rate(
             effect_size=eff,
@@ -486,49 +525,10 @@ def power_analysis(
     smooth_effect_sizes = None
     smooth_detection_rates = None
     mde = None
-
     if strategy == "sigmoid":
-        # Fit the two-parameter logistic
-        try:
-            # Initial guesses: x0 near the midpoint, k ~ 1/tau
-            x0_guess = float(effect_sizes_arr[len(effect_sizes_arr) // 2])
-            k_guess = 1.0 / max(tau, 1e-8)
-
-            popt, _ = curve_fit(
-                _logistic,
-                effect_sizes_arr,
-                detection_rates,
-                p0=[k_guess, x0_guess],
-                bounds=([0, 0], [np.inf, np.inf]),
-                maxfev=5000,
-            )
-            fitted_curve = LogisticFit(k=popt[0], x0=popt[1])
-
-            # Generate smooth curve
-            smooth_effect_sizes = np.linspace(
-                float(effect_sizes_arr[0]),
-                float(effect_sizes_arr[-1]),
-                200,
-            )
-            smooth_detection_rates = fitted_curve.predict(smooth_effect_sizes)
-
-            # Extract MDE
-            mde = fitted_curve.mde(power_threshold)
-
-            # Warn if MDE is outside the evaluated range
-            if mde < effect_sizes_arr[0] or mde > effect_sizes_arr[-1]:
-                warnings.warn(
-                    f"Fitted MDE ({mde:.4f}) is outside the evaluated range "
-                    f"[{effect_sizes_arr[0]:.4f}, {effect_sizes_arr[-1]:.4f}]. "
-                    f"Consider widening the effect_sizes range.",
-                    stacklevel=2,
-                )
-        except RuntimeError as e:
-            warnings.warn(
-                f"Sigmoid fitting failed: {e}. "
-                f"Returning raw evaluation points without fitted curve.",
-                stacklevel=2,
-            )
+        fitted_curve, smooth_effect_sizes, smooth_detection_rates, mde = _fit_sigmoid(
+            effect_sizes_arr, detection_rates, tau, power_threshold
+        )
 
     return PowerCurveResult(
         effect_sizes=effect_sizes_arr,

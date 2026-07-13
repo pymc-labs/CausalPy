@@ -25,11 +25,6 @@ from causalpy.checks.power_analysis import (
     power_analysis,
 )
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 def _make_pit_result(
     null_mean: float = 0.0,
     null_std: float = 50.0,
@@ -57,13 +52,6 @@ def _make_pit_result(
             "p_effect_outside_null": 0.97,
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests for _logistic helper
-# ---------------------------------------------------------------------------
-
-
 class TestLogistic:
     """Tests for the logistic function."""
 
@@ -90,13 +78,6 @@ class TestLogistic:
         y_shallow = _logistic(x, k=1.0, x0=5.0)
         y_steep = _logistic(x, k=10.0, x0=5.0)
         assert y_steep > y_shallow
-
-
-# ---------------------------------------------------------------------------
-# Tests for LogisticFit
-# ---------------------------------------------------------------------------
-
-
 class TestLogisticFit:
     """Tests for the LogisticFit dataclass."""
 
@@ -130,13 +111,6 @@ class TestLogisticFit:
             fit.mde(0.0)
         with pytest.raises(ValueError, match="power_threshold must be in"):
             fit.mde(1.0)
-
-
-# ---------------------------------------------------------------------------
-# Tests for _simulate_detection_rate
-# ---------------------------------------------------------------------------
-
-
 class TestSimulateDetectionRate:
     """Tests for the detection rate simulation."""
 
@@ -201,13 +175,6 @@ class TestSimulateDetectionRate:
         # Not strictly monotonic due to MC noise, but overall trend
         assert rates[-1] > rates[0]
         assert rates[-1] > 0.70
-
-
-# ---------------------------------------------------------------------------
-# Tests for power_analysis (grid strategy)
-# ---------------------------------------------------------------------------
-
-
 class TestPowerAnalysisGrid:
     """Tests for the grid strategy."""
 
@@ -275,13 +242,6 @@ class TestPowerAnalysisGrid:
             random_seed=42,
         )
         np.testing.assert_array_equal(r1.detection_rates, r2.detection_rates)
-
-
-# ---------------------------------------------------------------------------
-# Tests for power_analysis (sigmoid strategy)
-# ---------------------------------------------------------------------------
-
-
 class TestPowerAnalysisSigmoid:
     """Tests for the sigmoid strategy."""
 
@@ -381,13 +341,6 @@ class TestPowerAnalysisSigmoid:
         assert len(sigmoid_result.effect_sizes) == 5
         # Sigmoid should still produce a smooth curve with 200 points
         assert len(sigmoid_result.smooth_effect_sizes) == 200
-
-
-# ---------------------------------------------------------------------------
-# Tests for error handling
-# ---------------------------------------------------------------------------
-
-
 class TestPowerAnalysisErrors:
     """Tests for error handling."""
 
@@ -419,13 +372,6 @@ class TestPowerAnalysisErrors:
         pit_result = _make_pit_result()
         with pytest.raises(ValueError, match="strategy must be"):
             power_analysis(pit_result, strategy="unknown")
-
-
-# ---------------------------------------------------------------------------
-# Tests for PowerCurveResult.plot
-# ---------------------------------------------------------------------------
-
-
 class TestPowerCurvePlot:
     """Tests for the plot method."""
 
@@ -487,13 +433,6 @@ class TestPowerCurvePlot:
         returned_fig = result.plot(ax=ax)
         assert returned_fig is fig
         plt.close(fig)
-
-
-# ---------------------------------------------------------------------------
-# Tests for coverage of edge branches
-# ---------------------------------------------------------------------------
-
-
 class TestPowerAnalysisBranches:
     """Tests for uncovered code branches."""
 
