@@ -435,22 +435,6 @@ def power_analysis(
     * ``"sigmoid"`` — evaluate at a few points, fit a logistic, and
       read off the MDE.  Faster when you only need the MDE.
 
-    How it works
-    ------------
-    At each effect size the function runs ``n_simulations`` Monte Carlo
-    replications.  Each replication draws a null component from the
-    status-quo posterior, adds the hypothetical effect, simulates a
-    posterior around that total (using the observed fold SDs), and
-    applies the ROPE rule.  The fraction of replications that trigger
-    a positive decision is the estimated power.
-
-    For the sigmoid strategy a two-parameter logistic is fitted:
-
-    .. math::
-        P(\\text{detect} \\mid x) = \\frac{1}{1 + \\exp(-k(x - x_0))}
-
-    and the MDE is obtained by inverting at the desired power level.
-
     Parameters
     ----------
     pit_result : CheckResult
@@ -485,6 +469,22 @@ def power_analysis(
     ------
     ValueError
         If ``pit_result`` does not contain the required metadata.
+
+    Notes
+    -----
+    At each effect size the function runs ``n_simulations`` Monte Carlo
+    replications.  Each replication draws a null component from the
+    status-quo posterior, adds the hypothetical effect, simulates a
+    posterior around that total (using the observed fold SDs), and
+    applies the ROPE rule.  The fraction of replications that trigger
+    a positive decision is the estimated power.
+
+    For the sigmoid strategy a two-parameter logistic is fitted:
+
+    .. math::
+        P(\\text{detect} \\mid x) = \\frac{1}{1 + \\exp(-k(x - x_0))}
+
+    and the MDE is obtained by inverting at the desired power level.
 
     Examples
     --------
