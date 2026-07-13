@@ -445,8 +445,9 @@ def power_analysis(
         For ``strategy="grid"``: the exact effect sizes to evaluate.
         For ``strategy="sigmoid"``: a two-element ``[min, max]`` range
         within which evaluation points are placed.  If ``None``,
-        defaults to ``np.linspace(0, 4 * tau, 8)`` for grid or
-        ``[0, 4 * tau]`` for sigmoid, where ``tau`` is the null SD.
+        defaults to ``np.linspace(0, max(4*tau, 3*rope), 8)`` for grid
+        or ``[0, max(4*tau, 3*rope)]`` for sigmoid, where ``tau`` is
+        the null SD and ``rope`` is the ROPE half-width.
     n_simulations : int, default 200
         Number of Monte Carlo replications per evaluation point.
     strategy : {"grid", "sigmoid"}, default "grid"
