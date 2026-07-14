@@ -48,9 +48,7 @@ from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     PlotSpec,
-    as_axes_result,
     dataarray_draws,
-    panel_axes,
     summarize_draws,
 )
 from causalpy.pymc_models import PyMCModel
@@ -676,26 +674,11 @@ class PanelRegression(BaseExperiment):
                 + labs(title="", x="Coefficient Value", y="")
                 + theme(figure_size=figsize)
             )
-            fig = p.draw()
-            axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-            ax = axes[0]
-            ax.set_title(title)
-            return fig, ax
-
-    def _draw_plot_result(
-        self, result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Draw a ggplot or PlotSpec returned by coefficient plot helpers."""
-        if isinstance(result, PlotSpec):
-            fig = result.plot.draw(show=False)
-            axes = panel_axes(fig, result.n_panels)
-            if result.overlay is not None:
-                result.overlay(fig, axes)
-            return fig, as_axes_result(axes)
-        if isinstance(result, ggplot):
-            fig = result.draw(show=False)
-            return fig, as_axes_result(panel_axes(fig))
-        return result
+            return PlotSpec(
+                p,
+                overlay=lambda _fig, axes: axes[0].set_title(title),
+                n_panels=1,
+            )
 
     def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data for Bayesian model.
@@ -791,9 +774,13 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._draw_plot_result(
-            self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
-        )
+        import arviz as az
+
+        with plt.style.context(az.style.library["arviz-darkgrid"]):
+            result = self._plot_coefficients_internal(
+                var_names=var_names, hdi_prob=hdi_prob
+            )
+        return self._finalize_plot(result, show=False, legend_kwargs=None)
 
     def plot_unit_effects(
         self, highlight: list[str] | None = None, label_extreme: int = 0

@@ -363,6 +363,16 @@ class BaseExperiment(ABC):
             else:
                 raise ValueError("Unsupported model type")
 
+        return self._finalize_plot(result, show=show, legend_kwargs=legend_kwargs)
+
+    def _finalize_plot(
+        self,
+        result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray],
+        *,
+        show: bool,
+        legend_kwargs: dict[str, Any] | None,
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
+        """Draw a ggplot, PlotSpec, or legacy matplotlib return for public APIs."""
         if isinstance(result, PlotSpec):
             fig = result.plot.draw(show=False)
             axes = panel_axes(fig, result.n_panels)

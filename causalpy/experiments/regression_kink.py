@@ -36,6 +36,7 @@ from plotnine import (
 from causalpy.constants import HDI_PROB
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
+    PlotSpec,
     add_posterior_kind,
     interval_kind,
     posterior_histogram_tiles,
@@ -291,7 +292,7 @@ class RegressionKink(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Plot the regression kink results.
 
         Parameters
@@ -333,9 +334,8 @@ class RegressionKink(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot
-            A :class:`plotnine.ggplot` object. Call ``.draw()`` to obtain the
-            matplotlib figure.
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+            Matplotlib figure and axes for the rendered plot.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -403,7 +403,7 @@ class RegressionKink(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> ggplot:
+    ) -> PlotSpec:
         """Build the Bayesian RK plot from tidy declarative layers."""
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
@@ -463,7 +463,7 @@ class RegressionKink(BaseExperiment):
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 
-        return p
+        return PlotSpec(p, n_panels=1)
 
     def effect_summary(
         self,

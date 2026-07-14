@@ -26,7 +26,6 @@ from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
 from plotnine import (
     aes,
-    coord_cartesian,
     geom_point,
     geom_violin,
     ggplot,
@@ -34,7 +33,6 @@ from plotnine import (
     labs,
     scale_color_manual,
     scale_fill_manual,
-    scale_x_continuous,
 )
 from sklearn.base import RegressorMixin
 
@@ -49,11 +47,13 @@ from causalpy.plot_utils import (
     PlotSpec,
     add_causal_panel_legend,
     add_posterior_kind,
+    coord_xlim_for_column,
     histogram_y_edges,
     interval_kind,
     label_draws,
     posterior_histogram_tiles,
     prediction_draws,
+    scale_for_x_column,
     spaghetti_draws,
     summarize_draws,
 )
@@ -605,7 +605,7 @@ class DifferenceInDifferences(BaseExperiment):
             spaghetti_df=plot_data.posterior_paths,
             histogram_tiles=plot_data.posterior_density,
         )
-        treatment_times = self.x_pred_treatment[tcol].to_numpy().astype(float)
+        x_values = plot_data.scatter[tcol]
         p = (
             p
             + scale_color_manual(values=colors, name="")
@@ -614,14 +614,8 @@ class DifferenceInDifferences(BaseExperiment):
                 if kind == "ribbon"
                 else guides()
             )
-            + scale_x_continuous(breaks=list(treatment_times))
-            + coord_cartesian(
-                xlim=(
-                    float(np.min(treatment_times)) - 0.05,
-                    float(np.max(treatment_times))
-                    + 0.15 * float(np.ptp(treatment_times) or 1.0),
-                )
-            )
+            + scale_for_x_column(x_values)
+            + coord_xlim_for_column(x_values)
             + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
         if kind == "histogram":

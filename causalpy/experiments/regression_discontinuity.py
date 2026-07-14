@@ -40,6 +40,7 @@ from causalpy.custom_exceptions import (
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
+    PlotSpec,
     add_posterior_kind,
     interval_kind,
     posterior_histogram_tiles,
@@ -344,7 +345,7 @@ class RegressionDiscontinuity(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot | tuple[plt.Figure, plt.Axes]:
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Plot the regression discontinuity results.
 
         Parameters
@@ -386,10 +387,8 @@ class RegressionDiscontinuity(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot or tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-            A :class:`plotnine.ggplot` for Bayesian ``ribbon`` / ``spaghetti``
-            plots (call ``.draw()`` for the matplotlib figure). OLS plots
-            still return a ``(fig, ax)`` tuple.
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+            Matplotlib figure and axes for the rendered plot.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -470,7 +469,7 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> ggplot:
+    ) -> PlotSpec:
         """Build the Bayesian RD plot from tidy declarative layers."""
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
@@ -541,7 +540,7 @@ class RegressionDiscontinuity(BaseExperiment):
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 
-        return p
+        return PlotSpec(p, n_panels=1)
 
     def _ols_plot(
         self,

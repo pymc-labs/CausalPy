@@ -18,6 +18,7 @@ Tests for plot utility functions
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
 import pytest
 import xarray as xr
 
@@ -269,3 +270,141 @@ def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_draws):
     ).assign(series="a")
     with pytest.raises(ValueError, match="spaghetti_df"):
         posterior_kind_layers(bands, "spaghetti", x="obs_ind", y="mu")
+
+
+def test_validate_posterior_plot_options_rejects_invalid_kind():
+    from causalpy.plot_utils import validate_posterior_plot_options
+
+    with pytest.raises(ValueError, match="Unknown kind"):
+        validate_posterior_plot_options("bands")
+
+
+def test_validate_posterior_plot_options_rejects_invalid_ci_kind():
+    from causalpy.plot_utils import validate_posterior_plot_options
+
+    with pytest.raises(ValueError, match="Unknown ci_kind"):
+        validate_posterior_plot_options("ribbon", ci_kind="quantile")
+
+
+def test_validate_posterior_plot_options_rejects_non_positive_num_samples():
+    from causalpy.plot_utils import validate_posterior_plot_options
+
+    with pytest.raises(ValueError, match="num_samples must be positive"):
+        validate_posterior_plot_options("ribbon", num_samples=0)
+
+
+def test_spaghetti_draws_isolates_paths_across_series(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, spaghetti_draws
+
+    draws = pl.concat(
+        [
+            label_draws(synthetic_posterior_draws, series="control"),
+            label_draws(synthetic_posterior_draws, series="treatment"),
+        ],
+        how="diagonal_relaxed",
+    )
+    sampled = spaghetti_draws(
+        draws,
+        group_by=["series", "obs_ind"],
+        num_samples=4,
+    )
+
+    assert sampled["_line_id"].nunique() == 8
+    assert sampled.groupby("series")["_line_id"].nunique().eq(4).all()
+    assert sampled.groupby("_line_id")["series"].nunique().eq(1).all()
+
+
+def _assert_causal_panel_semantic_schema(panel_data) -> None:
+    draw_cols = set(panel_data.draws.columns)
+    assert {"chain", "draw", "obs_ind", "variable", "series", "value"} <= draw_cols
+    forbidden = {
+        "panel",
+        "mu",
+        "mu_lower",
+        "mu_upper",
+        "y1",
+        "y2",
+        "density",
+        "width",
+        "height",
+    }
+    assert not (draw_cols & forbidden)
+    assert set(panel_data.observations.columns) == {"obs_ind", "value"}
+
+
+@pytest.mark.integration
+def test_its_causal_panel_data_semantic_schema(mock_pymc_sample, its_data):
+    """Semantic extractor exposes only long-form identity, not render artifacts."""
+    import pandas as pd
+
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
+
+    result = cp.InterruptedTimeSeries(
+        its_data,
+        pd.to_datetime("2017-01-01"),
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    panel_data = result._causal_panel_data()
+
+    _assert_causal_panel_semantic_schema(panel_data)
+    assert set(panel_data.draws["variable"].unique()) == {
+        "outcome",
+        "effect",
+        "cumulative_effect",
+    }
+    assert set(panel_data.draws["series"].unique()) == {
+        "fit",
+        "counterfactual",
+        "pre",
+        "post",
+    }
+
+
+@pytest.mark.integration
+def test_sc_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
+    """Synthetic Control semantic extractor matches the shared panel contract."""
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
+
+    result = cp.SyntheticControl(
+        sc_data,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
+    )
+    panel_data = result._causal_panel_data(treated_unit="actual")
+
+    _assert_causal_panel_semantic_schema(panel_data)
+    assert set(panel_data.draws["variable"].unique()) == {
+        "outcome",
+        "effect",
+        "cumulative_effect",
+    }
+
+
+@pytest.mark.integration
+def test_sdid_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
+    """SDiD semantic extractor matches the shared panel contract."""
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
+
+    result = cp.SyntheticDifferenceInDifferences(
+        sc_data,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    panel_data = result._causal_panel_data(treated_unit="actual")
+
+    _assert_causal_panel_semantic_schema(panel_data)
+    assert set(panel_data.draws["variable"].unique()) == {
+        "outcome",
+        "effect",
+        "cumulative_effect",
+    }

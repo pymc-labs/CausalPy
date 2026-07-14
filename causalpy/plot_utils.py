@@ -40,6 +40,7 @@ from plotnine import (
     geom_hline,
     geom_line,
     geom_point,
+    geom_pointrange,
     geom_ribbon,
     geom_tile,
     guides,
@@ -47,6 +48,7 @@ from plotnine import (
     scale_color_manual,
     scale_fill_continuous,
     scale_fill_manual,
+    scale_x_continuous,
     theme,
 )
 
@@ -57,6 +59,9 @@ HISTOGRAM_PANEL_THEME = theme(
     panel_grid_major=element_blank(),
     panel_grid_minor=element_blank(),
 )
+
+_VALID_POSTERIOR_KINDS = frozenset({"ribbon", "histogram", "spaghetti"})
+_VALID_CI_KINDS = frozenset({"hdi", "eti"})
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,46 @@ def to_axes_list(ax: plt.Axes | np.ndarray | list[plt.Axes]) -> list[plt.Axes]:
     return [ax]
 
 
+def validate_posterior_plot_options(
+    kind: str,
+    *,
+    ci_kind: str = "hdi",
+    num_samples: int = 50,
+) -> None:
+    """Validate shared posterior plot kwargs once at the plotting boundary.
+
+    Parameters
+    ----------
+    kind : str
+        Posterior rendering mode.
+    ci_kind : str, optional
+        Credible interval type for ribbon summaries.
+    num_samples : int, optional
+        Number of spaghetti paths to sample.
+    """
+    if kind not in _VALID_POSTERIOR_KINDS:
+        msg = f"Unknown kind: {kind!r}. Must be 'ribbon', 'histogram', or 'spaghetti'."
+        raise ValueError(msg)
+    if ci_kind not in _VALID_CI_KINDS:
+        msg = f"Unknown ci_kind: {ci_kind!r}. Must be 'hdi' or 'eti'."
+        raise ValueError(msg)
+    if num_samples <= 0:
+        msg = f"num_samples must be positive, got {num_samples}."
+        raise ValueError(msg)
+
+
+def _validate_ci_kind(ci_kind: str) -> None:
+    if ci_kind not in _VALID_CI_KINDS:
+        msg = f"Unknown ci_kind: {ci_kind!r}. Must be 'hdi' or 'eti'."
+        raise ValueError(msg)
+
+
+def _validate_num_samples(num_samples: int) -> None:
+    if num_samples <= 0:
+        msg = f"num_samples must be positive, got {num_samples}."
+        raise ValueError(msg)
+
+
 def interval_kind(ci_kind: Literal["hdi", "eti"]) -> Literal["hdi", "eti"]:
     """Map public ``ci_kind`` to tidydraws ``interval`` argument.
 
@@ -118,7 +163,57 @@ def interval_kind(ci_kind: Literal["hdi", "eti"]) -> Literal["hdi", "eti"]:
     ci_kind : {"hdi", "eti"}
         Credible interval type from experiment ``plot()`` APIs.
     """
-    return "eti" if ci_kind == "eti" else "hdi"
+    _validate_ci_kind(ci_kind)
+    return ci_kind
+
+
+def scale_for_x_column(x: pd.Series | np.ndarray) -> Any:
+    """Choose a plotnine x scale that matches the column dtype.
+
+    Parameters
+    ----------
+    x : pandas.Series or numpy.ndarray
+        Values used on the shared x aesthetic.
+    """
+    series = pd.Series(x)
+    if pd.api.types.is_bool_dtype(series) or isinstance(
+        series.dtype, pd.CategoricalDtype
+    ):
+        return guides()
+    if not pd.api.types.is_numeric_dtype(series):
+        return guides()
+    breaks = sorted(series.astype(float).unique())
+    return scale_x_continuous(breaks=breaks)
+
+
+def coord_xlim_for_column(
+    x: pd.Series | np.ndarray,
+    *,
+    padding: float = 0.15,
+) -> Any:
+    """Return ``coord_cartesian`` x limits for numeric x columns only.
+
+    Parameters
+    ----------
+    x : pandas.Series or numpy.ndarray
+        Values used on the shared x aesthetic.
+    padding : float, optional
+        Extra span added beyond the maximum x value for annotations.
+    """
+    from plotnine import coord_cartesian
+
+    series = pd.Series(x)
+    if pd.api.types.is_bool_dtype(series) or isinstance(
+        series.dtype, pd.CategoricalDtype
+    ):
+        return coord_cartesian()
+    if not pd.api.types.is_numeric_dtype(series):
+        return coord_cartesian()
+    vals = series.astype(float).to_numpy()
+    span = float(np.ptp(vals) or 1.0)
+    return coord_cartesian(
+        xlim=(float(np.min(vals)) - 0.05, float(np.max(vals)) + padding * span)
+    )
 
 
 def sample_draw_lines(
@@ -287,6 +382,7 @@ def spaghetti_draws(
     sort_by : str or list of str, optional
         Explicit output sort columns.
     """
+    _validate_num_samples(num_samples)
     sampled = sample_draw_lines(draws, num_samples, sort_by=sort_by or group_by)
     identity = [col for col in ("panel", "series") if col in sampled.columns]
     if identity:
@@ -296,6 +392,8 @@ def spaghetti_draws(
                 separator=":",
             ).alias("_line_id")
         )
+    else:
+        sampled = sampled.with_columns(pl.col("_draw_id").alias("_line_id"))
     return sampled.to_pandas()
 
 
@@ -309,7 +407,7 @@ def posterior_kind_layers(
     histogram_tiles: pd.DataFrame | None = None,
     ymin: str = "mu_lower",
     ymax: str = "mu_upper",
-    spaghetti_group: str = "_draw_id",
+    spaghetti_group: str = "_line_id",
 ) -> list[Any]:
     """plotnine layers for ribbon, spaghetti, or histogram (mean-line) modes.
 
@@ -331,6 +429,7 @@ def posterior_kind_layers(
     spaghetti_group : str, optional
         Grouping column for spaghetti lines.
     """
+    validate_posterior_plot_options(kind)
     if kind == "histogram":
         layers: list[Any] = []
         if histogram_tiles is not None:
@@ -373,7 +472,7 @@ def add_posterior_kind(
     histogram_tiles: pd.DataFrame | None = None,
     ymin: str = "mu_lower",
     ymax: str = "mu_upper",
-    spaghetti_group: str = "_draw_id",
+    spaghetti_group: str = "_line_id",
 ) -> Any:
     """Append ribbon/spaghetti/histogram layers to a plotnine ggplot.
 
@@ -416,6 +515,277 @@ def _categorize_panels(frames: list[pd.DataFrame], panels: list[str]) -> None:
         frame["panel"] = pd.Categorical(frame["panel"], categories=panels, ordered=True)
 
 
+@dataclass(frozen=True)
+class CausalPanelData:
+    """Semantic long-form draws and observations for causal panel plots."""
+
+    draws: pl.DataFrame
+    observations: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class CausalPanelLayout:
+    """Maps semantic ``(variable, series)`` keys to causal panels."""
+
+    top: tuple[tuple[str, str], ...]
+    middle: tuple[tuple[str, str], ...]
+    bottom: tuple[tuple[str, str], ...]
+    shade_outcome: bool = True
+
+
+CAUSAL_IMPACT_LAYOUT = CausalPanelLayout(
+    top=(("outcome", "fit"), ("outcome", "counterfactual")),
+    middle=(("effect", "pre"), ("effect", "post")),
+    bottom=(("cumulative_effect", "post"),),
+)
+
+PIECEWISE_ITS_LAYOUT = CausalPanelLayout(
+    top=(("outcome", "fit"), ("outcome", "counterfactual")),
+    middle=(("effect", "post"),),
+    bottom=(("cumulative_effect", "post"),),
+    shade_outcome=False,
+)
+
+
+def tag_semantic_draws(
+    draws: pl.DataFrame,
+    *,
+    variable: str,
+    series: str,
+    value_col: str = "mu",
+) -> pl.DataFrame:
+    """Tag extracted draws with semantic ``variable``/``series`` identity.
+
+    Parameters
+    ----------
+    draws : polars.DataFrame
+        Canonical long posterior draws with a ``mu`` (or ``value_col``) column.
+    variable : str
+        Semantic quantity name (for example ``"outcome"`` or ``"effect"``).
+    series : str
+        Semantic series name (for example ``"fit"`` or ``"counterfactual"``).
+    value_col : str, optional
+        Source posterior value column. Defaults to ``"mu"``.
+    """
+    keep = [c for c in draws.columns if c != value_col]
+    return draws.select(
+        *keep,
+        pl.col(value_col).alias("value"),
+        pl.lit(variable).alias("variable"),
+        pl.lit(series).alias("series"),
+    )
+
+
+def stack_semantic_draws(parts: list[pl.DataFrame]) -> pl.DataFrame:
+    """Concatenate tagged semantic draw tables.
+
+    Parameters
+    ----------
+    parts : list of polars.DataFrame
+        Draw tables tagged by :func:`tag_semantic_draws`.
+    """
+    if not parts:
+        msg = "stack_semantic_draws requires at least one part"
+        raise ValueError(msg)
+    return pl.concat(parts, how="diagonal_relaxed")
+
+
+def _panel_key_map(
+    layout: CausalPanelLayout,
+    panel_titles: tuple[str, str, str],
+) -> dict[tuple[str, str], str]:
+    mapping: dict[tuple[str, str], str] = {}
+    for key in layout.top:
+        mapping[key] = panel_titles[0]
+    for key in layout.middle:
+        mapping[key] = panel_titles[1]
+    for key in layout.bottom:
+        mapping[key] = panel_titles[2]
+    return mapping
+
+
+def _semantic_to_panel_draws(
+    draws: pl.DataFrame,
+    *,
+    layout: CausalPanelLayout,
+    panel_titles: tuple[str, str, str],
+    series_labels: dict[tuple[str, str], str],
+) -> pl.DataFrame:
+    key_to_panel = _panel_key_map(layout, panel_titles)
+    parts: list[pl.DataFrame] = []
+    for (variable, series), panel in key_to_panel.items():
+        subset = draws.filter(
+            (pl.col("variable") == variable) & (pl.col("series") == series)
+        )
+        if subset.is_empty():
+            continue
+        display = series_labels.get((variable, series), series)
+        parts.append(
+            subset.with_columns(
+                pl.lit(panel).alias("panel"),
+                pl.lit(display).alias("series"),
+                pl.col("value").alias("mu"),
+            )
+        )
+    if not parts:
+        msg = "semantic draws contain no layout keys"
+        raise ValueError(msg)
+    return pl.concat(parts, how="diagonal_relaxed")
+
+
+def _observations_for_plot(
+    observations: pd.DataFrame,
+    *,
+    x: str,
+    panel: str,
+) -> pd.DataFrame:
+    obs = observations.rename(columns={"value": "y"})
+    obs["series"] = "Observations"
+    obs["panel"] = panel
+    return obs
+
+
+def _derive_effect_area(
+    intervals: pd.DataFrame,
+    observations: pd.DataFrame,
+    *,
+    layout: CausalPanelLayout,
+    panel_titles: tuple[str, str, str],
+    series_labels: dict[tuple[str, str], str],
+    x: str,
+    post_index: pd.Index | None,
+) -> pd.DataFrame | None:
+    top, middle, _bottom = panel_titles
+    counterfactual_label = series_labels.get(
+        ("outcome", "counterfactual"), "Counterfactual"
+    )
+    post_effect_label = series_labels.get(("effect", "post"), "post")
+    post_prediction = intervals[
+        (intervals["panel"] == top) & (intervals["series"] == counterfactual_label)
+    ]
+    post_impact = intervals[
+        (intervals["panel"] == middle) & (intervals["series"] == post_effect_label)
+    ]
+    areas: list[pd.DataFrame] = []
+    if (
+        layout.shade_outcome
+        and not post_prediction.empty
+        and (post_index is None or len(post_index) > 1)
+    ):
+        obs_frame = observations.rename(columns={"value": "y"})
+        if post_index is not None:
+            post_obs = obs_frame.loc[obs_frame[x].isin(post_index.tolist()), [x, "y"]]
+        else:
+            post_obs = obs_frame.loc[obs_frame[x].isin(post_prediction[x]), [x, "y"]]
+        areas.append(
+            post_prediction[[x, "mu"]]
+            .merge(post_obs, on=x)
+            .rename(columns={"mu": "y1", "y": "y2"})
+            .assign(panel=top)
+        )
+    if not post_impact.empty:
+        areas.append(
+            post_impact[[x, "mu"]]
+            .rename(columns={"mu": "y1"})
+            .assign(y2=0.0, panel=middle)
+        )
+    if not areas:
+        return None
+    return pd.concat(areas, ignore_index=True)
+
+
+def _derive_singleton_intervals(
+    intervals: pd.DataFrame,
+    *,
+    panel_titles: tuple[str, str, str],
+    series_labels: dict[tuple[str, str], str],
+    post_index: pd.Index | None,
+) -> pd.DataFrame:
+    if post_index is None or len(post_index) != 1:
+        return intervals.iloc[0:0].copy()
+    top, middle, bottom = panel_titles
+    counterfactual_label = series_labels.get(
+        ("outcome", "counterfactual"), "Counterfactual"
+    )
+    post_effect_label = series_labels.get(("effect", "post"), "post")
+    cumulative_label = series_labels.get(("cumulative_effect", "post"), "post")
+    return pd.concat(
+        [
+            intervals[
+                (intervals["panel"] == top)
+                & (intervals["series"] == counterfactual_label)
+            ],
+            intervals[
+                (intervals["panel"] == middle)
+                & (intervals["series"] == post_effect_label)
+            ],
+            intervals[
+                (intervals["panel"] == bottom)
+                & (intervals["series"] == cumulative_label)
+            ],
+        ],
+        ignore_index=True,
+    )
+
+
+def _derive_histogram_tiles(
+    draws: pl.DataFrame,
+    panel_draws: pl.DataFrame,
+    *,
+    layout: CausalPanelLayout,
+    panel_titles: tuple[str, str, str],
+    x: str,
+    histogram_top_keys: tuple[tuple[str, str], ...] | None = None,
+) -> pd.DataFrame:
+    if histogram_top_keys is not None:
+        top, middle, bottom = panel_titles
+        top_subsets = [
+            draws.filter(
+                (pl.col("variable") == variable) & (pl.col("series") == series)
+            )
+            for variable, series in histogram_top_keys
+        ]
+        top_edges = histogram_y_edges(*top_subsets, var_name="value")
+        tiles = [
+            posterior_histogram_tiles(
+                subset,
+                x,
+                x_col=x,
+                panel=top,
+                y_edges=top_edges,
+                var_name="value",
+            )
+            for subset in top_subsets
+        ]
+        for panel, keys in ((middle, layout.middle), (bottom, layout.bottom)):
+            for variable, series in keys:
+                subset = draws.filter(
+                    (pl.col("variable") == variable) & (pl.col("series") == series)
+                )
+                tiles.append(
+                    posterior_histogram_tiles(
+                        subset,
+                        x,
+                        x_col=x,
+                        panel=panel,
+                        var_name="value",
+                    )
+                )
+        return pd.concat(tiles, ignore_index=True)
+    return pd.concat(
+        [
+            posterior_histogram_tiles(
+                panel_draws.filter(pl.col("panel") == panel),
+                x,
+                x_col=x,
+                panel=panel,
+            )
+            for panel in panel_titles
+        ],
+        ignore_index=True,
+    )
+
+
 def add_causal_panel_legend(
     ax: plt.Axes,
     *,
@@ -451,60 +821,134 @@ def add_causal_panel_legend(
 
 
 def build_causal_panel_plot(
-    bands: pd.DataFrame,
-    obs: pd.DataFrame,
+    panel_data: CausalPanelData,
     *,
+    layout: CausalPanelLayout,
     panels: list[str],
+    series_labels: dict[tuple[str, str], str],
     colors: dict[str, str],
     show_panel_titles: bool = False,
     kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+    ci_prob: float = HDI_PROB,
+    interval: Literal["hdi", "eti"] = "hdi",
+    num_samples: int = 50,
     x: str = "obs_ind",
-    shade_df: pd.DataFrame | None = None,
     shade_fill: str = "#1f77b4",
-    spaghetti_df: pd.DataFrame | None = None,
-    histogram_tiles: pd.DataFrame | None = None,
     figsize: tuple[float, float] = (7, 11),
     zero_linetype: str | None = None,
     zero_alpha: float = 1.0,
+    post_index: pd.Index | None = None,
+    histogram_top_keys: tuple[tuple[str, str], ...] | None = None,
+    singleton_color: str = "#ff7f0e",
 ) -> Any:
     """Three-panel causal-impact layout shared by ITS, SC, SDiD, and PiecewiseITS.
 
+    Derives interval summaries, shading, spaghetti paths, histogram tiles, and
+    singleton point-ranges from semantic ``CausalPanelData``.
+
     Parameters
     ----------
-    bands : pandas.DataFrame
-        Mean + interval summaries with ``panel`` and ``series`` columns.
-    obs : pandas.DataFrame
-        Observed points for the top panel.
+    panel_data : CausalPanelData
+        Semantic draws and observations from an experiment extractor.
+    layout : CausalPanelLayout
+        Maps semantic keys to top, middle, and bottom panels.
     panels : list of str
         Ordered facet labels (top, middle, bottom).
+    series_labels : dict
+        Display labels keyed by ``(variable, series)`` semantic pairs.
     colors : dict
-        Series name to color mapping.
+        Series name to color mapping for rendered layers.
     show_panel_titles : bool, optional
         Whether to display facet labels as panel titles.
     kind : {"ribbon", "histogram", "spaghetti"}, optional
         Posterior rendering mode.
+    ci_prob : float, optional
+        Credible interval probability mass.
+    interval : {"hdi", "eti"}, optional
+        Interval type.
+    num_samples : int, optional
+        Spaghetti paths to sample when ``kind="spaghetti"``.
     x : str, optional
         Shared x column name. Defaults to ``"obs_ind"``.
-    shade_df : pandas.DataFrame, optional
-        Ribbon data for causal-impact shading.
     shade_fill : str, optional
-        Fill color for the shade ribbon.
-    spaghetti_df : pandas.DataFrame, optional
-        Sampled draws when ``kind="spaghetti"``.
-    histogram_tiles : pandas.DataFrame, optional
-        Tidy posterior heatmap tiles when ``kind="histogram"``.
+        Fill color for causal-impact shading ribbons.
     figsize : tuple of float, optional
         plotnine ``figure_size``.
     zero_linetype : str, optional
         ``geom_hline`` linetype for zero reference lines.
     zero_alpha : float, optional
         Alpha for zero reference lines.
+    post_index : pandas.Index, optional
+        Post-period index for outcome shading and singleton point-ranges.
+    histogram_top_keys : tuple, optional
+        Top-panel semantic keys that share y-bin edges in histogram mode.
+    singleton_color : str, optional
+        Color for singleton post-period point-ranges.
     """
     from plotnine import ggplot
 
-    frames = [bands, obs]
-    if shade_df is not None:
-        frames.append(shade_df)
+    validate_posterior_plot_options(kind, ci_kind=interval, num_samples=num_samples)
+
+    panel_titles: tuple[str, str, str] = (panels[0], panels[1], panels[2])
+    panel_draws = _semantic_to_panel_draws(
+        panel_data.draws,
+        layout=layout,
+        panel_titles=panel_titles,
+        series_labels=series_labels,
+    )
+    grouping = ["panel", "series", x]
+    intervals = summarize_draws(
+        panel_draws,
+        group_by=grouping,
+        ci_prob=ci_prob,
+        interval=interval,
+    )
+    obs = _observations_for_plot(panel_data.observations, x=x, panel=panels[0])
+    effect_area = _derive_effect_area(
+        intervals,
+        panel_data.observations,
+        layout=layout,
+        panel_titles=panel_titles,
+        series_labels=series_labels,
+        x=x,
+        post_index=post_index,
+    )
+    singleton_intervals = _derive_singleton_intervals(
+        intervals,
+        panel_titles=panel_titles,
+        series_labels=series_labels,
+        post_index=post_index,
+    )
+    if not singleton_intervals.empty:
+        singleton_intervals["panel"] = pd.Categorical(
+            singleton_intervals["panel"], categories=panels, ordered=True
+        )
+
+    spaghetti_df = (
+        spaghetti_draws(
+            panel_draws,
+            group_by=grouping,
+            num_samples=num_samples,
+        )
+        if kind == "spaghetti"
+        else None
+    )
+    histogram_tiles = (
+        _derive_histogram_tiles(
+            panel_data.draws,
+            panel_draws,
+            layout=layout,
+            panel_titles=panel_titles,
+            x=x,
+            histogram_top_keys=histogram_top_keys,
+        )
+        if kind == "histogram"
+        else None
+    )
+
+    frames = [intervals, obs]
+    if effect_area is not None:
+        frames.append(effect_area)
     if spaghetti_df is not None:
         frames.append(spaghetti_df)
     _categorize_panels(frames, panels)
@@ -514,16 +958,16 @@ def build_causal_panel_plot(
     _categorize_panels([zero_df], panels)
 
     p = ggplot()
-    if shade_df is not None:
+    if effect_area is not None:
         p = p + geom_ribbon(
-            shade_df,
+            effect_area,
             aes(x, ymin="y1", ymax="y2"),
             fill=shade_fill,
             alpha=0.25,
         )
     p = add_posterior_kind(
         p,
-        bands,
+        intervals,
         kind,
         x=x,
         spaghetti_df=spaghetti_df,
@@ -558,6 +1002,14 @@ def build_causal_panel_plot(
     )
     if kind == "histogram":
         p = p + HISTOGRAM_PANEL_THEME
+    if not singleton_intervals.empty:
+        p += geom_pointrange(
+            singleton_intervals,
+            aes(x, "mu", ymin="mu_lower", ymax="mu_upper"),
+            color=singleton_color,
+            size=0.5,
+            show_legend=False,
+        )
     return p
 
 

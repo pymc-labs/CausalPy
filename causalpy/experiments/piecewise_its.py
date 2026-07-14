@@ -16,7 +16,6 @@
 import ast
 import re
 import warnings
-from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
@@ -33,17 +32,16 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
+    PIECEWISE_ITS_LAYOUT,
+    CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
-    histogram_y_edges,
     interval_kind,
-    label_draws,
-    posterior_histogram_tiles,
     prediction_draws,
-    spaghetti_draws,
-    summarize_draws,
+    stack_semantic_draws,
+    tag_semantic_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -51,17 +49,6 @@ from causalpy.transforms import ramp, step  # noqa: F401
 from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
-
-
-@dataclass(frozen=True)
-class _PiecewiseITSPlotData:
-    """Tidy tables consumed by the declarative piecewise ITS plot."""
-
-    intervals: pd.DataFrame
-    observations: pd.DataFrame
-    effect_area: pd.DataFrame
-    posterior_paths: pd.DataFrame | None
-    posterior_density: pd.DataFrame | None
 
 
 class PiecewiseITS(BaseExperiment):
@@ -241,7 +228,6 @@ class PiecewiseITS(BaseExperiment):
 
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
-        # Check formula contains at least one step() or ramp() term
         if not self._step_ramp_terms:
             raise FormulaException(
                 "Formula must contain at least one step() or ramp() term. "
@@ -349,13 +335,11 @@ class PiecewiseITS(BaseExperiment):
 
     def _get_interruption_column_indices(self) -> list[int]:
         """Get indices of columns related to interruptions (step/ramp terms)."""
-        indices: list[int] = []
-        for term in self._x_design_info.terms:
-            if any(
-                self._parse_step_ramp_factor(factor.name()) for factor in term.factors
-            ):
-                term_slice = self._x_design_info.term_slices[term]
-                indices.extend(range(term_slice.start, term_slice.stop))
+        indices = []
+        for i, label in enumerate(self.labels):
+            # Patsy labels step/ramp terms like "step(t, 50)" or "ramp(t, 50)"
+            if "step(" in label or "ramp(" in label:
+                indices.append(i)
         return indices
 
     def _compute_counterfactual_and_effects(self) -> None:
@@ -554,17 +538,8 @@ class PiecewiseITS(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-        *,
-        panels: tuple[str, str, str],
-        ci_prob: float,
-        interval: Literal["hdi", "eti"],
-        kind: Literal["ribbon", "histogram", "spaghetti"],
-        num_samples: int,
-    ) -> _PiecewiseITSPlotData:
-        """Prepare tidy posterior and observed tables for plotting."""
-        top, middle, bottom = panels
+    def _causal_panel_data(self) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
         time_values = self.data[self.time_col].to_numpy()
         newdata = pd.DataFrame({"obs_ind": self.data.index, "t": time_values})
         time_lookup = pl.from_pandas(newdata)
@@ -574,89 +549,25 @@ class PiecewiseITS(BaseExperiment):
         cumulative_effect = dataarray_draws(self.cumulative_effect).join(
             time_lookup, on="obs_ind"
         )
-        panel_draws = pl.concat(
+        draws = stack_semantic_draws(
             [
-                label_draws(fitted, series="Fitted", panel=top),
-                label_draws(
-                    counterfactual,
-                    series="Counterfactual",
-                    panel=top,
+                tag_semantic_draws(fitted, variable="outcome", series="fit"),
+                tag_semantic_draws(
+                    counterfactual, variable="outcome", series="counterfactual"
                 ),
-                label_draws(effect, series="effect", panel=middle),
-                label_draws(cumulative_effect, series="cumulative", panel=bottom),
-            ],
-            how="diagonal_relaxed",
-        )
-        grouping = ["panel", "series", "t"]
-        intervals = summarize_draws(
-            panel_draws,
-            group_by=grouping,
-            ci_prob=ci_prob,
-            interval=interval,
+                tag_semantic_draws(effect, variable="effect", series="post"),
+                tag_semantic_draws(
+                    cumulative_effect, variable="cumulative_effect", series="post"
+                ),
+            ]
         )
         observations = pd.DataFrame(
             {
                 "t": time_values,
-                "y": self.design["y"].isel(treated_units=0).to_numpy(),
-                "series": "Observations",
-                "panel": top,
+                "value": self.design["y"].isel(treated_units=0).to_numpy(),
             }
         )
-        effect_area = (
-            intervals.query("panel == @middle and series == 'effect'")[["t", "mu"]]
-            .rename(columns={"mu": "y1"})
-            .assign(y2=0.0, panel=middle)
-        )
-        posterior_paths = (
-            spaghetti_draws(
-                panel_draws,
-                group_by=grouping,
-                num_samples=num_samples,
-            )
-            if kind == "spaghetti"
-            else None
-        )
-        posterior_density = None
-        if kind == "histogram":
-            top_edges = histogram_y_edges(fitted, counterfactual)
-            posterior_density = pd.concat(
-                [
-                    posterior_histogram_tiles(
-                        fitted,
-                        "t",
-                        x_col="t",
-                        panel=top,
-                        y_edges=top_edges,
-                    ),
-                    posterior_histogram_tiles(
-                        counterfactual,
-                        "t",
-                        x_col="t",
-                        panel=top,
-                        y_edges=top_edges,
-                    ),
-                    posterior_histogram_tiles(
-                        effect,
-                        "t",
-                        x_col="t",
-                        panel=middle,
-                    ),
-                    posterior_histogram_tiles(
-                        cumulative_effect,
-                        "t",
-                        x_col="t",
-                        panel=bottom,
-                    ),
-                ],
-                ignore_index=True,
-            )
-        return _PiecewiseITSPlotData(
-            intervals=intervals,
-            observations=observations,
-            effect_area=effect_area,
-            posterior_paths=posterior_paths,
-            posterior_density=posterior_density,
-        )
+        return CausalPanelData(draws=draws, observations=observations)
 
     def _bayesian_plot(
         self,
@@ -675,13 +586,13 @@ class PiecewiseITS(BaseExperiment):
             "Causal Effect",
             "Cumulative Causal Effect",
         )
-        plot_data = self._prepare_bayesian_plot_data(
-            panels=panels,
-            ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
-            kind=kind,
-            num_samples=num_samples,
-        )
+        plot_data = self._causal_panel_data()
+        series_labels = {
+            ("outcome", "fit"): "Fitted",
+            ("outcome", "counterfactual"): "Counterfactual",
+            ("effect", "post"): "effect",
+            ("cumulative_effect", "post"): "cumulative",
+        }
         colors = {
             "Fitted": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -690,20 +601,22 @@ class PiecewiseITS(BaseExperiment):
             "cumulative": "#d62728",
         }
         p = build_causal_panel_plot(
-            plot_data.intervals,
-            plot_data.observations,
+            plot_data,
+            layout=PIECEWISE_ITS_LAYOUT,
             panels=list(panels),
+            series_labels=series_labels,
             colors=colors,
             show_panel_titles=True,
             kind=kind,
+            ci_prob=ci_prob,
+            interval=interval_kind(ci_kind),
+            num_samples=num_samples,
             x="t",
-            shade_df=plot_data.effect_area,
             shade_fill="#2ca02c",
-            spaghetti_df=plot_data.posterior_paths,
-            histogram_tiles=plot_data.posterior_density,
             figsize=figsize,
             zero_linetype="dashed",
             zero_alpha=0.5,
+            histogram_top_keys=(("outcome", "fit"), ("outcome", "counterfactual")),
         )
         p += geom_vline(
             pd.DataFrame({"t": self.interruption_times}),

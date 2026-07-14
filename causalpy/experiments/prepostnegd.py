@@ -23,6 +23,7 @@ import pandas as pd
 import polars as pl
 import tidydraws as td
 import xarray as xr
+from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
 from plotnine import (
     aes,
@@ -44,6 +45,7 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
+    PlotSpec,
     add_posterior_kind,
     histogram_y_edges,
     interval_kind,
@@ -286,7 +288,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> ggplot:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -326,11 +328,9 @@ class PrePostNEGD(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot or tuple of (matplotlib.figure.Figure, numpy.ndarray)
-            A two-facet plot (top: scatter + posterior predictive bands;
-            bottom: estimated treatment effect posterior). ``kind="ribbon"``
-            returns a :class:`plotnine.ggplot`; other kinds return
-            ``(fig, ax)`` after drawing.
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes or numpy.ndarray]
+            Two-facet plot (top: scatter + posterior predictive bands;
+            bottom: estimated treatment effect posterior).
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -480,7 +480,7 @@ class PrePostNEGD(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
-    ) -> ggplot:
+    ) -> PlotSpec:
         """Build the Bayesian pre/post plot from tidy declarative layers."""
         plot_data = self._prepare_bayesian_plot_data(
             ci_prob=ci_prob,
@@ -532,7 +532,7 @@ class PrePostNEGD(BaseExperiment):
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 
-        return p
+        return PlotSpec(p, n_panels=2)
 
     def effect_summary(
         self,

@@ -27,6 +27,7 @@ dependencies:
   - papermill
   - patsy
   - plotnine>=0.15.7
+  - polars
   - prek
   - pymc-bart
   - pymc-extras>=0.3.0

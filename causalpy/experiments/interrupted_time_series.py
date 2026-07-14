@@ -14,17 +14,15 @@
 """Interrupted Time Series Analysis."""
 
 import warnings
-from dataclasses import dataclass
 from typing import Any, Literal
 
 import arviz as az
 import numpy as np
 import pandas as pd
-import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
-from plotnine import aes, element_text, geom_pointrange, geom_vline, theme
+from plotnine import aes, element_text, geom_vline, theme
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -32,35 +30,23 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
+    CAUSAL_IMPACT_LAYOUT,
+    CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
     get_hdi_to_df,
     interval_kind,
-    label_draws,
-    posterior_histogram_tiles,
     prediction_draws,
-    spaghetti_draws,
-    summarize_draws,
+    stack_semantic_draws,
+    tag_semantic_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, round_num
 
 from .base import BaseExperiment
-
-
-@dataclass(frozen=True)
-class _ITSPlotData:
-    """Tidy tables consumed by the declarative ITS plot."""
-
-    intervals: pd.DataFrame
-    observations: pd.DataFrame
-    effect_area: pd.DataFrame | None
-    posterior_paths: pd.DataFrame | None
-    posterior_density: pd.DataFrame | None
-    singleton_intervals: pd.DataFrame
 
 
 class InterruptedTimeSeries(BaseExperiment):
@@ -693,136 +679,45 @@ class InterruptedTimeSeries(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-        *,
-        panels: tuple[str, str, str],
-        ci_prob: float,
-        interval: Literal["hdi", "eti"],
-        kind: Literal["ribbon", "histogram", "spaghetti"],
-        num_samples: int,
-    ) -> _ITSPlotData:
-        """Prepare tidy posterior, observed, and effect tables for plotting."""
-        top, middle, bottom = panels
+    def _causal_panel_data(self) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
         pre_predictions = prediction_draws(
             self.pre_pred, pd.DataFrame({"obs_ind": self.datapre.index})
         )
         post_predictions = prediction_draws(
             self.post_pred, pd.DataFrame({"obs_ind": self.datapost.index})
         )
-        pre_effect = dataarray_draws(self.pre_impact)
-        post_effect = dataarray_draws(self.post_impact)
-        cumulative_effect = dataarray_draws(self.post_impact_cumulative)
-
-        panel_draws = pl.concat(
+        draws = stack_semantic_draws(
             [
-                label_draws(
-                    pre_predictions,
-                    series="Pre-intervention period",
-                    panel=top,
+                tag_semantic_draws(pre_predictions, variable="outcome", series="fit"),
+                tag_semantic_draws(
+                    post_predictions, variable="outcome", series="counterfactual"
                 ),
-                label_draws(
-                    post_predictions,
-                    series="Counterfactual",
-                    panel=top,
+                tag_semantic_draws(
+                    dataarray_draws(self.pre_impact), variable="effect", series="pre"
                 ),
-                label_draws(pre_effect, series="pre", panel=middle),
-                label_draws(post_effect, series="post", panel=middle),
-                label_draws(cumulative_effect, series="post", panel=bottom),
-            ],
-            how="diagonal_relaxed",
+                tag_semantic_draws(
+                    dataarray_draws(self.post_impact), variable="effect", series="post"
+                ),
+                tag_semantic_draws(
+                    dataarray_draws(self.post_impact_cumulative),
+                    variable="cumulative_effect",
+                    series="post",
+                ),
+            ]
         )
-        grouping = ["panel", "series", "obs_ind"]
-        intervals = summarize_draws(
-            panel_draws,
-            group_by=grouping,
-            ci_prob=ci_prob,
-            interval=interval,
-        )
-
         observations = pd.DataFrame(
             {
                 "obs_ind": self.data.index,
-                "y": np.concatenate(
+                "value": np.concatenate(
                     [
                         self.pre_design["y"].isel(treated_units=0).to_numpy(),
                         self.post_design["y"].isel(treated_units=0).to_numpy(),
                     ]
                 ),
-                "series": "Observations",
-                "panel": top,
             }
         )
-        post_prediction = intervals.query(
-            "panel == @top and series == 'Counterfactual'"
-        )
-        post_impact = intervals.query("panel == @middle and series == 'post'")
-        cumulative_impact = intervals.query("panel == @bottom and series == 'post'")
-
-        effect_area = None
-        if len(self.datapost) > 1:
-            post_observations = observations.loc[
-                observations["obs_ind"].isin(self.datapost.index.tolist()),
-                ["obs_ind", "y"],
-            ]
-            effect_area = pd.concat(
-                [
-                    post_prediction[["obs_ind", "mu"]]
-                    .merge(post_observations, on="obs_ind")
-                    .rename(columns={"mu": "y1", "y": "y2"})
-                    .assign(panel=top),
-                    post_impact[["obs_ind", "mu"]]
-                    .rename(columns={"mu": "y1"})
-                    .assign(y2=0.0, panel=middle),
-                ],
-                ignore_index=True,
-            )
-
-        posterior_paths = (
-            spaghetti_draws(
-                panel_draws,
-                group_by=grouping,
-                num_samples=num_samples,
-            )
-            if kind == "spaghetti"
-            else None
-        )
-        posterior_density = (
-            pd.concat(
-                [
-                    posterior_histogram_tiles(
-                        panel_draws.filter(pl.col("panel") == panel),
-                        "obs_ind",
-                        x_col="obs_ind",
-                        panel=panel,
-                    )
-                    for panel in panels
-                ],
-                ignore_index=True,
-            )
-            if kind == "histogram"
-            else None
-        )
-        singleton_intervals = (
-            pd.concat(
-                [post_prediction, post_impact, cumulative_impact],
-                ignore_index=True,
-            )
-            if len(self.datapost) == 1
-            else intervals.iloc[0:0].copy()
-        )
-        singleton_intervals["panel"] = pd.Categorical(
-            singleton_intervals["panel"], categories=panels, ordered=True
-        )
-
-        return _ITSPlotData(
-            intervals=intervals,
-            observations=observations,
-            effect_area=effect_area,
-            posterior_paths=posterior_paths,
-            posterior_density=posterior_density,
-            singleton_intervals=singleton_intervals,
-        )
+        return CausalPanelData(draws=draws, observations=observations)
 
     def _bayesian_plot(
         self,
@@ -843,13 +738,14 @@ class InterruptedTimeSeries(BaseExperiment):
             "Causal Impact",
             "Cumulative Causal Impact",
         )
-        plot_data = self._prepare_bayesian_plot_data(
-            panels=panels,
-            ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
-            kind=kind,
-            num_samples=num_samples,
-        )
+        plot_data = self._causal_panel_data()
+        series_labels = {
+            ("outcome", "fit"): "Pre-intervention period",
+            ("outcome", "counterfactual"): "Counterfactual",
+            ("effect", "pre"): "pre",
+            ("effect", "post"): "post",
+            ("cumulative_effect", "post"): "post",
+        }
         colors = {
             "Pre-intervention period": "#1f77b4",
             "Counterfactual": "#ff7f0e",
@@ -858,16 +754,18 @@ class InterruptedTimeSeries(BaseExperiment):
             "post": "#ff7f0e",
         }
         p = build_causal_panel_plot(
-            plot_data.intervals,
-            plot_data.observations,
+            plot_data,
+            layout=CAUSAL_IMPACT_LAYOUT,
             panels=list(panels),
+            series_labels=series_labels,
             colors=colors,
             show_panel_titles=True,
             kind=kind,
-            shade_df=plot_data.effect_area,
-            spaghetti_df=plot_data.posterior_paths,
-            histogram_tiles=plot_data.posterior_density,
+            ci_prob=ci_prob,
+            interval=interval_kind(ci_kind),
+            num_samples=num_samples,
             figsize=figsize,
+            post_index=self.datapost.index,
         )
         p += geom_vline(
             pd.DataFrame({"obs_ind": [self.treatment_time]}),
@@ -884,18 +782,6 @@ class InterruptedTimeSeries(BaseExperiment):
                 color="black",
                 size=1,
             )
-        p += geom_pointrange(
-            plot_data.singleton_intervals,
-            aes(
-                "obs_ind",
-                "mu",
-                ymin="mu_lower",
-                ymax="mu_upper",
-            ),
-            color="#ff7f0e",
-            size=0.5,
-            show_legend=False,
-        )
         if isinstance(self.data.index, pd.DatetimeIndex):
             p += theme(axis_text_x=element_text(rotation=45, ha="right"))
 
