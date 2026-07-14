@@ -34,6 +34,26 @@ from causalpy.pymc_forecast_models import PyMCForecastModel
 
 pymc_forecast = pytest.importorskip("pymc_forecast")
 
+
+@pytest.fixture(scope="module", autouse=True)
+def real_pymc_sampling():
+    """Undo the session-scoped ``mock_pymc_sample`` patch for this module.
+
+    The conftest registers PyMC's ``mock_sample`` (prior sampling instead of
+    MCMC) session-wide, so once any earlier test module requests it,
+    ``pm.sample`` stays mocked for the rest of the run. The round-trip tests
+    here assert effect recovery against ground truth, which is meaningless
+    under prior sampling — restore the real sampler for this module only.
+    """
+    import pymc as pm
+    import pymc.sampling.mcmc
+
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    yield
+    pm.sample = patched
+
+
 # The y ~ 1 + t design leaves intercept and slope strongly correlated
 # (unscaled t), so give NUTS a real warmup budget: tune=200 produced a
 # badly adapted mass matrix and a biased posterior on CI's platform.
