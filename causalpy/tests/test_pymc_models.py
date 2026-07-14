@@ -272,7 +272,6 @@ class TestDataSetterValidation:
 
     def test_standard_data_nodes_predict(self, rng, mock_pymc_sample):
         """Standard model with 'X' and 'y' data nodes exercises validation happy path."""
-        import causalpy as cp
         from causalpy.pymc_models import LinearRegression
 
         X = xr.DataArray(
