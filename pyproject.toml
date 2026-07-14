@@ -67,7 +67,7 @@ dependencies = [
 [project.optional-dependencies]
 # pymc-forecast is young (0.x); pin the minor so API movement across 0.x
 # minors is opted into deliberately (see docs on the ITS forecast backend).
-forecast = ["pymc-forecast>=0.1.0,<0.2"]
+forecast = ["pymc-forecast>=0.2,<0.3"]
 dev = [
     "prek",
     "twine",
@@ -105,7 +105,7 @@ docs = [
     "sphinxext-rediraffe",
 ]
 lint = ["prek", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill", "pymc-forecast>=0.1.0,<0.2"]
+test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill", "pymc-forecast>=0.2,<0.3"]
 
 [tool.pyproject2conda]
 channels = ["conda-forge"]

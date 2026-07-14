@@ -181,6 +181,48 @@ class TestRoundTripAgainstPyMCBackend:
         assert forecast_result._model_backend.kind == "pymc-forecast"
         assert forecast_result.idata.posterior is not None
 
+    def test_mu_is_noise_free(self, forecast_result):
+        """mu carries the upstream noise-free latent (mu/mu_future), so it is
+        strictly narrower than the posterior predictive y_hat."""
+        for pred in (forecast_result.pre_pred, forecast_result.post_pred):
+            pp = pred["posterior_predictive"]
+            mu_spread = float(pp["mu"].std(("chain", "draw")).mean())
+            y_hat_spread = float(pp["y_hat"].std(("chain", "draw")).mean())
+            assert mu_spread < y_hat_spread
+        # impact is computed from mu, i.e. excludes observation noise
+        impact_spread = float(forecast_result.post_impact.std(("chain", "draw")).mean())
+        post_pp = forecast_result.post_pred["posterior_predictive"]
+        assert impact_spread == pytest.approx(
+            float(post_pp["mu"].std(("chain", "draw")).mean()), rel=1e-6
+        )
+
+    def test_predictions_are_draw_coherent(self, forecast_result):
+        """One posterior is drawn at fit time and shared by every predictive
+        call: mu is a deterministic function of the shared draws, so repeated
+        calls reproduce it exactly, and pre/post mu come from the same draws
+        (checked through the linear model: mu = X @ beta draw-for-draw)."""
+        model = forecast_result.model
+        posterior = forecast_result.idata.posterior
+        for X, pred, out_of_sample in (
+            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
+            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+        ):
+            mu = pred["posterior_predictive"]["mu"]
+            expected = xr.dot(
+                posterior["beta"],
+                X.rename({"coeffs": "covariate"}),
+                dim="covariate",
+            )
+            np.testing.assert_allclose(
+                mu.isel(treated_units=0).transpose("chain", "draw", "obs_ind").values,
+                expected.transpose("chain", "draw", "obs_ind").values,
+                rtol=1e-5,
+            )
+            again = model.predict(X, out_of_sample=out_of_sample)
+            np.testing.assert_allclose(
+                mu.values, again["posterior_predictive"]["mu"].values, rtol=1e-6
+            )
+
 
 @pytest.mark.integration
 def test_covariate_free_future_index_path(its_data):
