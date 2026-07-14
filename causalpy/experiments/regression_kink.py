@@ -22,18 +22,10 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import polars as pl
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
-from plotnine import (
-    aes,
-    geom_point,
-    geom_vline,
-    ggplot,
-    labs,
-    scale_color_manual,
-    theme,
-)
 
 from causalpy.constants import HDI_PROB
 from causalpy.plot_utils import (
@@ -400,8 +392,8 @@ class RegressionKink(BaseExperiment):
             colors=color_values,
         )
 
-        p = ggplot() + geom_point(
-            plot_data.points, aes(xcol, ycol, color="series"), size=1.5
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.points, p9.aes(xcol, ycol, color="series"), size=1.5
         )
         for layer in posterior_layers:
             p += layer
@@ -424,17 +416,17 @@ class RegressionKink(BaseExperiment):
         thr_df = pd.DataFrame(
             {"xintercept": [self.kink_point], "series": ["treatment threshold"]}
         )
-        p = p + geom_vline(
-            thr_df, aes(xintercept="xintercept", color="series"), size=1.5
+        p = p + p9.geom_vline(
+            thr_df, p9.aes(xintercept="xintercept", color="series"), size=1.5
         )
 
         p = (
             p
-            + scale_color_manual(values=color_values, name="")
-            + labs(title=r2 + "\n" + grad_change + ci, x=xcol, y=ycol)
+            + p9.scale_color_manual(values=color_values, name="")
+            + p9.labs(title=r2 + "\n" + grad_change + ci, x=xcol, y=ycol)
         )
         if figsize is not None:
-            p += theme(figure_size=figsize)
+            p += p9.theme(figure_size=figsize)
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 

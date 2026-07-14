@@ -19,10 +19,10 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices, dmatrices
-from plotnine import aes, element_text, geom_vline, theme
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -748,23 +748,23 @@ class InterruptedTimeSeries(BaseExperiment):
             figsize=figsize,
             post_index=self.datapost.index,
         )
-        p += geom_vline(
+        p += p9.geom_vline(
             pd.DataFrame({"obs_ind": [self.treatment_time]}),
-            aes(xintercept="obs_ind"),
+            p9.aes(xintercept="obs_ind"),
             linetype="dashed",
             color="black",
             size=1,
         )
         if self.treatment_end_time is not None:
-            p += geom_vline(
+            p += p9.geom_vline(
                 pd.DataFrame({"obs_ind": [self.treatment_end_time]}),
-                aes(xintercept="obs_ind"),
+                p9.aes(xintercept="obs_ind"),
                 linetype="dotted",
                 color="black",
                 size=1,
             )
         if isinstance(self.data.index, pd.DatetimeIndex):
-            p += theme(axis_text_x=element_text(rotation=45, ha="right"))
+            p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
         # plotnine guides are not Axes legends, so keep this compatibility boundary for the public matplotlib-based legend_kwargs API.
         def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:

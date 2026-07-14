@@ -27,11 +27,13 @@ from causalpy.plot_utils import dataarray_draws
 
 @pytest.mark.integration
 def test_panel_axes_filters_colorbars():
-    from plotnine import aes, geom_point, ggplot
+    import plotnine as p9
 
     from causalpy.plot_utils import panel_axes
 
-    p = ggplot() + geom_point(pd.DataFrame({"x": [1, 2], "y": [1, 2]}), aes("x", "y"))
+    p = p9.ggplot() + p9.geom_point(
+        pd.DataFrame({"x": [1, 2], "y": [1, 2]}), p9.aes("x", "y")
+    )
     fig = p.draw(show=False)
     axes = panel_axes(fig)
     assert axes
@@ -41,7 +43,7 @@ def test_panel_axes_filters_colorbars():
 
 @pytest.mark.integration
 def test_plot_spec_overlay_runs_once():
-    from plotnine import aes, geom_point, ggplot
+    import plotnine as p9
 
     from causalpy.plot_utils import PlotSpec, panel_axes
 
@@ -50,7 +52,9 @@ def test_plot_spec_overlay_runs_once():
     def overlay(_fig, axes):
         calls.append(len(axes))
 
-    p = ggplot() + geom_point(pd.DataFrame({"x": [1], "y": [1]}), aes("x", "y"))
+    p = p9.ggplot() + p9.geom_point(
+        pd.DataFrame({"x": [1], "y": [1]}), p9.aes("x", "y")
+    )
     spec = PlotSpec(p, overlay=overlay, n_panels=1)
     fig = spec.plot.draw(show=False)
     axes = panel_axes(fig, spec.n_panels)
@@ -193,7 +197,7 @@ def test_histogram_layers_keep_series_in_separate_geoms(synthetic_posterior_draw
 
 @pytest.mark.integration
 def test_posterior_histogram_layers_render_with_plotnine(synthetic_posterior_draws):
-    from plotnine import ggplot
+    import plotnine as p9
 
     from causalpy.plot_utils import label_draws, posterior_kind_layers
 
@@ -206,7 +210,7 @@ def test_posterior_histogram_layers_render_with_plotnine(synthetic_posterior_dra
         ci_prob=0.94,
         colors={"posterior": "orange"},
     )
-    p = ggplot()
+    p = p9.ggplot()
     for layer in layers:
         p += layer
     fig = p.draw(show=False)

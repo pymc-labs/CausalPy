@@ -19,9 +19,9 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
-from plotnine import aes, element_text, geom_line, geom_vline, theme
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -589,9 +589,9 @@ class SyntheticControl(BaseExperiment):
             num_samples=num_samples,
             figsize=figsize,
         )
-        p += geom_vline(
+        p += p9.geom_vline(
             pd.DataFrame({"obs_ind": [self.treatment_time]}),
-            aes(xintercept="obs_ind"),
+            p9.aes(xintercept="obs_ind"),
             color="red",
             size=2,
         )
@@ -606,16 +606,16 @@ class SyntheticControl(BaseExperiment):
                     value_name="y",
                 )
             )
-            p += geom_line(
+            p += p9.geom_line(
                 predictors,
-                aes("obs_ind", "y", group="predictor"),
+                p9.aes("obs_ind", "y", group="predictor"),
                 color="#cccccc",
                 size=0.5,
                 inherit_aes=False,
                 show_legend=False,
             )
         if isinstance(self.data.index, pd.DatetimeIndex):
-            p += theme(axis_text_x=element_text(rotation=45, ha="right"))
+            p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
         def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             add_causal_panel_legend(

@@ -21,11 +21,11 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, dmatrices
-from plotnine import aes, geom_vline
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -606,9 +606,9 @@ class PiecewiseITS(BaseExperiment):
             zero_alpha=0.5,
             shade_outcome=False,
         )
-        p += geom_vline(
+        p += p9.geom_vline(
             pd.DataFrame({"t": self.interruption_times}),
-            aes(xintercept="t"),
+            p9.aes(xintercept="t"),
             color="red",
             size=1.5,
             alpha=0.7,

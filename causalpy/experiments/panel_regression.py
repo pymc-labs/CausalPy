@@ -19,28 +19,9 @@ from typing import Any, Literal
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import polars as pl
 from patsy import ModelDesc, dmatrices
-from plotnine import (
-    aes,
-    coord_flip,
-    element_blank,
-    facet_wrap,
-    geom_col,
-    geom_errorbarh,
-    geom_histogram,
-    geom_hline,
-    geom_line,
-    geom_point,
-    geom_qq,
-    geom_qq_line,
-    geom_ribbon,
-    geom_vline,
-    ggplot,
-    guides,
-    labs,
-    theme,
-)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
@@ -642,12 +623,16 @@ class PanelRegression(BaseExperiment):
             )
             title = f"Model Coefficients with {hdi_prob:.0%} HDI"
             p = (
-                ggplot(tidy, aes(x="mean", y="coeffs"))
-                + geom_errorbarh(aes(xmin="lower", xmax="higher"), height=0.2, size=0.6)
-                + geom_point(size=2)
-                + geom_vline(xintercept=0, color="black", linetype="dashed", alpha=0.8)
-                + labs(x="Coefficient Value", y="")
-                + theme(figure_size=figsize)
+                p9.ggplot(tidy, p9.aes(x="mean", y="coeffs"))
+                + p9.geom_errorbarh(
+                    p9.aes(xmin="lower", xmax="higher"), height=0.2, size=0.6
+                )
+                + p9.geom_point(size=2)
+                + p9.geom_vline(
+                    xintercept=0, color="black", linetype="dashed", alpha=0.8
+                )
+                + p9.labs(x="Coefficient Value", y="")
+                + p9.theme(figure_size=figsize)
             )
             return PlotSpec(
                 p,
@@ -663,12 +648,14 @@ class PanelRegression(BaseExperiment):
             )
             title = "Model Coefficients"
             p = (
-                ggplot(tidy, aes(x="coeffs", y="coef"))
-                + geom_col(fill="#1f77b4")
-                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.8)
-                + coord_flip()
-                + labs(title="", x="Coefficient Value", y="")
-                + theme(figure_size=figsize)
+                p9.ggplot(tidy, p9.aes(x="coeffs", y="coef"))
+                + p9.geom_col(fill="#1f77b4")
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.8
+                )
+                + p9.coord_flip()
+                + p9.labs(title="", x="Coefficient Value", y="")
+                + p9.theme(figure_size=figsize)
             )
             return PlotSpec(
                 p,
@@ -839,10 +826,10 @@ class PanelRegression(BaseExperiment):
         tidy = pd.DataFrame({"value": values})
         title = f"Distribution of Unit Fixed Effects (N={self.n_units})"
         p = (
-            ggplot(tidy, aes(x="value"))
-            + geom_histogram(bins=n_bins, fill="#1f77b4", color="black", alpha=0.7)
-            + labs(x=x_label, y="Count", title="")
-            + theme(figure_size=(10, 6))
+            p9.ggplot(tidy, p9.aes(x="value"))
+            + p9.geom_histogram(bins=n_bins, fill="#1f77b4", color="black", alpha=0.7)
+            + p9.labs(x=x_label, y="Count", title="")
+            + p9.theme(figure_size=(10, 6))
         )
         fig = p.draw()
         axes = [a for a in fig.axes if a.get_subplotspec() is not None]
@@ -1032,36 +1019,36 @@ class PanelRegression(BaseExperiment):
             fit_df["unit_label"], categories=unit_labels, ordered=True
         )
 
-        p = ggplot()
+        p = p9.ggplot()
         if is_bayesian and ribbon_rows:
             ribbon_df = pd.DataFrame(ribbon_rows)
             ribbon_df["unit_label"] = pd.Categorical(
                 ribbon_df["unit_label"], categories=unit_labels, ordered=True
             )
-            p = p + geom_ribbon(
+            p = p + p9.geom_ribbon(
                 ribbon_df,
-                aes("time", ymin="ymin", ymax="ymax"),
+                p9.aes("time", ymin="ymin", ymax="ymax"),
                 fill="#1f77b4",
                 alpha=0.2,
                 inherit_aes=False,
             )
         p = (
             p
-            + geom_line(
+            + p9.geom_line(
                 fit_df,
-                aes("time", "y"),
+                p9.aes("time", "y"),
                 color="#ff7f0e",
                 linetype="dashed",
                 alpha=0.7,
             )
-            + geom_point(obs_df, aes("time", "y"), color="black", alpha=0.7)
-            + geom_line(obs_df, aes("time", "y"), color="black", alpha=0.7)
-            + facet_wrap("unit_label", ncol=ncols, scales="free_y")
-            + guides(color="none")
-            + labs(x="", y="")
-            + theme(
-                strip_text=element_blank(),
-                strip_background=element_blank(),
+            + p9.geom_point(obs_df, p9.aes("time", "y"), color="black", alpha=0.7)
+            + p9.geom_line(obs_df, p9.aes("time", "y"), color="black", alpha=0.7)
+            + p9.facet_wrap("unit_label", ncol=ncols, scales="free_y")
+            + p9.guides(color="none")
+            + p9.labs(x="", y="")
+            + p9.theme(
+                strip_text=p9.element_blank(),
+                strip_background=p9.element_blank(),
                 figure_size=figsize,
             )
         )
@@ -1117,32 +1104,32 @@ class PanelRegression(BaseExperiment):
 
         if kind == "scatter":
             p = (
-                ggplot(tidy, aes("fitted", "residual"))
-                + geom_point(alpha=0.5)
-                + geom_hline(yintercept=0, color="red", linetype="dashed")
-                + labs(
+                p9.ggplot(tidy, p9.aes("fitted", "residual"))
+                + p9.geom_point(alpha=0.5)
+                + p9.geom_hline(yintercept=0, color="red", linetype="dashed")
+                + p9.labs(
                     x="Fitted Values",
                     y="Residuals",
                     title="Residuals vs Fitted Values",
                 )
-                + theme(figure_size=(10, 6))
+                + p9.theme(figure_size=(10, 6))
             )
         elif kind == "histogram":
             p = (
-                ggplot(tidy, aes(x="residual"))
-                + geom_histogram(bins=50, fill="#1f77b4", color="black", alpha=0.7)
-                + labs(x="Residuals", y="Count", title="Distribution of Residuals")
-                + theme(figure_size=(10, 6))
+                p9.ggplot(tidy, p9.aes(x="residual"))
+                + p9.geom_histogram(bins=50, fill="#1f77b4", color="black", alpha=0.7)
+                + p9.labs(x="Residuals", y="Count", title="Distribution of Residuals")
+                + p9.theme(figure_size=(10, 6))
             )
         elif kind == "qq":
             p = (
-                ggplot(tidy, aes(sample="residual"))
-                + geom_qq(color="#1f77b4")
-                + geom_qq_line(color="#ff7f0e")
-                + labs(
+                p9.ggplot(tidy, p9.aes(sample="residual"))
+                + p9.geom_qq(color="#1f77b4")
+                + p9.geom_qq_line(color="#ff7f0e")
+                + p9.labs(
                     title="Q-Q Plot", x="Theoretical Quantiles", y="Sample Quantiles"
                 )
-                + theme(figure_size=(10, 6))
+                + p9.theme(figure_size=(10, 6))
             )
         else:
             raise ValueError("kind must be 'scatter', 'histogram', or 'qq'")

@@ -24,32 +24,11 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from patsy import PatsyError, dmatrices
-from plotnine import (
-    aes,
-    element_blank,
-    element_text,
-    facet_wrap,
-    geom_hline,
-    geom_line,
-    geom_point,
-    geom_pointrange,
-    geom_rect,
-    geom_ribbon,
-    geom_vline,
-    ggplot,
-    guides,
-    labs,
-    scale_color_manual,
-    scale_fill_manual,
-    scale_linetype_manual,
-    scale_shape_manual,
-    scale_x_continuous,
-    theme,
-)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -1034,32 +1013,34 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         plot_data = self._prepare_event_time_plot_data()
         estimates = plot_data.estimates
         p = (
-            ggplot(estimates, aes("event_time", "att", color="series", shape="series"))
-            + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
-            + geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
+            p9.ggplot(
+                estimates, p9.aes("event_time", "att", color="series", shape="series")
+            )
+            + p9.geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
+            + p9.geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
         )
         if plot_data.placebo_area is not None:
-            p = p + geom_rect(
+            p = p + p9.geom_rect(
                 plot_data.placebo_area,
-                aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
+                p9.aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
                 fill="gray",
                 alpha=0.1,
                 inherit_aes=False,
             )
         p = (
             p
-            + geom_pointrange(
-                aes(ymin="att_lower", ymax="att_upper"),
+            + p9.geom_pointrange(
+                p9.aes(ymin="att_lower", ymax="att_upper"),
                 size=0.7,
                 fatten=6,
             )
-            + scale_color_manual(values=plot_data.colors, name="")
-            + scale_shape_manual(values=plot_data.shapes, name="")
-            + scale_x_continuous(breaks=list(estimates["event_time"].values))
-            + labs(x="", y="")
-            + theme(
+            + p9.scale_color_manual(values=plot_data.colors, name="")
+            + p9.scale_shape_manual(values=plot_data.shapes, name="")
+            + p9.scale_x_continuous(breaks=list(estimates["event_time"].values))
+            + p9.labs(x="", y="")
+            + p9.theme(
                 figure_size=figsize or (10, 6),
-                legend_text=element_text(size=LEGEND_FONT_SIZE),
+                legend_text=p9.element_text(size=LEGEND_FONT_SIZE),
             )
         )
 
@@ -1115,29 +1096,33 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "ATT estimate": "#1f77b4",
             }
             p = (
-                ggplot(
+                p9.ggplot(
                     estimates,
-                    aes(x_col, "att", color="series", fill="series", linetype="series"),
+                    p9.aes(
+                        x_col, "att", color="series", fill="series", linetype="series"
+                    ),
                 )
-                + geom_ribbon(
-                    aes(ymin="att_lower", ymax="att_upper", group="series"),
+                + p9.geom_ribbon(
+                    p9.aes(ymin="att_lower", ymax="att_upper", group="series"),
                     alpha=0.2,
                     color="none",
                     show_legend=False,
                 )
-                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
-                + geom_line()
-                + geom_point(aes(shape="series"), size=2)
-                + facet_wrap("cohort_label", ncol=1, scales="free_y")
-                + scale_color_manual(values=type_colors, name="")
-                + scale_fill_manual(values=type_colors, name="")
-                + scale_linetype_manual(values=type_linetypes, name="")
-                + scale_shape_manual(values=type_shapes, name="")
-                + guides(color="none", fill="none", linetype="none", shape="none")
-                + labs(x="", y="")
-                + theme(
-                    strip_text=element_blank(),
-                    strip_background=element_blank(),
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.7
+                )
+                + p9.geom_line()
+                + p9.geom_point(p9.aes(shape="series"), size=2)
+                + p9.facet_wrap("cohort_label", ncol=1, scales="free_y")
+                + p9.scale_color_manual(values=type_colors, name="")
+                + p9.scale_fill_manual(values=type_colors, name="")
+                + p9.scale_linetype_manual(values=type_linetypes, name="")
+                + p9.scale_shape_manual(values=type_shapes, name="")
+                + p9.guides(color="none", fill="none", linetype="none", shape="none")
+                + p9.labs(x="", y="")
+                + p9.theme(
+                    strip_text=p9.element_blank(),
+                    strip_background=p9.element_blank(),
                     figure_size=figsize,
                     panel_spacing_y=0.06,
                 )
@@ -1146,9 +1131,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             # Overlay: color by cohort; dashed placebo / solid ATT.
             cohort_colors = {f"Cohort {c}": f"C{i % 10}" for i, c in enumerate(cohorts)}
             p = (
-                ggplot(
+                p9.ggplot(
                     estimates,
-                    aes(
+                    p9.aes(
                         x_col,
                         "att",
                         color="cohort_label",
@@ -1158,25 +1143,27 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                         group="cohort_label",
                     ),
                 )
-                + geom_ribbon(
-                    aes(ymin="att_lower", ymax="att_upper", group="cohort_label"),
+                + p9.geom_ribbon(
+                    p9.aes(ymin="att_lower", ymax="att_upper", group="cohort_label"),
                     alpha=0.15,
                     color="none",
                     show_legend=False,
                 )
-                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
-                + geom_line()
-                + geom_point(size=2)
-                + scale_color_manual(values=cohort_colors, name="Treatment cohort")
-                + scale_fill_manual(values=cohort_colors, name="Treatment cohort")
-                + scale_linetype_manual(values=type_linetypes, name="")
-                + scale_shape_manual(values=type_shapes, name="")
-                + labs(x="", y="", title="Staggered DiD Cohort Trajectories")
-                + theme(figure_size=figsize)
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.7
+                )
+                + p9.geom_line()
+                + p9.geom_point(size=2)
+                + p9.scale_color_manual(values=cohort_colors, name="Treatment cohort")
+                + p9.scale_fill_manual(values=cohort_colors, name="Treatment cohort")
+                + p9.scale_linetype_manual(values=type_linetypes, name="")
+                + p9.scale_shape_manual(values=type_shapes, name="")
+                + p9.labs(x="", y="", title="Staggered DiD Cohort Trajectories")
+                + p9.theme(figure_size=figsize)
             )
 
         if x_axis == "event_time":
-            p = p + geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
+            p = p + p9.geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
 
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             if layout == "facet":

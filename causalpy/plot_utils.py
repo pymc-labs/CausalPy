@@ -24,38 +24,19 @@ from typing import Any, Literal
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import polars as pl
 import tidydraws as td
 import xarray as xr
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from plotnine import (
-    aes,
-    after_stat,
-    element_blank,
-    element_rect,
-    facet_wrap,
-    geom_bin_2d,
-    geom_hline,
-    geom_line,
-    geom_point,
-    geom_pointrange,
-    geom_ribbon,
-    guides,
-    labs,
-    scale_alpha_continuous,
-    scale_color_manual,
-    scale_fill_manual,
-    scale_x_continuous,
-    theme,
-)
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 
-HISTOGRAM_PANEL_THEME = theme(
-    panel_background=element_rect(fill="white"),
-    panel_grid_major=element_blank(),
-    panel_grid_minor=element_blank(),
+HISTOGRAM_PANEL_THEME = p9.theme(
+    panel_background=p9.element_rect(fill="white"),
+    panel_grid_major=p9.element_blank(),
+    panel_grid_minor=p9.element_blank(),
 )
 
 _VALID_POSTERIOR_KINDS = frozenset({"ribbon", "histogram", "spaghetti"})
@@ -165,11 +146,11 @@ def scale_for_x_column(x: pd.Series | np.ndarray) -> Any:
     if pd.api.types.is_bool_dtype(series) or isinstance(
         series.dtype, pd.CategoricalDtype
     ):
-        return guides()
+        return p9.guides()
     if not pd.api.types.is_numeric_dtype(series):
-        return guides()
+        return p9.guides()
     breaks = sorted(series.astype(float).unique())
-    return scale_x_continuous(breaks=breaks)
+    return p9.scale_x_continuous(breaks=breaks)
 
 
 def coord_xlim_for_column(
@@ -186,18 +167,16 @@ def coord_xlim_for_column(
     padding : float, optional
         Extra span added beyond the maximum x value for annotations.
     """
-    from plotnine import coord_cartesian
-
     series = pd.Series(x)
     if pd.api.types.is_bool_dtype(series) or isinstance(
         series.dtype, pd.CategoricalDtype
     ):
-        return coord_cartesian()
+        return p9.coord_cartesian()
     if not pd.api.types.is_numeric_dtype(series):
-        return coord_cartesian()
+        return p9.coord_cartesian()
     vals = series.astype(float).to_numpy()
     span = float(np.ptp(vals) or 1.0)
-    return coord_cartesian(
+    return p9.coord_cartesian(
         xlim=(float(np.min(vals)) - 0.05, float(np.max(vals)) + padding * span)
     )
 
@@ -433,7 +412,9 @@ def posterior_kind_layers(
         var_name=var_name,
     )
     has_series = "series" in draws.columns
-    line_aes = aes(x, var_name, color="series") if has_series else aes(x, var_name)
+    line_aes = (
+        p9.aes(x, var_name, color="series") if has_series else p9.aes(x, var_name)
+    )
     line_bands = (
         bands.groupby("series", observed=True)
         .filter(lambda group: len(group) > 1)
@@ -443,7 +424,7 @@ def posterior_kind_layers(
         if len(bands) > 1
         else bands.iloc[0:0]
     )
-    mean_line = [geom_line(line_bands, line_aes)] if not line_bands.empty else []
+    mean_line = [p9.geom_line(line_bands, line_aes)] if not line_bands.empty else []
 
     if kind == "histogram":
         layers: list[Any] = []
@@ -453,9 +434,9 @@ def posterior_kind_layers(
             subset = frame if label is None else frame.loc[frame["series"] == label]
             fill = "grey" if label is None else (colors or {}).get(label, "grey")
             layers.append(
-                geom_bin_2d(
+                p9.geom_bin_2d(
                     subset,
-                    aes(x, var_name, alpha=after_stat("count")),
+                    p9.aes(x, var_name, alpha=p9.after_stat("count")),
                     bins=(max(int(subset[x].nunique()), 1), 50),
                     drop=True,
                     fill=fill,
@@ -466,8 +447,8 @@ def posterior_kind_layers(
             )
         layers.extend(
             [
-                scale_alpha_continuous(range=(0.0, 0.85)),
-                guides(alpha="none"),
+                p9.scale_alpha_continuous(range=(0.0, 0.85)),
+                p9.guides(alpha="none"),
                 *mean_line,
             ]
         )
@@ -480,11 +461,11 @@ def posterior_kind_layers(
             num_samples=num_samples,
         )
         layers = [
-            geom_line(
+            p9.geom_line(
                 paths,
-                aes(x, var_name, group="_line_id", color="series")
+                p9.aes(x, var_name, group="_line_id", color="series")
                 if has_series
-                else aes(x, var_name, group="_line_id"),
+                else p9.aes(x, var_name, group="_line_id"),
                 alpha=0.1,
                 size=0.3,
                 show_legend=False,
@@ -494,16 +475,16 @@ def posterior_kind_layers(
         return bands, layers
 
     return bands, [
-        geom_ribbon(
+        p9.geom_ribbon(
             bands,
-            aes(
+            p9.aes(
                 x,
                 ymin=f"{var_name}_lower",
                 ymax=f"{var_name}_upper",
                 fill="series",
             )
             if has_series
-            else aes(
+            else p9.aes(
                 x,
                 ymin=f"{var_name}_lower",
                 ymax=f"{var_name}_upper",
@@ -755,8 +736,6 @@ def build_causal_panel_plot(
     shade_outcome : bool, optional
         Whether to shade the top-panel counterfactual gap.
     """
-    from plotnine import ggplot
-
     validate_posterior_plot_options(kind, ci_kind=interval, num_samples=num_samples)
 
     panel_titles: tuple[str, str, str] = (panels[0], panels[1], panels[2])
@@ -806,11 +785,11 @@ def build_causal_panel_plot(
     zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
     _categorize_panels([zero_df], panels)
 
-    p = ggplot()
+    p = p9.ggplot()
     if effect_area is not None:
-        p = p + geom_ribbon(
+        p = p + p9.geom_ribbon(
             effect_area,
-            aes(x, ymin="y1", ymax="y2"),
+            p9.aes(x, ymin="y1", ymax="y2"),
             fill=shade_fill,
             alpha=0.25,
         )
@@ -819,9 +798,9 @@ def build_causal_panel_plot(
     hline_kwargs: dict[str, Any] = {"color": "black", "alpha": zero_alpha}
     if zero_linetype is not None:
         hline_kwargs["linetype"] = zero_linetype
-    scales = [scale_color_manual(values=colors, name="")]
+    scales = [p9.scale_color_manual(values=colors, name="")]
     if kind != "histogram":
-        scales.append(scale_fill_manual(values=colors, name=""))
+        scales.append(p9.scale_fill_manual(values=colors, name=""))
     plot_theme: dict[str, Any] = {
         "figure_size": figsize,
         "panel_spacing_y": 0.06,
@@ -829,21 +808,21 @@ def build_causal_panel_plot(
     }
     p = (
         p
-        + geom_point(obs, aes(x, "y", color="series"), size=1)
-        + geom_hline(zero_df, aes(yintercept="yintercept"), **hline_kwargs)
-        + facet_wrap("panel", ncol=1, scales="free_y")
+        + p9.geom_point(obs, p9.aes(x, "y", color="series"), size=1)
+        + p9.geom_hline(zero_df, p9.aes(yintercept="yintercept"), **hline_kwargs)
+        + p9.facet_wrap("panel", ncol=1, scales="free_y")
         + scales[0]
-        + (scales[1] if len(scales) > 1 else guides())
-        + guides(color="none", fill="none")
-        + labs(x="", y="")
-        + theme(**plot_theme)
+        + (scales[1] if len(scales) > 1 else p9.guides())
+        + p9.guides(color="none", fill="none")
+        + p9.labs(x="", y="")
+        + p9.theme(**plot_theme)
     )
     if kind == "histogram":
         p = p + HISTOGRAM_PANEL_THEME
     if not singleton_intervals.empty:
-        p += geom_pointrange(
+        p += p9.geom_pointrange(
             singleton_intervals,
-            aes(x, "mu", ymin="mu_lower", ymax="mu_upper"),
+            p9.aes(x, "mu", ymin="mu_lower", ymax="mu_upper"),
             color=singleton_color,
             size=0.5,
             show_legend=False,

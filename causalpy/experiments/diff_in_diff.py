@@ -19,24 +19,12 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import polars as pl
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
-from plotnine import (
-    aes,
-    annotate,
-    arrow,
-    geom_point,
-    geom_violin,
-    ggplot,
-    guides,
-    labs,
-    scale_color_manual,
-    scale_fill_manual,
-    theme,
-)
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -553,32 +541,32 @@ class DifferenceInDifferences(BaseExperiment):
             num_samples=num_samples,
             colors=colors,
         )
-        p = ggplot() + geom_point(
-            plot_data.scatter, aes(tcol, ycol, color="series"), size=1.5
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.scatter, p9.aes(tcol, ycol, color="series"), size=1.5
         )
         for layer in posterior_layers:
             p += layer
         x_values = plot_data.scatter[tcol]
         p = (
             p
-            + scale_color_manual(values=colors, name="")
+            + p9.scale_color_manual(values=colors, name="")
             + (
-                scale_fill_manual(values=colors, name="")
+                p9.scale_fill_manual(values=colors, name="")
                 if kind == "ribbon"
-                else guides()
+                else p9.guides()
             )
             + scale_for_x_column(x_values)
             + coord_xlim_for_column(x_values)
-            + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
+            + p9.labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
         if figsize is not None:
-            p += theme(figure_size=figsize)
+            p += p9.theme(figure_size=figsize)
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
         if len(plot_data.time_points) == 1:
-            p = p + geom_violin(
+            p = p + p9.geom_violin(
                 plot_data.counterfactual_draws,
-                aes(tcol, "mu"),
+                p9.aes(tcol, "mu"),
                 width=0.2,
                 fill="#1f77b4",
                 color=None,
@@ -586,17 +574,17 @@ class DifferenceInDifferences(BaseExperiment):
                 show_legend=False,
                 inherit_aes=False,
             )
-        p += annotate(
+        p += p9.annotate(
             "segment",
             x=plot_data.arrow_x,
             xend=plot_data.arrow_x,
             y=plot_data.treatment_y,
             yend=plot_data.counterfactual_y,
-            arrow=arrow(length=0.1, ends="first", type="closed"),
+            arrow=p9.arrow(length=0.1, ends="first", type="closed"),
             color="green",
             size=1.5,
         )
-        p += annotate(
+        p += p9.annotate(
             "text",
             x=plot_data.arrow_x,
             y=np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),

@@ -21,18 +21,10 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import polars as pl
+import plotnine as p9
 import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
-from plotnine import (
-    aes,
-    geom_point,
-    geom_vline,
-    ggplot,
-    labs,
-    scale_color_manual,
-    theme,
-)
 from sklearn.base import RegressorMixin
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
@@ -448,6 +440,7 @@ class RegressionDiscontinuity(BaseExperiment):
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
         plot_data = self._prepare_bayesian_plot_data()
+        colors = {**plot_data.colors, "treatment threshold": "red"}
         _, posterior_layers = posterior_kind_layers(
             plot_data.draws,
             kind,
@@ -456,10 +449,10 @@ class RegressionDiscontinuity(BaseExperiment):
             ci_prob=ci_prob,
             interval=ci_kind,
             num_samples=num_samples,
-            colors=plot_data.colors,
+            colors=colors,
         )
-        p = ggplot() + geom_point(
-            plot_data.points, aes(xcol, ycol, color="series"), size=1.5
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.points, p9.aes(xcol, ycol, color="series"), size=1.5
         )
         for layer in posterior_layers:
             p += layer
@@ -483,9 +476,8 @@ class RegressionDiscontinuity(BaseExperiment):
                 "series": ["treatment threshold"],
             }
         )
-        plot_data.colors["treatment threshold"] = "red"
-        p = p + geom_vline(
-            thr_df, aes(xintercept="xintercept", color="series"), size=1.5
+        p = p + p9.geom_vline(
+            thr_df, p9.aes(xintercept="xintercept", color="series"), size=1.5
         )
         if self.donut_hole > 0:
             donut_df = pd.DataFrame(
@@ -497,21 +489,21 @@ class RegressionDiscontinuity(BaseExperiment):
                     "series": ["donut boundary", "donut boundary"],
                 }
             )
-            p = p + geom_vline(
+            p = p + p9.geom_vline(
                 donut_df,
-                aes(xintercept="xintercept", color="series"),
+                p9.aes(xintercept="xintercept", color="series"),
                 linetype="dashed",
                 size=1,
             )
-            plot_data.colors["donut boundary"] = "orange"
+            colors["donut boundary"] = "orange"
 
         p = (
             p
-            + scale_color_manual(values=plot_data.colors, name="")
-            + labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
+            + p9.scale_color_manual(values=colors, name="")
+            + p9.labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
         )
         if figsize is not None:
-            p += theme(figure_size=figsize)
+            p += p9.theme(figure_size=figsize)
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 

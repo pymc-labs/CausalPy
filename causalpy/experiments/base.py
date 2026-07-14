@@ -27,8 +27,8 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
-from plotnine import ggplot
 from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
@@ -355,7 +355,7 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
-        result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]
+        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if self._model_backend.is_bayesian:
                 result = self._bayesian_plot(**draw_kwargs)
@@ -368,7 +368,7 @@ class BaseExperiment(ABC):
 
     def _finalize_plot(
         self,
-        result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray],
+        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray],
         *,
         show: bool,
         legend_kwargs: dict[str, Any] | None,
@@ -380,7 +380,7 @@ class BaseExperiment(ABC):
             if result.overlay is not None:
                 result.overlay(fig, axes)
             ax = as_axes_result(axes)
-        elif isinstance(result, ggplot):
+        elif isinstance(result, p9.ggplot):
             fig = result.draw(show=False)
             ax = as_axes_result(panel_axes(fig))
         else:
@@ -422,7 +422,7 @@ class BaseExperiment(ABC):
 
     def _ols_plot(
         self, *args: Any, **kwargs: Any
-    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]:
+    ) -> p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 
