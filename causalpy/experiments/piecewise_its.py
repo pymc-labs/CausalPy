@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Piecewise Interrupted Time Series Analysis (Segmented Regression)."""
 
+import ast
 import re
 import warnings
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ import pandas as pd
 import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
+from patsy import ModelDesc, dmatrices
 from plotnine import aes, geom_vline
 from sklearn.base import RegressorMixin
 
@@ -191,11 +192,9 @@ class PiecewiseITS(BaseExperiment):
         # Rename the index to "obs_ind" for consistency
         self.data.index.name = "obs_ind"
 
-        # Input validation
-        self._validate_inputs()
-
         # Parse and validate step/ramp terms before any downstream logic.
         self._step_ramp_terms = self._parse_step_ramp_terms()
+        self._validate_inputs()
         self.time_col = self._extract_time_column(self._step_ramp_terms)
         self.interruption_times = self._extract_and_canonicalize_interruption_times(
             self._step_ramp_terms, self.time_col
@@ -243,19 +242,42 @@ class PiecewiseITS(BaseExperiment):
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
         # Check formula contains at least one step() or ramp() term
-        if "step(" not in self.formula and "ramp(" not in self.formula:
+        if not self._step_ramp_terms:
             raise FormulaException(
                 "Formula must contain at least one step() or ramp() term. "
                 "Example: 'y ~ 1 + t + step(t, 50) + ramp(t, 50)'"
             )
 
+    @staticmethod
+    def _parse_step_ramp_factor(factor_name: str) -> list[dict[str, str]]:
+        """Extract bare ``step`` and ``ramp`` calls from one Patsy factor."""
+        expression = ast.parse(factor_name, mode="eval")
+        calls = []
+        for node in ast.walk(expression):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"step", "ramp"}
+                and len(node.args) == 2
+                and isinstance(node.args[0], ast.Name)
+            ):
+                threshold = ast.get_source_segment(factor_name, node.args[1])
+                calls.append(
+                    {
+                        "transform": node.func.id,
+                        "variable": node.args[0].id,
+                        "raw_threshold": threshold or ast.unparse(node.args[1]),
+                    }
+                )
+        return calls
+
     def _parse_step_ramp_terms(self) -> list[dict[str, str]]:
         """Parse step/ramp terms into structured metadata."""
-        pattern = r"(step|ramp)\s*\(\s*(\w+)\s*,\s*([^)]+?)\s*\)"
-        matches = re.findall(pattern, self.formula)
         return [
-            {"transform": transform, "variable": variable, "raw_threshold": threshold}
-            for transform, variable, threshold in matches
+            call
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            for factor in term.factors
+            for call in self._parse_step_ramp_factor(factor.name())
         ]
 
     def _extract_time_column(self, terms: list[dict[str, str]]) -> str:
@@ -290,7 +312,13 @@ class PiecewiseITS(BaseExperiment):
 
         canonical_thresholds: list[int | float | pd.Timestamp] = []
         for term in terms:
-            raw_threshold = term["raw_threshold"].strip().strip("'\"")
+            raw_threshold = term["raw_threshold"].strip()
+            if (
+                len(raw_threshold) >= 2
+                and raw_threshold[0] in "'\""
+                and raw_threshold[-1] == raw_threshold[0]
+            ):
+                raw_threshold = raw_threshold[1:-1]
 
             if is_datetime:
                 try:
@@ -321,11 +349,13 @@ class PiecewiseITS(BaseExperiment):
 
     def _get_interruption_column_indices(self) -> list[int]:
         """Get indices of columns related to interruptions (step/ramp terms)."""
-        indices = []
-        for i, label in enumerate(self.labels):
-            # Patsy labels step/ramp terms like "step(t, 50)" or "ramp(t, 50)"
-            if "step(" in label or "ramp(" in label:
-                indices.append(i)
+        indices: list[int] = []
+        for term in self._x_design_info.terms:
+            if any(
+                self._parse_step_ramp_factor(factor.name()) for factor in term.factors
+            ):
+                term_slice = self._x_design_info.term_slices[term]
+                indices.extend(range(term_slice.start, term_slice.stop))
         return indices
 
     def _compute_counterfactual_and_effects(self) -> None:

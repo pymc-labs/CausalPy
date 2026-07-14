@@ -23,7 +23,7 @@ import polars as pl
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices, dmatrices
 from plotnine import (
     aes,
     coord_cartesian,
@@ -69,7 +69,6 @@ from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
-    get_interaction_terms,
     round_num,
 )
 
@@ -255,10 +254,7 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if (
-                self.post_treatment_variable_name in label
-                and self.group_variable_name in label
-            ):
+            if self._is_treatment_interaction(label):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
@@ -268,24 +264,19 @@ class DifferenceInDifferences(BaseExperiment):
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
-                if (
-                    self.post_treatment_variable_name in label
-                    and self.group_variable_name in label
-                ):
+                if self._is_treatment_interaction(label):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
         elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
-            # Store the coefficient into dictionary {intercept:value}
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
-            # Create and find the interaction term based on the values user provided
-            interaction_term = (
-                f"{self.group_variable_name}:{self.post_treatment_variable_name}"
+            matched_key = next(
+                (key for key in coef_map if self._is_treatment_interaction(key)),
+                None,
             )
-            matched_key = next((k for k in coef_map if interaction_term in k), None)
             att = coef_map.get(matched_key) if matched_key is not None else None
             self.causal_impact = att
         else:
@@ -295,11 +286,6 @@ class DifferenceInDifferences(BaseExperiment):
         """Validate the input data and model formula for correctness."""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-        # Check if post_treatment_variable_name is in formula
-        if self.post_treatment_variable_name not in self.formula:
-            raise FormulaException(
-                f"Missing required variable '{self.post_treatment_variable_name}' in formula"
-            )
 
         # Check if post_treatment_variable_name is in data columns
         if self.post_treatment_variable_name not in self.data.columns:
@@ -320,33 +306,66 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _validate_formula_interaction_terms(self) -> None:
         """
-        Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
-        Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
+        Validate that the formula contains exactly one interaction term, that it
+        is between the group and post-treatment variables, and that it is not a
+        three-way or higher-order interaction.
+
+        Raises FormulaException if no interaction term is found, if more than one
+        interaction term is found, if any interaction term has more than 2
+        variables, or if the single interaction term does not involve both the
+        group and post-treatment variables.
         """
-        # Define interaction indicators
-        INTERACTION_INDICATORS = ["*", ":"]
+        interaction_terms = [
+            term
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            if len(term.factors) > 1
+        ]
 
-        # Get interaction terms
-        interaction_terms = get_interaction_terms(self.formula)
-
-        # Check for interaction terms with more than 2 variables (more than one '*' or ':')
+        # Check for interaction terms with more than 2 variables
         for term in interaction_terms:
-            total_indicators = sum(
-                term.count(indicator) for indicator in INTERACTION_INDICATORS
-            )
-            if (
-                total_indicators >= 2
-            ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
+            if len(term.factors) > 2:
                 raise FormulaException(
-                    f"Formula contains interaction term with more than 2 variables: {term}. "
+                    f"Formula contains interaction term with more than 2 variables: {term.name()}. "
                     "Three-way or higher-order interactions are not supported as they complicate interpretation of the causal effect."
                 )
 
         if len(interaction_terms) > 1:
+            interaction_term_names = [term.name() for term in interaction_terms]
             raise FormulaException(
-                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_term_names}. "
                 "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
+
+        # A DiD formula must contain exactly one interaction term, and it must be
+        # between the group and post-treatment variables: that term is what
+        # identifies the causal effect (see `algorithm`, which reads it back off
+        # the fitted model). Without this check a formula with no interaction
+        # term, or an interaction between unrelated variables, would pass
+        # validation and only fail later when `causal_impact` is accessed.
+        if len(interaction_terms) == 0 or not (
+            self._is_treatment_interaction(interaction_terms[0].name())
+        ):
+            raise FormulaException(
+                "Formula must contain exactly one interaction term between the "
+                f"group variable '{self.group_variable_name}' and the "
+                f"post-treatment variable '{self.post_treatment_variable_name}' "
+                f"(e.g. '{self.group_variable_name}*{self.post_treatment_variable_name}'). "
+                "This interaction term identifies the difference-in-differences causal effect."
+            )
+
+    def _is_treatment_interaction(self, term: str) -> bool:
+        """Whether a term is exactly the group/post-treatment interaction."""
+        factors = {
+            factor.split("[", maxsplit=1)[0]
+            for factor in term.replace("*", ":").split(":")
+        }
+        return len(factors) == 2 and all(
+            any(factor in {name, f"C({name})"} for factor in factors)
+            for name in (
+                self.group_variable_name,
+                self.post_treatment_variable_name,
+            )
+        )
 
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.

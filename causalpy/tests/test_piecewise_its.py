@@ -286,6 +286,43 @@ def test_piecewise_its_no_step_or_ramp():
         )
 
 
+def test_piecewise_its_parser_preserves_nested_threshold_expressions():
+    """Patsy's parsed factors preserve nested parentheses and commas."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.formula = "y ~ step(t, int(50)) + ramp(t, foo(a, b))"
+
+    assert experiment._parse_step_ramp_terms() == [
+        {"transform": "step", "variable": "t", "raw_threshold": "int(50)"},
+        {"transform": "ramp", "variable": "t", "raw_threshold": "foo(a, b)"},
+    ]
+
+
+@pytest.mark.parametrize("factor", ["np.step(t, 50)", "mystep(t, 50)"])
+def test_piecewise_its_parser_requires_bare_transform_name(factor):
+    """Qualified or similarly named functions are not interruption transforms."""
+    assert cp.PiecewiseITS._parse_step_ramp_factor(factor) == []
+
+
+@pytest.mark.parametrize("raw_threshold", ["50'", "''50''"])
+def test_piecewise_its_threshold_unwraps_only_one_matched_quote_pair(raw_threshold):
+    """Stray or repeated quotes are not silently stripped into valid numbers."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.data = pd.DataFrame({"t": np.arange(100)})
+    terms = [{"transform": "step", "variable": "t", "raw_threshold": raw_threshold}]
+
+    with pytest.raises(FormulaException, match="Invalid numeric threshold"):
+        experiment._extract_and_canonicalize_interruption_times(terms, "t")
+
+
+def test_piecewise_its_matched_quoted_threshold_still_parses():
+    """A single matched quote pair remains supported."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.data = pd.DataFrame({"t": np.arange(100)})
+    terms = [{"transform": "step", "variable": "t", "raw_threshold": "'50'"}]
+
+    assert experiment._extract_and_canonicalize_interruption_times(terms, "t") == [50]
+
+
 def test_piecewise_its_missing_column():
     """Test that missing column in formula raises error."""
     from patsy import PatsyError
