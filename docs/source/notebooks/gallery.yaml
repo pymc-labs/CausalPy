@@ -83,7 +83,6 @@ groups:
           Piecewise interrupted time series (segmented regression) models the outcome with separate slopes before and after the intervention, allowing the level and trend to change at the treatment point.
         cards:
           - title: Piecewise Interrupted Time Series (Segmented Regression)
-            notebook: piecewise_its_pymc
             notebook: piecewise-interrupted-time-series-pymc
       - title: Hierarchical Interrupted Time Series
         intro: |
@@ -91,7 +90,7 @@ groups:
         cards:
           - title: Hierarchical ITS for staggered launches (event-study)
             notebook: hierarchical_its_launch
-   
+
 
   - title: Cross-sectional methods
     intro: |
