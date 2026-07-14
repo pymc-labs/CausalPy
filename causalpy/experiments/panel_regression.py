@@ -663,16 +663,18 @@ class PanelRegression(BaseExperiment):
             )
             title = "Model Coefficients"
             p = (
-                ggplot(tidy, aes(x="coef", y="coeffs"))
+                ggplot(tidy, aes(x="coeffs", y="coef"))
                 + geom_col(fill="#1f77b4")
-                + geom_vline(xintercept=0, color="black", linetype="dashed", alpha=0.8)
+                + geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.8)
                 + coord_flip()
                 + labs(title="", x="Coefficient Value", y="")
                 + theme(figure_size=figsize)
             )
             return PlotSpec(
                 p,
-                overlay=lambda _fig, axes: axes[0].set_title(title),
+                overlay=lambda _fig, axes: axes[0].set(
+                    title=title, xlabel="Coefficient Value"
+                ),
                 n_panels=1,
             )
 

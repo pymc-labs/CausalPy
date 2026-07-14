@@ -682,8 +682,8 @@ def test_plot_coefficients_with_var_names(small_panel_data):
     )
     fig, ax = result.plot_coefficients(var_names=["treatment"])
     ytick_labels = [t.get_text() for t in ax.get_yticklabels() if t.get_text()]
-    xtick_labels = [t.get_text() for t in ax.get_xticklabels() if t.get_text()]
-    assert ytick_labels == ["treatment"] or xtick_labels == ["treatment"]
+    assert ytick_labels == ["treatment"]
+    assert ax.get_xlabel() == "Coefficient Value"
     plt.close(fig)
 
 

@@ -1277,7 +1277,7 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
     df = generate_staggered_did_data(
         n_units=30,
         n_time_periods=15,
-        treatment_cohorts={5: 10, 10: 10},
+        treatment_cohorts={4: 8, 8: 8, 12: 8},
         seed=42,
     )
 

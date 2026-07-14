@@ -1181,7 +1181,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             if layout == "facet":
                 for a in axes[1:]:
-                    axes[0].sharey(a)
+                    a.sharey(axes[0])
                 for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
                     ax.set_title(f"Cohort {cohort}")
                     ax.set_ylabel(plot_data.y_label)

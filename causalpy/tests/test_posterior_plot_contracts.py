@@ -176,6 +176,15 @@ def test_prepost_plot_kinds_return_two_panels(mock_pymc_sample, anova1_data, kin
     fig, ax = result.plot(show=False, kind=kind, num_samples=10)
     axes = assert_figure_axes_contract(fig, ax, min_axes=2)
     assert len(axes) == 2
+    assert axes[0].get_xlabel() == "Pretest"
+    assert axes[0].get_ylabel() == "Posttest"
+    assert axes[1].get_title().startswith("mean =")
+    legend = axes[0].get_legend()
+    assert legend is not None
+    assert {text.get_text() for text in legend.get_texts()} == {
+        "Control group",
+        "Treatment group",
+    }
 
 
 @pytest.mark.integration
