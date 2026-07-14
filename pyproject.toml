@@ -56,7 +56,7 @@ dependencies = [
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
-    "tidydraws==0.4.0",
+    "tidydraws==0.4.3",
     "xarray>=v2022.11.0",
     "pymc-extras>=0.3.0",
 ]

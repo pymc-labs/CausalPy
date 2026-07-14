@@ -99,7 +99,7 @@ jobs:
         # tidydraws is pip-only (not on conda-forge for all Python versions).
         run: |
           pip install --no-deps -e .
-          pip install 'tidydraws==0.4.0'
+          pip install 'tidydraws==0.4.3'
       - name: Show environment
         run: |
           micromamba list
