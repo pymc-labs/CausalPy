@@ -30,17 +30,13 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    CAUSAL_IMPACT_LAYOUT,
     CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
-    get_hdi_to_df,
-    interval_kind,
     prediction_draws,
-    stack_semantic_draws,
-    tag_semantic_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -629,8 +625,8 @@ class InterruptedTimeSeries(BaseExperiment):
         kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
             (mean + credible band). ``"spaghetti"`` draws posterior sample
-            lines via plotnine. ``"histogram"`` renders a density heatmap via
-            plotnine layout with a matplotlib ``pcolormesh`` density layer.
+            lines via plotnine. ``"histogram"`` renders plotnine
+            two-dimensional histogram layers.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -654,8 +650,7 @@ class InterruptedTimeSeries(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created (plotnine base plus matplotlib
-            overlays for singleton HDI markers and date formatting).
+            The rendered plotnine figure.
         ax : numpy.ndarray
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
@@ -687,25 +682,6 @@ class InterruptedTimeSeries(BaseExperiment):
         post_predictions = prediction_draws(
             self.post_pred, pd.DataFrame({"obs_ind": self.datapost.index})
         )
-        draws = stack_semantic_draws(
-            [
-                tag_semantic_draws(pre_predictions, variable="outcome", series="fit"),
-                tag_semantic_draws(
-                    post_predictions, variable="outcome", series="counterfactual"
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.pre_impact), variable="effect", series="pre"
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.post_impact), variable="effect", series="post"
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.post_impact_cumulative),
-                    variable="cumulative_effect",
-                    series="post",
-                ),
-            ]
-        )
         observations = pd.DataFrame(
             {
                 "obs_ind": self.data.index,
@@ -717,7 +693,14 @@ class InterruptedTimeSeries(BaseExperiment):
                 ),
             }
         )
-        return CausalPanelData(draws=draws, observations=observations)
+        return CausalPanelData(
+            fitted=pre_predictions,
+            counterfactual=post_predictions,
+            pre_effect=dataarray_draws(self.pre_impact),
+            post_effect=dataarray_draws(self.post_impact),
+            cumulative_effect=dataarray_draws(self.post_impact_cumulative),
+            observations=observations,
+        )
 
     def _bayesian_plot(
         self,
@@ -740,11 +723,11 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         plot_data = self._causal_panel_data()
         series_labels = {
-            ("outcome", "fit"): "Pre-intervention period",
-            ("outcome", "counterfactual"): "Counterfactual",
-            ("effect", "pre"): "pre",
-            ("effect", "post"): "post",
-            ("cumulative_effect", "post"): "post",
+            "fitted": "Pre-intervention period",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
         }
         colors = {
             "Pre-intervention period": "#1f77b4",
@@ -755,14 +738,12 @@ class InterruptedTimeSeries(BaseExperiment):
         }
         p = build_causal_panel_plot(
             plot_data,
-            layout=CAUSAL_IMPACT_LAYOUT,
-            panels=list(panels),
+            panels=panels,
             series_labels=series_labels,
             colors=colors,
-            show_panel_titles=True,
             kind=kind,
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
+            interval=ci_kind,
             num_samples=num_samples,
             figsize=figsize,
             post_index=self.datapost.index,
@@ -933,30 +914,22 @@ class InterruptedTimeSeries(BaseExperiment):
             pre_data["prediction"] = pre_mu.mean("sample").values
             post_data["prediction"] = post_mu.mean("sample").values
 
-            hdi_pre_pred = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            pre_pred_summary = summarize_draws(
+                dataarray_draws(self.pre_pred["posterior_predictive"].mu),
+                group_by="obs_ind",
+                ci_prob=hdi_prob,
             )
-            hdi_post_pred = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
+            post_pred_summary = summarize_draws(
+                dataarray_draws(self.post_pred["posterior_predictive"].mu),
+                group_by="obs_ind",
+                ci_prob=hdi_prob,
             )
-            # If treated_units present, select unit_0; otherwise use directly
-            if (
-                isinstance(hdi_pre_pred.index, pd.MultiIndex)
-                and "treated_units" in hdi_pre_pred.index.names
-            ):
-                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
-                    "unit_0", level="treated_units"
-                ).set_index(pre_data.index)
-                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
-                    "unit_0", level="treated_units"
-                ).set_index(post_data.index)
-            else:
-                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.set_index(
-                    pre_data.index
-                )
-                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.set_index(
-                    post_data.index
-                )
+            pre_data[[pred_lower_col, pred_upper_col]] = pre_pred_summary[
+                ["mu_lower", "mu_upper"]
+            ].to_numpy()
+            post_data[[pred_lower_col, pred_upper_col]] = post_pred_summary[
+                ["mu_lower", "mu_upper"]
+            ].to_numpy()
 
             pre_impact_mean = (
                 self.pre_impact.mean(dim=["chain", "draw"])

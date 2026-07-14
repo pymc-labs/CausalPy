@@ -29,17 +29,13 @@ from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    CAUSAL_IMPACT_LAYOUT,
     CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
-    get_hdi_to_df,
-    interval_kind,
     prediction_draws,
-    stack_semantic_draws,
-    tag_semantic_draws,
+    summarize_draws,
 )
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
@@ -514,31 +510,6 @@ class SyntheticControl(BaseExperiment):
             pd.DataFrame({"obs_ind": self.datapost.index}),
             treated_unit=treated_unit,
         )
-        draws = stack_semantic_draws(
-            [
-                tag_semantic_draws(pre_predictions, variable="outcome", series="fit"),
-                tag_semantic_draws(
-                    post_predictions, variable="outcome", series="counterfactual"
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.pre_impact, treated_unit=treated_unit),
-                    variable="effect",
-                    series="pre",
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.post_impact, treated_unit=treated_unit),
-                    variable="effect",
-                    series="post",
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(
-                        self.post_impact_cumulative, treated_unit=treated_unit
-                    ),
-                    variable="cumulative_effect",
-                    series="post",
-                ),
-            ]
-        )
         observations = pd.DataFrame(
             {
                 "obs_ind": self.data.index,
@@ -554,7 +525,16 @@ class SyntheticControl(BaseExperiment):
                 ),
             }
         )
-        return CausalPanelData(draws=draws, observations=observations)
+        return CausalPanelData(
+            fitted=pre_predictions,
+            counterfactual=post_predictions,
+            pre_effect=dataarray_draws(self.pre_impact, treated_unit=treated_unit),
+            post_effect=dataarray_draws(self.post_impact, treated_unit=treated_unit),
+            cumulative_effect=dataarray_draws(
+                self.post_impact_cumulative, treated_unit=treated_unit
+            ),
+            observations=observations,
+        )
 
     def _bayesian_plot(
         self,
@@ -585,11 +565,11 @@ class SyntheticControl(BaseExperiment):
         )
         plot_data = self._causal_panel_data(treated_unit=treated_unit)
         series_labels = {
-            ("outcome", "fit"): "Pre-intervention period",
-            ("outcome", "counterfactual"): "Counterfactual",
-            ("effect", "pre"): "pre",
-            ("effect", "post"): "post",
-            ("cumulative_effect", "post"): "post",
+            "fitted": "Pre-intervention period",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
         }
         colors = {
             "Pre-intervention period": "#1f77b4",
@@ -600,14 +580,12 @@ class SyntheticControl(BaseExperiment):
         }
         p = build_causal_panel_plot(
             plot_data,
-            layout=CAUSAL_IMPACT_LAYOUT,
-            panels=list(panels),
+            panels=panels,
             series_labels=series_labels,
             colors=colors,
-            show_panel_titles=True,
             kind=kind,
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
+            interval=ci_kind,
             num_samples=num_samples,
             figsize=figsize,
         )
@@ -834,21 +812,29 @@ class SyntheticControl(BaseExperiment):
         post_data["prediction"] = post_pred_vals.sel(treated_units=treated_unit).values
 
         # HDI intervals for predictions (always use treated_units dimension)
-        pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
-            hdi_prob=hdi_prob,
+        pre_summary = summarize_draws(
+            dataarray_draws(
+                self.pre_pred["posterior_predictive"].mu,
+                treated_unit=treated_unit,
+            ),
+            group_by="obs_ind",
+            ci_prob=hdi_prob,
         )
-        post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
-            hdi_prob=hdi_prob,
+        post_summary = summarize_draws(
+            dataarray_draws(
+                self.post_pred["posterior_predictive"].mu,
+                treated_unit=treated_unit,
+            ),
+            group_by="obs_ind",
+            ci_prob=hdi_prob,
         )
 
-        # Extract only the lower and upper columns and ensure proper indexing
-        pre_lower_upper = pre_hdi.iloc[:, [0, -1]].values  # Get first and last columns
-        post_lower_upper = post_hdi.iloc[:, [0, -1]].values
-
-        pre_data[[pred_lower_col, pred_upper_col]] = pre_lower_upper
-        post_data[[pred_lower_col, pred_upper_col]] = post_lower_upper
+        pre_data[[pred_lower_col, pred_upper_col]] = pre_summary[
+            ["mu_lower", "mu_upper"]
+        ].to_numpy()
+        post_data[[pred_lower_col, pred_upper_col]] = post_summary[
+            ["mu_lower", "mu_upper"]
+        ].to_numpy()
 
         # Impact data - always use primary unit for main dataframe
         pre_data["impact"] = (
@@ -862,19 +848,23 @@ class SyntheticControl(BaseExperiment):
             .values
         )
         # Impact HDI intervals (always use treated_units dimension)
-        pre_impact_hdi = get_hdi_to_df(
-            self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+        pre_impact_summary = summarize_draws(
+            dataarray_draws(self.pre_impact, treated_unit=treated_unit),
+            group_by="obs_ind",
+            ci_prob=hdi_prob,
         )
-        post_impact_hdi = get_hdi_to_df(
-            self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
+        post_impact_summary = summarize_draws(
+            dataarray_draws(self.post_impact, treated_unit=treated_unit),
+            group_by="obs_ind",
+            ci_prob=hdi_prob,
         )
 
-        # Extract only the lower and upper columns for impact HDI
-        pre_impact_lower_upper = pre_impact_hdi.iloc[:, [0, -1]].values
-        post_impact_lower_upper = post_impact_hdi.iloc[:, [0, -1]].values
-
-        pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_lower_upper
-        post_data[[impact_lower_col, impact_upper_col]] = post_impact_lower_upper
+        pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_summary[
+            ["mu_lower", "mu_upper"]
+        ].to_numpy()
+        post_data[[impact_lower_col, impact_upper_col]] = post_impact_summary[
+            ["mu_lower", "mu_upper"]
+        ].to_numpy()
 
         self.plot_data = pd.concat([pre_data, post_data])
 

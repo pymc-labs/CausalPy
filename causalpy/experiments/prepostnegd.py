@@ -36,6 +36,7 @@ from plotnine import (
     labs,
     scale_color_manual,
     scale_fill_manual,
+    theme,
 )
 
 from causalpy.constants import HDI_PROB
@@ -46,14 +47,9 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
-    add_posterior_kind,
-    histogram_y_edges,
-    interval_kind,
     label_draws,
-    posterior_histogram_tiles,
+    posterior_kind_layers,
     prediction_draws,
-    spaghetti_draws,
-    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -67,9 +63,7 @@ class _PrePostPlotData:
     """Tidy tables consumed by the declarative pre/post plot."""
 
     scatter: pd.DataFrame
-    intervals: pd.DataFrame
-    posterior_paths: pd.DataFrame | None
-    posterior_density: pd.DataFrame | None
+    draws: pl.DataFrame
     effects: pd.DataFrame
     references: pd.DataFrame
     panels: tuple[str, str]
@@ -315,16 +309,14 @@ class PrePostNEGD(BaseExperiment):
             Number of posterior draws to overlay when ``kind="spaghetti"``.
             Defaults to 50.
         figsize : tuple of (float, float)
-            Unused for the plotnine path; retained for API compatibility.
-            Defaults to ``(7, 9)``.
+            Width and height of the figure in inches. Defaults to ``(7, 9)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied only when the return value is a
-            matplotlib ``(fig, ax)`` tuple.
+            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
 
         Returns
         -------
@@ -356,8 +348,6 @@ class PrePostNEGD(BaseExperiment):
         *,
         ci_prob: float,
         interval: Literal["hdi", "eti"],
-        kind: Literal["ribbon", "histogram", "spaghetti"],
-        num_samples: int,
         round_to: int | None,
     ) -> _PrePostPlotData:
         """Prepare observed, posterior, and effect tables for plotting."""
@@ -384,25 +374,8 @@ class PrePostNEGD(BaseExperiment):
                 label_draws(treated, series="Treatment group"),
             ],
             how="diagonal_relaxed",
-        )
-        intervals = summarize_draws(
-            draws,
-            group_by=["series", "pre"],
-            ci_prob=ci_prob,
-            interval=interval,
-        ).rename(columns={"pre": "_x", "mu": "_y"})
-        intervals["panel"] = panels[0]
-        posterior_paths = (
-            spaghetti_draws(
-                draws,
-                group_by=["series", "pre"],
-                num_samples=num_samples,
-            ).rename(columns={"pre": "_x", "mu": "_y"})
-            if kind == "spaghetti"
-            else None
-        )
-        if posterior_paths is not None:
-            posterior_paths["panel"] = panels[0]
+        ).rename({"pre": "_x", "mu": "_y"})
+        draws = draws.with_columns(pl.lit(panels[0]).alias("panel"))
 
         effect = np.asarray(self.causal_impact).ravel()
         effect_summary = td.point_interval(
@@ -425,35 +398,11 @@ class PrePostNEGD(BaseExperiment):
                 "ref": ["zero", "interval", "interval"],
             }
         )
-        for frame in (scatter, intervals, effects, references):
+        for frame in (scatter, effects, references):
             frame["panel"] = pd.Categorical(
                 frame["panel"], categories=panels, ordered=True
             )
 
-        posterior_density = None
-        if kind == "histogram":
-            edges = histogram_y_edges(untreated, treated)
-            posterior_density = pd.concat(
-                [
-                    posterior_histogram_tiles(
-                        untreated,
-                        "pre",
-                        x_col="_x",
-                        y_col="_y",
-                        panel=panels[0],
-                        y_edges=edges,
-                    ),
-                    posterior_histogram_tiles(
-                        treated,
-                        "pre",
-                        x_col="_x",
-                        y_col="_y",
-                        panel=panels[0],
-                        y_edges=edges,
-                    ),
-                ],
-                ignore_index=True,
-            )
         title = (
             f"mean = {round_num(effect_summary['effect'][0], round_to)}\n"
             f"{ci_prob * 100:.0f}% CI "
@@ -462,9 +411,7 @@ class PrePostNEGD(BaseExperiment):
         )
         return _PrePostPlotData(
             scatter=scatter,
-            intervals=intervals,
-            posterior_paths=posterior_paths,
-            posterior_density=posterior_density,
+            draws=draws,
             effects=effects,
             references=references,
             panels=panels,
@@ -484,27 +431,26 @@ class PrePostNEGD(BaseExperiment):
         """Build the Bayesian pre/post plot from tidy declarative layers."""
         plot_data = self._prepare_bayesian_plot_data(
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
-            kind=kind,
-            num_samples=num_samples,
+            interval=ci_kind,
             round_to=round_to,
         )
         colors = {"Control group": "#1f77b4", "Treatment group": "#ff7f0e"}
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x="_x",
+            group_by=["panel", "series", "_x"],
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            var_name="_y",
+            colors=colors,
+        )
         p = ggplot() + geom_point(
             plot_data.scatter, aes("_x", "_y", color="series"), alpha=0.5
         )
-        p = add_posterior_kind(
-            p,
-            plot_data.intervals,
-            kind,
-            x="_x",
-            y="_y",
-            ymin="mu_lower",
-            ymax="mu_upper",
-            spaghetti_df=plot_data.posterior_paths,
-            histogram_tiles=plot_data.posterior_density,
-            spaghetti_group="_line_id",
-        )
+        for layer in posterior_layers:
+            p += layer
         p = (
             p
             + geom_density(plot_data.effects, aes("_x"))
@@ -528,6 +474,7 @@ class PrePostNEGD(BaseExperiment):
             )
             + guides(color="none", fill="none")
             + labs(x="", y="", title=plot_data.title)
+            + theme(figure_size=figsize)
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME

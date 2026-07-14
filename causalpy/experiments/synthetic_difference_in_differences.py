@@ -29,16 +29,12 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.plot_utils import (
-    CAUSAL_IMPACT_LAYOUT,
     CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
-    interval_kind,
     prediction_draws,
-    stack_semantic_draws,
-    tag_semantic_draws,
 )
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
@@ -693,38 +689,22 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             pd.DataFrame({"obs_ind": self.datapost.index}),
             treated_unit=treated_unit,
         )
-        draws = stack_semantic_draws(
-            [
-                tag_semantic_draws(pre_predictions, variable="outcome", series="fit"),
-                tag_semantic_draws(
-                    post_predictions, variable="outcome", series="counterfactual"
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.pre_impact, treated_unit=treated_unit),
-                    variable="effect",
-                    series="pre",
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(self.post_impact, treated_unit=treated_unit),
-                    variable="effect",
-                    series="post",
-                ),
-                tag_semantic_draws(
-                    dataarray_draws(
-                        self.post_impact_cumulative, treated_unit=treated_unit
-                    ),
-                    variable="cumulative_effect",
-                    series="post",
-                ),
-            ]
-        )
         observations = pd.DataFrame(
             {
                 "obs_ind": self.data.index,
                 "value": self.data[self.treated_units].mean(axis=1).to_numpy(),
             }
         )
-        return CausalPanelData(draws=draws, observations=observations)
+        return CausalPanelData(
+            fitted=pre_predictions,
+            counterfactual=post_predictions,
+            pre_effect=dataarray_draws(self.pre_impact, treated_unit=treated_unit),
+            post_effect=dataarray_draws(self.post_impact, treated_unit=treated_unit),
+            cumulative_effect=dataarray_draws(
+                self.post_impact_cumulative, treated_unit=treated_unit
+            ),
+            observations=observations,
+        )
 
     def _bayesian_plot(
         self,
@@ -747,11 +727,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
         plot_data = self._causal_panel_data(treated_unit=treated_unit)
         series_labels = {
-            ("outcome", "fit"): "Pre-intervention fit",
-            ("outcome", "counterfactual"): "Counterfactual",
-            ("effect", "pre"): "pre",
-            ("effect", "post"): "post",
-            ("cumulative_effect", "post"): "post",
+            "fitted": "Pre-intervention fit",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
         }
         colors = {
             "Pre-intervention fit": "#1f77b4",
@@ -762,14 +742,12 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         }
         p = build_causal_panel_plot(
             plot_data,
-            layout=CAUSAL_IMPACT_LAYOUT,
-            panels=list(panels),
+            panels=panels,
             series_labels=series_labels,
             colors=colors,
-            show_panel_titles=True,
             kind=kind,
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
+            interval=ci_kind,
             num_samples=num_samples,
             figsize=figsize,
         )

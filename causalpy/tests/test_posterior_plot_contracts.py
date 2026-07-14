@@ -148,6 +148,22 @@ def test_did_plot_kinds_return_figure_axes(mock_pymc_sample, did_data, kind):
 
 
 @pytest.mark.integration
+def test_did_plot_supports_boolean_time(mock_pymc_sample, did_data):
+    did_data = did_data.assign(t=did_data["t"].astype(bool))
+    result = cp.DifferenceInDifferences(
+        did_data,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    fig, ax = result.plot(show=False, kind="histogram")
+
+    assert_figure_axes_contract(fig, ax)
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", POSTERIOR_KINDS)
 def test_prepost_plot_kinds_return_two_panels(mock_pymc_sample, anova1_data, kind):
     result = cp.PrePostNEGD(
@@ -185,8 +201,28 @@ def test_rd_plot_eti_path_returns_figure_axes(mock_pymc_sample, rd_data):
         treatment_threshold=0.5,
         epsilon=0.001,
     )
-    fig, ax = result.plot(show=False, kind="ribbon", ci_kind="eti")
+    fig, ax = result.plot(
+        show=False,
+        kind="ribbon",
+        ci_kind="eti",
+        figsize=(5, 4),
+    )
     assert_figure_axes_contract(fig, ax)
+    assert np.allclose(fig.get_size_inches(), (5, 4))
+
+
+@pytest.mark.integration
+def test_rd_plot_rejects_invalid_posterior_kind(mock_pymc_sample, rd_data):
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + bs(x, df=6) + treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        treatment_threshold=0.5,
+        epsilon=0.001,
+    )
+
+    with pytest.raises(ValueError, match="Unknown kind"):
+        result.plot(show=False, kind="invalid")  # type: ignore[arg-type]
 
 
 @pytest.mark.integration

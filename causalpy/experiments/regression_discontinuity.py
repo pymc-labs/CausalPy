@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import seaborn as sns
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
@@ -30,6 +31,7 @@ from plotnine import (
     ggplot,
     labs,
     scale_color_manual,
+    theme,
 )
 from sklearn.base import RegressorMixin
 from causalpy.experiments.model_adapter import build_coords
@@ -41,12 +43,9 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
-    add_posterior_kind,
-    interval_kind,
-    posterior_histogram_tiles,
+    label_draws,
+    posterior_kind_layers,
     prediction_draws,
-    spaghetti_draws,
-    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
@@ -65,9 +64,7 @@ class _RDPlotData:
     """Tidy tables consumed by the declarative RD plot."""
 
     points: pd.DataFrame
-    intervals: pd.DataFrame
-    posterior_paths: pd.DataFrame | None
-    posterior_density: pd.DataFrame | None
+    draws: pl.DataFrame
     colors: dict[str, str]
 
 
@@ -365,8 +362,8 @@ class RegressionDiscontinuity(BaseExperiment):
         kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
             (mean + credible band). ``"spaghetti"`` draws individual posterior
-            predictive lines. ``"histogram"`` uses a matplotlib density heatmap
-            overlay on the plotnine base.
+            predictive lines. ``"histogram"`` uses plotnine two-dimensional
+            histogram layers.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -375,15 +372,14 @@ class RegressionDiscontinuity(BaseExperiment):
             to 50. Ignored for other kinds.
 
         figsize : tuple of (float, float), optional
-            Unused for the plotnine path; retained for API compatibility.
+            Width and height of the figure in inches.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied only when the return value is a
-            matplotlib ``(fig, ax)`` tuple (e.g. OLS plots).
+            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
 
         Returns
         -------
@@ -411,14 +407,8 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def _prepare_bayesian_plot_data(
         self,
-        *,
-        ci_prob: float,
-        interval: Literal["hdi", "eti"],
-        kind: Literal["ribbon", "histogram", "spaghetti"],
-        num_samples: int,
     ) -> _RDPlotData:
         """Prepare observed and posterior tables for plotting."""
-        xcol = self.running_variable_name
         points = self.data.copy()
         has_exclusion = len(self.fit_data) < len(self.data)
         point_label = "fit data" if has_exclusion else "data"
@@ -431,32 +421,16 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         newdata = self.x_pred.reset_index(drop=True)
         newdata["obs_ind"] = range(len(newdata))
-        draws = prediction_draws(self.pred, newdata)
-        intervals = summarize_draws(
-            draws,
-            group_by=xcol,
-            ci_prob=ci_prob,
-            interval=interval,
-        ).assign(series="Posterior mean")
-        posterior_paths = (
-            spaghetti_draws(
-                draws,
-                group_by=xcol,
-                num_samples=num_samples,
-            ).assign(series="Posterior mean")
-            if kind == "spaghetti"
-            else None
+        draws = label_draws(
+            prediction_draws(self.pred, newdata),
+            series="Posterior mean",
         )
         colors = {point_label: "black", "Posterior mean": "#ff7f0e"}
         if has_exclusion:
             colors["excluded data"] = "lightgray"
         return _RDPlotData(
             points=points,
-            intervals=intervals,
-            posterior_paths=posterior_paths,
-            posterior_density=(
-                posterior_histogram_tiles(draws, xcol) if kind == "histogram" else None
-            ),
+            draws=draws,
             colors=colors,
         )
 
@@ -473,23 +447,22 @@ class RegressionDiscontinuity(BaseExperiment):
         """Build the Bayesian RD plot from tidy declarative layers."""
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
-        plot_data = self._prepare_bayesian_plot_data(
+        plot_data = self._prepare_bayesian_plot_data()
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x=xcol,
+            group_by=["series", xcol],
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
-            kind=kind,
+            interval=ci_kind,
             num_samples=num_samples,
+            colors=plot_data.colors,
         )
         p = ggplot() + geom_point(
             plot_data.points, aes(xcol, ycol, color="series"), size=1.5
         )
-        p = add_posterior_kind(
-            p,
-            plot_data.intervals,
-            kind,
-            x=xcol,
-            spaghetti_df=plot_data.posterior_paths,
-            histogram_tiles=plot_data.posterior_density,
-        )
+        for layer in posterior_layers:
+            p += layer
 
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
@@ -537,6 +510,8 @@ class RegressionDiscontinuity(BaseExperiment):
             + scale_color_manual(values=plot_data.colors, name="")
             + labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
         )
+        if figsize is not None:
+            p += theme(figure_size=figsize)
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
 

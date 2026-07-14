@@ -976,7 +976,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
         **kwargs: Any,
-    ) -> ggplot | PlotSpec:
+    ) -> PlotSpec:
         """Plot results for Bayesian model.
 
         Parameters
@@ -1009,9 +1009,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot or :class:`~causalpy.plot_utils.PlotSpec`
-            Declarative event-study plot, or a group-time spec when
-            matplotlib axis post-processing remains necessary.
+        :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative event-study or group-time plot specification.
         """
         if hdi_prob is not None and hdi_prob != self.hdi_prob_:
             raise ValueError(

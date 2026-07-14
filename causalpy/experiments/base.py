@@ -355,6 +355,7 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
+        result: ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if self._model_backend.is_bayesian:
                 result = self._bayesian_plot(**draw_kwargs)
@@ -411,15 +412,17 @@ class BaseExperiment(ABC):
 
         return fig, ax
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> ggplot | PlotSpec | tuple:
+    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> PlotSpec:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian.
 
-        Returns a :class:`plotnine.ggplot`, :class:`~causalpy.plot_utils.PlotSpec`,
-        or legacy ``(fig, ax)`` for OLS-style matplotlib plots.
+        Bayesian plot builders return a :class:`~causalpy.plot_utils.PlotSpec`;
+        public methods render it to the stable ``(fig, ax)`` contract.
         """
         raise NotImplementedError("_bayesian_plot method not yet implemented")
 
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> ggplot | PlotSpec | tuple:
+    def _ols_plot(
+        self, *args: Any, **kwargs: Any
+    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Plot results for OLS models. Override in subclasses that support OLS."""
         raise NotImplementedError("_ols_plot method not yet implemented")
 

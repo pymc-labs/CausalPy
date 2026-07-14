@@ -571,9 +571,7 @@ class PanelRegression(BaseExperiment):
             hdi_prob=hdi_prob,
         )
 
-    def _bayesian_plot(
-        self, hdi_prob: float = HDI_PROB, **kwargs: Any
-    ) -> ggplot | PlotSpec:
+    def _bayesian_plot(self, hdi_prob: float = HDI_PROB, **kwargs: Any) -> PlotSpec:
         """Create coefficient plot for Bayesian model.
 
         Parameters
@@ -586,14 +584,12 @@ class PanelRegression(BaseExperiment):
 
         Returns
         -------
-        plotnine.ggplot or :class:`~causalpy.plot_utils.PlotSpec`
+        :class:`~causalpy.plot_utils.PlotSpec`
             Declarative coefficient plot for the base ``plot()`` draw path.
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
-    def _ols_plot(
-        self, **kwargs: Any
-    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]:
+    def _ols_plot(self, **kwargs: Any) -> PlotSpec:
         """Create coefficient plot for OLS model.
 
         Returns
@@ -605,7 +601,7 @@ class PanelRegression(BaseExperiment):
 
     def _plot_coefficients_internal(
         self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
-    ) -> ggplot | PlotSpec | tuple[plt.Figure, plt.Axes]:
+    ) -> PlotSpec:
         """Internal method to create coefficient plot.
 
         Parameters

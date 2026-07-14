@@ -32,16 +32,12 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    PIECEWISE_ITS_LAYOUT,
     CausalPanelData,
     PlotSpec,
     add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
-    interval_kind,
     prediction_draws,
-    stack_semantic_draws,
-    tag_semantic_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -549,25 +545,19 @@ class PiecewiseITS(BaseExperiment):
         cumulative_effect = dataarray_draws(self.cumulative_effect).join(
             time_lookup, on="obs_ind"
         )
-        draws = stack_semantic_draws(
-            [
-                tag_semantic_draws(fitted, variable="outcome", series="fit"),
-                tag_semantic_draws(
-                    counterfactual, variable="outcome", series="counterfactual"
-                ),
-                tag_semantic_draws(effect, variable="effect", series="post"),
-                tag_semantic_draws(
-                    cumulative_effect, variable="cumulative_effect", series="post"
-                ),
-            ]
-        )
         observations = pd.DataFrame(
             {
                 "t": time_values,
                 "value": self.design["y"].isel(treated_units=0).to_numpy(),
             }
         )
-        return CausalPanelData(draws=draws, observations=observations)
+        return CausalPanelData(
+            fitted=fitted,
+            counterfactual=counterfactual,
+            post_effect=effect,
+            cumulative_effect=cumulative_effect,
+            observations=observations,
+        )
 
     def _bayesian_plot(
         self,
@@ -588,10 +578,10 @@ class PiecewiseITS(BaseExperiment):
         )
         plot_data = self._causal_panel_data()
         series_labels = {
-            ("outcome", "fit"): "Fitted",
-            ("outcome", "counterfactual"): "Counterfactual",
-            ("effect", "post"): "effect",
-            ("cumulative_effect", "post"): "cumulative",
+            "fitted": "Fitted",
+            "counterfactual": "Counterfactual",
+            "post_effect": "effect",
+            "cumulative_effect": "cumulative",
         }
         colors = {
             "Fitted": "#1f77b4",
@@ -602,21 +592,19 @@ class PiecewiseITS(BaseExperiment):
         }
         p = build_causal_panel_plot(
             plot_data,
-            layout=PIECEWISE_ITS_LAYOUT,
-            panels=list(panels),
+            panels=panels,
             series_labels=series_labels,
             colors=colors,
-            show_panel_titles=True,
             kind=kind,
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
+            interval=ci_kind,
             num_samples=num_samples,
             x="t",
             shade_fill="#2ca02c",
             figsize=figsize,
             zero_linetype="dashed",
             zero_alpha=0.5,
-            histogram_top_keys=(("outcome", "fit"), ("outcome", "counterfactual")),
+            shade_outcome=False,
         )
         p += geom_vline(
             pd.DataFrame({"t": self.interruption_times}),

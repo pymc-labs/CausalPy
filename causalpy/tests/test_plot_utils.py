@@ -22,7 +22,7 @@ import polars as pl
 import pytest
 import xarray as xr
 
-from causalpy.plot_utils import dataarray_draws, get_hdi_to_df
+from causalpy.plot_utils import dataarray_draws
 
 
 @pytest.mark.integration
@@ -59,28 +59,15 @@ def test_plot_spec_overlay_runs_once():
     plt.close(fig)
 
 
-@pytest.mark.integration
-def test_get_hdi_to_df_with_coordinate_dimensions():
-    """
-    Regression test for bug where get_hdi_to_df returned string coordinate values
-    instead of numeric HDI values when xarray had named coordinate dimensions.
+def test_dataarray_summary_ignores_scalar_string_coordinates():
+    """Regression test for #532's string coordinate leaking into HDI columns."""
+    from causalpy.plot_utils import summarize_draws
 
-    This bug manifested in multi-cell synthetic control experiments where columns
-    like 'pred_hdi_upper_94' contained the string "treated_agg" instead of
-    numeric upper bound values.
-
-    See: https://github.com/pymc-labs/CausalPy/issues/532
-    """
-    # Create a mock xarray DataArray similar to what's produced in synthetic control
-    # with a coordinate dimension like 'treated_units'
     np.random.seed(42)
     n_chains = 2
     n_draws = 100
     n_obs = 10
-
-    # Simulate posterior samples with a named coordinate
     data = np.random.normal(loc=5.0, scale=0.5, size=(n_chains, n_draws, n_obs))
-
     xr_data = xr.DataArray(
         data,
         dims=["chain", "draw", "obs_ind"],
@@ -92,45 +79,15 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
         },
     )
 
-    # Call get_hdi_to_df
-    result = get_hdi_to_df(xr_data, hdi_prob=0.94)
-
-    # Assertions to verify the bug is fixed
-    assert isinstance(result, pd.DataFrame), "Result should be a DataFrame"
-
-    # Check that we have exactly 2 columns (lower and higher)
-    assert result.shape[1] == 2, f"Expected 2 columns, got {result.shape[1]}"
-
-    # Check column names
-    assert "lower" in result.columns, "Should have 'lower' column"
-    assert "higher" in result.columns, "Should have 'higher' column"
-
-    # CRITICAL: Check that columns contain numeric data, not strings
-    assert result["lower"].dtype in [
-        np.float64,
-        np.float32,
-    ], f"'lower' column should be numeric, got {result['lower'].dtype}"
-    assert result["higher"].dtype in [
-        np.float64,
-        np.float32,
-    ], f"'higher' column should be numeric, got {result['higher'].dtype}"
-
-    # Check that no string values like 'treated_agg' appear in the data
-    assert not (result["lower"].astype(str).str.contains("treated_agg").any()), (
-        "'lower' column should not contain coordinate string values"
-    )
-    assert not (result["higher"].astype(str).str.contains("treated_agg").any()), (
-        "'higher' column should not contain coordinate string values"
+    result = summarize_draws(
+        dataarray_draws(xr_data),
+        group_by="obs_ind",
+        ci_prob=0.94,
     )
 
-    # Verify HDI ordering
-    assert (result["lower"] <= result["higher"]).all(), (
-        "'lower' should be <= 'higher' for all rows"
-    )
-
-    # Verify reasonable HDI values (should be around the mean of 5.0)
-    assert result["lower"].min() > 3.0, "HDI lower bounds should be reasonable"
-    assert result["higher"].max() < 7.0, "HDI upper bounds should be reasonable"
+    assert pd.api.types.is_numeric_dtype(result["mu_lower"])
+    assert pd.api.types.is_numeric_dtype(result["mu_upper"])
+    assert (result["mu_lower"] <= result["mu_upper"]).all()
 
 
 @pytest.fixture
@@ -199,77 +156,80 @@ def test_spaghetti_draws_samples_complete_paths(synthetic_posterior_draws):
     assert sampled.groupby("_line_id")[["panel", "series"]].nunique().eq(1).all().all()
 
 
-def test_posterior_histogram_tiles_use_draw_proportions(synthetic_posterior_draws):
-    from causalpy.plot_utils import posterior_histogram_tiles
-
-    tiles = posterior_histogram_tiles(synthetic_posterior_draws, "obs_ind")
-    assert {"obs_ind", "y", "width", "height", "density"} <= set(tiles.columns)
-    assert pd.api.types.is_datetime64_any_dtype(tiles["obs_ind"])
-    assert (
-        tiles.groupby("obs_ind")["density"]
-        .sum()
-        .between(0.99, 1.01, inclusive="both")
-        .all()
-    )
-
-
-def test_histogram_layers_share_explicit_y_grid(synthetic_posterior_draws):
-    from causalpy.plot_utils import (
-        histogram_y_edges,
-        posterior_histogram_tiles,
-    )
+def test_histogram_layers_keep_series_in_separate_geoms(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
 
     shifted = synthetic_posterior_draws.with_columns(
         mu=synthetic_posterior_draws["mu"] + 10
     )
-    edges = histogram_y_edges(synthetic_posterior_draws, shifted)
-    tiles = pd.concat(
+    draws = pl.concat(
         [
-            posterior_histogram_tiles(
+            label_draws(
                 synthetic_posterior_draws,
-                "obs_ind",
-                panel="first",
-                y_edges=edges,
+                series="first",
             ),
-            posterior_histogram_tiles(
+            label_draws(
                 shifted,
-                "obs_ind",
-                panel="second",
-                y_edges=edges,
+                series="second",
             ),
-        ],
-        ignore_index=True,
+        ]
     )
+    _, layers = posterior_kind_layers(
+        draws,
+        "histogram",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
+        ci_prob=0.94,
+        colors={"first": "blue", "second": "orange"},
+    )
+    bin_layers = [layer for layer in layers if type(layer).__name__ == "geom_bin_2d"]
 
-    assert set(tiles["panel"]) == {"first", "second"}
-    assert tiles.groupby("panel")["y"].agg(["min", "max"]).nunique().eq(1).all()
+    assert len(bin_layers) == 2
+    assert [layer.data["series"].drop_duplicates().item() for layer in bin_layers] == [
+        "first",
+        "second",
+    ]
 
 
 @pytest.mark.integration
-def test_posterior_histogram_tiles_render_with_plotnine(synthetic_posterior_draws):
+def test_posterior_histogram_layers_render_with_plotnine(synthetic_posterior_draws):
     from plotnine import ggplot
 
-    from causalpy.plot_utils import histogram_tile_layers, posterior_histogram_tiles
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
 
-    tiles = posterior_histogram_tiles(synthetic_posterior_draws, "obs_ind")
+    draws = label_draws(synthetic_posterior_draws, series="posterior")
+    _, layers = posterior_kind_layers(
+        draws,
+        "histogram",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
+        ci_prob=0.94,
+        colors={"posterior": "orange"},
+    )
     p = ggplot()
-    for layer in histogram_tile_layers(tiles, "obs_ind"):
+    for layer in layers:
         p += layer
     fig = p.draw(show=False)
     assert fig.axes
     plt.close(fig)
 
 
-def test_posterior_kind_layers_spaghetti_requires_df(synthetic_posterior_draws):
-    from causalpy.plot_utils import posterior_kind_layers, summarize_draws
+def test_posterior_kind_layers_prepares_spaghetti(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
 
-    bands = summarize_draws(
-        synthetic_posterior_draws,
-        group_by="obs_ind",
+    draws = label_draws(synthetic_posterior_draws, series="a")
+    bands, layers = posterior_kind_layers(
+        draws,
+        "spaghetti",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
         ci_prob=0.94,
-    ).assign(series="a")
-    with pytest.raises(ValueError, match="spaghetti_df"):
-        posterior_kind_layers(bands, "spaghetti", x="obs_ind", y="mu")
+        num_samples=3,
+    )
+
+    assert len(bands) == 20
+    assert len(layers) == 2
+    assert layers[0].data["_draw_id"].nunique() == 3
 
 
 def test_validate_posterior_plot_options_rejects_invalid_kind():
@@ -314,27 +274,28 @@ def test_spaghetti_draws_isolates_paths_across_series(synthetic_posterior_draws)
     assert sampled.groupby("_line_id")["series"].nunique().eq(1).all()
 
 
-def _assert_causal_panel_semantic_schema(panel_data) -> None:
-    draw_cols = set(panel_data.draws.columns)
-    assert {"chain", "draw", "obs_ind", "variable", "series", "value"} <= draw_cols
-    forbidden = {
-        "panel",
-        "mu",
-        "mu_lower",
-        "mu_upper",
-        "y1",
-        "y2",
-        "density",
-        "width",
-        "height",
-    }
-    assert not (draw_cols & forbidden)
+def _assert_explicit_causal_panel_schema(panel_data) -> None:
+    draw_fields = (
+        "fitted",
+        "counterfactual",
+        "pre_effect",
+        "post_effect",
+        "cumulative_effect",
+    )
+    for field in draw_fields:
+        draws = getattr(panel_data, field)
+        if draws is not None:
+            assert {"chain", "draw", "obs_ind", "mu"} <= set(draws.columns)
+            assert not (
+                set(draws.columns)
+                & {"panel", "series", "mu_lower", "mu_upper", "y1", "y2"}
+            )
     assert set(panel_data.observations.columns) == {"obs_ind", "value"}
 
 
 @pytest.mark.integration
-def test_its_causal_panel_data_semantic_schema(mock_pymc_sample, its_data):
-    """Semantic extractor exposes only long-form identity, not render artifacts."""
+def test_its_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, its_data):
+    """Extractor exposes named posterior quantities, not render artifacts."""
     import pandas as pd
 
     import causalpy as cp
@@ -348,23 +309,13 @@ def test_its_causal_panel_data_semantic_schema(mock_pymc_sample, its_data):
     )
     panel_data = result._causal_panel_data()
 
-    _assert_causal_panel_semantic_schema(panel_data)
-    assert set(panel_data.draws["variable"].unique()) == {
-        "outcome",
-        "effect",
-        "cumulative_effect",
-    }
-    assert set(panel_data.draws["series"].unique()) == {
-        "fit",
-        "counterfactual",
-        "pre",
-        "post",
-    }
+    _assert_explicit_causal_panel_schema(panel_data)
+    assert panel_data.pre_effect is not None
 
 
 @pytest.mark.integration
-def test_sc_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
-    """Synthetic Control semantic extractor matches the shared panel contract."""
+def test_sc_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, sc_data):
+    """Synthetic Control extractor matches the explicit panel contract."""
     import causalpy as cp
     from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
 
@@ -377,17 +328,12 @@ def test_sc_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
     )
     panel_data = result._causal_panel_data(treated_unit="actual")
 
-    _assert_causal_panel_semantic_schema(panel_data)
-    assert set(panel_data.draws["variable"].unique()) == {
-        "outcome",
-        "effect",
-        "cumulative_effect",
-    }
+    _assert_explicit_causal_panel_schema(panel_data)
 
 
 @pytest.mark.integration
-def test_sdid_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
-    """SDiD semantic extractor matches the shared panel contract."""
+def test_sdid_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, sc_data):
+    """SDiD extractor matches the explicit panel contract."""
     import causalpy as cp
     from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
 
@@ -402,9 +348,4 @@ def test_sdid_causal_panel_data_semantic_schema(mock_pymc_sample, sc_data):
     )
     panel_data = result._causal_panel_data(treated_unit="actual")
 
-    _assert_causal_panel_semantic_schema(panel_data)
-    assert set(panel_data.draws["variable"].unique()) == {
-        "outcome",
-        "effect",
-        "cumulative_effect",
-    }
+    _assert_explicit_causal_panel_schema(panel_data)

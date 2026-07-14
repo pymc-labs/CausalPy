@@ -26,6 +26,8 @@ from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices, dmatrices
 from plotnine import (
     aes,
+    annotate,
+    arrow,
     geom_point,
     geom_violin,
     ggplot,
@@ -33,6 +35,7 @@ from plotnine import (
     labs,
     scale_color_manual,
     scale_fill_manual,
+    theme,
 )
 from sklearn.base import RegressorMixin
 
@@ -46,16 +49,11 @@ from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
     add_causal_panel_legend,
-    add_posterior_kind,
     coord_xlim_for_column,
-    histogram_y_edges,
-    interval_kind,
     label_draws,
-    posterior_histogram_tiles,
+    posterior_kind_layers,
     prediction_draws,
     scale_for_x_column,
-    spaghetti_draws,
-    summarize_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -80,12 +78,10 @@ class _DiDPlotData:
     """Tidy tables and annotation coordinates consumed by the DiD plot."""
 
     scatter: pd.DataFrame
-    intervals: pd.DataFrame
-    posterior_paths: pd.DataFrame | None
-    posterior_density: pd.DataFrame | None
+    draws: pl.DataFrame
     counterfactual_draws: pd.DataFrame
     time_points: np.ndarray
-    arrow_x: float
+    arrow_x: Any
     treatment_y: float
     counterfactual_y: float
 
@@ -467,11 +463,6 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _prepare_bayesian_plot_data(
         self,
-        *,
-        ci_prob: float,
-        interval: Literal["hdi", "eti"],
-        kind: Literal["ribbon", "histogram", "spaghetti"],
-        num_samples: int,
     ) -> _DiDPlotData:
         """Prepare observed, posterior, and annotation data for plotting."""
         tcol = self.time_variable_name
@@ -502,49 +493,6 @@ class DifferenceInDifferences(BaseExperiment):
         if len(time_points) > 1:
             draw_parts.append(label_draws(counterfactual, series="Counterfactual"))
         draws = pl.concat(draw_parts, how="diagonal_relaxed")
-        grouping = ["series", tcol]
-        intervals = summarize_draws(
-            draws,
-            group_by=grouping,
-            ci_prob=ci_prob,
-            interval=interval,
-        )
-        posterior_paths = (
-            spaghetti_draws(
-                draws,
-                group_by=grouping,
-                num_samples=num_samples,
-            )
-            if kind == "spaghetti"
-            else None
-        )
-        posterior_density = None
-        if kind == "histogram":
-            edges = histogram_y_edges(control, treatment, counterfactual)
-            density_parts = [
-                posterior_histogram_tiles(
-                    control,
-                    tcol,
-                    x_col=tcol,
-                    y_edges=edges,
-                ),
-                posterior_histogram_tiles(
-                    treatment,
-                    tcol,
-                    x_col=tcol,
-                    y_edges=edges,
-                ),
-            ]
-            if len(time_points) > 1:
-                density_parts.append(
-                    posterior_histogram_tiles(
-                        counterfactual,
-                        tcol,
-                        x_col=tcol,
-                        y_edges=edges,
-                    )
-                )
-            posterior_density = pd.concat(density_parts, ignore_index=True)
 
         treatment_y = _as_scalar(
             self.y_pred_treatment["posterior_predictive"]
@@ -556,13 +504,19 @@ class DifferenceInDifferences(BaseExperiment):
             self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
         )
         treatment_times = self.x_pred_treatment[tcol].to_numpy()
-        time_span = float(np.ptp(treatment_times.astype(float)))
-        arrow_x = float(np.max(treatment_times)) + 0.1 * time_span
+        arrow_x: Any
+        if np.issubdtype(treatment_times.dtype, np.datetime64):
+            time_min = pd.Timestamp(treatment_times.min())
+            time_max = pd.Timestamp(treatment_times.max())
+            arrow_x = time_max + 0.1 * (time_max - time_min)
+        elif np.issubdtype(treatment_times.dtype, np.number):
+            time_span = float(np.ptp(treatment_times.astype(float)))
+            arrow_x = float(np.max(treatment_times)) + 0.1 * time_span
+        else:
+            arrow_x = treatment_times[-1]
         return _DiDPlotData(
             scatter=scatter,
-            intervals=intervals,
-            posterior_paths=posterior_paths,
-            posterior_density=posterior_density,
+            draws=draws,
             counterfactual_draws=counterfactual.to_pandas(),
             time_points=time_points,
             arrow_x=arrow_x,
@@ -588,23 +542,22 @@ class DifferenceInDifferences(BaseExperiment):
             "Treatment group": "#ff7f0e",
             "Counterfactual": "#2ca02c",
         }
-        plot_data = self._prepare_bayesian_plot_data(
+        plot_data = self._prepare_bayesian_plot_data()
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x=tcol,
+            group_by=["series", tcol],
             ci_prob=ci_prob,
-            interval=interval_kind(ci_kind),
-            kind=kind,
+            interval=ci_kind,
             num_samples=num_samples,
+            colors=colors,
         )
         p = ggplot() + geom_point(
             plot_data.scatter, aes(tcol, ycol, color="series"), size=1.5
         )
-        p = add_posterior_kind(
-            p,
-            plot_data.intervals,
-            kind,
-            x=tcol,
-            spaghetti_df=plot_data.posterior_paths,
-            histogram_tiles=plot_data.posterior_density,
-        )
+        for layer in posterior_layers:
+            p += layer
         x_values = plot_data.scatter[tcol]
         p = (
             p
@@ -618,6 +571,8 @@ class DifferenceInDifferences(BaseExperiment):
             + coord_xlim_for_column(x_values)
             + labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
         )
+        if figsize is not None:
+            p += theme(figure_size=figsize)
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
         if len(plot_data.time_points) == 1:
@@ -631,6 +586,24 @@ class DifferenceInDifferences(BaseExperiment):
                 show_legend=False,
                 inherit_aes=False,
             )
+        p += annotate(
+            "segment",
+            x=plot_data.arrow_x,
+            xend=plot_data.arrow_x,
+            y=plot_data.treatment_y,
+            yend=plot_data.counterfactual_y,
+            arrow=arrow(length=0.1, ends="first", type="closed"),
+            color="green",
+            size=1.5,
+        )
+        p += annotate(
+            "text",
+            x=plot_data.arrow_x,
+            y=np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),
+            label="causal\nimpact",
+            color="green",
+            ha="left",
+        )
 
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             ax = axes[0]
@@ -641,23 +614,6 @@ class DifferenceInDifferences(BaseExperiment):
                 ax,
                 labels=legend_labels,
                 colors=colors,
-            )
-            ax.annotate(
-                "",
-                xy=(plot_data.arrow_x, plot_data.counterfactual_y),
-                xytext=(plot_data.arrow_x, plot_data.treatment_y),
-                arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
-            )
-            ax.annotate(
-                "causal\nimpact",
-                xy=(
-                    plot_data.arrow_x,
-                    np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),
-                ),
-                xytext=(5, 0),
-                textcoords="offset points",
-                color="green",
-                va="center",
             )
 
         return PlotSpec(p, overlay=overlay, n_panels=1)
