@@ -67,7 +67,9 @@ dependencies = [
 [project.optional-dependencies]
 # pymc-forecast is young (0.x); pin the minor so API movement across 0.x
 # minors is opted into deliberately (see docs on the ITS forecast backend).
-forecast = ["pymc-forecast>=0.2,<0.3"]
+forecast = [
+    "pymc-forecast>=0.2,<0.3",
+]
 dev = [
     "prek",
     "twine",
@@ -105,10 +107,24 @@ docs = [
     "sphinxext-rediraffe",
 ]
 lint = ["prek", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill", "pymc-forecast>=0.2,<0.3"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "diff-cover",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+    "papermill",
+    "pymc-forecast>=0.2,<0.3",
+]
 
 [tool.pyproject2conda]
 channels = ["conda-forge"]
+
+# pymc-forecast is PyPI-only (not on conda-forge): route it to the pip
+# section of the generated environment.yml.
+[tool.pyproject2conda.dependencies]
+pymc-forecast = { pip = true }
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"

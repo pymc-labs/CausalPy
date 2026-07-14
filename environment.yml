@@ -29,7 +29,6 @@ dependencies:
   - prek
   - pymc-bart
   - pymc-extras>=0.3.0
-  - pymc-forecast<0.3,>=0.2
   - pymc<6,>=5.15.1
   - pytensor<3,>=2.38.1
   - pytest
@@ -44,3 +43,4 @@ dependencies:
   - pip
   - pip:
       - marimo[mcp]
+      - pymc-forecast<0.3,>=0.2
