@@ -270,6 +270,31 @@ class TestDataSetterValidation:
         with pytest.raises(ValueError, match="Data node 'y' not found"):
             model.predict(X=X)
 
+    def test_standard_data_nodes_predict(self, rng, mock_pymc_sample):
+        """Standard model with 'X' and 'y' data nodes exercises validation happy path."""
+        import causalpy as cp
+        from causalpy.pymc_models import LinearRegression
+
+        X = xr.DataArray(
+            rng.normal(size=(10, 1)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(10), "coeffs": ["x1"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(10, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(10), "treated_units": ["unit_0"]},
+        )
+        coords = {
+            "obs_ind": np.arange(10),
+            "coeffs": ["x1"],
+            "treated_units": ["unit_0"],
+        }
+        model = LinearRegression(sample_kwargs={"chains": 2, "draws": 2})
+        model.fit(X, y, coords=coords)
+        predictions = model.predict(X=X)
+        assert isinstance(predictions, az.InferenceData)
+
 
 def test_idata_property(mock_pymc_sample, did_data):
     """Test that we can access the idata property of the model"""
