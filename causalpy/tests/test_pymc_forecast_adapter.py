@@ -34,9 +34,12 @@ from causalpy.pymc_forecast_models import PyMCForecastModel
 
 pymc_forecast = pytest.importorskip("pymc_forecast")
 
+# The y ~ 1 + t design leaves intercept and slope strongly correlated
+# (unscaled t), so give NUTS a real warmup budget: tune=200 produced a
+# badly adapted mass matrix and a biased posterior on CI's platform.
 sample_kwargs = {
-    "draws": 200,
-    "tune": 200,
+    "draws": 500,
+    "tune": 1000,
     "chains": 2,
 }
 
