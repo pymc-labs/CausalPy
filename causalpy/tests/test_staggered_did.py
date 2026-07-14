@@ -281,6 +281,52 @@ def test_staggered_did_formula_missing_outcome():
         )
 
 
+def test_staggered_did_accepts_transformed_outcome():
+    """Treatment effects use the outcome vector evaluated by Patsy."""
+    df = generate_staggered_did_data(
+        n_units=10, n_time_periods=8, treatment_cohorts={4: 5}, seed=42
+    )
+    df["positive_y"] = np.exp(df["y"] / 10)
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="np.log(positive_y) ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    )
+
+    np.testing.assert_allclose(
+        result._observed_outcome.to_numpy(), np.log(df["positive_y"])
+    )
+    assert result.outcome_variable_name == "np.log(positive_y)"
+    assert result.data_["tau_hat"].notna().any()
+    assert not result._get_group_time_placebo_data().empty
+
+
+def test_staggered_did_bayesian_plot_data_accepts_transformed_outcome(
+    mock_pymc_sample,
+):
+    """Bayesian placebo and plotting paths use Patsy's observed response."""
+    df = generate_staggered_did_data(
+        n_units=10, n_time_periods=8, treatment_cohorts={4: 5}, seed=42
+    )
+    df["positive_y"] = np.exp(df["y"] / 10)
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="np.log(positive_y) ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    assert not result._get_group_time_placebo_data().empty
+    assert not result.get_plot_data_bayesian(hdi_prob=0.8).empty
+
+
 # ==============================================================================
 # Unit Tests - Core Functionality
 # ==============================================================================

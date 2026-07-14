@@ -21,8 +21,8 @@ Analysis of covariance is a simple linear model, typically with one continuous p
 
 :::{grid-item-card} ANCOVA for pre/post treatment nonequivalent group designs
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/ancova_pymc.png
-:link: ancova_pymc
+:img-top: ../_static/thumbnails/ancova-pymc.png
+:link: ancova-pymc
 :link-type: doc
 :::
 ::::
@@ -36,8 +36,8 @@ Panel data tracks the same units over multiple time periods. Fixed effects explo
 
 :::{grid-item-card} Panel Fixed Effects for Causal Inference
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/panel_fixed_effects.png
-:link: panel_fixed_effects
+:img-top: ../_static/thumbnails/panel-fixed-effects.png
+:link: panel-fixed-effects
 :link-type: doc
 :::
 ::::
@@ -51,36 +51,36 @@ The synthetic control method is a statistical method used to evaluate the effect
 
 :::{grid-item-card} Synthetic control with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_skl.png
-:link: sc_skl
+:img-top: ../_static/thumbnails/synthetic-control-sklearn.png
+:link: synthetic-control-sklearn
 :link-type: doc
 :::
 
 :::{grid-item-card} Synthetic control with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc.png
-:link: sc_pymc
+:img-top: ../_static/thumbnails/synthetic-control-pymc.png
+:link: synthetic-control-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} The effects of Brexit
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sc_pymc_brexit.png
-:link: sc_pymc_brexit
+:img-top: ../_static/thumbnails/synthetic-control-brexit-pymc.png
+:link: synthetic-control-brexit-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Synthetic Difference-in-Differences with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/sdid_pymc.png
-:link: sdid_pymc
+:img-top: ../_static/thumbnails/synthetic-difference-in-differences-pymc.png
+:link: synthetic-difference-in-differences-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Choosing the right counterfactual: ITS vs. synthetic control
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_causalpy_vs_causalimpact.png
-:link: its_causalpy_vs_causalimpact
+:img-top: ../_static/thumbnails/interrupted-time-series-causalpy-vs-causalimpact.png
+:link: interrupted-time-series-causalpy-vs-causalimpact
 :link-type: doc
 :::
 ::::
@@ -94,15 +94,15 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 
 :::{grid-item-card} Bayesian geolift with CausalPy
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/geolift1.png
-:link: geolift1
+:img-top: ../_static/thumbnails/geolift-single-cell.png
+:link: geolift-single-cell
 :link-type: doc
 :::
 
 :::{grid-item-card} Multi-cell geolift analysis
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/multi_cell_geolift.png
-:link: multi_cell_geolift
+:img-top: ../_static/thumbnails/multi-cell-geolift.png
+:link: multi-cell-geolift
 :link-type: doc
 :::
 ::::
@@ -116,29 +116,29 @@ Analysis where the treatment effect is estimated as a difference between treatme
 
 :::{grid-item-card} Difference in Differences with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_skl.png
-:link: did_skl
+:img-top: ../_static/thumbnails/difference-in-differences-sklearn.png
+:link: difference-in-differences-sklearn
 :link-type: doc
 :::
 
 :::{grid-item-card} Difference in Differences with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc.png
-:link: did_pymc
+:img-top: ../_static/thumbnails/difference-in-differences-pymc.png
+:link: difference-in-differences-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Banking dataset with a `pymc` model
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/did_pymc_banks.png
-:link: did_pymc_banks
+:img-top: ../_static/thumbnails/difference-in-differences-banks-pymc.png
+:link: difference-in-differences-banks-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Staggered Difference-in-Differences
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/staggered_did_pymc.png
-:link: staggered_did_pymc
+:img-top: ../_static/thumbnails/staggered-difference-in-differences-pymc.png
+:link: staggered-difference-in-differences-pymc
 :link-type: doc
 :::
 ::::
@@ -152,43 +152,43 @@ A quasi-experimental design that uses time series methods to generate counterfac
 
 :::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_skl.png
-:link: its_skl
+:img-top: ../_static/thumbnails/interrupted-time-series-sklearn.png
+:link: interrupted-time-series-sklearn
 :link-type: doc
 :::
 
 :::{grid-item-card} Bayesian Interrupted Time Series
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_pymc.png
-:link: its_pymc
+:img-top: ../_static/thumbnails/interrupted-time-series-pymc.png
+:link: interrupted-time-series-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Interrupted Time Series for fixed-period interventions
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_post_intervention_analysis.png
-:link: its_post_intervention_analysis
+:img-top: ../_static/thumbnails/interrupted-time-series-post-intervention-analysis.png
+:link: interrupted-time-series-post-intervention-analysis
 :link-type: doc
 :::
 
 :::{grid-item-card} Excess deaths due to COVID-19
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_covid.png
-:link: its_covid
+:img-top: ../_static/thumbnails/interrupted-time-series-covid.png
+:link: interrupted-time-series-covid
 :link-type: doc
 :::
 
 :::{grid-item-card} Lift Testing with Interrupted Time Series
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_lift_test.png
-:link: its_lift_test
+:img-top: ../_static/thumbnails/interrupted-time-series-lift-test.png
+:link: interrupted-time-series-lift-test
 :link-type: doc
 :::
 
 :::{grid-item-card} Placebo-in-time and falsification: a UK CO₂ case study
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_placebo_in_time_analysis.png
-:link: its_placebo_in_time_analysis
+:img-top: ../_static/thumbnails/interrupted-time-series-placebo-in-time-analysis.png
+:link: interrupted-time-series-placebo-in-time-analysis
 :link-type: doc
 :::
 ::::
@@ -202,8 +202,8 @@ Comparative interrupted time series extends standard ITS by incorporating contro
 
 :::{grid-item-card} Comparative Interrupted Time Series: a geo-experimentation example
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/its_pymc_comparative.png
-:link: its_pymc_comparative
+:img-top: ../_static/thumbnails/interrupted-time-series-comparative-pymc.png
+:link: interrupted-time-series-comparative-pymc
 :link-type: doc
 :::
 ::::
@@ -217,8 +217,8 @@ Piecewise interrupted time series (segmented regression) models the outcome with
 
 :::{grid-item-card} Piecewise Interrupted Time Series (Segmented Regression)
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/piecewise_its_pymc.png
-:link: piecewise_its_pymc
+:img-top: ../_static/thumbnails/piecewise-interrupted-time-series-pymc.png
+:link: piecewise-interrupted-time-series-pymc
 :link-type: doc
 :::
 ::::
@@ -251,36 +251,36 @@ A quasi-experimental design where treatment assignment is determined by a cutoff
 
 :::{grid-item-card} Sharp regression discontinuity with scikit-learn models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_skl.png
-:link: rd_skl
+:img-top: ../_static/thumbnails/regression-discontinuity-sklearn.png
+:link: regression-discontinuity-sklearn
 :link-type: doc
 :::
 
 :::{grid-item-card} Sharp regression discontinuity with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_pymc.png
-:link: rd_pymc
+:img-top: ../_static/thumbnails/regression-discontinuity-pymc.png
+:link: regression-discontinuity-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Drinking age with a scikit-learn model
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_skl_drinking.png
-:link: rd_skl_drinking
+:img-top: ../_static/thumbnails/regression-discontinuity-drinking-sklearn.png
+:link: regression-discontinuity-drinking-sklearn
 :link-type: doc
 :::
 
 :::{grid-item-card} Drinking age - Bayesian analysis
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_pymc_drinking.png
-:link: rd_pymc_drinking
+:img-top: ../_static/thumbnails/regression-discontinuity-drinking-pymc.png
+:link: regression-discontinuity-drinking-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Donut Regression Discontinuity
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rd_donut_pymc.png
-:link: rd_donut_pymc
+:img-top: ../_static/thumbnails/regression-discontinuity-donut-pymc.png
+:link: regression-discontinuity-donut-pymc
 :link-type: doc
 :::
 ::::
@@ -294,8 +294,8 @@ A variation of regression discontinuity where treatment affects the slope (rate 
 
 :::{grid-item-card} Regression kink design with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/rkink_pymc.png
-:link: rkink_pymc
+:img-top: ../_static/thumbnails/regression-kink-pymc.png
+:link: regression-kink-pymc
 :link-type: doc
 :::
 ::::
@@ -309,22 +309,22 @@ A quasi-experimental design to estimate a treatment effect where there is a risk
 
 :::{grid-item-card} Instrumental Variable Modelling (IV) with `pymc` models
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_pymc.png
-:link: iv_pymc
+:img-top: ../_static/thumbnails/instrumental-variables-pymc.png
+:link: instrumental-variables-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} Instrumental Regression and Justifying Instruments with `pymc`
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_weak_instruments.png
-:link: iv_weak_instruments
+:img-top: ../_static/thumbnails/instrumental-variables-weak-instruments.png
+:link: instrumental-variables-weak-instruments
 :link-type: doc
 :::
 
 :::{grid-item-card} Variable Selection Priors and Instrumental Variable Designs
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/iv_vs_priors.png
-:link: iv_vs_priors
+:img-top: ../_static/thumbnails/instrumental-variables-variable-selection-priors.png
+:link: instrumental-variables-variable-selection-priors
 :link-type: doc
 :::
 ::::
@@ -338,15 +338,15 @@ A method for estimating causal effects by weighting observations by the inverse 
 
 :::{grid-item-card} Inverse Propensity Score Weighting with `pymc`
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_pymc.png
-:link: inv_prop_pymc
+:img-top: ../_static/thumbnails/inverse-propensity-pymc.png
+:link: inverse-propensity-pymc
 :link-type: doc
 :::
 
 :::{grid-item-card} The Paradox of Propensity Scores in Bayesian Inference
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/inv_prop_latent.png
-:link: inv_prop_latent
+:img-top: ../_static/thumbnails/inverse-propensity-latent.png
+:link: inverse-propensity-latent
 :link-type: doc
 :::
 ::::
@@ -364,8 +364,8 @@ CausalPy's pipeline API chains causal inference steps into a single, reproducibl
 
 :::{grid-item-card} Pipeline Workflow
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/pipeline_workflow.png
-:link: pipeline_workflow
+:img-top: ../_static/thumbnails/pipeline-workflow.png
+:link: pipeline-workflow
 :link-type: doc
 :::
 ::::
@@ -393,8 +393,8 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 
 :::{grid-item-card} HTML Report Generation
 :class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/report_demo.png
-:link: report_demo
+:img-top: ../_static/thumbnails/reporting-demo.png
+:link: reporting-demo
 :link-type: doc
 :::
 ::::
@@ -406,7 +406,7 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 :caption: ANCOVA
 :maxdepth: 1
 
-ancova_pymc.ipynb
+ancova-pymc.ipynb
 :::
 
 :::{toctree}
@@ -414,7 +414,7 @@ ancova_pymc.ipynb
 :caption: Panel Fixed Effects
 :maxdepth: 1
 
-panel_fixed_effects.ipynb
+panel-fixed-effects.ipynb
 :::
 
 :::{toctree}
@@ -422,11 +422,11 @@ panel_fixed_effects.ipynb
 :caption: Synthetic Control
 :maxdepth: 1
 
-sc_skl.ipynb
-sc_pymc.ipynb
-sc_pymc_brexit.ipynb
-sdid_pymc.ipynb
-its_causalpy_vs_causalimpact.ipynb
+synthetic-control-sklearn.ipynb
+synthetic-control-pymc.ipynb
+synthetic-control-brexit-pymc.ipynb
+synthetic-difference-in-differences-pymc.ipynb
+interrupted-time-series-causalpy-vs-causalimpact.ipynb
 :::
 
 :::{toctree}
@@ -434,8 +434,8 @@ its_causalpy_vs_causalimpact.ipynb
 :caption: Geographical lift testing
 :maxdepth: 1
 
-geolift1.ipynb
-multi_cell_geolift.ipynb
+geolift-single-cell.ipynb
+multi-cell-geolift.ipynb
 :::
 
 :::{toctree}
@@ -443,10 +443,10 @@ multi_cell_geolift.ipynb
 :caption: Difference in Differences
 :maxdepth: 1
 
-did_skl.ipynb
-did_pymc.ipynb
-did_pymc_banks.ipynb
-staggered_did_pymc.ipynb
+difference-in-differences-sklearn.ipynb
+difference-in-differences-pymc.ipynb
+difference-in-differences-banks-pymc.ipynb
+staggered-difference-in-differences-pymc.ipynb
 :::
 
 :::{toctree}
@@ -454,12 +454,12 @@ staggered_did_pymc.ipynb
 :caption: Interrupted Time Series
 :maxdepth: 1
 
-its_skl.ipynb
-its_pymc.ipynb
-its_post_intervention_analysis.ipynb
-its_covid.ipynb
-its_lift_test.ipynb
-its_placebo_in_time_analysis.ipynb
+interrupted-time-series-sklearn.ipynb
+interrupted-time-series-pymc.ipynb
+interrupted-time-series-post-intervention-analysis.ipynb
+interrupted-time-series-covid.ipynb
+interrupted-time-series-lift-test.ipynb
+interrupted-time-series-placebo-in-time-analysis.ipynb
 :::
 
 :::{toctree}
@@ -467,7 +467,7 @@ its_placebo_in_time_analysis.ipynb
 :caption: Comparative Interrupted Time Series
 :maxdepth: 1
 
-its_pymc_comparative.ipynb
+interrupted-time-series-comparative-pymc.ipynb
 :::
 
 :::{toctree}
@@ -475,7 +475,7 @@ its_pymc_comparative.ipynb
 :caption: Piecewise Interrupted Time Series
 :maxdepth: 1
 
-piecewise_its_pymc.ipynb
+piecewise-interrupted-time-series-pymc.ipynb
 :::
 
 :::{toctree}
@@ -491,11 +491,11 @@ hierarchical_its_launch.ipynb
 :caption: Regression Discontinuity
 :maxdepth: 1
 
-rd_skl.ipynb
-rd_pymc.ipynb
-rd_skl_drinking.ipynb
-rd_pymc_drinking.ipynb
-rd_donut_pymc.ipynb
+regression-discontinuity-sklearn.ipynb
+regression-discontinuity-pymc.ipynb
+regression-discontinuity-drinking-sklearn.ipynb
+regression-discontinuity-drinking-pymc.ipynb
+regression-discontinuity-donut-pymc.ipynb
 :::
 
 :::{toctree}
@@ -503,7 +503,7 @@ rd_donut_pymc.ipynb
 :caption: Regression Kink Design
 :maxdepth: 1
 
-rkink_pymc.ipynb
+regression-kink-pymc.ipynb
 :::
 
 :::{toctree}
@@ -511,9 +511,9 @@ rkink_pymc.ipynb
 :caption: Instrumental Variables Regression
 :maxdepth: 1
 
-iv_pymc.ipynb
-iv_weak_instruments.ipynb
-iv_vs_priors.ipynb
+instrumental-variables-pymc.ipynb
+instrumental-variables-weak-instruments.ipynb
+instrumental-variables-variable-selection-priors.ipynb
 :::
 
 :::{toctree}
@@ -521,8 +521,8 @@ iv_vs_priors.ipynb
 :caption: Inverse Propensity Score Weighting
 :maxdepth: 1
 
-inv_prop_pymc.ipynb
-inv_prop_latent.ipynb
+inverse-propensity-pymc.ipynb
+inverse-propensity-latent.ipynb
 :::
 
 :::{toctree}
@@ -530,7 +530,7 @@ inv_prop_latent.ipynb
 :caption: Pipeline
 :maxdepth: 1
 
-pipeline_workflow.ipynb
+pipeline-workflow.ipynb
 :::
 
 :::{toctree}
@@ -546,5 +546,5 @@ sensitivity_checks.md
 :caption: Reporting
 :maxdepth: 1
 
-report_demo.ipynb
+reporting-demo.ipynb
 :::

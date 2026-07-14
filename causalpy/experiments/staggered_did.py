@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
+from patsy import PatsyError, dmatrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -246,13 +246,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "Either provide treated_variable_name or treatment_time_variable_name."
             )
 
-        # Validate formula contains outcome variable
-        outcome_match = self.formula.split("~")[0].strip()
-        if outcome_match not in self.data.columns:
-            raise FormulaException(
-                f"Outcome variable '{outcome_match}' from formula not found in data"
-            )
-
         # Validate absorbing treatment (once treated, always treated)
         self._validate_absorbing_treatment()
 
@@ -425,7 +418,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices using patsy."""
         # Build design matrix for the full data
-        y, X = dmatrices(self.formula, self.data)
+        try:
+            y, X = dmatrices(self.formula, self.data)
+        except PatsyError as err:
+            raise FormulaException(f"Unable to evaluate formula: {err}") from err
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -434,6 +430,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # Store full design matrix
         self.X_full = np.asarray(X)
         self.y_full = np.asarray(y)
+        self._observed_outcome = pd.Series(self.y_full.ravel(), index=self.data.index)
 
         # Get untreated subset for training
         untreated_mask = np.asarray(self.data["_is_untreated"].values, dtype=bool)
@@ -491,7 +488,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self.data["tau_hat"] = np.nan  # Initialize with NaN
         treated_mask = ~self.data["_is_untreated"]
         self.data.loc[treated_mask, "tau_hat"] = (
-            self.data.loc[treated_mask, self.outcome_variable_name]
+            self._observed_outcome.loc[treated_mask]
             - self.data.loc[treated_mask, "y_hat0"]
         )
 
@@ -556,7 +553,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
         # Get observed y for all observations
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = self._observed_outcome.to_numpy()
 
         # Compute tau draws for all observations
         # tau_draws has shape (chain, draw, obs_ind)
@@ -684,8 +681,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if len(pretreatment_data) > 0:
             pretreatment_data = pretreatment_data.copy()
             pretreatment_data["tau_hat"] = (
-                pretreatment_data[self.outcome_variable_name]
-                - pretreatment_data["y_hat0"]
+                self._observed_outcome.loc[pretreatment_data.index].to_numpy()
+                - pretreatment_data["y_hat0"].to_numpy()
             )
 
         # Combine pre-treatment and post-treatment for event-time aggregation
@@ -1309,7 +1306,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = self._observed_outcome.to_numpy()
         tau_draws_all = y_observed - mu_draws.values
 
         att_gt_rows: list[dict[str, Any]] = []
@@ -1339,7 +1336,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             return pd.DataFrame()
 
         pretreatment_data["tau_hat"] = (
-            pretreatment_data[self.outcome_variable_name] - pretreatment_data["y_hat0"]
+            self._observed_outcome.loc[pretreatment_data.index].to_numpy()
+            - pretreatment_data["y_hat0"].to_numpy()
         )
         att_gt = (
             pretreatment_data.groupby(["G", self.time_variable_name])["tau_hat"]
@@ -1521,7 +1519,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
 
         # Get observed y for all observations
-        y_observed = np.asarray(self.data[self.outcome_variable_name].values)
+        y_observed = self._observed_outcome.to_numpy()
 
         # Compute tau draws for all observations
         tau_draws_all = y_observed - mu_draws.values

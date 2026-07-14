@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 import causalpy as cp
+from causalpy.custom_exceptions import DataException
 
 
 @pytest.fixture(scope="module")
@@ -54,6 +55,48 @@ def ipw_result(mock_pymc_sample):
 def propensity_scores(ipw_result):
     """Extract propensity scores from the first posterior sample."""
     return ipw_result.idata["posterior"]["p"].stack(z=("chain", "draw"))[:, 0].values
+
+
+def test_ipw_accepts_binary_transformed_treatment(mock_pymc_sample):
+    """IPW validates and fits the treatment vector produced by Patsy."""
+    df = cp.load_data("nhefs")
+    result = cp.InversePropensityWeighting(
+        df,
+        formula="I(1 - trt) ~ 1 + age + race",
+        outcome_variable="outcome",
+        weighting_scheme="robust",
+        model=cp.pymc_models.PropensityScore(
+            sample_kwargs={"tune": 5, "draws": 5, "chains": 1}
+        ),
+    )
+
+    np.testing.assert_array_equal(result.t.ravel(), 1 - df["trt"].to_numpy())
+
+
+def test_ipw_rejects_nonbinary_transformed_treatment():
+    """A transformed LHS must still satisfy the Bernoulli model's 0/1 contract."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="0-1 binary"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="center(trt) ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
+
+
+def test_ipw_missing_treatment_expression_raises_data_exception():
+    """Missing formula inputs retain a CausalPy validation error."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="Unable to evaluate propensity formula"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="missing_treatment ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
 
 
 class TestComputeAteRobust:
