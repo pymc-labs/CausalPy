@@ -33,6 +33,7 @@ from causalpy.plot_utils import (
     get_hdi_to_df,
     plot_posterior_over_x,
 )
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, round_num
@@ -61,9 +62,13 @@ class InterruptedTimeSeries(BaseExperiment):
         post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
-    model : Union[PyMCModel, RegressorMixin], optional
+    model : Union[PyMCModel, RegressorMixin, PyMCForecastModel], optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
-        LinearRegression model.
+        LinearRegression model. Alternatively, a
+        :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` wrapping a
+        ``pymc_forecast`` forecasting model can serve as the counterfactual
+        backend (requires the optional ``pymc-forecast`` dependency); see
+        :mod:`causalpy.pymc_forecast_models` for when to prefer it.
     treatment_end_time : Union[int, float, pd.Timestamp], optional
         The time when treatment ended, enabling three-period analysis. Must be
         greater than ``treatment_time`` and within the data range. If None (default),
@@ -132,6 +137,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    supports_pymc_forecast = True
     _default_model_class = LinearRegression
     _deprecated_design_aliases = {
         "pre_X": ("pre_design", "X"),
@@ -145,7 +151,7 @@ class InterruptedTimeSeries(BaseExperiment):
         data: pd.DataFrame,
         treatment_time: int | float | pd.Timestamp,
         formula: str,
-        model: PyMCModel | RegressorMixin | None = None,
+        model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
         **kwargs: Any,
     ) -> None:

@@ -121,6 +121,7 @@ class BaseExperiment(ABC):
 
     supports_bayes: bool
     supports_ols: bool
+    supports_pymc_forecast: bool = False
 
     _default_model_class: type[PyMCModel] | None = None
 
@@ -193,6 +194,7 @@ class BaseExperiment(ABC):
             default_model_class=self._default_model_class,
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
+            supports_pymc_forecast=self.supports_pymc_forecast,
         )
         self._model_backend = adapter
         self.model = adapter.model
