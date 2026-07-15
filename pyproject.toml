@@ -67,8 +67,10 @@ dependencies = [
 [project.optional-dependencies]
 # pymc-forecast is young (0.x); pin the minor so API movement across 0.x
 # minors is opted into deliberately (see docs on the ITS forecast backend).
+# The [extras] marker pulls pymc-extras>=0.10, which upstream declares for
+# the Pathfinder integration the adapter advertises.
 forecast = [
-    "pymc-forecast>=0.2,<0.3",
+    "pymc-forecast[extras]>=0.2,<0.3",
 ]
 dev = [
     "prek",
@@ -115,7 +117,7 @@ test = [
     "nbformat",
     "nbconvert",
     "papermill",
-    "pymc-forecast>=0.2,<0.3",
+    "pymc-forecast[extras]>=0.2,<0.3",
 ]
 
 [tool.pyproject2conda]

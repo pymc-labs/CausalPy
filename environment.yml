@@ -43,4 +43,4 @@ dependencies:
   - pip
   - pip:
       - marimo[mcp]
-      - pymc-forecast<0.3,>=0.2
+      - pymc-forecast[extras]<0.3,>=0.2

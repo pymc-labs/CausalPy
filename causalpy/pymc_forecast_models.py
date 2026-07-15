@@ -86,7 +86,7 @@ def _import_pymc_forecast():
         raise ImportError(
             "PyMCForecastModel requires the optional dependency 'pymc-forecast'. "
             "Install it with `pip install causalpy[forecast]` or "
-            "`pip install pymc-forecast>=0.2`."
+            "`pip install 'pymc-forecast[extras]>=0.2'`."
         ) from err
     return pymc_forecast
 
