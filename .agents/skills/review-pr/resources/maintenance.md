@@ -1,6 +1,6 @@
 # Skill Maintenance
 
-Use this resource when updating `maintainer-pr-review` with patterns learned from future reviews.
+Use this resource when updating `review-pr` with patterns learned from future reviews.
 
 ## When to Add a Pattern
 
