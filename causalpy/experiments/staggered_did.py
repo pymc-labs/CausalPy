@@ -27,7 +27,6 @@ import pandas as pd
 import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
 from patsy import PatsyError, dmatrices
 from sklearn.base import RegressorMixin
 
@@ -1063,12 +1062,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories via plotnine.
 
         Builds ribbons/lines/points as one ggplot (facet or overlay), then
-        applies axis titles, treatment vlines, shared-y, and legends in an
-        overlay callback. OLS helpers (``_make_group_time_axes``, etc.) are
+        applies axis titles, treatment vlines, and shared-y in an overlay
+        callback. OLS helpers (``_make_group_time_axes``, etc.) are
         unused here.
-
-        ponytail: axis chrome and per-panel legends stay on matplotlib after
-        ``.draw()`` so existing tests and ``legend_kwargs`` keep working.
         """
         if layout not in {"facet", "overlay"}:
             raise ValueError("layout must be 'facet' or 'overlay'")
@@ -1118,7 +1114,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 + p9.scale_fill_manual(values=type_colors, name="")
                 + p9.scale_linetype_manual(values=type_linetypes, name="")
                 + p9.scale_shape_manual(values=type_shapes, name="")
-                + p9.guides(color="none", fill="none", linetype="none", shape="none")
                 + p9.labs(x="", y="")
                 + p9.theme(
                     strip_text=p9.element_blank(),
@@ -1188,35 +1183,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                             linewidth=1,
                             alpha=0.5,
                         )
-                    handles = [
-                        Line2D(
-                            [0],
-                            [0],
-                            color="gray",
-                            marker="s",
-                            linestyle="--",
-                            markersize=7,
-                        ),
-                        Line2D(
-                            [0],
-                            [0],
-                            color="#1f77b4",
-                            marker="o",
-                            linestyle="-",
-                            markersize=7,
-                        ),
-                    ]
-                    ax.legend(
-                        handles=handles,
-                        labels=["Placebo estimate", "ATT estimate"],
-                        fontsize=LEGEND_FONT_SIZE,
-                    )
             else:
                 ax = axes[0]
                 ax.set_xlabel(plot_data.x_label)
                 ax.set_ylabel(plot_data.y_label)
                 ax.set_title("Staggered DiD Cohort Trajectories")
-                ax.legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
 
         n_panels = n_cohorts if layout == "facet" else 1
         return PlotSpec(p, overlay=overlay, n_panels=n_panels)

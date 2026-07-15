@@ -79,6 +79,10 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
         # numeric codes since _set_loc may not accept strings.
         if hasattr(legend, "set_loc"):
             legend.set_loc(loc)
+        elif hasattr(legend, "loc") and not hasattr(legend, "get_texts"):
+            from matplotlib.legend import Legend
+
+            legend.loc = Legend.codes.get(loc, loc) if isinstance(loc, str) else loc
         else:
             if isinstance(loc, str):  # pragma: no cover
                 loc = legend.codes.get(loc, loc)
@@ -88,12 +92,51 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
             kwargs["bbox_to_anchor"], kwargs.get("bbox_transform")
         )
     if "fontsize" in kwargs:
-        for text in legend.get_texts():
+        for text in _legend_texts(legend):
             text.set_fontsize(kwargs["fontsize"])
     if "frameon" in kwargs:
-        legend.set_frame_on(kwargs["frameon"])
+        if hasattr(legend, "set_frame_on"):
+            legend.set_frame_on(kwargs["frameon"])
+        else:
+            legend.patch.set_visible(kwargs["frameon"])
     if "title" in kwargs:
-        legend.set_title(kwargs["title"])
+        if hasattr(legend, "set_title"):
+            legend.set_title(kwargs["title"])
+        else:
+            texts = _legend_texts(legend)
+            if texts:
+                texts[0].set_text(kwargs["title"])
+
+
+def _legend_texts(legend: Any) -> list[Any]:
+    """Return text artists from Matplotlib or Plotnine legends."""
+    if hasattr(legend, "get_texts"):
+        return list(legend.get_texts())
+    texts: list[Any] = []
+
+    def collect(artist: Any) -> None:
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            texts.append(artist)
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return texts
+
+
+def _patch_plotnine_gridspec_for_matplotlib(fig: plt.Figure) -> None:
+    """Keep Matplotlib's ``tight_layout`` compatible with Plotnine figures."""
+    for axis in fig.axes:
+        subplotspec = axis.get_subplotspec()
+        if subplotspec is None:
+            continue
+        gridspec = subplotspec.get_gridspec()
+        if not hasattr(gridspec, "locally_modified_subplot_params"):
+            type(gridspec).locally_modified_subplot_params = lambda _self: False
 
 
 class BaseExperiment(ABC):
@@ -374,6 +417,7 @@ class BaseExperiment(ABC):
         legend_kwargs: dict[str, Any] | None,
     ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Draw a ggplot, PlotSpec, or legacy matplotlib return for public APIs."""
+        declarative = isinstance(result, (PlotSpec, p9.ggplot))
         if isinstance(result, PlotSpec):
             fig = result.plot.draw(show=False)
             axes = panel_axes(fig, result.n_panels)
@@ -397,15 +441,31 @@ class BaseExperiment(ABC):
                 axes = ax
             else:
                 axes = [ax]
+            legends = list(fig.legends)
+            legends.extend(
+                artist
+                for artist in fig.artists
+                if hasattr(artist, "set_bbox_to_anchor")
+                and hasattr(artist, "loc")
+                and not hasattr(artist, "get_texts")
+            )
             for a in axes:
                 legend = a.get_legend()
                 if legend is not None:
-                    _apply_legend_kwargs(legend, legend_kwargs)
+                    legends.append(legend)
+            for legend in legends:
+                _apply_legend_kwargs(legend, legend_kwargs)
             # Recompute layout when the legend is placed outside the axes
             # so it is not clipped (some subclass plots already call
             # tight_layout before we get here).
             if "bbox_to_anchor" in legend_kwargs:
                 fig.tight_layout()
+
+        if declarative:
+            # Plotnine closes and unregisters figures rendered with show=False.
+            # Re-register it so both plt.show() and manual display still work.
+            _patch_plotnine_gridspec_for_matplotlib(fig)
+            plt.figure(fig)
 
         if show:
             plt.show()

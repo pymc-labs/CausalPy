@@ -78,7 +78,9 @@ dev = [
 ]
 docs = [
     "ipykernel",
+    "jax",
     "maketables",
+    "numpyro",
     "pymc-marketing>=0.13.1",
     "daft-pgm",
     "linkify-it-py",

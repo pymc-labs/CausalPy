@@ -38,6 +38,31 @@ def _axes_list(ax: matplotlib.axes.Axes | np.ndarray | list) -> list:
     return list(ax)
 
 
+def _plotnine_legend(fig):
+    return next(
+        artist
+        for artist in fig.artists
+        if hasattr(artist, "set_bbox_to_anchor") and hasattr(artist, "loc")
+    )
+
+
+def _legend_texts(legend):
+    texts = []
+
+    def collect(artist):
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            texts.append(artist)
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return texts
+
+
 def assert_figure_axes_contract(
     fig: matplotlib.figure.Figure,
     ax: matplotlib.axes.Axes | np.ndarray | list,
@@ -179,11 +204,11 @@ def test_prepost_plot_kinds_return_two_panels(mock_pymc_sample, anova1_data, kin
     assert axes[0].get_xlabel() == "Pretest"
     assert axes[0].get_ylabel() == "Posttest"
     assert axes[1].get_title().startswith("mean =")
-    legend = axes[0].get_legend()
-    assert legend is not None
-    assert {text.get_text() for text in legend.get_texts()} == {
+    legend = _plotnine_legend(fig)
+    assert {text.get_text() for text in _legend_texts(legend)} == {
         "Control group",
         "Treatment group",
+        "series",
     }
 
 

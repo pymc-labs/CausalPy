@@ -34,7 +34,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     CausalPanelData,
     PlotSpec,
-    add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
     prediction_draws,
@@ -613,29 +612,13 @@ class PiecewiseITS(BaseExperiment):
             size=1.5,
             alpha=0.7,
         )
-        interruption_labels = [
-            f"Interruption {index}" for index in range(len(self.interruption_times))
-        ]
 
-        def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            add_causal_panel_legend(
-                axes[0],
-                labels=[
-                    "Observations",
-                    "Fitted",
-                    "Counterfactual",
-                    *interruption_labels,
-                ],
-                colors={
-                    **colors,
-                    **dict.fromkeys(interruption_labels, "red"),
-                },
-            )
+        def add_labels(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             axes[0].set_ylabel(self.outcome_variable_name)
             axes[1].set_ylabel("Effect")
             axes[2].set_ylabel("Cumulative Effect")
 
-        return PlotSpec(p, overlay=add_legend, n_panels=3)
+        return PlotSpec(p, overlay=add_labels, n_panels=3)
 
     def _ols_plot(
         self,

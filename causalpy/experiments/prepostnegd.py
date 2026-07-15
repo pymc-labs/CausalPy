@@ -35,7 +35,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
-    add_causal_panel_legend,
     label_draws,
     posterior_kind_layers,
     prediction_draws,
@@ -459,7 +458,6 @@ class PrePostNEGD(BaseExperiment):
                 if kind != "histogram"
                 else p9.guides()
             )
-            + p9.guides(color="none", fill="none")
             + p9.labs(x="", y="")
             + p9.theme(figure_size=figsize)
         )
@@ -469,12 +467,6 @@ class PrePostNEGD(BaseExperiment):
         def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
             axes[0].set(xlabel="Pretest", ylabel="Posttest")
             axes[1].set_title(plot_data.title)
-            add_causal_panel_legend(
-                axes[0],
-                labels=list(colors),
-                colors=colors,
-                area_labels=set(colors) if kind == "ribbon" else None,
-            )
 
         return PlotSpec(p, overlay=overlay, n_panels=2)
 

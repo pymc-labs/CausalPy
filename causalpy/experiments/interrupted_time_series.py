@@ -32,7 +32,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     CausalPanelData,
     PlotSpec,
-    add_causal_panel_legend,
     build_causal_panel_plot,
     dataarray_draws,
     prediction_draws,
@@ -766,19 +765,7 @@ class InterruptedTimeSeries(BaseExperiment):
         if isinstance(self.data.index, pd.DatetimeIndex):
             p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
-        # plotnine guides are not Axes legends, so keep this compatibility boundary for the public matplotlib-based legend_kwargs API.
-        def add_legend(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            add_causal_panel_legend(
-                axes[0],
-                labels=[
-                    "Pre-intervention period",
-                    "Observations",
-                    "Counterfactual",
-                ],
-                colors=colors,
-            )
-
-        return PlotSpec(p, overlay=add_legend, n_panels=3)
+        return PlotSpec(p, n_panels=3)
 
     def _ols_plot(
         self,

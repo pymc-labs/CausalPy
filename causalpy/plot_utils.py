@@ -813,7 +813,6 @@ def build_causal_panel_plot(
         + p9.facet_wrap("panel", ncol=1, scales="free_y")
         + scales[0]
         + (scales[1] if len(scales) > 1 else p9.guides())
-        + p9.guides(color="none", fill="none")
         + p9.labs(x="", y="")
         + p9.theme(**plot_theme)
     )

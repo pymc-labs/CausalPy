@@ -36,7 +36,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
-    add_causal_panel_legend,
     coord_xlim_for_column,
     label_draws,
     posterior_kind_layers,
@@ -593,18 +592,7 @@ class DifferenceInDifferences(BaseExperiment):
             ha="left",
         )
 
-        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            ax = axes[0]
-            legend_labels = ["Control group", "Treatment group"]
-            if len(plot_data.time_points) > 1:
-                legend_labels.append("Counterfactual")
-            add_causal_panel_legend(
-                ax,
-                labels=legend_labels,
-                colors=colors,
-            )
-
-        return PlotSpec(p, overlay=overlay, n_panels=1)
+        return PlotSpec(p, n_panels=1)
 
     def _ols_plot(
         self,
