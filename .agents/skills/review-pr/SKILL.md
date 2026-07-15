@@ -1,5 +1,5 @@
 ---
-name: maintainer-pr-review
+name: review-pr
 description: Review CausalPy pull requests end-to-end by classifying PR type, checking branch freshness, mergeability, remote CI, correctness, security, tests, docs, and maintainer concerns. Use when asked to review a PR, assess a branch before merge, summarize PR risks, or request changes.
 ---
 
