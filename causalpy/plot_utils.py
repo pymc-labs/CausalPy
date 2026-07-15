@@ -810,7 +810,7 @@ def build_causal_panel_plot(
         p
         + p9.geom_point(obs, p9.aes(x, "y", color="series"), size=1)
         + p9.geom_hline(zero_df, p9.aes(yintercept="yintercept"), **hline_kwargs)
-        + p9.facet_wrap("panel", ncol=1, scales="free_y")
+        + p9.facet_wrap("panel", ncol=1, scales="free_y", as_table=False)
         + scales[0]
         + (scales[1] if len(scales) > 1 else p9.guides())
         + p9.labs(x="", y="")

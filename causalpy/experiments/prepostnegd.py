@@ -451,7 +451,7 @@ class PrePostNEGD(BaseExperiment):
                 color="black",
                 linetype="dashed",
             )
-            + p9.facet_wrap("panel", ncol=1, scales="free")
+            + p9.facet_wrap("panel", ncol=1, scales="free", as_table=False)
             + p9.scale_color_manual(values=colors, name="")
             + (
                 p9.scale_fill_manual(values=colors, name="")
@@ -459,7 +459,11 @@ class PrePostNEGD(BaseExperiment):
                 else p9.guides()
             )
             + p9.labs(x="", y="")
-            + p9.theme(figure_size=figsize)
+            + p9.theme(
+                figure_size=figsize,
+                legend_position=(0.02, 0.98),
+                legend_justification=(0, 1),
+            )
         )
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
