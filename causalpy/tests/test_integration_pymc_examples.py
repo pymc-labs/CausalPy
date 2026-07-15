@@ -28,6 +28,28 @@ from causalpy.tests.conftest import setup_regression_kink_data
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
+def _plotnine_legend_labels(fig):
+    legend = next(
+        artist
+        for artist in fig.artists
+        if hasattr(artist, "set_bbox_to_anchor") and hasattr(artist, "loc")
+    )
+    labels = []
+
+    def collect(artist):
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            labels.append(artist.get_text())
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return labels
+
+
 @pytest.mark.integration
 def test_did(mock_pymc_sample, did_data):
     """
@@ -451,10 +473,8 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
             "point interval; otherwise the post-period is invisible"
         )
 
-    legend = ax[0].get_legend()
-    assert legend is not None, "top panel should have a legend"
-    legend_labels = [t.get_text() for t in legend.get_texts()]
-    assert "Counterfactual" in legend_labels
+    legend_labels = _plotnine_legend_labels(fig)
+    assert "Pre-intervention period" in legend_labels
     assert "Causal impact" not in legend_labels
     plt.close(fig)
 
