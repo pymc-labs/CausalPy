@@ -87,7 +87,7 @@ class ModelAdapter(ABC):
 
     @property
     @abstractmethod
-    def model(self) -> PyMCModel | RegressorMixin:
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
         """The underlying model instance."""
 
     @property

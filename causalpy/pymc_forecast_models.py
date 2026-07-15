@@ -49,9 +49,17 @@ draw-level posterior predictive of the observed variable is reported
 separately as ``y_hat``. One posterior subsample is drawn at fit time and
 shared by every predictive call, so draw *i* of the pre-period fit and draw
 *i* of the counterfactual come from the same parameter draw (upstream
-``posterior=`` passthrough). The one exception is ``StatespaceForecaster``
-models, whose upstream outputs carry no separate noise-free latent — there
-``mu`` falls back to the posterior predictive.
+``posterior=`` passthrough).
+
+``StatespaceForecaster`` models are rejected for now: their upstream outputs
+carry no separate noise-free latent, so the impact convention above cannot be
+honoured without silently substituting the noisy predictive. Tracked upstream
+as `pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_.
+
+Inference diagnostics: :attr:`PyMCForecastModel.idata` holds the thinned,
+draw-coherent posterior subsample used for prediction; the *full* fit result
+(e.g. the complete NUTS ``InferenceData`` with sample stats) is exposed as
+:attr:`PyMCForecastModel.fit_idata`.
 """
 
 from __future__ import annotations
@@ -95,12 +103,12 @@ class PyMCForecastModel:
         ethos.
     forecaster : type, optional
         The ``pymc_forecast`` forecaster class used to fit the model. Defaults
-        to :class:`pymc_forecast.HMCForecaster` (NUTS) — or
-        :class:`pymc_forecast.StatespaceForecaster` when ``model_fn`` is a
-        :class:`pymc_forecast.StatespaceModel` — matching CausalPy's native
-        PyMC backends. Pass :class:`pymc_forecast.Forecaster` (ADVI) or
+        to :class:`pymc_forecast.HMCForecaster` (NUTS), matching CausalPy's
+        native PyMC backends. Pass :class:`pymc_forecast.Forecaster` (ADVI) or
         :class:`pymc_forecast.PathfinderForecaster` for faster approximate
         inference — but check convergence before trusting the counterfactual.
+        :class:`pymc_forecast.StatespaceForecaster` is not supported yet (its
+        outputs carry no noise-free latent; see pymc-forecast#50).
     forecaster_kwargs : dict, optional
         Extra keyword arguments for the forecaster constructor (e.g.
         ``{"draws": 500}`` for MCMC, ``{"num_steps": 20_000}`` for ADVI, or
@@ -153,10 +161,21 @@ class PyMCForecastModel:
         self._pf = _import_pymc_forecast()
         self.model_fn = model_fn
         if forecaster is None:
-            forecaster = (
-                self._pf.StatespaceForecaster
-                if isinstance(model_fn, self._pf.StatespaceModel)
-                else self._pf.HMCForecaster
+            forecaster = self._pf.HMCForecaster
+        # Statespace outputs carry no noise-free latent (mu/mu_future), so
+        # CausalPy's impact convention cannot be honoured without silently
+        # substituting the noisy predictive. Reject until pymc-forecast#50
+        # ships the expected-observation outputs.
+        if isinstance(model_fn, self._pf.StatespaceModel) or (
+            isinstance(forecaster, type)
+            and issubclass(forecaster, self._pf.StatespaceForecaster)
+        ):
+            raise NotImplementedError(
+                "StatespaceModel / StatespaceForecaster backends are not "
+                "supported yet: their prediction outputs carry no noise-free "
+                "latent (mu), which CausalPy's causal-impact convention "
+                "requires. Tracked upstream as "
+                "https://github.com/pymc-labs/pymc-forecast/issues/50."
             )
         self.forecaster_cls = forecaster
         self.forecaster_kwargs = dict(forecaster_kwargs or {})
@@ -173,6 +192,52 @@ class PyMCForecastModel:
         self._posterior: xr.Dataset | None = None
         self._treated_units: list[str] = ["unit_0"]
         self._has_covariates = False
+
+    def _clone(self) -> PyMCForecastModel:
+        """Return a fresh, unfitted copy with the same configuration.
+
+        Used by CausalPy's sensitivity checks (e.g.
+        :class:`~causalpy.checks.PlaceboInTime`) via
+        :func:`~causalpy.checks.base.clone_model` to refit the same model
+        specification on placebo data.
+        """
+        return type(self)(
+            self.model_fn,
+            forecaster=self.forecaster_cls,
+            forecaster_kwargs=dict(self.forecaster_kwargs),
+            num_samples=self.num_samples,
+            random_seed=self.random_seed,
+        )
+
+    @property
+    def fit_idata(self) -> az.InferenceData:
+        """Full inference result of the underlying forecaster fit.
+
+        For the default NUTS backend this is the complete MCMC
+        ``InferenceData`` (posterior, sample stats, diagnostics) — as
+        distinct from :attr:`idata`, which holds the thinned posterior
+        subsample shared by every predictive call for draw coherence.
+
+        Raises
+        ------
+        RuntimeError
+            If the model has not been fit yet.
+        AttributeError
+            If the forecaster does not retain an ``InferenceData`` fit
+            result (e.g. variational fits, which expose ``.approx`` /
+            ``.losses`` on ``.forecaster`` instead).
+        """
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        fit_result = getattr(self.forecaster, "idata", None)
+        if fit_result is None:
+            raise AttributeError(
+                f"{type(self.forecaster).__name__} does not retain a full "
+                "InferenceData fit result; inspect the forecaster directly "
+                "via `.forecaster` (e.g. `.approx` / `.losses` for "
+                "variational fits)."
+            )
+        return fit_result
 
     # -- fitting -----------------------------------------------------------
 
@@ -272,7 +337,7 @@ class PyMCForecastModel:
                 )
             samples = self._pf.prediction_samples(result)
             y_hat = samples[self._pf.FORECAST_VAR]
-            mu = samples.get(self._pf.MU_FORECAST_VAR, y_hat)
+            mu = samples[self._pf.MU_FORECAST_VAR]
             time_dim = self._pf.FUTURE_DIM
         else:
             result = self.forecaster.predict_in_sample(
@@ -280,10 +345,8 @@ class PyMCForecastModel:
             )
             samples = self._pf.prediction_samples(result)
             y_hat = samples[self._pf.OBS_VAR]
-            mu = samples.get(self._pf.MU_VAR, y_hat)
+            mu = samples[self._pf.MU_VAR]
             time_dim = self._pf.TIME_DIM
-        # mu is the noise-free latent (upstream mu/mu_future); statespace
-        # results carry no separate latent, so mu falls back to y_hat there
         mu = mu.rename({time_dim: "obs_ind"})
         y_hat = y_hat.rename({time_dim: "obs_ind"})
         return self._to_inference_data(mu, y_hat, X.obs_ind.values)

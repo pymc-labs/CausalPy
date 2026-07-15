@@ -362,3 +362,84 @@ def test_three_period_design(its_data):
     )
     summary = result.effect_summary(period="comparison")
     assert "persistence" in summary.text
+
+
+def test_statespace_models_rejected():
+    """Statespace backends lack a noise-free latent (pymc-forecast#50)."""
+    with pytest.raises(NotImplementedError, match="pymc-forecast/issues/50"):
+        PyMCForecastModel(linear_model, forecaster=pymc_forecast.StatespaceForecaster)
+
+
+def test_clone_returns_unfitted_copy_with_same_config():
+    """clone_model dispatches to _clone; the copy is unfitted but identically
+    configured, so sensitivity checks can refit the same model spec."""
+    from causalpy.checks.base import clone_model
+
+    model = make_forecast_model()
+    cloned = clone_model(model)
+    assert isinstance(cloned, PyMCForecastModel)
+    assert cloned is not model
+    assert cloned.model_fn is model.model_fn
+    assert cloned.forecaster_cls is model.forecaster_cls
+    assert cloned.forecaster_kwargs == model.forecaster_kwargs
+    assert cloned.forecaster is not model.forecaster
+    assert cloned.num_samples == model.num_samples
+    assert cloned.random_seed == model.random_seed
+    assert cloned.idata is None
+
+
+@pytest.mark.integration
+def test_fit_idata_exposes_full_fit_result(forecast_result):
+    """fit_idata is the full NUTS result; idata the thinned draw-coherent
+    posterior used for prediction."""
+    model = forecast_result.model
+    full = model.fit_idata
+    assert hasattr(full, "sample_stats")
+    assert full.posterior.sizes["draw"] == sample_kwargs["draws"]
+    thinned = forecast_result.idata
+    assert thinned.posterior.sizes["chain"] == 1
+    assert thinned.posterior.sizes["draw"] == model.num_samples
+
+    with pytest.raises(RuntimeError, match="has not been fit"):
+        _ = make_forecast_model().fit_idata
+
+
+@pytest.mark.integration
+class TestPlaceboInTime:
+    """PlaceboInTime accepts the forecast backend and refits it via _clone."""
+
+    def test_validate_accepts_forecast_backend(self, forecast_result):
+        cp.checks.PlaceboInTime(n_folds=2).validate(forecast_result)
+
+    def test_placebo_run_clones_and_refits(self, its_data, forecast_result):
+        from causalpy.checks.base import clone_model
+
+        df, _ = its_data
+        base_model = forecast_result.model
+
+        def factory(data, treatment_time):
+            return cp.InterruptedTimeSeries(
+                data,
+                treatment_time,
+                formula="y ~ 1 + t",
+                model=clone_model(base_model),
+            )
+
+        check = cp.checks.PlaceboInTime(
+            n_folds=2,
+            experiment_factory=factory,
+            sample_kwargs={
+                "draws": 100,
+                "tune": 100,
+                "chains": 2,
+                "progressbar": False,
+            },
+            random_seed=42,
+        )
+        result = check.run(forecast_result)
+        assert len(result.metadata["fold_results"]) == 2
+        for fold in result.metadata["fold_results"]:
+            fold_model = fold.experiment.model
+            assert isinstance(fold_model, PyMCForecastModel)
+            assert fold_model is not base_model
+            assert fold_model.idata is not None
