@@ -18,8 +18,8 @@ values actually change the rendered credible-interval bands.
 
 These tests guard against the regression described in GitHub issue
 `pymc-labs/CausalPy#890`_, where ``result.plot(hdi_prob=...)`` was silently
-swallowed by ``**kwargs`` rather than reaching the underlying
-:func:`causalpy.plot_utils.plot_posterior_over_x` (and equivalent) calls.
+swallowed by ``**kwargs`` rather than reaching the underlying plotting
+callables (e.g. ``td.point_interval``, ``az.hdi``).
 
 ``hdi_prob`` was the original parameter name. It was renamed to ``ci_prob``
 when ETI support was added (since the parameter controls the *credible interval*
@@ -29,6 +29,7 @@ width, not only HDI). ``hdi_prob`` remains accepted with a ``FutureWarning``.
 """
 
 import importlib
+from collections.abc import Callable
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
@@ -49,9 +50,10 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # Each entry maps a "spy target" (dotted import path of the callable used by
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
-# ``plot_posterior_over_x`` targets use ``"ci_prob"`` (the canonical name); other callables
-# such as ``az.plot_posterior`` and ``az.plot_forest`` use ``"hdi_prob"``.
-_SpyTarget = tuple[str, str]
+# Migrated (plotnine) experiments thread ``ci_prob`` into ``td.point_interval``
+# as ``probs=(ci_prob,)``; those targets add a third element that extracts the
+# scalar from the recorded tuple.
+_SpyTarget = tuple[str, str] | tuple[str, str, Callable[[Any], float | None]]
 
 
 def _resolve_dotted(dotted: str) -> Any:
@@ -86,15 +88,18 @@ def _record_hdi_prob_calls(
     recorded: list[float | None] = []
     stack = ExitStack()
 
-    for dotted, kwarg in targets:
+    for target in targets:
+        dotted, kwarg = target[0], target[1]
+        transform = target[2] if len(target) > 2 else (lambda v: v)
         real = _resolve_dotted(dotted)
 
-        def make_spy(real_callable=real, kwarg_name=kwarg):
+        def make_spy(real_callable=real, kwarg_name=kwarg, extract=transform):
             """Build a side_effect that records ``kwarg_name`` and forwards to ``real_callable``."""
 
             def spy(*args, **kwargs):
                 """Record ``hdi_prob`` then delegate to the real callable."""
-                recorded.append(kwargs.get(kwarg_name))
+                value = kwargs.get(kwarg_name)
+                recorded.append(value if value is None else extract(value))
                 return real_callable(*args, **kwargs)
 
             return spy
@@ -328,50 +333,47 @@ def _check_default(
     )
 
 
-_ITS_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.interrupted_time_series.plot_posterior_over_x", "ci_prob"),
-]
-_SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
-]
-_DID_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),
-]
-_RD_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_discontinuity.plot_posterior_over_x", "ci_prob"),
-]
-_RKINK_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),
-]
+_POINT_INTERVAL_TARGET: _SpyTarget = (
+    "causalpy.plot_utils.td.point_interval",
+    "probs",
+    lambda probs: probs[0] if probs else None,
+)
+
+_ITS_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_SC_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_SDID_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_DID_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_RD_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_RKINK_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
 _PREPOST_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.prepostnegd.plot_posterior_over_x", "ci_prob"),
-    ("causalpy.experiments.prepostnegd.az.plot_posterior", "hdi_prob"),
+    _POINT_INTERVAL_TARGET,
+    (
+        "causalpy.experiments.prepostnegd.td.point_interval",
+        "probs",
+        lambda probs: probs[0] if probs else None,
+    ),
 ]
-_PIECEWISE_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.piecewise_its.plot_posterior_over_x", "ci_prob"),
-]
-_PANEL_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.panel_regression.az.plot_forest", "hdi_prob"),
-]
+_PIECEWISE_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
+_PANEL_TARGETS: list[_SpyTarget] = [_POINT_INTERVAL_TARGET]
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_its_plot_threads_ci_prob(mock_pymc_sample, fitted_its, ci_prob):
-    """ITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """ITS ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_its, _ITS_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
 def test_its_plot_default_ci_prob(mock_pymc_sample, fitted_its):
-    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_posterior_over_x`` call (as ``ci_prob``)."""
+    """ITS default ``plot()`` forwards ``HDI_PROB`` to ``td.point_interval``."""
     _check_default(fitted_its, _ITS_TARGETS)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
-    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """Synthetic Control ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_sc, _SC_TARGETS, ci_prob)
 
 
@@ -383,8 +385,21 @@ def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_sdid_plot_threads_ci_prob(mock_pymc_sample, fitted_sdid, ci_prob):
+    """SDiD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
+    _check_threading(fitted_sdid, _SDID_TARGETS, ci_prob)
+
+
+@pytest.mark.integration
+def test_sdid_plot_default_ci_prob(mock_pymc_sample, fitted_sdid):
+    """SDiD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
+    _check_default(fitted_sdid, _SDID_TARGETS)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_did_plot_threads_ci_prob(mock_pymc_sample, fitted_did, ci_prob):
-    """DiD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """DiD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_did, _DID_TARGETS, ci_prob)
 
 
@@ -397,7 +412,7 @@ def test_did_plot_default_ci_prob(mock_pymc_sample, fitted_did):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rd_plot_threads_ci_prob(mock_pymc_sample, fitted_rd, ci_prob):
-    """RD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """RD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_rd, _RD_TARGETS, ci_prob)
 
 
@@ -410,7 +425,7 @@ def test_rd_plot_default_ci_prob(mock_pymc_sample, fitted_rd):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_rkink_plot_threads_ci_prob(mock_pymc_sample, fitted_rkink, ci_prob):
-    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """Regression Kink ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_rkink, _RKINK_TARGETS, ci_prob)
 
 
@@ -423,7 +438,7 @@ def test_rkink_plot_default_ci_prob(mock_pymc_sample, fitted_rkink):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_prepost_plot_threads_ci_prob(mock_pymc_sample, fitted_prepost, ci_prob):
-    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``plot_posterior_over_x`` and ``az.plot_posterior``."""
+    """PrePostNEGD ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_prepost, _PREPOST_TARGETS, ci_prob)
 
 
@@ -436,7 +451,7 @@ def test_prepost_plot_default_ci_prob(mock_pymc_sample, fitted_prepost):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_piecewise_plot_threads_ci_prob(mock_pymc_sample, fitted_piecewise, ci_prob):
-    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    """PiecewiseITS ``plot(ci_prob=...)`` reaches ``td.point_interval``."""
     _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, ci_prob)
 
 
@@ -449,7 +464,7 @@ def test_piecewise_plot_default_ci_prob(mock_pymc_sample, fitted_piecewise):
 @pytest.mark.integration
 @pytest.mark.parametrize("ci_prob", _PARAMS)
 def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
-    """PanelRegression ``plot(hdi_prob=...)`` reaches ``az.plot_forest``.
+    """PanelRegression ``plot(hdi_prob=...)`` reaches ``td.point_interval``.
 
     PanelRegression has not yet been migrated to ``ci_prob`` (it does not
     support ETI/spaghetti/histogram), so we call ``plot(hdi_prob=...)`` here.
@@ -459,7 +474,7 @@ def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
 
 @pytest.mark.integration
 def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
-    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to ``az.plot_forest``."""
+    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to tidydraws."""
     _check_default(fitted_panel, _PANEL_TARGETS)
 
 
@@ -470,20 +485,13 @@ def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
 
 @pytest.mark.integration
 def test_deprecated_hdi_prob_still_wired(mock_pymc_sample, fitted_its):
-    """``plot(hdi_prob=...)`` still reaches ``plot_posterior_over_x`` via the deprecated alias.
+    """``plot(hdi_prob=...)`` still reaches ``td.point_interval`` via the deprecated alias.
 
     Ensures that existing user code does not silently break after the rename
     to ``ci_prob``. The deprecated alias must emit a ``FutureWarning`` and
-    forward the value to ``plot_posterior_over_x`` as ``ci_prob``.
+    forward the value to ``td.point_interval`` as ``probs``.
     """
-    stack, recorded = _record_hdi_prob_calls(
-        [
-            (
-                "causalpy.experiments.interrupted_time_series.plot_posterior_over_x",
-                "ci_prob",
-            )
-        ]
-    )
+    stack, recorded = _record_hdi_prob_calls([_POINT_INTERVAL_TARGET])
     import warnings
 
     with stack, warnings.catch_warnings(record=True) as caught:

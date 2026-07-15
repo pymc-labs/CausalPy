@@ -29,6 +29,31 @@ from causalpy.data.simulate_data import generate_staggered_did_data
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
+def _plotnine_legend(fig):
+    return next(
+        artist
+        for artist in fig.artists
+        if hasattr(artist, "set_bbox_to_anchor") and hasattr(artist, "loc")
+    )
+
+
+def _legend_texts(legend):
+    texts = []
+
+    def collect(artist):
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            texts.append(artist)
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return texts
+
+
 # ==============================================================================
 # Integration Tests
 # ==============================================================================
@@ -1277,7 +1302,7 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
     df = generate_staggered_did_data(
         n_units=30,
         n_time_periods=15,
-        treatment_cohorts={5: 10, 10: 10},
+        treatment_cohorts={4: 8, 8: 8, 12: 8},
         seed=42,
     )
 
@@ -1300,10 +1325,8 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
         assert "ATT(g, e)" in ax.get_ylabel()
         assert "placebo" in ax.get_ylabel()
         assert f"Cohort {cohort}" in ax.get_title()
-        legend = ax.get_legend()
-        assert legend is not None
-        legend_labels = {text.get_text() for text in legend.get_texts()}
-        assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
+    legend_labels = {text.get_text() for text in _legend_texts(_plotnine_legend(fig))}
+    assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
 
     plt.close(fig)
 

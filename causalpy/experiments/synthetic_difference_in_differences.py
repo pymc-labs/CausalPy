@@ -21,14 +21,20 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    CausalPanelData,
+    PlotSpec,
+    build_causal_panel_plot,
+    dataarray_draws,
+    prediction_draws,
+)
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
 
@@ -602,6 +608,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        figsize: tuple[float, float] = (7, 11),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, np.ndarray]:
@@ -619,19 +626,18 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
-
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches. Defaults to ``(7, 11)``
+            so the three panels and date tick labels have room.
         show : bool, optional
             Whether to call :func:`matplotlib.pyplot.show` after drawing.
             Defaults to ``True``.
@@ -645,7 +651,9 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure containing the three stacked panels.
+            The figure containing the three stacked panels (plotnine base
+            plus matplotlib overlays for the treatment line and date
+            formatting).
         ax : numpy.ndarray
             Array of the three :class:`matplotlib.axes.Axes` instances.
         """
@@ -665,17 +673,37 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            figsize=figsize,
         )
 
-    @staticmethod
-    def _convert_treatment_time_for_axis(
-        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
-    ) -> int | float | pd.Timestamp:
-        """Convert treatment time into the plotting units expected by a specific axis."""
-        try:
-            return axis.xaxis.convert_units(treatment_time)
-        except (TypeError, ValueError):
-            return treatment_time
+    def _causal_panel_data(self, *, treated_unit: str) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
+        pre_predictions = prediction_draws(
+            self.pre_pred,
+            pd.DataFrame({"obs_ind": self.datapre.index}),
+            treated_unit=treated_unit,
+        )
+        post_predictions = prediction_draws(
+            self.post_pred,
+            pd.DataFrame({"obs_ind": self.datapost.index}),
+            treated_unit=treated_unit,
+        )
+        observations = pd.DataFrame(
+            {
+                "obs_ind": self.data.index,
+                "value": self.data[self.treated_units].mean(axis=1).to_numpy(),
+            }
+        )
+        return CausalPanelData(
+            fitted=pre_predictions,
+            counterfactual=post_predictions,
+            pre_effect=dataarray_draws(self.pre_impact, treated_unit=treated_unit),
+            post_effect=dataarray_draws(self.post_impact, treated_unit=treated_unit),
+            cumulative_effect=dataarray_draws(
+                self.post_impact_cumulative, treated_unit=treated_unit
+            ),
+            observations=observations,
+        )
 
     def _bayesian_plot(
         self,
@@ -684,167 +712,54 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot the results: counterfactual, impact, and cumulative impact.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use
-            ``None`` to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the credible interval. Must be in ``(0, 1]``.
-            Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
-        ci_kind : {"hdi", "eti"}, optional
-            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
-        num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-            The matplotlib figure containing the plots.
-        ax : list of matplotlib.axes.Axes
-            The three axes (counterfactual, impact, cumulative impact).
-        """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
+        figsize: tuple[float, float] = (7, 11),
+        **kwargs: Any,
+    ) -> PlotSpec:
+        """Build the Bayesian synthetic DiD plot from tidy declarative layers."""
         treated_unit = self.treated_units[0]
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
-
-        # ---- TOP PLOT: Observed vs counterfactual ----
-        pre_pred = self.pre_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
-        post_pred = self.post_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
-
-        # Pre-intervention synthetic control fit
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapre.index,
-            pre_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention fit"]
-
-        # Observed treated outcome
-        (h,) = ax[0].plot(
-            self.datapre.index,
-            self.datapre[self.treated_units].values.mean(axis=1),
-            "k.",
-            label="Observations",
-        )
-        handles.append(h)
-        labels.append("Observations")
-
-        # Post-intervention counterfactual
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapost.index,
-            post_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append("Counterfactual")
-
-        ax[0].plot(
-            self.datapost.index,
-            self.datapost[self.treated_units].values.mean(axis=1),
-            "k.",
-        )
-
-        # Shaded causal effect
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost[self.treated_units].values.mean(axis=1),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        handles.append(h)
-        labels.append("Causal impact")
-
         tau_mean = float(self.tau_posterior.mean())
         r_to = round_to if round_to is not None else 2
-        ax[0].set(title=f"SDiD: ATT = {round(tau_mean, r_to)}")
-
-        # ---- MIDDLE PLOT: Impact ----
-        plot_posterior_over_x(
-            self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
+        panels = (
+            f"SDiD: ATT = {round(tau_mean, r_to)}",
+            "Causal Impact",
+            "Cumulative Causal Impact",
         )
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
+        plot_data = self._causal_panel_data(treated_unit=treated_unit)
+        series_labels = {
+            "fitted": "Pre-intervention fit",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
+        }
+        colors = {
+            "Pre-intervention fit": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "pre": "#1f77b4",
+            "post": "#ff7f0e",
+        }
+        p = build_causal_panel_plot(
+            plot_data,
+            panels=panels,
+            series_labels=series_labels,
+            colors=colors,
+            kind=kind,
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            figsize=figsize,
         )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"])
-            .sel(treated_units=treated_unit)
-            .values,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
+        p += p9.geom_vline(
+            pd.DataFrame({"obs_ind": [self.treatment_time]}),
+            p9.aes(xintercept="obs_ind"),
+            color="red",
+            size=2,
         )
-        ax[1].set(title="Causal Impact")
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
-        # ---- BOTTOM PLOT: Cumulative impact ----
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[2].axhline(y=0, c="k")
-
-        # Intervention line
-        for i in [0, 1, 2]:
-            treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
-            )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
-
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-        )
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return fig, ax
+        return PlotSpec(p, n_panels=3)
 
     def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """OLS not supported for SDiD."""

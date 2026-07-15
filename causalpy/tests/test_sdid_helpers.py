@@ -384,32 +384,3 @@ class TestSummaryMultiTreated:
         captured = capsys.readouterr().out
         assert "Treated units: ['t0', 't1']" in captured
         assert "Treated unit:" not in captured
-
-
-class TestConvertTreatmentTimeForAxis:
-    """``_convert_treatment_time_for_axis`` falls back when conversion fails."""
-
-    def test_returns_input_when_convert_units_raises_typeerror(self):
-        class _XAxis:
-            @staticmethod
-            def convert_units(_value):
-                raise TypeError("cannot convert")
-
-        axis = SimpleNamespace(xaxis=_XAxis())
-        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
-            axis, 42
-        )
-        assert result == 42
-
-    def test_returns_input_when_convert_units_raises_valueerror(self):
-        class _XAxis:
-            @staticmethod
-            def convert_units(_value):
-                raise ValueError("bad value")
-
-        axis = SimpleNamespace(xaxis=_XAxis())
-        ts = pd.Timestamp("2020-01-01")
-        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
-            axis, ts
-        )
-        assert result == ts

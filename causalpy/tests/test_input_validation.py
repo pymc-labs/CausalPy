@@ -885,6 +885,20 @@ def test_rd_unrecognized_model_type():
         )
 
 
+def _rd_donut_boundary_xs(ax: plt.Axes) -> set[float]:
+    """Vertical reference-line x positions (matplotlib or plotnine draw)."""
+    xs: set[float] = set()
+    for line in ax.get_lines():
+        xdata = np.asarray(line.get_xdata(), dtype=float)
+        if xdata.size >= 2 and np.isclose(xdata[0], xdata[1]):
+            xs.add(float(xdata[0]))
+    for coll in ax.collections:
+        for seg in getattr(coll, "get_segments", lambda: [])():
+            if len(seg) == 2 and np.isclose(seg[0, 0], seg[1, 0]):
+                xs.add(float(seg[0, 0]))
+    return xs
+
+
 def test_rd_ols_plot_with_donut_hole():
     """Test that OLS plot shows donut hole boundary lines."""
     threshold = 0.5
@@ -902,13 +916,10 @@ def test_rd_ols_plot_with_donut_hole():
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    # Check that donut boundary lines were added at threshold ± donut_hole
+    donut_xs = _rd_donut_boundary_xs(ax)
+    assert any(np.isclose(x, threshold - 0.1) for x in donut_xs)
+    assert any(np.isclose(x, threshold + 0.1) for x in donut_xs)
     plt.close(fig)
 
 
@@ -925,17 +936,16 @@ def test_rd_bayesian_plot_with_donut_hole():
         donut_hole=0.1,
     )
 
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
+    if isinstance(ax, np.ndarray):
+        ax = ax.flat[0]
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
+    # Check that donut boundary lines were added at threshold ± donut_hole
+    donut_xs = _rd_donut_boundary_xs(ax)
+    assert any(np.isclose(x, threshold - 0.1) for x in donut_xs)
+    assert any(np.isclose(x, threshold + 0.1) for x in donut_xs)
     plt.close(fig)
 
 

@@ -96,7 +96,10 @@ jobs:
       - name: Install package
         # --no-deps so pip does not pull pip-built pymc/pytensor on top of the
         # conda-forge ones. Runtime deps come from environment.yml.
-        run: pip install --no-deps -e .
+        # tidydraws is pip-only (not on conda-forge for all Python versions).
+        run: |
+          pip install --no-deps -e .
+          pip install 'tidydraws==0.4.3'
       - name: Show environment
         run: |
           micromamba list

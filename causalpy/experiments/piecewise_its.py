@@ -21,6 +21,8 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
+import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, dmatrices
@@ -29,7 +31,13 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    CausalPanelData,
+    PlotSpec,
+    build_causal_panel_plot,
+    dataarray_draws,
+    prediction_draws,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -215,7 +223,6 @@ class PiecewiseITS(BaseExperiment):
 
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
-        # Check formula contains at least one step() or ramp() term
         if not self._step_ramp_terms:
             raise FormulaException(
                 "Formula must contain at least one step() or ramp() term. "
@@ -323,13 +330,11 @@ class PiecewiseITS(BaseExperiment):
 
     def _get_interruption_column_indices(self) -> list[int]:
         """Get indices of columns related to interruptions (step/ramp terms)."""
-        indices: list[int] = []
-        for term in self._x_design_info.terms:
-            if any(
-                self._parse_step_ramp_factor(factor.name()) for factor in term.factors
-            ):
-                term_slice = self._x_design_info.term_slices[term]
-                indices.extend(range(term_slice.start, term_slice.stop))
+        indices = []
+        for i, label in enumerate(self.labels):
+            # Patsy labels step/ramp terms like "step(t, 50)" or "ramp(t, 50)"
+            if "step(" in label or "ramp(" in label:
+                indices.append(i)
         return indices
 
     def _compute_counterfactual_and_effects(self) -> None:
@@ -464,7 +469,7 @@ class PiecewiseITS(BaseExperiment):
         figsize: tuple[float, float] = (10, 10),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray | list[plt.Axes]]:
         """Plot the piecewise interrupted time-series results.
 
         Parameters
@@ -479,22 +484,18 @@ class PiecewiseITS(BaseExperiment):
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
+            How posterior uncertainty is rendered for Bayesian models.
+            Defaults to ``"ribbon"`` (mean + credible band). Ignored for OLS.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
 
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 10)``.
+            Width and height of the figure in inches. Defaults to ``(10, 10)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -507,8 +508,9 @@ class PiecewiseITS(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+            The figure that was created (plotnine base plus matplotlib
+            overlays for interruption lines when Bayesian).
+        ax : list[matplotlib.axes.Axes] or numpy.ndarray
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
@@ -531,6 +533,31 @@ class PiecewiseITS(BaseExperiment):
             figsize=figsize,
         )
 
+    def _causal_panel_data(self) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
+        time_values = self.data[self.time_col].to_numpy()
+        newdata = pd.DataFrame({"obs_ind": self.data.index, "t": time_values})
+        time_lookup = pl.from_pandas(newdata)
+        fitted = prediction_draws(self.y_pred, newdata)
+        counterfactual = prediction_draws(self.y_counterfactual, newdata)
+        effect = dataarray_draws(self.effect).join(time_lookup, on="obs_ind")
+        cumulative_effect = dataarray_draws(self.cumulative_effect).join(
+            time_lookup, on="obs_ind"
+        )
+        observations = pd.DataFrame(
+            {
+                "t": time_values,
+                "value": self.design["y"].isel(treated_units=0).to_numpy(),
+            }
+        )
+        return CausalPanelData(
+            fitted=fitted,
+            counterfactual=counterfactual,
+            post_effect=effect,
+            cumulative_effect=cumulative_effect,
+            observations=observations,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -540,144 +567,65 @@ class PiecewiseITS(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results for Bayesian models.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals for rounding. Defaults to 2.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            fitted, counterfactual, causal effect, and cumulative effect bands.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(10, 10)``.
-
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure.
-        ax : list[plt.Axes]
-            List of axes objects.
-        """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
+    ) -> PlotSpec:
+        """Build the Bayesian piecewise ITS plot from tidy declarative layers."""
+        panels = (
+            f"Piecewise ITS: Bayesian $R^2$ = "
+            f"{round_num(self.score['unit_0_r2'], round_to)}",
+            "Causal Effect",
+            "Cumulative Causal Effect",
+        )
+        plot_data = self._causal_panel_data()
+        series_labels = {
+            "fitted": "Fitted",
+            "counterfactual": "Counterfactual",
+            "post_effect": "effect",
+            "cumulative_effect": "cumulative",
         }
-        time_values = self.data[self.time_col].values
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-
-        # TOP PLOT: Observed, Fitted, and Counterfactual
-        # Observed data
-        (h_obs,) = ax[0].plot(
-            time_values,
-            self.design["y"].isel(treated_units=0),
-            "k.",
-            label="Observations",
+        colors = {
+            "Fitted": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "effect": "#2ca02c",
+            "cumulative": "#d62728",
+        }
+        p = build_causal_panel_plot(
+            plot_data,
+            panels=panels,
+            series_labels=series_labels,
+            colors=colors,
+            kind=kind,
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            x="t",
+            shade_fill="#2ca02c",
+            figsize=figsize,
+            zero_linetype="dashed",
+            zero_alpha=0.5,
+            shade_outcome=False,
+        )
+        p += p9.geom_vline(
+            pd.DataFrame({"t": self.interruption_times}),
+            p9.aes(xintercept="t"),
+            color="red",
+            size=1.5,
+            alpha=0.7,
         )
 
-        # Fitted values (mu)
-        y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-        if "treated_units" in y_pred_mu.dims:
-            y_pred_mu = y_pred_mu.isel(treated_units=0)
-        h_line_fit, h_patch_fit = plot_posterior_over_x(
-            time_values,
-            y_pred_mu,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
+        def add_labels(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            axes[0].set_ylabel(self.outcome_variable_name)
+            axes[1].set_ylabel("Effect")
+            axes[2].set_ylabel("Cumulative Effect")
 
-        # Counterfactual
-        y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-        if "treated_units" in y_cf_mu.dims:
-            y_cf_mu = y_cf_mu.isel(treated_units=0)
-        h_line_cf, h_patch_cf = plot_posterior_over_x(
-            time_values,
-            y_cf_mu,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-
-        # Title with R^2
-        r2_val = None
-        try:
-            if isinstance(self.score, pd.Series):
-                if "unit_0_r2" in self.score.index:
-                    r2_val = self.score["unit_0_r2"]
-                elif "r2" in self.score.index:
-                    r2_val = self.score["r2"]
-        except Exception:
-            pass
-
-        title_str = "Piecewise ITS: Bayesian $R^2$"
-        if r2_val is not None:
-            title_str += f" = {round_num(r2_val, round_to)}"
-        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
-
-        handles = [h_obs, (h_line_fit, h_patch_fit), (h_line_cf, h_patch_cf)]
-        labels_legend = ["Observations", "Fitted", "Counterfactual"]
-
-        # MIDDLE PLOT: Causal Effect
-        plot_posterior_over_x(
-            time_values,
-            self.effect,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C2"},
-        )
-        ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
-        ax[1].fill_between(
-            time_values,
-            y1=self.effect.mean(dim=["chain", "draw"]).values,
-            alpha=0.25,
-            color="C2",
-        )
-        ax[1].set(title="Causal Effect", ylabel="Effect")
-
-        # BOTTOM PLOT: Cumulative Effect
-        plot_posterior_over_x(
-            time_values,
-            self.cumulative_effect,
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C3"},
-        )
-        ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)
-        ax[2].set(title="Cumulative Causal Effect", ylabel="Cumulative Effect")
-
-        # Add vertical lines for interruptions
-        for i, t_k in enumerate(self.interruption_times):
-            for a in ax:
-                a.axvline(
-                    x=t_k,
-                    ls="-",
-                    lw=2,
-                    color="red",
-                    alpha=0.7,
-                    label=f"Interruption {i}" if a == ax[0] else None,
-                )
-            handles.append(plt.Line2D([0], [0], color="red", lw=2))
-            labels_legend.append(f"Interruption {i}")
-
-        ax[0].legend(handles=handles, labels=labels_legend, fontsize=LEGEND_FONT_SIZE)
-
-        plt.tight_layout()
-        return fig, ax
+        return PlotSpec(p, overlay=add_labels, n_panels=3)
 
     def _ols_plot(
         self,
         round_to: int | None = 2,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray | list[plt.Axes]]:
         """
         Plot the results for OLS models.
 

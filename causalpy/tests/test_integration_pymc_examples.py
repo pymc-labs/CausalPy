@@ -28,6 +28,28 @@ from causalpy.tests.conftest import setup_regression_kink_data
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
+def _plotnine_legend_labels(fig):
+    legend = next(
+        artist
+        for artist in fig.artists
+        if hasattr(artist, "set_bbox_to_anchor") and hasattr(artist, "loc")
+    )
+    labels = []
+
+    def collect(artist):
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            labels.append(artist.get_text())
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return labels
+
+
 @pytest.mark.integration
 def test_did(mock_pymc_sample, did_data):
     """
@@ -148,7 +170,7 @@ def test_rd(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
     with pytest.raises(NotImplementedError):
@@ -180,7 +202,7 @@ def test_rd_bandwidth(mock_pymc_sample, rd_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
@@ -220,7 +242,7 @@ def test_rd_bandwidth_custom_running_variable(mock_pymc_sample):
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
@@ -253,7 +275,7 @@ def test_rd_drinking(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
@@ -282,7 +304,7 @@ def test_rkink(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
     with pytest.raises(NotImplementedError):
@@ -314,7 +336,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
 
@@ -428,22 +450,8 @@ def test_its_covid(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
-    """Regression test: ITS plot must remain readable when the post-period
-    contains a single observation.
-
-    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
-    zero-area polygon, the median line has no neighbours to connect to, and
-    the (then top-of-zorder) treatment ``axvline`` covers the only datum -
-    leaving the bottom two panels visually empty. The fix
-        1. lowers the treatment-line zorder and switches it to a thin dashed
-           style so it reads as an annotation, never as data;
-        2. overlays an explicit median-plus-HDI errorbar on every panel;
-        3. swaps the legend handle to that errorbar so the legend matches
-           what is drawn (and drops the "Causal impact" entry whose
-           ``fill_between`` collapses to nothing).
-    """
+    """A singleton post-period remains visible as a declarative point interval."""
     from matplotlib.collections import LineCollection
-    from matplotlib.container import ErrorbarContainer
 
     df = its_data
     # Choose treatment_time so exactly one datum sits in the post-period.
@@ -455,63 +463,19 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
     assert len(result.datapost) == 1
-    fig, ax = result.plot()
+    fig, ax = result.plot(ci_prob=0.5, ci_kind="eti")
 
-    treatment_axvlines = [
-        ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
-    ]
-    assert treatment_axvlines, "expected a treatment-start axvline"
-    assert all(ln.get_zorder() < 2 for ln in treatment_axvlines), (
-        "treatment axvline must sit below data (zorder<2) so it never "
-        "occludes the only post-period observation"
-    )
-    assert all(ln.get_linestyle() == "--" for ln in treatment_axvlines), (
-        "treatment axvline must be dashed to read as an annotation"
-    )
-    assert all(ln.get_linewidth() <= 2 for ln in treatment_axvlines), (
-        "treatment axvline must be thin to avoid dominating the plot"
-    )
-
-    # Each panel must contain at least one errorbar overlay
-    # (rendered as a LineCollection from the errorbar caps/whiskers).
+    # geom_pointrange renders its interval as a LineCollection.
     for i, a in enumerate(ax):
         line_collections = [c for c in a.collections if isinstance(c, LineCollection)]
         assert line_collections, (
             f"panel {i} should have a LineCollection from the singleton "
-            "errorbar overlay; otherwise the post-period is invisible"
+            "point interval; otherwise the post-period is invisible"
         )
 
-    # Top-panel legend must reflect what is actually drawn: a Counterfactual
-    # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
-    # and no "Causal impact" entry (since its fill_between is degenerate).
-    legend = ax[0].get_legend()
-    assert legend is not None, "top panel should have a legend"
-    legend_labels = [t.get_text() for t in legend.get_texts()]
-    assert "Counterfactual" in legend_labels
-    assert "Causal impact" not in legend_labels, (
-        "Causal impact entry must be dropped when its fill_between collapses"
-    )
-    cf_idx = legend_labels.index("Counterfactual")
-    cf_handle = legend.legend_handles[cf_idx]
-    # Matplotlib renders an ErrorbarContainer in the legend via a
-    # LineCollection proxy. What we want to assert is that the handle is
-    # *not* the old (Line2D, PolyCollection) tuple, since that would imply
-    # the legend swatch shows a ribbon that does not exist on the plot.
-    from matplotlib.collections import PolyCollection
-    from matplotlib.lines import Line2D
-
-    assert not (isinstance(cf_handle, tuple) and len(cf_handle) == 2), (
-        "Counterfactual legend handle should not be a (line, ribbon) tuple "
-        "in the singleton case - the ribbon does not render."
-    )
-    assert not isinstance(cf_handle, PolyCollection), (
-        "Counterfactual legend handle should not be a PolyCollection ribbon "
-        "in the singleton case - the ribbon does not render."
-    )
-    assert isinstance(cf_handle, ErrorbarContainer | LineCollection | Line2D), (
-        "Counterfactual legend handle should reflect the errorbar overlay, "
-        f"got {type(cf_handle).__name__}"
-    )
+    legend_labels = _plotnine_legend_labels(fig)
+    assert "Pre-intervention period" in legend_labels
+    assert "Causal impact" not in legend_labels
     plt.close(fig)
 
 
@@ -802,12 +766,11 @@ def test_ancova(mock_pymc_sample, anova1_data):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    fig, ax = result.plot()
+    fig, ax = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
-    # For multi-panel plots, ax should be an array of axes
-    assert isinstance(ax, np.ndarray) and all(
-        isinstance(item, plt.Axes) for item in ax
-    ), "ax must be a numpy.ndarray of plt.Axes"
+    assert isinstance(ax, (plt.Axes, np.ndarray))
+    with pytest.raises(NotImplementedError):
+        result.get_plot_data()
 
 
 @pytest.mark.integration

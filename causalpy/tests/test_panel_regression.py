@@ -681,8 +681,9 @@ def test_plot_coefficients_with_var_names(small_panel_data):
         model=LinearRegression(),
     )
     fig, ax = result.plot_coefficients(var_names=["treatment"])
-    # Should have exactly one bar (horizontal bar chart)
-    assert len(ax.patches) == 1
+    ytick_labels = [t.get_text() for t in ax.get_yticklabels() if t.get_text()]
+    assert ytick_labels == ["treatment"]
+    assert ax.get_xlabel() == "Coefficient Value"
     plt.close(fig)
 
 
@@ -749,8 +750,8 @@ def test_plot_unit_effects_ols(small_panel_data):
 
     fig, ax = result.plot_unit_effects()
     assert isinstance(fig, plt.Figure)
-    # Histogram should have at least one patch
-    assert len(ax.patches) > 0
+    assert "Unit Fixed Effects" in ax.get_title()
+    assert len(ax.patches) + len(ax.collections) > 0
     plt.close(fig)
 
 

@@ -14,11 +14,13 @@
 """Difference in differences."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
+import polars as pl
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -31,7 +33,15 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    HISTOGRAM_PANEL_THEME,
+    PlotSpec,
+    coord_xlim_for_column,
+    label_draws,
+    posterior_kind_layers,
+    prediction_draws,
+    scale_for_x_column,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -48,6 +58,19 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _DiDPlotData:
+    """Tidy tables and annotation coordinates consumed by the DiD plot."""
+
+    scatter: pd.DataFrame
+    draws: pl.DataFrame
+    counterfactual_draws: pd.DataFrame
+    time_points: np.ndarray
+    arrow_x: Any
+    treatment_y: float
+    counterfactual_y: float
 
 
 class DifferenceInDifferences(BaseExperiment):
@@ -375,18 +398,15 @@ class DifferenceInDifferences(BaseExperiment):
             (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults
-            to 50. Ignored for other kinds.
+            Number of posterior draws to overlay when ``kind="spaghetti"``.
+            Defaults to 50.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -428,6 +448,69 @@ class DifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
+    def _prepare_bayesian_plot_data(
+        self,
+    ) -> _DiDPlotData:
+        """Prepare observed, posterior, and annotation data for plotting."""
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        levels = sorted(self.data[self.group_variable_name].unique())
+        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
+        scatter = self.data[[tcol, ycol]].copy()
+        scatter["series"] = (
+            self.data[self.group_variable_name].map(group_to_series).to_numpy()
+        )
+
+        control_grid = self.x_pred_control.reset_index(drop=True)
+        control_grid["obs_ind"] = range(len(control_grid))
+        treatment_grid = self.x_pred_treatment.reset_index(drop=True)
+        treatment_grid["obs_ind"] = range(len(treatment_grid))
+        counterfactual_grid = self.x_pred_counterfactual.reset_index(drop=True)
+        counterfactual_grid["obs_ind"] = range(len(counterfactual_grid))
+        control = prediction_draws(self.y_pred_control, control_grid)
+        treatment = prediction_draws(self.y_pred_treatment, treatment_grid)
+        counterfactual = prediction_draws(
+            self.y_pred_counterfactual, counterfactual_grid
+        )
+        time_points = self.x_pred_counterfactual[tcol].to_numpy()
+        draw_parts = [
+            label_draws(control, series="Control group"),
+            label_draws(treatment, series="Treatment group"),
+        ]
+        if len(time_points) > 1:
+            draw_parts.append(label_draws(counterfactual, series="Counterfactual"))
+        draws = pl.concat(draw_parts, how="diagonal_relaxed")
+
+        treatment_y = _as_scalar(
+            self.y_pred_treatment["posterior_predictive"]
+            .mu.isel({"obs_ind": 1})
+            .mean()
+            .data
+        )
+        counterfactual_y = _as_scalar(
+            self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+        )
+        treatment_times = self.x_pred_treatment[tcol].to_numpy()
+        arrow_x: Any
+        if np.issubdtype(treatment_times.dtype, np.datetime64):
+            time_min = pd.Timestamp(treatment_times.min())
+            time_max = pd.Timestamp(treatment_times.max())
+            arrow_x = time_max + 0.1 * (time_max - time_min)
+        elif np.issubdtype(treatment_times.dtype, np.number):
+            time_span = float(np.ptp(treatment_times.astype(float)))
+            arrow_x = float(np.max(treatment_times)) + 0.1 * time_span
+        else:
+            arrow_x = treatment_times[-1]
+        return _DiDPlotData(
+            scatter=scatter,
+            draws=draws,
+            counterfactual_draws=counterfactual.to_pandas(),
+            time_points=time_points,
+            arrow_x=arrow_x,
+            treatment_y=treatment_y,
+            counterfactual_y=counterfactual_y,
+        )
+
     def _bayesian_plot(
         self,
         round_to: int | None = None,
@@ -437,178 +520,79 @@ class DifferenceInDifferences(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive bands for the control, treatment, and
-            counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
+    ) -> PlotSpec:
+        """Build the Bayesian DiD plot from tidy data and declarative layers."""
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        colors = {
+            "Control group": "#1f77b4",
+            "Treatment group": "#ff7f0e",
+            "Counterfactual": "#2ca02c",
         }
-
-        def _plot_causal_impact_arrow(results, ax):
-            """
-            draw a vertical arrow between `y_pred_counterfactual` and
-            `y_pred_counterfactual`
-            """
-            # Calculate y values to plot the arrow between
-            y_pred_treatment = (
-                results.y_pred_treatment["posterior_predictive"]
-                .mu.isel({"obs_ind": 1})
-                .mean()
-                .data
+        plot_data = self._prepare_bayesian_plot_data()
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x=tcol,
+            group_by=["series", tcol],
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            colors=colors,
+        )
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.scatter, p9.aes(tcol, ycol, color="series"), size=1.5
+        )
+        for layer in posterior_layers:
+            p += layer
+        x_values = plot_data.scatter[tcol]
+        p = (
+            p
+            + p9.scale_color_manual(values=colors, name="")
+            + (
+                p9.scale_fill_manual(values=colors, name="")
+                if kind == "ribbon"
+                else p9.guides()
             )
-            y_pred_counterfactual = (
-                results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
+            + scale_for_x_column(x_values)
+            + coord_xlim_for_column(x_values)
+            + p9.labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
+        )
+        if figsize is not None:
+            p += p9.theme(figure_size=figsize)
+        if kind == "histogram":
+            p = p + HISTOGRAM_PANEL_THEME
+        if len(plot_data.time_points) == 1:
+            p = p + p9.geom_violin(
+                plot_data.counterfactual_draws,
+                p9.aes(tcol, "mu"),
+                width=0.2,
+                fill="#1f77b4",
+                color=None,
+                alpha=0.5,
+                show_legend=False,
+                inherit_aes=False,
             )
-            y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
-            y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
-            # Calculate the x position to plot at
-            # Note that we force to be float to avoid a type error using np.ptp with boolean
-            # values
-            diff = np.ptp(
-                np.array(
-                    results.x_pred_treatment[results.time_variable_name].values
-                ).astype(float)
-            )
-            x = (
-                np.max(results.x_pred_treatment[results.time_variable_name].values)
-                + 0.1 * diff
-            )
-            # Plot the arrow
-            ax.annotate(
-                "",
-                xy=(x, y_pred_counterfactual_scalar),
-                xycoords="data",
-                xytext=(x, y_pred_treatment_scalar),
-                textcoords="data",
-                arrowprops={"arrowstyle": "<-", "color": "green", "lw": 3},
-            )
-            # Plot text annotation next to arrow
-            ax.annotate(
-                "causal\nimpact",
-                xy=(
-                    x,
-                    np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
-                ),
-                xycoords="data",
-                xytext=(5, 0),
-                textcoords="offset points",
-                color="green",
-                va="center",
-            )
-
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot raw data
-        sns.scatterplot(
-            self.data,
-            x=self.time_variable_name,
-            y=self.outcome_variable_name,
-            hue=self.group_variable_name,
-            alpha=1,
-            legend=False,
-            markers=True,
-            ax=ax,
+        p += p9.annotate(
+            "segment",
+            x=plot_data.arrow_x,
+            xend=plot_data.arrow_x,
+            y=plot_data.treatment_y,
+            yend=plot_data.counterfactual_y,
+            arrow=p9.arrow(length=0.1, ends="first", type="closed"),
+            color="green",
+            size=1.5,
+        )
+        p += p9.annotate(
+            "text",
+            x=plot_data.arrow_x,
+            y=np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),
+            label="causal\nimpact",
+            color="green",
+            ha="left",
         )
 
-        # Plot model fit to control group
-        time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_posterior_over_x(
-            time_points,
-            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-            label="Control group",
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Control group"]
-
-        # Plot model fit to treatment group
-        time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_posterior_over_x(
-            time_points,
-            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Treatment group",
-        )
-        handles.append((h_line, h_patch))
-        labels.append("Treatment group")
-
-        # Plot counterfactual - post-test for treatment group IF no treatment
-        # had occurred.
-        time_points = self.x_pred_counterfactual[self.time_variable_name].values
-        if len(time_points) == 1:
-            y_pred_cf = az.extract(
-                self.y_pred_counterfactual,
-                group="posterior_predictive",
-                var_names="mu",
-            )
-            # Select single unit data for plotting
-            y_pred_cf_single = y_pred_cf.isel(treated_units=0)
-            violin_data = (
-                y_pred_cf_single.values
-                if hasattr(y_pred_cf_single, "values")
-                else y_pred_cf_single
-            )
-            parts = ax.violinplot(
-                violin_data.T,
-                positions=self.x_pred_counterfactual[self.time_variable_name].values,
-                showmeans=False,
-                showmedians=False,
-                widths=0.2,
-            )
-            for pc in parts["bodies"]:
-                pc.set_facecolor("C0")
-                pc.set_edgecolor("None")
-                pc.set_alpha(0.5)
-        else:
-            h_line, h_patch = plot_posterior_over_x(
-                time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu.isel(
-                    treated_units=0
-                ),
-                ax=ax,
-                **style,
-                plot_hdi_kwargs={"color": "C2"},
-                label="Counterfactual",
-            )
-            handles.append((h_line, h_patch))
-            labels.append("Counterfactual")
-
-        # arrow to label the causal impact
-        _plot_causal_impact_arrow(self, ax)
-
-        # formatting
-        ax.set(
-            xticks=self.x_pred_treatment[self.time_variable_name].values,
-            title=self._causal_impact_summary_stat(round_to),
-        )
-        ax.legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-        return fig, ax
+        return PlotSpec(p, n_panels=1)
 
     def _ols_plot(
         self,

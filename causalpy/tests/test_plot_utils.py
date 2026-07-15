@@ -18,35 +18,60 @@ Tests for plot utility functions
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
 import pytest
 import xarray as xr
-from matplotlib.collections import PolyCollection
 
-from causalpy.plot_utils import get_hdi_to_df, plot_posterior_over_x
+from causalpy.plot_utils import dataarray_draws
 
 
 @pytest.mark.integration
-def test_get_hdi_to_df_with_coordinate_dimensions():
-    """
-    Regression test for bug where get_hdi_to_df returned string coordinate values
-    instead of numeric HDI values when xarray had named coordinate dimensions.
+def test_panel_axes_filters_colorbars():
+    import plotnine as p9
 
-    This bug manifested in multi-cell synthetic control experiments where columns
-    like 'pred_hdi_upper_94' contained the string "treated_agg" instead of
-    numeric upper bound values.
+    from causalpy.plot_utils import panel_axes
 
-    See: https://github.com/pymc-labs/CausalPy/issues/532
-    """
-    # Create a mock xarray DataArray similar to what's produced in synthetic control
-    # with a coordinate dimension like 'treated_units'
+    p = p9.ggplot() + p9.geom_point(
+        pd.DataFrame({"x": [1, 2], "y": [1, 2]}), p9.aes("x", "y")
+    )
+    fig = p.draw(show=False)
+    axes = panel_axes(fig)
+    assert axes
+    assert all(a.get_subplotspec() is not None for a in axes)
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_spec_overlay_runs_once():
+    import plotnine as p9
+
+    from causalpy.plot_utils import PlotSpec, panel_axes
+
+    calls: list[int] = []
+
+    def overlay(_fig, axes):
+        calls.append(len(axes))
+
+    p = p9.ggplot() + p9.geom_point(
+        pd.DataFrame({"x": [1], "y": [1]}), p9.aes("x", "y")
+    )
+    spec = PlotSpec(p, overlay=overlay, n_panels=1)
+    fig = spec.plot.draw(show=False)
+    axes = panel_axes(fig, spec.n_panels)
+    spec.overlay(fig, axes)
+    assert calls == [1]
+    plt.close(fig)
+
+
+def test_dataarray_summary_ignores_scalar_string_coordinates():
+    """Regression test for #532's string coordinate leaking into HDI columns."""
+    from causalpy.plot_utils import summarize_draws
+
     np.random.seed(42)
     n_chains = 2
     n_draws = 100
     n_obs = 10
-
-    # Simulate posterior samples with a named coordinate
     data = np.random.normal(loc=5.0, scale=0.5, size=(n_chains, n_draws, n_obs))
-
     xr_data = xr.DataArray(
         data,
         dims=["chain", "draw", "obs_ind"],
@@ -58,507 +83,273 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
         },
     )
 
-    # Call get_hdi_to_df
-    result = get_hdi_to_df(xr_data, hdi_prob=0.94)
-
-    # Assertions to verify the bug is fixed
-    assert isinstance(result, pd.DataFrame), "Result should be a DataFrame"
-
-    # Check that we have exactly 2 columns (lower and higher)
-    assert result.shape[1] == 2, f"Expected 2 columns, got {result.shape[1]}"
-
-    # Check column names
-    assert "lower" in result.columns, "Should have 'lower' column"
-    assert "higher" in result.columns, "Should have 'higher' column"
-
-    # CRITICAL: Check that columns contain numeric data, not strings
-    assert result["lower"].dtype in [
-        np.float64,
-        np.float32,
-    ], f"'lower' column should be numeric, got {result['lower'].dtype}"
-    assert result["higher"].dtype in [
-        np.float64,
-        np.float32,
-    ], f"'higher' column should be numeric, got {result['higher'].dtype}"
-
-    # Check that no string values like 'treated_agg' appear in the data
-    assert not (result["lower"].astype(str).str.contains("treated_agg").any()), (
-        "'lower' column should not contain coordinate string values"
-    )
-    assert not (result["higher"].astype(str).str.contains("treated_agg").any()), (
-        "'higher' column should not contain coordinate string values"
-    )
-
-    # Verify HDI ordering
-    assert (result["lower"] <= result["higher"]).all(), (
-        "'lower' should be <= 'higher' for all rows"
-    )
-
-    # Verify reasonable HDI values (should be around the mean of 5.0)
-    assert result["lower"].min() > 3.0, "HDI lower bounds should be reasonable"
-    assert result["higher"].max() < 7.0, "HDI upper bounds should be reasonable"
-
-
-@pytest.fixture
-def synthetic_posterior_data():
-    """Create synthetic posterior data for testing plot_posterior_over_x."""
-    np.random.seed(42)
-    n_chains = 2
-    n_draws = 100
-    n_time_points = 20
-
-    # Generate synthetic posterior: trend + noise
-    true_mean = (
-        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
-    )
-
-    # Create posterior samples with uncertainty
-    rng = np.random.default_rng(seed=42)
-    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
-
-    for chain in range(n_chains):
-        for draw in range(n_draws):
-            # Add some variation to the mean for each draw
-            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
-            # Add observation-level noise
-            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
-                0, 1.0, n_time_points
-            )
-
-    # Create xarray DataArray with proper dimensions and coordinates
-    time_index = pd.date_range(start="2020-01-01", periods=n_time_points, freq="D")
-    Y = xr.DataArray(
-        posterior_samples,
-        dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": np.arange(n_chains),
-            "draw": np.arange(n_draws),
-            "obs_ind": time_index,
-        },
-    )
-
-    return time_index, Y
-
-
-@pytest.fixture
-def synthetic_posterior_data_numeric():
-    """Create synthetic posterior data with numeric x values."""
-    np.random.seed(42)
-    n_chains = 2
-    n_draws = 100
-    n_time_points = 20
-
-    # Generate synthetic posterior: trend + noise
-    true_mean = (
-        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
-    )
-
-    # Create posterior samples with uncertainty
-    rng = np.random.default_rng(seed=42)
-    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
-
-    for chain in range(n_chains):
-        for draw in range(n_draws):
-            # Add some variation to the mean for each draw
-            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
-            # Add observation-level noise
-            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
-                0, 1.0, n_time_points
-            )
-
-    # Create xarray DataArray with proper dimensions and coordinates
-    x = np.arange(n_time_points)
-    Y = xr.DataArray(
-        posterior_samples,
-        dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": np.arange(n_chains),
-            "draw": np.arange(n_draws),
-            "obs_ind": x,
-        },
-    )
-
-    return x, Y
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_ribbon_hdi(synthetic_posterior_data):
-    """Test ribbon plot with HDI (default behavior)."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    h_line, h_patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="hdi",
+    result = summarize_draws(
+        dataarray_draws(xr_data),
+        group_by="obs_ind",
         ci_prob=0.94,
-        label="Test HDI",
     )
 
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-    assert isinstance(h_patch, PolyCollection), (
-        "Should return PolyCollection for HDI ribbon"
+    assert pd.api.types.is_numeric_dtype(result["mu_lower"])
+    assert pd.api.types.is_numeric_dtype(result["mu_upper"])
+    assert (result["mu_lower"] <= result["mu_upper"]).all()
+
+
+@pytest.fixture
+def synthetic_posterior_draws():
+    rng = np.random.default_rng(42)
+    obs_ind = pd.date_range("2020-01-01", periods=20, freq="D")
+    values = rng.normal(
+        loc=np.linspace(10, 12, len(obs_ind)),
+        scale=1,
+        size=(2, 100, len(obs_ind)),
+    )
+    da = xr.DataArray(
+        values,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"chain": range(2), "draw": range(100), "obs_ind": obs_ind},
+    )
+    return dataarray_draws(da)
+
+
+def test_dataarray_draws_selects_requested_treated_unit():
+    da = xr.DataArray(
+        np.arange(16).reshape(1, 2, 2, 4),
+        dims=["chain", "draw", "treated_units", "obs_ind"],
+        coords={"treated_units": ["a", "b"]},
     )
 
-    # Check that plot was created
-    assert len(ax.lines) > 0, "Should have at least one line (mean)"
-    assert len(ax.collections) > 0, "Should have at least one collection (HDI ribbon)"
+    draws = dataarray_draws(da, treated_unit="b")
 
+    assert "treated_units" not in draws.columns
+    assert draws["mu"].to_list() == [4, 5, 6, 7, 12, 13, 14, 15]
+
+
+def test_summarize_draws_preserves_requested_interval_mass(synthetic_posterior_draws):
+    from causalpy.plot_utils import summarize_draws
+
+    narrow = summarize_draws(
+        synthetic_posterior_draws,
+        group_by="obs_ind",
+        ci_prob=0.5,
+        interval="eti",
+    )
+    wide = summarize_draws(
+        synthetic_posterior_draws,
+        group_by="obs_ind",
+        ci_prob=0.9,
+        interval="eti",
+    )
+
+    assert np.allclose(narrow["mu"], wide["mu"])
+    assert (wide["mu_lower"] <= narrow["mu_lower"]).all()
+    assert (wide["mu_upper"] >= narrow["mu_upper"]).all()
+
+
+def test_spaghetti_draws_samples_complete_paths(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, spaghetti_draws
+
+    sampled = spaghetti_draws(
+        label_draws(synthetic_posterior_draws, series="posterior", panel="top"),
+        group_by=["panel", "series", "obs_ind"],
+        num_samples=3,
+    )
+
+    assert sampled["_draw_id"].nunique() == 3
+    assert sampled.groupby("_draw_id").size().eq(20).all()
+    assert sampled["_line_id"].nunique() == 3
+    assert sampled.groupby("_line_id")[["panel", "series"]].nunique().eq(1).all().all()
+
+
+def test_histogram_layers_keep_series_in_separate_geoms(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
+
+    shifted = synthetic_posterior_draws.with_columns(
+        mu=synthetic_posterior_draws["mu"] + 10
+    )
+    draws = pl.concat(
+        [
+            label_draws(
+                synthetic_posterior_draws,
+                series="first",
+            ),
+            label_draws(
+                shifted,
+                series="second",
+            ),
+        ]
+    )
+    _, layers = posterior_kind_layers(
+        draws,
+        "histogram",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
+        ci_prob=0.94,
+        colors={"first": "blue", "second": "orange"},
+    )
+    bin_layers = [layer for layer in layers if type(layer).__name__ == "geom_bin_2d"]
+
+    assert len(bin_layers) == 2
+    assert [layer.data["series"].drop_duplicates().item() for layer in bin_layers] == [
+        "first",
+        "second",
+    ]
+
+
+@pytest.mark.integration
+def test_posterior_histogram_layers_render_with_plotnine(synthetic_posterior_draws):
+    import plotnine as p9
+
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
+
+    draws = label_draws(synthetic_posterior_draws, series="posterior")
+    _, layers = posterior_kind_layers(
+        draws,
+        "histogram",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
+        ci_prob=0.94,
+        colors={"posterior": "orange"},
+    )
+    p = p9.ggplot()
+    for layer in layers:
+        p += layer
+    fig = p.draw(show=False)
+    assert fig.axes
     plt.close(fig)
 
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_ribbon_eti(synthetic_posterior_data):
-    """Test ribbon plot with ETI."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
+def test_posterior_kind_layers_prepares_spaghetti(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, posterior_kind_layers
 
-    h_line, h_patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="eti",
-        ci_prob=0.89,
-        label="Test ETI",
+    draws = label_draws(synthetic_posterior_draws, series="a")
+    bands, layers = posterior_kind_layers(
+        draws,
+        "spaghetti",
+        x="obs_ind",
+        group_by=["series", "obs_ind"],
+        ci_prob=0.94,
+        num_samples=3,
     )
 
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for ETI ribbon"
-    assert isinstance(h_patch, PolyCollection), (
-        "Should return PolyCollection for ETI ribbon"
-    )
-
-    # Check that plot was created
-    assert len(ax.lines) > 0, "Should have at least one line (mean)"
-    assert len(ax.collections) > 0, "Should have at least one collection (ETI ribbon)"
-
-    plt.close(fig)
+    assert len(bands) == 20
+    assert len(layers) == 2
+    assert layers[0].data["_draw_id"].nunique() == 3
 
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_histogram(synthetic_posterior_data):
-    """Test histogram visualization (2D heatmap)."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        label="Test Histogram",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    # Check that plot was created
-    # Histogram uses pcolormesh which creates a QuadMesh
-    assert len(ax.collections) > 0 or len(ax.images) > 0, (
-        "Should have collections or images (pcolormesh/heatmap)"
-    )
-    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_histogram_numeric(synthetic_posterior_data_numeric):
-    """Test histogram visualization with numeric x values."""
-    x, Y = synthetic_posterior_data_numeric
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        label="Test Histogram Numeric",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    # Check that plot was created
-    assert len(ax.collections) > 0 or len(ax.images) > 0, (
-        "Should have collections or images (pcolormesh/heatmap)"
-    )
-    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_spaghetti(synthetic_posterior_data):
-    """Test spaghetti plot visualization."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    handles, patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="spaghetti",
-        num_samples=30,
-        label="Test Spaghetti",
-    )
-
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert len(handles) > 0, "Should have at least one handle"
-    assert patch is None, "Spaghetti should not return PolyCollection"
-
-    # Check that plot was created
-    # Spaghetti plot should have multiple lines (samples + mean)
-    assert len(ax.lines) >= 30, "Should have at least 30 lines (samples + mean)"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_default_behavior(synthetic_posterior_data):
-    """Test that default behavior matches original (ribbon with HDI)."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    # Test with no parameters (should default to ribbon, hdi, 0.94)
-    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax)
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_backward_compatibility_hdi_prob(
-    synthetic_posterior_data,
-):
-    """Test backward compatibility with hdi_prob parameter."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-
-    # Test that hdi_prob still works (should override ci_prob)
-    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax, hdi_prob=0.95)
-
-    # Check return types
-    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
-    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
-
-    plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_different_ci_prob(synthetic_posterior_data):
-    """Test different ci_prob values."""
-    x, Y = synthetic_posterior_data
-
-    for ci_prob in [0.80, 0.89, 0.94, 0.95, 0.99]:
-        fig, ax = plt.subplots()
-
-        h_line, h_patch = plot_posterior_over_x(
-            x,
-            Y,
-            ax=ax,
-            kind="ribbon",
-            ci_kind="hdi",
-            ci_prob=ci_prob,
-        )
-
-        # Check return types
-        assert isinstance(h_line, plt.Line2D), (
-            f"Should return Line2D for ci_prob={ci_prob}"
-        )
-        assert h_patch is not None, (
-            f"Should return PolyCollection for ci_prob={ci_prob}"
-        )
-
-        plt.close(fig)
-
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_invalid_kind(synthetic_posterior_data):
-    """Test that invalid kind parameter raises ValueError."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
+def test_validate_posterior_plot_options_rejects_invalid_kind():
+    from causalpy.plot_utils import validate_posterior_plot_options
 
     with pytest.raises(ValueError, match="Unknown kind"):
-        plot_posterior_over_x(x, Y, ax=ax, kind="invalid_kind")
-
-    plt.close(fig)
+        validate_posterior_plot_options("bands")
 
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_spaghetti_num_samples(synthetic_posterior_data):
-    """Test spaghetti plot with different num_samples values."""
-    x, Y = synthetic_posterior_data
+def test_validate_posterior_plot_options_rejects_invalid_ci_kind():
+    from causalpy.plot_utils import validate_posterior_plot_options
 
-    for num_samples in [10, 50, 100]:
-        fig, ax = plt.subplots()
-
-        handles, patch = plot_posterior_over_x(
-            x,
-            Y,
-            ax=ax,
-            kind="spaghetti",
-            num_samples=num_samples,
-        )
-
-        # Check return types
-        assert isinstance(handles, list), (
-            f"Should return list for num_samples={num_samples}"
-        )
-        assert patch is None, (
-            f"Should not return PolyCollection for num_samples={num_samples}"
-        )
-
-        # Check that we have approximately the right number of lines
-        # (samples + mean line, but may be less if num_samples > total samples)
-        assert len(ax.lines) > 0, f"Should have lines for num_samples={num_samples}"
-
-        plt.close(fig)
+    with pytest.raises(ValueError, match="Unknown ci_kind"):
+        validate_posterior_plot_options("ribbon", ci_kind="quantile")
 
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_histogram_custom_colormap(synthetic_posterior_data):
-    """Test histogram with custom colormap."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
+def test_validate_posterior_plot_options_rejects_non_positive_num_samples():
+    from causalpy.plot_utils import validate_posterior_plot_options
 
-    handles, patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="histogram",
-        plot_hdi_kwargs={"cmap": "plasma", "alpha": 0.6},
+    with pytest.raises(ValueError, match="num_samples must be positive"):
+        validate_posterior_plot_options("ribbon", num_samples=0)
+
+
+def test_spaghetti_draws_isolates_paths_across_series(synthetic_posterior_draws):
+    from causalpy.plot_utils import label_draws, spaghetti_draws
+
+    draws = pl.concat(
+        [
+            label_draws(synthetic_posterior_draws, series="control"),
+            label_draws(synthetic_posterior_draws, series="treatment"),
+        ],
+        how="diagonal_relaxed",
+    )
+    sampled = spaghetti_draws(
+        draws,
+        group_by=["series", "obs_ind"],
+        num_samples=4,
     )
 
-    # Check return types
-    assert isinstance(handles, list), "Should return list of handles"
-    assert patch is None, "Histogram should not return PolyCollection"
-
-    plt.close(fig)
+    assert sampled["_line_id"].nunique() == 8
+    assert sampled.groupby("series")["_line_id"].nunique().eq(4).all()
+    assert sampled.groupby("_line_id")["series"].nunique().eq(1).all()
 
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_histogram_requires_single_time_dim():
-    """Histogram rejects Y with more than one non-chain/draw dimension."""
-    rng = np.random.default_rng(0)
-    Y = xr.DataArray(
-        rng.standard_normal((2, 30, 4, 5)),
-        dims=["chain", "draw", "a", "b"],
-        coords={
-            "chain": [0, 1],
-            "draw": np.arange(30),
-            "a": np.arange(4),
-            "b": np.arange(5),
-        },
+def _assert_explicit_causal_panel_schema(panel_data) -> None:
+    draw_fields = (
+        "fitted",
+        "counterfactual",
+        "pre_effect",
+        "post_effect",
+        "cumulative_effect",
     )
-    fig, ax = plt.subplots()
-    with pytest.raises(ValueError, match="exactly one non-chain/draw"):
-        plot_posterior_over_x(np.arange(4), Y, ax=ax, kind="histogram")
-    plt.close(fig)
+    for field in draw_fields:
+        draws = getattr(panel_data, field)
+        if draws is not None:
+            assert {"chain", "draw", "obs_ind", "mu"} <= set(draws.columns)
+            assert not (
+                set(draws.columns)
+                & {"panel", "series", "mu_lower", "mu_upper", "y1", "y2"}
+            )
+    assert set(panel_data.observations.columns) == {"obs_ind", "value"}
 
 
 @pytest.mark.integration
-def test_plot_posterior_over_x_histogram_x_length_mismatch_raises(
-    synthetic_posterior_data,
-):
-    """Histogram rejects x length differing from the posterior time dimension."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.raises(ValueError, match="Length of x"):
-        plot_posterior_over_x(x[:3], Y, ax=ax, kind="histogram")
-    plt.close(fig)
+def test_its_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, its_data):
+    """Extractor exposes named posterior quantities, not render artifacts."""
+    import pandas as pd
 
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_histogram_single_time_point():
-    """Histogram with one time point exercises single-edge x bin construction."""
-    rng = np.random.default_rng(2)
-    x = pd.date_range("2020-01-01", periods=1, freq="D")
-    Y = xr.DataArray(
-        rng.standard_normal((2, 40, 1)),
-        dims=["chain", "draw", "obs_ind"],
-        coords={
-            "chain": [0, 1],
-            "draw": np.arange(40),
-            "obs_ind": x,
-        },
+    result = cp.InterruptedTimeSeries(
+        its_data,
+        pd.to_datetime("2017-01-01"),
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
-    fig, ax = plt.subplots()
-    handles, patch = plot_posterior_over_x(x, Y, ax=ax, kind="histogram")
-    assert isinstance(handles, list)
-    assert patch is None
-    plt.close(fig)
+    panel_data = result._causal_panel_data()
+
+    _assert_explicit_causal_panel_schema(panel_data)
+    assert panel_data.pre_effect is not None
 
 
 @pytest.mark.integration
-def test_plot_posterior_over_x_histogram_object_dtype_datetime_strings(
-    synthetic_posterior_data,
-):
-    """Object-dtype x of ISO strings hits datetime parsing in _x_as_numeric_mesh."""
-    x, Y = synthetic_posterior_data
-    x_obj = np.array([str(t) for t in x], dtype=object)
-    fig, ax = plt.subplots()
-    handles, patch = plot_posterior_over_x(x_obj, Y, ax=ax, kind="histogram")
-    assert isinstance(handles, list)
-    assert patch is None
-    plt.close(fig)
+def test_sc_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, sc_data):
+    """Synthetic Control extractor matches the explicit panel contract."""
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
 
-
-@pytest.mark.integration
-def test_plot_posterior_over_x_ribbon_fill_kwargs_eti(synthetic_posterior_data):
-    """Ribbon ETI path uses fill_kwargs and default label when label is None."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    h_line, h_patch = plot_posterior_over_x(
-        x,
-        Y,
-        ax=ax,
-        kind="ribbon",
-        ci_kind="eti",
-        plot_hdi_kwargs={
-            "color": "C2",
-            "fill_kwargs": {"color": "C2", "alpha": 0.4},
-        },
-        label=None,
+    result = cp.SyntheticControl(
+        sc_data,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
     )
-    assert isinstance(h_line, plt.Line2D)
-    assert h_patch is not None
-    plt.close(fig)
+    panel_data = result._causal_panel_data(treated_unit="actual")
+
+    _assert_explicit_causal_panel_schema(panel_data)
 
 
 @pytest.mark.integration
-def test_plot_posterior_over_x_warns_ci_kind_ignored_for_non_ribbon(
-    synthetic_posterior_data,
-):
-    """ci_kind is ignored for histogram/spaghetti; a UserWarning must be raised."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.warns(UserWarning, match="ci_kind.*ignored"):
-        plot_posterior_over_x(x, Y, ax=ax, kind="histogram", ci_kind="eti")
-    plt.close(fig)
+def test_sdid_causal_panel_data_uses_explicit_quantities(mock_pymc_sample, sc_data):
+    """SDiD extractor matches the explicit panel contract."""
+    import causalpy as cp
+    from causalpy.tests.test_hdi_prob_wiring import sample_kwargs
 
+    result = cp.SyntheticDifferenceInDifferences(
+        sc_data,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs
+        ),
+    )
+    panel_data = result._causal_panel_data(treated_unit="actual")
 
-@pytest.mark.integration
-def test_plot_posterior_over_x_warns_num_samples_ignored_for_non_spaghetti(
-    synthetic_posterior_data,
-):
-    """num_samples is ignored for ribbon/histogram; a UserWarning must be raised."""
-    x, Y = synthetic_posterior_data
-    fig, ax = plt.subplots()
-    with pytest.warns(UserWarning, match="num_samples.*ignored"):
-        plot_posterior_over_x(x, Y, ax=ax, kind="ribbon", num_samples=100)
-    plt.close(fig)
+    _assert_explicit_causal_panel_schema(panel_data)
