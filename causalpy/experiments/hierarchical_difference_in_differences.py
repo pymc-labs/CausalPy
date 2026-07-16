@@ -79,8 +79,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
     causal_impact : xr.DataArray
         Posterior samples for the population-average ATT.
     icc : xr.DataArray or None
-        Intraclass correlation for the random-intercept component when the
-        posterior contains the required variance parameters.
+        Posterior samples of the adjusted generalized intraclass correlation,
+        averaged over the observed random-effects design.
 
     Notes
     -----
@@ -439,20 +439,93 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         self.group_effects = posterior["beta_random"]
 
     def _compute_icc(self) -> None:
-        """Compute the random-intercept intraclass correlation when available."""
+        r"""Compute the adjusted generalized intraclass correlation.
+
+        Random slopes make the random-effect variance depend on the observed
+        random-effects design. Following Johnson (2014), the scalar random-effect
+        variance is therefore the mean observation-level variance
+
+        .. math::
+
+            \overline{\sigma^2_{\mathrm{random}}}
+            = \frac{1}{n}\sum_{i=1}^{n} \mathbf{z}_i^\top
+              \mathbf{G}\mathbf{z}_i
+            = \operatorname{mean}(\operatorname{diag}(\mathbf{Z}
+              \mathbf{G}\mathbf{Z}^\top)).
+
+        The adjusted generalized ICC is
+
+        .. math::
+
+            \mathrm{ICC}
+            = \frac{\overline{\sigma^2_{\mathrm{random}}}}
+              {\overline{\sigma^2_{\mathrm{random}}}
+               + \sigma^2_{\epsilon}}.
+
+        For a random-intercept-only model, this calculation reduces to the
+        classical random-intercept ICC.
+
+        References
+        ----------
+        .. [1] Johnson, P. C. D. (2014). Extension of Nakagawa and Schielzeth's
+           R2_GLMM to random slopes models. *Methods in Ecology and Evolution*,
+           5(9), 944-946. https://doi.org/10.1111/2041-210X.12225
+        .. [2] Nakagawa, S., Johnson, P. C. D., and Schielzeth, H. (2017). The
+           coefficient of determination R2 and intra-class correlation
+           coefficient from generalized linear mixed-effects models revisited
+           and expanded. *Journal of the Royal Society Interface*, 14(134),
+           20170213. https://doi.org/10.1098/rsif.2017.0213
+        """
         posterior = self._model_backend.require_idata().posterior
-        if "sigma_random" not in posterior or "sigma_fixed" not in posterior:
+        required = {"sigma_random", "sigma_fixed"}
+        if required.difference(posterior.data_vars):
             self.icc = None
             return
-        random_intercept_label = next(
-            (label for label in self.random_effect_labels if label.startswith("1|")),
-            self.random_effect_labels[0],
+
+        random_effect_covariance = self._random_effect_covariance()
+        residual_variance = posterior["sigma_fixed"] ** 2
+        observation_random_variance = self._observation_random_variance(
+            self.Z, random_effect_covariance
         )
-        sigma_group = posterior["sigma_random"].sel(
-            random_coeffs=random_intercept_label
+        mean_random_variance = observation_random_variance.mean("obs_ind")
+        self.icc = mean_random_variance / (mean_random_variance + residual_variance)
+
+    def _random_effect_covariance(self) -> xr.DataArray:
+        """Build the posterior random-effects covariance matrix.
+
+        The current hierarchical regression backend estimates independent
+        random coefficients. Its covariance matrix is therefore diagonal, but
+        the ICC calculation consumes the complete matrix representation.
+        """
+        row_dim = "random_coeffs_row"
+        column_dim = "random_coeffs_column"
+        labels = self.random_effect_labels
+        posterior = self._model_backend.require_idata().posterior
+        identity = xr.DataArray(
+            np.eye(len(labels)),
+            dims=(row_dim, column_dim),
+            coords={row_dim: labels, column_dim: labels},
         )
-        sigma_fixed = posterior["sigma_fixed"]
-        self.icc = sigma_group**2 / (sigma_group**2 + sigma_fixed**2)
+        random_variances = (posterior["sigma_random"] ** 2).rename(
+            {"random_coeffs": row_dim}
+        )
+        return identity * random_variances
+
+    @staticmethod
+    def _observation_random_variance(
+        design: xr.DataArray, covariance: xr.DataArray
+    ) -> xr.DataArray:
+        r"""Return :math:`\operatorname{diag}(\mathbf{Z}\mathbf{G}\mathbf{Z}^\top)`."""
+        row_dim = "random_coeffs_row"
+        column_dim = "random_coeffs_column"
+        row_design = design.rename({"random_coeffs": row_dim})
+        column_design = design.rename({"random_coeffs": column_dim})
+        return xr.dot(
+            row_design,
+            covariance,
+            column_design,
+            dim=[row_dim, column_dim],
+        )
 
     @staticmethod
     def _hdi_dataarray(

@@ -1075,7 +1075,7 @@ def generate_hdid_data(
         "config": config,
         "simulator": simulator,
         "true_att": config.outcome.att_effect,
-        "empirical_icc": hdid.HDiDSimulator.estimate_icc(panel),
+        "empirical_icc": simulator.estimate_icc(),
         "n_stores": config.n_stores_total,
         "n_treated_stores": config.n_stores_treated,
         "n_customers": panel["customer_id"].nunique(),
