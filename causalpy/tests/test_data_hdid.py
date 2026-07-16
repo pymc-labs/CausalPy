@@ -181,6 +181,7 @@ class TestHDiDSimulator:
         assert isinstance(params["config"], hdid.Config)
         assert isinstance(params["simulator"], hdid.HDiDSimulator)
         assert params["true_att"] == params["config"].outcome.att_effect
+        assert np.isfinite(params["empirical_icc"])
         assert params["n_stores"] == 4
         assert params["n_treated_stores"] == 2
         params["simulator"].validate_panel(panel)
@@ -274,14 +275,28 @@ class TestHDiDSimulator:
         assert did_estimate == pytest.approx(config.outcome.att_effect, abs=0.01)
 
     def test_estimate_icc_returns_finite_ratio(self):
-        """Validate that empirical ICC estimation returns a finite ratio."""
-        config = self._small_config()
-        panel = hdid.HDiDSimulator(config=config).simulate()
+        """Validate that realized generalized ICC returns a finite ratio."""
+        config = self._small_config(
+            outcome=hdid.Outcome(
+                noise_parameters={"loc": 0.0, "scale": 2.0},
+                store_intercept_parameters={"loc": 0.0, "scale": 1.0},
+                treatment_slope_parameters={"loc": 0.0, "scale": 0.5},
+            )
+        )
+        simulator = hdid.HDiDSimulator(config=config)
+        simulator.simulate()
 
-        icc = hdid.HDiDSimulator.estimate_icc(panel=panel)
+        icc = simulator.estimate_icc()
 
         assert np.isfinite(icc)
         assert 0.0 <= icc <= 1.0
+
+    def test_estimate_icc_requires_simulation(self):
+        """Validate that realized ICC requires a generated sample."""
+        simulator = hdid.HDiDSimulator(config=self._small_config())
+
+        with pytest.raises(RuntimeError, match=r"Call simulate\(\)"):
+            simulator.estimate_icc()
 
     def test_save_writes_compressed_csv(self, tmp_path):
         """Validate that simulator save writes a compressed CSV file."""
