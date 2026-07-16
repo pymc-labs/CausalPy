@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from causalpy.data.datasets import _DATA_DIR
+_DATA_DIR = Path(__file__).parent
 
 
 @dataclass(slots=True, frozen=True)
