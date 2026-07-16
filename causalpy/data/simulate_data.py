@@ -15,10 +15,15 @@
 Functions that generate data sets used in examples
 """
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from scipy.stats import gamma
 from statsmodels.nonparametric.smoothers_lowess import lowess
+
+from causalpy.data import hdid
 
 default_lowess_kwargs: dict[str, float | int] = {"frac": 0.2, "it": 0}
 RANDOM_SEED: int = 8927
@@ -974,3 +979,107 @@ def generate_hlr_data(
     }
 
     return XY, Z, params
+
+
+def generate_hdid_data(
+    seed: int = 656,
+    n_stores_total: int = 20,
+    n_stores_treated: int | None = None,
+    n_months: int = 12,
+    pre_months: int = 6,
+    units_min: int = 20,
+    units_max: int = 30,
+    units_lam: float | None = None,
+    att_effect: float = 4.0,
+    sigma_noise: float = 4.0,
+    sigma_store_intercept: float = 1.3,
+    sigma_treatment_slope: float = 0.45,
+    run_validation: bool = True,
+    output_path: Path | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    r"""Generate hierarchical DiD data.
+
+    .. math::
+
+                Y_{igt} = \alpha + b_g + \gamma t + \lambda Post_t + \delta Treat_g
+                + (\tau + u_g) Post_t Treat_g + x_{igt}^{\top}\beta + r_g
+                + \epsilon_{igt}.
+
+    Parameters
+    ----------
+    seed : int, default=656
+        Random seed used by the simulator configuration.
+    n_stores_total : int, default=20
+        Total number of stores in the generated panel.
+    n_stores_treated : int | None, default=None
+        Number of treated stores. Defaults to half of n_stores_total.
+    n_months : int, default=12
+        Number of periods per customer.
+    pre_months : int, default=6
+        Number of pre-treatment periods.
+    units_min, units_max : int
+        Bounds used to clip sampled customers per store.
+    units_lam : float | None, default=None
+        Poisson rate for customers per store. Defaults to the midpoint of the
+        unit bounds.
+    att_effect : float, default=4.0
+        Population-average treatment effect used by the outcome DGP.
+    sigma_noise : float, default=4.0
+        Observation-level outcome noise scale.
+    sigma_store_intercept : float, default=1.3
+        Store random-intercept scale.
+    sigma_treatment_slope : float, default=0.45
+        Store treatment-slope deviation scale.
+    run_validation : bool, default=True
+        Whether to run simulator panel validation.
+    output_path : Path | None, default=None
+        Optional default output path stored in the generated config.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, dict[str, Any]]
+        The simulated panel and a params dictionary containing the config,
+        simulator, true ATT, empirical ICC, and core design dimensions.
+    """
+    treated_count = (
+        n_stores_total // 2 if n_stores_treated is None else n_stores_treated
+    )
+    units_rate = (units_min + units_max) / 2 if units_lam is None else units_lam
+    config_kwargs: dict[str, Any] = {}
+    if output_path is not None:
+        config_kwargs["output_path"] = Path(output_path)
+    config = hdid.Config(
+        seed=seed,
+        n_stores_total=n_stores_total,
+        n_stores_treated=treated_count,
+        n_months=n_months,
+        pre_months=pre_months,
+        store=hdid.Store(
+            units_min=units_min,
+            units_max=units_max,
+            units_parameters={"lam": float(units_rate)},
+        ),
+        outcome=hdid.Outcome(
+            att_effect=att_effect,
+            noise_parameters={"loc": 0.0, "scale": sigma_noise},
+            store_intercept_parameters={"loc": 0.0, "scale": sigma_store_intercept},
+            treatment_slope_parameters={"loc": 0.0, "scale": sigma_treatment_slope},
+        ),
+        run_validation=run_validation,
+        **config_kwargs,
+    )
+
+    simulator = hdid.HDiDSimulator(config=config)
+    panel = simulator.simulate()
+    params = {
+        "config": config,
+        "simulator": simulator,
+        "true_att": config.outcome.att_effect,
+        "empirical_icc": hdid.HDiDSimulator.estimate_icc(panel),
+        "n_stores": config.n_stores_total,
+        "n_treated_stores": config.n_stores_treated,
+        "n_customers": panel["customer_id"].nunique(),
+        "n_months": config.n_months,
+        "pre_months": config.pre_months,
+    }
+    return panel, params
