@@ -431,6 +431,7 @@ class HDiDSimulator:
         self.outcome = config.outcome
         self.region_labels = np.array(self.region.labels, dtype=object)
         self.region_effects = np.array(self.region.effects, dtype=np.float32)
+        self._empirical_icc: float | None = None
         if len(self.region_labels) != len(self.region_effects):
             raise ValueError("region.labels and region.effects must have equal length")
         self._validate_config()
@@ -670,10 +671,10 @@ class HDiDSimulator:
             + region_effect
         )
 
-        purchase_amount = np.round(
-            mu + self.outcome.sample(rng=self.rng, prefix="noise", size=mu.shape[0]),
-            2,
-        ).astype(np.float32)
+        observation_noise = self.outcome.sample(
+            rng=self.rng, prefix="noise", size=mu.shape[0]
+        )
+        purchase_amount = np.round(mu + observation_noise, 2).astype(np.float32)
 
         panel = pd.DataFrame(
             {
@@ -693,6 +694,23 @@ class HDiDSimulator:
                 ),
                 "urban": urban.astype(np.int8),
             }
+        )
+        random_effects = np.column_stack(
+            (stores["store_intercept"], stores["store_treatment_slope"])
+        )
+        random_effect_covariance = np.cov(random_effects, rowvar=False, ddof=1)
+        random_design = np.column_stack((np.ones(len(panel)), post_treatment * treated))
+        covariance_weighted_design = random_design @ random_effect_covariance
+        observation_random_variance = (covariance_weighted_design * random_design).sum(
+            axis=1
+        )
+        mean_random_variance = observation_random_variance.mean()
+        residual_variance = observation_noise.var(ddof=1)
+        total_variance = mean_random_variance + residual_variance
+        self._empirical_icc = (
+            float(mean_random_variance / total_variance)
+            if total_variance > 0
+            else np.nan
         )
 
         if self.config.run_validation:
@@ -725,26 +743,38 @@ class HDiDSimulator:
         if panel.groupby(by="store_id", observed=True)["treated"].nunique().max() != 1:
             raise RuntimeError("Treatment assignment is not store-level")
 
-    @staticmethod
-    def estimate_icc(panel: pd.DataFrame) -> float:
-        """Estimate empirical ICC from store-level outcome clustering.
+    def estimate_icc(self) -> float:
+        r"""Return the realized adjusted generalized ICC.
 
-        Parameters
-        ----------
-        panel : pd.DataFrame
-            Simulated panel dataset.
+        The simulator computes the mean observation-level random-effect
+        variance as :math:`\operatorname{mean}(\operatorname{diag}(\mathbf{Z}
+        \widehat{\mathbf{G}}\mathbf{Z}^\top))`, using the random coefficients
+        and observation noise drawn by the most recent call to :meth:`simulate`.
 
         Returns
         -------
         float
-            Ratio of between-store variance to total variance.
-        """
+            Realized adjusted generalized ICC.
 
-        store_means_var = (
-            panel.groupby(by="store_id", observed=True)["purchase_amount"].mean().var()
-        )
-        total_var = panel["purchase_amount"].var()
-        return float(store_means_var / total_var)
+        Raises
+        ------
+        RuntimeError
+            If :meth:`simulate` has not been called.
+
+        References
+        ----------
+        .. [1] Johnson, P. C. D. (2014). Extension of Nakagawa and Schielzeth's
+           R2_GLMM to random slopes models. *Methods in Ecology and Evolution*,
+           5(9), 944-946. https://doi.org/10.1111/2041-210X.12225
+        .. [2] Nakagawa, S., Johnson, P. C. D., and Schielzeth, H. (2017). The
+           coefficient of determination R2 and intra-class correlation
+           coefficient from generalized linear mixed-effects models revisited
+           and expanded. *Journal of the Royal Society Interface*, 14(134),
+           20170213. https://doi.org/10.1098/rsif.2017.0213
+        """
+        if self._empirical_icc is None:
+            raise RuntimeError("Call simulate() before estimating the realized ICC.")
+        return self._empirical_icc
 
     def save(self, panel: pd.DataFrame, path: Path | None = None) -> Path:
         """Persist simulated panel data to a compressed CSV file.

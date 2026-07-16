@@ -229,6 +229,26 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         assert result.n_groups == 10
         assert "post_treatment:treated|store_id" in result.random_effect_labels
 
+    def test_icc_uses_mean_observation_level_random_variance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Validate generalized ICC across the observed random-effects design."""
+        data = self._panel_data()
+        self._patch_parse_formula(monkeypatch, self._matrices(data))
+        result = self._experiment(data)
+
+        idata = result.idata
+        assert idata is not None
+        sigma_random = idata.posterior["sigma_random"] ** 2
+        sigma_fixed = idata.posterior["sigma_fixed"] ** 2
+        mean_random_variance = (
+            (result.Z**2 * sigma_random).sum("random_coeffs").mean("obs_ind")
+        )
+        expected = mean_random_variance / (mean_random_variance + sigma_fixed)
+
+        assert result.icc is not None
+        xr.testing.assert_allclose(result.icc, expected)
+
     @pytest.mark.parametrize("missing_variable", ["sigma_fixed", "sigma_random"])
     def test_posterior_data(
         self,
@@ -246,6 +266,31 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         result._compute_icc()
 
         assert result.icc is None
+
+    def test_observation_random_variance_uses_full_covariance_matrix(self) -> None:
+        """Validate that ICC variance includes random-effect covariance."""
+        design = xr.DataArray(
+            [[1.0, 0.0], [1.0, 1.0]],
+            dims=("obs_ind", "random_coeffs"),
+            coords={"random_coeffs": ["intercept", "slope"]},
+        )
+        covariance = xr.DataArray(
+            [[2.0, 0.5], [0.5, 3.0]],
+            dims=("random_coeffs_row", "random_coeffs_column"),
+            coords={
+                "random_coeffs_row": ["intercept", "slope"],
+                "random_coeffs_column": ["intercept", "slope"],
+            },
+        )
+
+        result = HierarchicalDifferenceInDifferences._observation_random_variance(
+            design, covariance
+        )
+
+        xr.testing.assert_allclose(
+            result,
+            xr.DataArray([2.0, 6.0], dims=("obs_ind",)),
+        )
 
     def test_formula_includes_random_effects(self) -> None:
         """Reject parsed DiD formulas without a random-effects term."""
