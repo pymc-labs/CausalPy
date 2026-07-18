@@ -191,13 +191,6 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link: interrupted-time-series-placebo-in-time-analysis
 :link-type: doc
 :::
-
-:::{grid-item-card} G-computation and link functions for outcome-scale effects
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/g-computation-link-functions-pymc.png
-:link: g-computation-link-functions-pymc
-:link-type: doc
-:::
 ::::
 
 ## Comparative Interrupted Time Series
@@ -452,7 +445,6 @@ interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
 interrupted-time-series-placebo-in-time-analysis.ipynb
-g-computation-link-functions-pymc.ipynb
 :::
 
 :::{toctree}
