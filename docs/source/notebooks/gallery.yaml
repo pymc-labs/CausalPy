@@ -72,8 +72,6 @@ groups:
             notebook: interrupted-time-series-lift-test
           - title: "Placebo-in-time and falsification: a UK CO₂ case study"
             notebook: interrupted-time-series-placebo-in-time-analysis
-          - title: G-computation and link functions for outcome-scale effects
-            notebook: g-computation-link-functions-pymc
       - title: Comparative Interrupted Time Series
         intro: |
           Comparative interrupted time series extends standard ITS by incorporating control units as predictors, helping disentangle treatment effects from coincidental changes that affect both treated and control units.
