@@ -54,7 +54,8 @@ class InterruptedTimeSeries(BaseExperiment):
     ----------
     data : pd.DataFrame
         A pandas dataframe with time series data. The index should be either
-        a DatetimeIndex or numeric (integer/float).
+        a DatetimeIndex or numeric (integer/float), with unique values in
+        monotonically increasing order.
     treatment_time : Union[int, float, pd.Timestamp]
         The time when treatment occurred, should be in reference to the data index.
         Must match the index type (DatetimeIndex requires pd.Timestamp).
@@ -252,6 +253,11 @@ class InterruptedTimeSeries(BaseExperiment):
         treatment_end_time : int, float, pd.Timestamp, or None, default None
             Optional end of the treatment period for three-period designs.
         """
+        if not data.index.is_unique or not data.index.is_monotonic_increasing:
+            raise BadIndexException(
+                "data.index must be unique and monotonically increasing. "
+                "Sort the data and remove duplicate index values before fitting."
+            )
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
