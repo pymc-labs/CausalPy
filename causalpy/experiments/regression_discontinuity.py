@@ -21,8 +21,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
+
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -155,7 +157,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 msg = f"Only {len(self.fit_data)} datapoints in the dataset."
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        y, X = dmatrices(self.formula, self.fit_data)
+        y, X = build_formula_matrices(self.formula, self.fit_data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

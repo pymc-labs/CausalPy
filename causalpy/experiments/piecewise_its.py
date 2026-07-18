@@ -23,12 +23,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, dmatrices
+from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -92,6 +93,9 @@ class PiecewiseITS(BaseExperiment):
     The `step` and `ramp` transforms are patsy stateful transforms that handle
     both numeric and datetime time columns. For datetime, thresholds can be
     specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
+
+    Bare datetime predictors are represented as continuous elapsed days. Use
+    ``C(date)`` when date fixed effects are intended instead.
 
     References
     ----------
@@ -174,8 +178,8 @@ class PiecewiseITS(BaseExperiment):
             self._step_ramp_terms, self.time_col
         )
 
-        # Parse formula with patsy (step and ramp are available in namespace)
-        y, X = dmatrices(formula, self.data)
+        # Parse formula with datetime-aware Patsy handling.
+        y, X = build_formula_matrices(formula, self.data)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

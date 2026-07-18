@@ -21,13 +21,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from patsy import ModelDesc, dmatrices
+from patsy import ModelDesc
 from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -292,7 +293,7 @@ class PanelRegression(BaseExperiment):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = dmatrices(self.formula, data)
+        y, X = build_formula_matrices(self.formula, data)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

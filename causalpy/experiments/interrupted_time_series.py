@@ -21,13 +21,14 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import build_design_matrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     get_hdi_to_df,
@@ -165,7 +166,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for pre and post intervention periods using patsy."""
-        y, X = dmatrices(self.formula, self.datapre)
+        y, X = build_formula_matrices(self.formula, self.datapre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info

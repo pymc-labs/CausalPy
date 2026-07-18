@@ -25,12 +25,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -419,7 +420,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """Build design matrices using patsy."""
         # Build design matrix for the full data
         try:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = build_formula_matrices(self.formula, self.data)
         except PatsyError as err:
             raise FormulaException(f"Unable to evaluate formula: {err}") from err
         self._y_design_info = y.design_info
