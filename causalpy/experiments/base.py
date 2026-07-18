@@ -32,6 +32,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -100,11 +101,14 @@ class BaseExperiment(ABC):
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
-    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    Bayesian default. To use an OLS/sklearn model — or, for experiments that
+    declare ``supports_pymc_forecast``, a
+    :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` — pass one
+    explicitly.
 
     Parameters
     ----------
-    model : PyMCModel, RegressorMixin, or None, default None
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or None, default None
         Model instance to use. If ``None`` and ``_default_model_class`` is set,
         an instance of that default class is constructed.
 
@@ -121,6 +125,7 @@ class BaseExperiment(ABC):
 
     supports_bayes: bool
     supports_ols: bool
+    supports_pymc_forecast: bool = False
 
     _default_model_class: type[PyMCModel] | None = None
 
@@ -187,12 +192,15 @@ class BaseExperiment(ABC):
 
     _model_backend: ModelAdapter
 
-    def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
+    def __init__(
+        self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
+    ) -> None:
         adapter = make_model_adapter(
             model,
             default_model_class=self._default_model_class,
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
+            supports_pymc_forecast=self.supports_pymc_forecast,
         )
         self._model_backend = adapter
         self.model = adapter.model

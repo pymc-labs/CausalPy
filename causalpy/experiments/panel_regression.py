@@ -438,7 +438,7 @@ class PanelRegression(BaseExperiment):
             # For OLS models the base print_coefficients uses positional zip
             # which would pair filtered labels with the wrong coefficient
             # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             max_label_length = max(len(name) for name in coeff_labels)
             rd = round_to if round_to is not None else 2
             print("Model coefficients:")
@@ -615,7 +615,7 @@ class PanelRegression(BaseExperiment):
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]
+            coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -785,7 +785,7 @@ class PanelRegression(BaseExperiment):
         else:
             # OLS: get point estimates
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             fe_values = [coefs[idx] for idx in unit_fe_indices]
 
             ax.hist(
