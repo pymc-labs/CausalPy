@@ -18,6 +18,8 @@ Tests the extension of InterruptedTimeSeries to support temporary interventions
 with pre-intervention, intervention, and post-intervention periods.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -577,6 +579,45 @@ def test_effect_summary_invalid_period_raises_error(datetime_data, mock_pymc_sam
 # ==============================================================================
 # 4.2.4 Validation
 # ==============================================================================
+
+
+@pytest.mark.parametrize(
+    ("index", "treatment_time"),
+    [
+        pytest.param(pd.Index([0, 2, 1, 3]), 2, id="unsorted-numeric"),
+        pytest.param(pd.Index([0, 1, 1, 2]), 1, id="duplicate-numeric"),
+        pytest.param(
+            pd.DatetimeIndex(["2024-01-01", "2024-01-03", "2024-01-02", "2024-01-04"]),
+            pd.Timestamp("2024-01-03"),
+            id="unsorted-datetime",
+        ),
+        pytest.param(
+            pd.DatetimeIndex(["2024-01-01", "2024-01-02", "2024-01-02", "2024-01-03"]),
+            pd.Timestamp("2024-01-02"),
+            id="duplicate-datetime",
+        ),
+    ],
+)
+def test_invalid_time_index_rejected_before_design_matrices(index, treatment_time):
+    """Unsorted and duplicate time indexes fail before matrix construction."""
+    data = pd.DataFrame(
+        {"y": np.arange(len(index)), "t": np.arange(len(index))}, index=index
+    )
+
+    with (
+        patch.object(
+            cp.InterruptedTimeSeries, "_build_design_matrices"
+        ) as build_design_matrices,
+        pytest.raises(BadIndexException, match="unique and monotonically increasing"),
+    ):
+        cp.InterruptedTimeSeries(
+            data,
+            treatment_time=treatment_time,
+            formula="y ~ 1 + t",
+            model=LinearRegression(fit_intercept=False),
+        )
+
+    build_design_matrices.assert_not_called()
 
 
 def test_treatment_end_time_less_than_treatment_time_raises_error(datetime_data):
