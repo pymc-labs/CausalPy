@@ -14,7 +14,7 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 
 **Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** inherit this convention unless a method documents a different estimand (for example link-scale regression coefficients).
 
-Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands. A worked tutorial notebook is tracked in `CausalPy#1017 <https://github.com/pymc-labs/CausalPy/issues/1017>`_.
+Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands and {doc}`../notebooks/g-computation-link-functions-pymc` for worked Poisson and logit examples.
 
 ## Backend obligations
 
