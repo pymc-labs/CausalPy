@@ -81,7 +81,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
-| **Impact uses mu, not y_hat** | `calculate_impact()` subtracts posterior `mu` (expected value), not `y_hat` (with observation noise). |
+| **Impact uses mu, not y_hat** | `calculate_impact()` subtracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise). For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
 | **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
 | **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
