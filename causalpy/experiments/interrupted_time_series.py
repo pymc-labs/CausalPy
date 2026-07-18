@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -20,14 +21,20 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import build_design_matrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import get_hdi_to_df, plot_xY
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    get_hdi_to_df,
+    plot_posterior_over_x,
+)
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, round_num
@@ -48,7 +55,8 @@ class InterruptedTimeSeries(BaseExperiment):
     ----------
     data : pd.DataFrame
         A pandas dataframe with time series data. The index should be either
-        a DatetimeIndex or numeric (integer/float).
+        a DatetimeIndex or numeric (integer/float), with unique values in
+        monotonically increasing order.
     treatment_time : Union[int, float, pd.Timestamp]
         The time when treatment occurred, should be in reference to the data index.
         Must match the index type (DatetimeIndex requires pd.Timestamp).
@@ -56,9 +64,13 @@ class InterruptedTimeSeries(BaseExperiment):
         post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
-    model : Union[PyMCModel, RegressorMixin], optional
+    model : Union[PyMCModel, RegressorMixin, PyMCForecastModel], optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
-        LinearRegression model.
+        LinearRegression model. Alternatively, a
+        :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` wrapping a
+        ``pymc_forecast`` forecasting model can serve as the counterfactual
+        backend (requires the optional ``pymc-forecast`` dependency); see
+        :mod:`causalpy.pymc_forecast_models` for when to prefer it.
     treatment_end_time : Union[int, float, pd.Timestamp], optional
         The time when treatment ended, enabling three-period analysis. Must be
         greater than ``treatment_time`` and within the data range. If None (default),
@@ -127,6 +139,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    supports_pymc_forecast = True
     _default_model_class = LinearRegression
     _deprecated_design_aliases = {
         "pre_X": ("pre_design", "X"),
@@ -140,7 +153,7 @@ class InterruptedTimeSeries(BaseExperiment):
         data: pd.DataFrame,
         treatment_time: int | float | pd.Timestamp,
         formula: str,
-        model: PyMCModel | RegressorMixin | None = None,
+        model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
         **kwargs: Any,
     ) -> None:
@@ -160,7 +173,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for pre and post intervention periods using patsy."""
-        y, X = dmatrices(self.formula, self.datapre)
+        y, X = build_formula_matrices(self.formula, self.datapre)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -246,6 +259,11 @@ class InterruptedTimeSeries(BaseExperiment):
         treatment_end_time : int, float, pd.Timestamp, or None, default None
             Optional end of the treatment period for three-period designs.
         """
+        if not data.index.is_unique or not data.index.is_monotonic_increasing:
+            raise BadIndexException(
+                "data.index must be unique and monotonically increasing. "
+                "Sort the data and remove duplicate index values before fitting."
+            )
         if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
             treatment_time, pd.Timestamp
         ):
@@ -588,7 +606,11 @@ class InterruptedTimeSeries(BaseExperiment):
         self,
         *,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -601,11 +623,26 @@ class InterruptedTimeSeries(BaseExperiment):
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
             ``None`` to render raw numbers.
-        hdi_prob : float
-            Probability mass of the highest density interval drawn around the
+        ci_prob : float
+            Probability mass of the credible interval drawn around the
             posterior predictive, causal impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
@@ -628,11 +665,22 @@ class InterruptedTimeSeries(BaseExperiment):
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
@@ -646,12 +694,13 @@ class InterruptedTimeSeries(BaseExperiment):
     ) -> Any:
         """Overlay a median dot + HDI errorbar for a single post-period datum.
 
-        ``plot_xY`` (and the ``arviz.plot_hdi`` it wraps) renders a degenerate
-        zero-area polygon when the post-period contains a single observation,
-        so neither the median line nor the HDI ribbon is visible. Drawing an
-        explicit point and errorbar makes both the central tendency and the
-        uncertainty plain to read in that edge case. Returns the matplotlib
-        ``ErrorbarContainer`` so callers can use it as a legend handle.
+        When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
+        HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
+        when the post-period contains a single observation, so neither the median
+        line nor the HDI ribbon is visible. Drawing an explicit point and errorbar
+        makes both the central tendency and the uncertainty plain to read in that
+        edge case. Returns the matplotlib ``ErrorbarContainer`` so callers can use
+        it as a legend handle.
         """
         Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
         median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
@@ -673,7 +722,10 @@ class InterruptedTimeSeries(BaseExperiment):
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -695,6 +747,12 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         counterfactual_label = "Counterfactual"
         single_post_obs = len(self.datapost) <= 1
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
@@ -703,11 +761,11 @@ class InterruptedTimeSeries(BaseExperiment):
         pre_mu_plot = (
             pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
         )
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_mu_plot,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         handles = [(h_line, h_patch)]
@@ -729,15 +787,15 @@ class InterruptedTimeSeries(BaseExperiment):
             if "treated_units" in post_mu.dims
             else post_mu
         )
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.datapost.index,
             post_mu_plot,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         if single_post_obs:
-            # plot_xY's HDI ribbon collapses to a zero-area polygon for a
+            # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
             # single post-period datum; overlay an explicit median + HDI
             # errorbar so the counterfactual is still visible. Use the
             # errorbar artist itself as the legend handle so the legend
@@ -803,11 +861,11 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.pre_impact.dims
             else self.pre_impact
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapre.index,
             pre_impact_plot,
             ax=ax[1],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         post_impact_plot = (
@@ -816,11 +874,11 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.post_impact.dims
             else self.post_impact
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             post_impact_plot,
             ax=ax[1],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         if single_post_obs:
@@ -855,11 +913,11 @@ class InterruptedTimeSeries(BaseExperiment):
             and "treated_units" in self.post_impact_cumulative.dims
             else self.post_impact_cumulative
         )
-        plot_xY(
+        plot_posterior_over_x(
             self.datapost.index,
             post_cum_plot,
             ax=ax[2],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         if single_post_obs:

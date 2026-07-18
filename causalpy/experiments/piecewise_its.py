@@ -13,7 +13,9 @@
 #   limitations under the License.
 """Piecewise Interrupted Time Series Analysis (Segmented Regression)."""
 
+import ast
 import re
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -21,13 +23,14 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
+from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import plot_xY
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
@@ -90,6 +93,9 @@ class PiecewiseITS(BaseExperiment):
     The `step` and `ramp` transforms are patsy stateful transforms that handle
     both numeric and datetime time columns. For datetime, thresholds can be
     specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
+
+    Bare datetime predictors are represented as continuous elapsed days. Use
+    ``C(date)`` when date fixed effects are intended instead.
 
     References
     ----------
@@ -164,18 +170,16 @@ class PiecewiseITS(BaseExperiment):
         # Rename the index to "obs_ind" for consistency
         self.data.index.name = "obs_ind"
 
-        # Input validation
-        self._validate_inputs()
-
         # Parse and validate step/ramp terms before any downstream logic.
         self._step_ramp_terms = self._parse_step_ramp_terms()
+        self._validate_inputs()
         self.time_col = self._extract_time_column(self._step_ramp_terms)
         self.interruption_times = self._extract_and_canonicalize_interruption_times(
             self._step_ramp_terms, self.time_col
         )
 
-        # Parse formula with patsy (step and ramp are available in namespace)
-        y, X = dmatrices(formula, self.data)
+        # Parse formula with datetime-aware Patsy handling.
+        y, X = build_formula_matrices(formula, self.data)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -216,19 +220,42 @@ class PiecewiseITS(BaseExperiment):
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
         # Check formula contains at least one step() or ramp() term
-        if "step(" not in self.formula and "ramp(" not in self.formula:
+        if not self._step_ramp_terms:
             raise FormulaException(
                 "Formula must contain at least one step() or ramp() term. "
                 "Example: 'y ~ 1 + t + step(t, 50) + ramp(t, 50)'"
             )
 
+    @staticmethod
+    def _parse_step_ramp_factor(factor_name: str) -> list[dict[str, str]]:
+        """Extract bare ``step`` and ``ramp`` calls from one Patsy factor."""
+        expression = ast.parse(factor_name, mode="eval")
+        calls = []
+        for node in ast.walk(expression):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"step", "ramp"}
+                and len(node.args) == 2
+                and isinstance(node.args[0], ast.Name)
+            ):
+                threshold = ast.get_source_segment(factor_name, node.args[1])
+                calls.append(
+                    {
+                        "transform": node.func.id,
+                        "variable": node.args[0].id,
+                        "raw_threshold": threshold or ast.unparse(node.args[1]),
+                    }
+                )
+        return calls
+
     def _parse_step_ramp_terms(self) -> list[dict[str, str]]:
         """Parse step/ramp terms into structured metadata."""
-        pattern = r"(step|ramp)\s*\(\s*(\w+)\s*,\s*([^)]+?)\s*\)"
-        matches = re.findall(pattern, self.formula)
         return [
-            {"transform": transform, "variable": variable, "raw_threshold": threshold}
-            for transform, variable, threshold in matches
+            call
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            for factor in term.factors
+            for call in self._parse_step_ramp_factor(factor.name())
         ]
 
     def _extract_time_column(self, terms: list[dict[str, str]]) -> str:
@@ -263,7 +290,13 @@ class PiecewiseITS(BaseExperiment):
 
         canonical_thresholds: list[int | float | pd.Timestamp] = []
         for term in terms:
-            raw_threshold = term["raw_threshold"].strip().strip("'\"")
+            raw_threshold = term["raw_threshold"].strip()
+            if (
+                len(raw_threshold) >= 2
+                and raw_threshold[0] in "'\""
+                and raw_threshold[-1] == raw_threshold[0]
+            ):
+                raw_threshold = raw_threshold[1:-1]
 
             if is_datetime:
                 try:
@@ -294,11 +327,13 @@ class PiecewiseITS(BaseExperiment):
 
     def _get_interruption_column_indices(self) -> list[int]:
         """Get indices of columns related to interruptions (step/ramp terms)."""
-        indices = []
-        for i, label in enumerate(self.labels):
-            # Patsy labels step/ramp terms like "step(t, 50)" or "ramp(t, 50)"
-            if "step(" in label or "ramp(" in label:
-                indices.append(i)
+        indices: list[int] = []
+        for term in self._x_design_info.terms:
+            if any(
+                self._parse_step_ramp_factor(factor.name()) for factor in term.factors
+            ):
+                term_slice = self._x_design_info.term_slices[term]
+                indices.extend(range(term_slice.start, term_slice.stop))
         return indices
 
     def _compute_counterfactual_and_effects(self) -> None:
@@ -425,7 +460,11 @@ class PiecewiseITS(BaseExperiment):
         self,
         *,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -437,11 +476,26 @@ class PiecewiseITS(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to 2. Use ``None`` to render raw numbers.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             fitted, counterfactual, causal effect, and cumulative effect
             bands. Must be in ``(0, 1]``. Ignored for OLS models. Defaults
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 10)``.
@@ -462,18 +516,32 @@ class PiecewiseITS(BaseExperiment):
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (10, 10),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -499,6 +567,12 @@ class PiecewiseITS(BaseExperiment):
         ax : list[plt.Axes]
             List of axes objects.
         """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         time_values = self.data[self.time_col].values
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
@@ -516,11 +590,11 @@ class PiecewiseITS(BaseExperiment):
         y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
         if "treated_units" in y_pred_mu.dims:
             y_pred_mu = y_pred_mu.isel(treated_units=0)
-        h_line_fit, h_patch_fit = plot_xY(
+        h_line_fit, h_patch_fit = plot_posterior_over_x(
             time_values,
             y_pred_mu,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
         )
 
@@ -528,11 +602,11 @@ class PiecewiseITS(BaseExperiment):
         y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
         if "treated_units" in y_cf_mu.dims:
             y_cf_mu = y_cf_mu.isel(treated_units=0)
-        h_line_cf, h_patch_cf = plot_xY(
+        h_line_cf, h_patch_cf = plot_posterior_over_x(
             time_values,
             y_cf_mu,
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
 
@@ -556,11 +630,11 @@ class PiecewiseITS(BaseExperiment):
         labels_legend = ["Observations", "Fitted", "Counterfactual"]
 
         # MIDDLE PLOT: Causal Effect
-        plot_xY(
+        plot_posterior_over_x(
             time_values,
             self.effect,
             ax=ax[1],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C2"},
         )
         ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
@@ -573,11 +647,11 @@ class PiecewiseITS(BaseExperiment):
         ax[1].set(title="Causal Effect", ylabel="Effect")
 
         # BOTTOM PLOT: Cumulative Effect
-        plot_xY(
+        plot_posterior_over_x(
             time_values,
             self.cumulative_effect,
             ax=ax[2],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C3"},
         )
         ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)

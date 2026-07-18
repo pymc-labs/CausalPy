@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Panel Regression with Fixed Effects."""
 
+import re
 from typing import Any, Literal
 
 import arviz as az
@@ -20,13 +21,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from patsy import dmatrices
+from patsy import ModelDesc
 from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -236,25 +238,43 @@ class PanelRegression(BaseExperiment):
                 "fe_method must be 'dummies' (unpooled fixed effects) or 'demeaned'"
             )
 
-        # Check if formula includes C(unit_var) or C(time_var) when using demeaned method
-        if (
-            self.fe_method == "demeaned"
-            and f"C({self.unit_fe_variable})" in self.formula
-        ):
-            raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.unit_fe_variable}) "
-                "in the formula. The demeaned transformation handles unit fixed effects automatically."
-            )
+        if self.fe_method == "demeaned":
+            rhs_terms = ModelDesc.from_formula(self.formula).rhs_termlist
+            for variable, effect_type in (
+                (self.unit_fe_variable, "unit"),
+                (self.time_fe_variable, "time"),
+            ):
+                if variable and any(
+                    len(term.factors) == 1
+                    and self._is_fe_factor(term.factors[0].name(), variable)
+                    for term in rhs_terms
+                ):
+                    raise ValueError(
+                        f"When using fe_method='demeaned', do not include C({variable}) "
+                        f"in the formula. The demeaned transformation handles {effect_type} "
+                        "fixed effects automatically."
+                    )
 
-        if (
-            self.fe_method == "demeaned"
-            and self.time_fe_variable
-            and f"C({self.time_fe_variable})" in self.formula
-        ):
-            raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.time_fe_variable}) "
-                "in the formula. The demeaned transformation handles time fixed effects automatically."
+    @staticmethod
+    def _is_fe_factor(factor_name: str, variable: str) -> bool:
+        """Whether a Patsy factor categorically encodes the given variable."""
+        return (
+            re.match(
+                rf"^C\(\s*{re.escape(variable)}\s*(?:,|\))",
+                factor_name,
             )
+            is not None
+        )
+
+    def _get_fe_labels(self, variable: str) -> list[str]:
+        """Return labels belonging to the variable's plain fixed-effect term."""
+        labels: list[str] = []
+        for term in self._x_design_info.terms:
+            if len(term.factors) == 1 and self._is_fe_factor(
+                term.factors[0].name(), variable
+            ):
+                labels.extend(self.labels[self._x_design_info.term_slices[term]])
+        return labels
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy.
@@ -273,7 +293,7 @@ class PanelRegression(BaseExperiment):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = dmatrices(self.formula, data)
+        y, X = build_formula_matrices(self.formula, data)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -376,17 +396,10 @@ class PanelRegression(BaseExperiment):
         """
         coeff_labels = self.labels.copy()
         if self.fe_method == "dummies":
-            coeff_labels = [
-                c
-                for c in coeff_labels
-                if not c.startswith(f"C({self.unit_fe_variable})")
-            ]
+            fe_labels = set(self._get_fe_labels(self.unit_fe_variable))
             if self.time_fe_variable:
-                coeff_labels = [
-                    c
-                    for c in coeff_labels
-                    if not c.startswith(f"C({self.time_fe_variable})")
-                ]
+                fe_labels.update(self._get_fe_labels(self.time_fe_variable))
+            coeff_labels = [label for label in coeff_labels if label not in fe_labels]
         return coeff_labels
 
     def summary(self, round_to: int | None = None) -> None:
@@ -425,7 +438,7 @@ class PanelRegression(BaseExperiment):
             # For OLS models the base print_coefficients uses positional zip
             # which would pair filtered labels with the wrong coefficient
             # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             max_label_length = max(len(name) for name in coeff_labels)
             rd = round_to if round_to is not None else 2
             print("Model coefficients:")
@@ -602,7 +615,7 @@ class PanelRegression(BaseExperiment):
             # OLS: point estimates
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]
+            coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -742,9 +755,7 @@ class PanelRegression(BaseExperiment):
             )
 
         # Extract unit fixed effects from coefficients
-        unit_fe_names = [
-            c for c in self.labels if c.startswith(f"C({self.unit_fe_variable})")
-        ]
+        unit_fe_names = self._get_fe_labels(self.unit_fe_variable)
 
         if not unit_fe_names:
             raise ValueError("No unit fixed effects found in model coefficients")
@@ -774,7 +785,7 @@ class PanelRegression(BaseExperiment):
         else:
             # OLS: get point estimates
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             fe_values = [coefs[idx] for idx in unit_fe_indices]
 
             ax.hist(

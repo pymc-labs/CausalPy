@@ -32,6 +32,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -40,8 +41,9 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     """Mutate an existing Legend in place without recreating it.
 
     This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
-    built by :func:`~causalpy.plot_utils.plot_xY`) that would be lost if the
-    legend were rebuilt with ``ax.legend()``.
+    built by :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+    ``kind="ribbon"``) that would be lost if the legend were rebuilt with
+    ``ax.legend()``.
 
     Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
     with ``bbox_to_anchor``), ``fontsize``, ``frameon``, ``title``.
@@ -99,11 +101,14 @@ class BaseExperiment(ABC):
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
-    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    Bayesian default. To use an OLS/sklearn model — or, for experiments that
+    declare ``supports_pymc_forecast``, a
+    :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` — pass one
+    explicitly.
 
     Parameters
     ----------
-    model : PyMCModel, RegressorMixin, or None, default None
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or None, default None
         Model instance to use. If ``None`` and ``_default_model_class`` is set,
         an instance of that default class is constructed.
 
@@ -120,6 +125,7 @@ class BaseExperiment(ABC):
 
     supports_bayes: bool
     supports_ols: bool
+    supports_pymc_forecast: bool = False
 
     _default_model_class: type[PyMCModel] | None = None
 
@@ -186,12 +192,15 @@ class BaseExperiment(ABC):
 
     _model_backend: ModelAdapter
 
-    def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
+    def __init__(
+        self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
+    ) -> None:
         adapter = make_model_adapter(
             model,
             default_model_class=self._default_model_class,
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
+            supports_pymc_forecast=self.supports_pymc_forecast,
         )
         self._model_backend = adapter
         self.model = adapter.model
@@ -331,13 +340,40 @@ class BaseExperiment(ABC):
             Keyword arguments to adjust legend placement and styling. The
             existing legend is modified **in place** so that custom
             handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
-            :func:`~causalpy.plot_utils.plot_xY`) are preserved.
+            :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+            ``kind="ribbon"``) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
-            ``_bayesian_plot`` / ``_ols_plot``.
+            ``_bayesian_plot`` / ``_ols_plot``. May include ``kind``,
+            ``ci_kind``, ``ci_prob``, and ``num_samples`` for
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`.
+
+        Notes
+        -----
+        **Legend handling and ``plot_posterior_over_x`` return types:** :func:`~causalpy.plot_utils.plot_posterior_over_x`
+        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
+        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
+        Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
+        matplotlib legends from those return values should only pack
+        ``(line, patch)`` tuples when calling ``plot_posterior_over_x`` with ``kind="ribbon"``
+        (the default). Many current experiment plots always use the ribbon
+        default and never forward ``kind``; if a subclass forwards non-ribbon
+        kinds, it must build legend handles accordingly. The base class applies
+        ``legend_kwargs`` by mutating an existing legend in place, which preserves
+        whatever handle objects the subclass attached (including tuple handles
+        used for ribbon mean+band).
+
+        Examples
+        --------
+        Move the legend outside the plot area to avoid overlap:
+
+        >>> fig, ax = result.plot(  # doctest: +SKIP
+        ...     show=False,
+        ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+        ... )
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
             if self._model_backend.is_bayesian:
@@ -349,7 +385,8 @@ class BaseExperiment(ABC):
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
-        # (Line2D, PolyCollection) tuples built by plot_xY — are preserved
+        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x with
+        # kind="ribbon" — are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
             # Normalise ax to a flat list so we can iterate uniformly.

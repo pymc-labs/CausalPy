@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Difference in differences."""
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -21,7 +22,7 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -30,7 +31,8 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import plot_xY
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
@@ -43,7 +45,6 @@ from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
-    get_interaction_terms,
     round_num,
 )
 
@@ -128,7 +129,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
+        y, X = build_formula_matrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -214,10 +215,7 @@ class DifferenceInDifferences(BaseExperiment):
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
-            if (
-                self.post_treatment_variable_name in label
-                and self.group_variable_name in label
-            ):
+            if self._is_treatment_interaction(label):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
@@ -227,24 +225,19 @@ class DifferenceInDifferences(BaseExperiment):
             # This is the coefficient on the interaction term
             coeff_names = self.model.idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
-                if (
-                    self.post_treatment_variable_name in label
-                    and self.group_variable_name in label
-                ):
+                if self._is_treatment_interaction(label):
                     self.causal_impact = self.model.idata.posterior["beta"].isel(
                         {"coeffs": i}
                     )
         elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
-            # Store the coefficient into dictionary {intercept:value}
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
-            # Create and find the interaction term based on the values user provided
-            interaction_term = (
-                f"{self.group_variable_name}:{self.post_treatment_variable_name}"
+            matched_key = next(
+                (key for key in coef_map if self._is_treatment_interaction(key)),
+                None,
             )
-            matched_key = next((k for k in coef_map if interaction_term in k), None)
             att = coef_map.get(matched_key) if matched_key is not None else None
             self.causal_impact = att
         else:
@@ -254,11 +247,6 @@ class DifferenceInDifferences(BaseExperiment):
         """Validate the input data and model formula for correctness."""
         # Validate formula structure and interaction interaction terms
         self._validate_formula_interaction_terms()
-        # Check if post_treatment_variable_name is in formula
-        if self.post_treatment_variable_name not in self.formula:
-            raise FormulaException(
-                f"Missing required variable '{self.post_treatment_variable_name}' in formula"
-            )
 
         # Check if post_treatment_variable_name is in data columns
         if self.post_treatment_variable_name not in self.data.columns:
@@ -279,33 +267,66 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _validate_formula_interaction_terms(self) -> None:
         """
-        Validate that the formula contains at most one interaction term and no three-way or higher-order interactions.
-        Raises FormulaException if more than one interaction term is found or if any interaction term has more than 2 variables.
+        Validate that the formula contains exactly one interaction term, that it
+        is between the group and post-treatment variables, and that it is not a
+        three-way or higher-order interaction.
+
+        Raises FormulaException if no interaction term is found, if more than one
+        interaction term is found, if any interaction term has more than 2
+        variables, or if the single interaction term does not involve both the
+        group and post-treatment variables.
         """
-        # Define interaction indicators
-        INTERACTION_INDICATORS = ["*", ":"]
+        interaction_terms = [
+            term
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            if len(term.factors) > 1
+        ]
 
-        # Get interaction terms
-        interaction_terms = get_interaction_terms(self.formula)
-
-        # Check for interaction terms with more than 2 variables (more than one '*' or ':')
+        # Check for interaction terms with more than 2 variables
         for term in interaction_terms:
-            total_indicators = sum(
-                term.count(indicator) for indicator in INTERACTION_INDICATORS
-            )
-            if (
-                total_indicators >= 2
-            ):  # 3 or more variables (e.g., a*b*c or a:b:c has 2 symbols)
+            if len(term.factors) > 2:
                 raise FormulaException(
-                    f"Formula contains interaction term with more than 2 variables: {term}. "
+                    f"Formula contains interaction term with more than 2 variables: {term.name()}. "
                     "Three-way or higher-order interactions are not supported as they complicate interpretation of the causal effect."
                 )
 
         if len(interaction_terms) > 1:
+            interaction_term_names = [term.name() for term in interaction_terms]
             raise FormulaException(
-                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_terms}. "
+                f"Formula contains {len(interaction_terms)} interaction terms: {interaction_term_names}. "
                 "Multiple interaction terms are not currently supported as they complicate interpretation of the causal effect."
             )
+
+        # A DiD formula must contain exactly one interaction term, and it must be
+        # between the group and post-treatment variables: that term is what
+        # identifies the causal effect (see `algorithm`, which reads it back off
+        # the fitted model). Without this check a formula with no interaction
+        # term, or an interaction between unrelated variables, would pass
+        # validation and only fail later when `causal_impact` is accessed.
+        if len(interaction_terms) == 0 or not (
+            self._is_treatment_interaction(interaction_terms[0].name())
+        ):
+            raise FormulaException(
+                "Formula must contain exactly one interaction term between the "
+                f"group variable '{self.group_variable_name}' and the "
+                f"post-treatment variable '{self.post_treatment_variable_name}' "
+                f"(e.g. '{self.group_variable_name}*{self.post_treatment_variable_name}'). "
+                "This interaction term identifies the difference-in-differences causal effect."
+            )
+
+    def _is_treatment_interaction(self, term: str) -> bool:
+        """Whether a term is exactly the group/post-treatment interaction."""
+        factors = {
+            factor.split("[", maxsplit=1)[0]
+            for factor in term.replace("*", ":").split(":")
+        }
+        return len(factors) == 2 and all(
+            any(factor in {name, f"C({name})"} for factor in factors)
+            for name in (
+                self.group_variable_name,
+                self.post_treatment_variable_name,
+            )
+        )
 
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
@@ -330,7 +351,11 @@ class DifferenceInDifferences(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -343,12 +368,26 @@ class DifferenceInDifferences(BaseExperiment):
             Number of decimals used to round numerical results in the figure
             title. Defaults to ``None``, in which case 2 significant figures
             are used.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             posterior predictive bands for the control, treatment, and
             counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
             OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -371,18 +410,32 @@ class DifferenceInDifferences(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -403,6 +456,12 @@ class DifferenceInDifferences(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
 
         def _plot_causal_impact_arrow(results, ax):
             """
@@ -472,11 +531,11 @@ class DifferenceInDifferences(BaseExperiment):
 
         # Plot model fit to control group
         time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             time_points,
             self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -485,11 +544,11 @@ class DifferenceInDifferences(BaseExperiment):
 
         # Plot model fit to treatment group
         time_points = self.x_pred_control[self.time_variable_name].values
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             time_points,
             self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -524,13 +583,13 @@ class DifferenceInDifferences(BaseExperiment):
                 pc.set_edgecolor("None")
                 pc.set_alpha(0.5)
         else:
-            h_line, h_patch = plot_xY(
+            h_line, h_patch = plot_posterior_over_x(
                 time_points,
                 self.y_pred_counterfactual.posterior_predictive.mu.isel(
                     treated_units=0
                 ),
                 ax=ax,
-                hdi_prob=hdi_prob,
+                **style,
                 plot_hdi_kwargs={"color": "C2"},
                 label="Counterfactual",
             )

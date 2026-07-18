@@ -65,12 +65,20 @@ dependencies = [
 #
 # Similar to `dependencies` above, these must be valid existing projects.
 [project.optional-dependencies]
+# pymc-forecast is young (0.x); pin the minor so API movement across 0.x
+# minors is opted into deliberately (see docs on the ITS forecast backend).
+# The [extras] marker pulls pymc-extras>=0.10, which upstream declares for
+# the Pathfinder integration the adapter advertises.
+forecast = [
+    "pymc-forecast[extras]>=0.2,<0.3",
+]
 dev = [
     "prek",
     "twine",
     "codespell",
     "nbformat",
     "nbconvert",
+    "PyYAML",
 ]
 docs = [
     "ipykernel",
@@ -94,12 +102,31 @@ docs = [
     "ipywidgets",
     "sphinx-design",
     "sphinx-togglebutton",
+    "nbformat",
+    "nbconvert",
+    "Pillow",
+    "PyYAML",
+    "sphinxext-rediraffe",
 ]
 lint = ["prek", "ruff", "mypy"]
-test = ["pytest", "pytest-cov", "diff-cover", "codespell", "nbformat", "nbconvert", "papermill"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "diff-cover",
+    "codespell",
+    "nbformat",
+    "nbconvert",
+    "papermill",
+    "pymc-forecast[extras]>=0.2,<0.3",
+]
 
 [tool.pyproject2conda]
 channels = ["conda-forge"]
+
+# pymc-forecast is PyPI-only (not on conda-forge): route it to the pip
+# section of the generated environment.yml.
+[tool.pyproject2conda.dependencies]
+pymc-forecast = { pip = true }
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"

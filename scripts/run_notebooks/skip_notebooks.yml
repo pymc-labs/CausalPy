@@ -3,5 +3,10 @@
 # These notebooks are skipped for various reasons documented below.
 
 # Requires JAX which is not installed in the test environment.
-- iv_pymc.ipynb
-- iv_weak_instruments.ipynb
+- instrumental-variables-pymc.ipynb
+- instrumental-variables-weak-instruments.ipynb
+
+# Requires the third-party `causalimpact` package (Google's library, used here
+# only for side-by-side comparison) which is not a CausalPy dependency and is
+# not installed in the test environment.
+- interrupted-time-series-causalpy-vs-causalimpact.ipynb

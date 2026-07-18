@@ -96,15 +96,15 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
-    # Test 5: Repeated interaction terms (should be invalid)
-    with pytest.raises(FormulaException):
-        _ = cp.DifferenceInDifferences(
-            df,
-            formula="y ~ 1 + group + group*post_treatment + group*post_treatment",
-            time_variable_name="t",
-            group_variable_name="group",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
+    # Test 5: Patsy collapses repeated terms into one design-matrix term
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group + group*post_treatment + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    assert result.causal_impact is not None
 
     # Test 6: Three-way interactions using * (should be invalid)
     with pytest.raises(FormulaException):
@@ -155,6 +155,150 @@ def test_did_validation_post_treatment_formula():
             group_variable_name="group",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
+
+    # Test 11: No interaction term at all (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+    # Test 12: Interaction term between unrelated variables, not group/post_treatment
+    # (should be invalid)
+    with pytest.raises(FormulaException):
+        _ = cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group + post_treatment + male*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        )
+
+
+def test_did_validation_interaction_term_order_independent():
+    """Test that the group*post_treatment interaction term is accepted
+    regardless of which variable is written first in the formula."""
+    df = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1],
+            "t": [0, 1, 0, 1],
+            "unit": [0, 0, 1, 1],
+            "post_treatment": [0, 1, 0, 1],
+            "y": [1, 2, 3, 4],
+        }
+    )
+
+    # group*post_treatment and post_treatment*group are statistically identical;
+    # construction must succeed either way.
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post_treatment*group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+    assert result.causal_impact is not None
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + I(x**2) + group*post_treatment",
+        "y ~ 1 + group*post_treatment + I(t**2)",
+        "y ~ 1 + I(x * 2) + group*post_treatment",
+        "y ~ 1 + (group + post_treatment)**2",
+    ],
+)
+def test_did_validation_uses_patsy_interaction_terms(did_data, formula):
+    """Arithmetic and power expressions must follow Patsy's term semantics."""
+    df = did_data.assign(x=np.arange(len(did_data)))
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    assert result.causal_impact is not None
+
+
+def test_did_validation_rejects_substring_only_interaction(did_data):
+    """Variable-name substrings must not count as the required interaction."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["group"] = df["g"]
+    df["post_treatment"] = df["post"]
+
+    with pytest.raises(FormulaException):
+        cp.DifferenceInDifferences(
+            df,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="g",
+            post_treatment_variable_name="post",
+            model=LinearRegression(),
+        )
+
+
+def test_did_exact_interaction_matching_preserves_categorical_wrapper(did_data):
+    """Exact matching still accepts patsy's categorical wrapper."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(g)*post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=LinearRegression(),
+    )
+
+    assert result.causal_impact is not None
+
+
+def test_did_ols_matches_only_exact_interaction(did_data):
+    """OLS lookup and counterfactual construction use the exact interaction."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["g_post"] = np.arange(len(df))
+    df["y"] = (
+        1 + 2 * df["g"] + 3 * df["post"] + 4 * df["g"] * df["post"] + 5 * df["g_post"]
+    )
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post*g + g_post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=LinearRegression(),
+    )
+
+    assert result.causal_impact == pytest.approx(4)
+    expected_counterfactual = (
+        1 + 2 + 3 + 5 * result.x_pred_counterfactual["g_post"].to_numpy()
+    )
+    np.testing.assert_allclose(result.y_pred_counterfactual, expected_counterfactual)
+
+
+def test_did_bayesian_matches_only_exact_interaction(mock_pymc_sample, did_data):
+    """Bayesian lookup must not confuse a similarly named main effect."""
+    df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
+    df["g_post"] = np.arange(len(df))
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post*g + g_post",
+        time_variable_name="t",
+        group_variable_name="g",
+        post_treatment_variable_name="post",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    )
+
+    assert result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
 
 
 def test_did_validation_post_treatment_data():
@@ -411,6 +555,36 @@ def test_rd_validation_treated_is_dummy():
             formula="y ~ 1 + x + treated",
             model=LinearRegression(),
             treatment_threshold=0.5,
+        )
+
+
+@pytest.mark.parametrize(
+    ("experiment", "threshold_argument"),
+    [
+        (cp.RegressionDiscontinuity, "treatment_threshold"),
+        (cp.RegressionKink, "kink_point"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("formula", "extra_columns", "exception"),
+    [
+        ("y ~ 1 + x + untreated", {"untreated": [0, 0, 1, 1]}, FormulaException),
+        ("treated ~ 1 + x", {"treated": [0, 0, 1, 1]}, FormulaException),
+        ("y ~ 1 + x + treated", {}, DataException),
+    ],
+)
+def test_rd_rk_validation_requires_treated_rhs_column(
+    experiment, threshold_argument, formula, extra_columns, exception
+):
+    """The exact treated column must exist and be referenced on the RHS."""
+    df = pd.DataFrame({"x": [0, 1, 2, 3], "y": [1, 1, 2, 2], **extra_columns})
+
+    with pytest.raises(exception):
+        experiment(
+            df,
+            formula=formula,
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+            **{threshold_argument: 0.5},
         )
 
 

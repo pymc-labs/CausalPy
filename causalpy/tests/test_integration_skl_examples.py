@@ -52,6 +52,43 @@ def test_did(did_data):
 
 
 @pytest.mark.integration
+def test_did_causal_impact_order_independent_ols(did_data):
+    """
+    Regression test: causal_impact must not depend on which variable is
+    written first in the DiD interaction term.
+
+    Previously, DifferenceInDifferences.algorithm() looked up the OLS
+    interaction coefficient using a single concatenated substring
+    ("group:post_treatment"), which only matched patsy's column naming when
+    the formula wrote the group variable first. Writing the formula the
+    other way round (post_treatment*group) fit an identical model but
+    silently produced causal_impact=None instead of the real value.
+    """
+    data = did_data
+
+    result_group_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    result_post_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + post_treatment*group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    assert result_group_first.causal_impact is not None
+    assert result_post_first.causal_impact is not None
+    assert result_group_first.causal_impact == pytest.approx(
+        result_post_first.causal_impact
+    )
+
+
+@pytest.mark.integration
 def test_rd_drinking():
     """
     Test Regression Discontinuity scikit-learn experiment on drinking age data.

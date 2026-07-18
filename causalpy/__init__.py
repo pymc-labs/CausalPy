@@ -14,6 +14,7 @@
 """CausalPy: causal inference for quasi-experiments in Python."""
 
 import causalpy.checks as checks  # noqa: E402
+import causalpy.pymc_forecast_models as pymc_forecast_models
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
 import causalpy.variable_selection_priors as variable_selection_priors
@@ -64,6 +65,7 @@ __all__ = [
     "PanelRegression",
     "plot_correlations",
     "PrePostNEGD",
+    "pymc_forecast_models",
     "pymc_models",
     "ramp",
     "RegressionDiscontinuity",

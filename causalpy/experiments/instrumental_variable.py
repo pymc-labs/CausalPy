@@ -17,11 +17,16 @@ import warnings  # noqa: I001
 
 import numpy as np
 import pandas as pd
-from patsy import dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
+import arviz as az
+
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import InstrumentalVariableRegression
+from causalpy.utils import round_num
 
 from .base import BaseExperiment
 from causalpy.reporting import EffectSummary
@@ -138,8 +143,8 @@ class InstrumentalVariable(BaseExperiment):
         self.vs_hyperparams = vs_hyperparams or {}
         self.binary_treatment = binary_treatment
         self.use_vs_prior_outcome = self.vs_hyperparams.get("outcome", False)
-        self.input_validation()
         self._build_design_matrices()
+        self.input_validation()
 
         # Store user-provided priors (will set defaults in algorithm() if None)
         self.priors = priors
@@ -148,14 +153,20 @@ class InstrumentalVariable(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
-        y, X = dmatrices(self.formula, self.data)
+        try:
+            y, X = build_formula_matrices(self.formula, self.data)
+            t, Z = build_formula_matrices(
+                self.instruments_formula, self.instruments_data
+            )
+        except PatsyError as err:
+            raise DataException(f"Unable to evaluate IV formula: {err}") from err
+
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
-        t, Z = dmatrices(self.instruments_formula, self.instruments_data)
         self._t_design_info = t.design_info
         self._z_design_info = Z.design_info
         self.labels_instruments = Z.design_info.column_names
@@ -202,19 +213,25 @@ class InstrumentalVariable(BaseExperiment):
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
-        treatment = self.instruments_formula.split("~")[0]
-        test = treatment.strip() in self.instruments_data.columns
-        test = test & (treatment.strip() in self.data.columns)
-        if not test:
+        if self.instrument_variable_name not in self._x_design_info.term_name_slices:
             raise DataException(
-                f"""
-                The treatment variable:
-                {treatment} must appear in the instrument_data to be used
-                as an outcome variable and in the data object to be used as a covariate.
-                """
+                f"Treatment term '{self.instrument_variable_name}' from the instrument "
+                "formula must also appear in the outcome formula."
             )
-        Z = self.data[treatment.strip()]
-        check_binary = len(np.unique(Z)) > 2
+
+        if self.instrument_variable_name not in self.data.columns:
+            treatment_factor = next(iter(self._t_design_info.terms[0].factors))
+            # ponytail: transformed-treatment interactions need factor-level design
+            # reconstruction; add it only when that use case is required.
+            if any(
+                treatment_factor in term.factors and len(term.factors) > 1
+                for term in self._x_design_info.terms
+            ):
+                raise DataException(
+                    "Interactions with a transformed IV treatment are not supported."
+                )
+
+        check_binary = len(np.unique(self.t)) > 2
         if check_binary:
             warnings.warn(
                 """Warning. The treatment variable is not Binary.
@@ -231,9 +248,17 @@ class InstrumentalVariable(BaseExperiment):
         """
         first_stage_reg = sk_lin_reg().fit(self.Z, self.t)
         fitted_Z_values = first_stage_reg.predict(self.Z)
-        X2 = self.data.copy(deep=True)
-        X2[self.instrument_variable_name] = fitted_Z_values
-        _, X2 = dmatrices(self.formula, X2)
+        if self.instrument_variable_name in self.data.columns:
+            second_stage_data = self.data.copy(deep=True)
+            second_stage_data[self.instrument_variable_name] = fitted_Z_values
+            _, X2 = build_formula_matrices(self.formula, second_stage_data)
+            X2 = np.asarray(X2)
+        else:
+            X2 = self.X.copy()
+            treatment_slice = self._x_design_info.term_name_slices[
+                self.instrument_variable_name
+            ]
+            X2[:, treatment_slice] = fitted_Z_values
         second_stage_reg = sk_lin_reg().fit(X=X2, y=self.y)
         betas_first = list(first_stage_reg.coef_[0][1:])
         betas_first.insert(0, first_stage_reg.intercept_[0])
@@ -286,7 +311,7 @@ class InstrumentalVariable(BaseExperiment):
         """
         raise NotImplementedError("Plot method not implemented.")
 
-    def summary(self, round_to: int | None = None) -> None:
+    def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
         Parameters
@@ -295,7 +320,41 @@ class InstrumentalVariable(BaseExperiment):
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
         """
-        raise NotImplementedError("Summary method not implemented.")
+        print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print(f"Instruments formula: {self.instruments_formula}")
+
+        print("\nNaive OLS coefficients:")
+        for name, val in self.ols_beta_params.items():
+            print(f"  {name: <20}  {round_num(val, round_to)}")
+
+        print("\n2SLS coefficients:")
+        print("  First stage:")
+        for name, val in zip(
+            self.labels_instruments, self.ols_beta_first_params, strict=False
+        ):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+        print("  Second stage:")
+        for name, val in zip(self.labels, self.ols_beta_second_params, strict=False):
+            print(f"    {name: <20}  {round_num(val, round_to)}")
+
+        print("\nBayesian coefficients:")
+        posterior = self.idata.posterior  # type: ignore[union-attr]
+        for var, dim, labels, stage in [
+            ("beta_t", "instruments", self.labels_instruments, "Instrument stage"),
+            ("beta_z", "covariates", self.labels, "Outcome stage"),
+        ]:
+            print(f"  {stage}:")
+            coeffs = az.extract(posterior, var_names=var)
+            for name in labels:
+                samples = coeffs.sel({dim: name})
+                lo = samples.quantile((1 - HDI_PROB) / 2).item()
+                hi = samples.quantile(1 - (1 - HDI_PROB) / 2).item()
+                print(
+                    f"    {name: <20}  {round_num(samples.mean().item(), round_to)}, "
+                    f"{HDI_PROB * 100:.0f}% HDI [{round_num(lo, round_to)}, "
+                    f"{round_num(hi, round_to)}]"
+                )
 
     def effect_summary(
         self,

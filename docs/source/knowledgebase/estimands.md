@@ -22,6 +22,8 @@ The **structure of available data** also constrains which empirical estimands ar
 
 The estimator is the machinery that transforms data into an estimate. Different estimators make different bias-variance trade-offs and have different data requirements. See {doc}`structural_causal_models` for a deeper treatment of structural versus reduced-form approaches.
 
+For Bayesian experiments, the default **response-scale** additive impact (`observed - counterfactual expectation`) is documented in {doc}`prediction-contract`. That contract distinguishes the linear predictor, the conditional expected outcome (`mu`), and posterior-predictive draws (`y_hat`). Risk ratios, odds ratios, and link-scale contrasts are separate estimands and are not the default reporting scale in CausalPy.
+
 :::{note}
 This is an iterative process: estimates inform new theoretical questions, refining our understanding over time.
 :::

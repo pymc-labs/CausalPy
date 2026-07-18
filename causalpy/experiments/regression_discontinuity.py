@@ -13,22 +13,25 @@
 #   limitations under the License.
 """Regression discontinuity design."""
 
-import warnings  # noqa: I001
+import re  # noqa: I001
+import warnings
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
+
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import plot_xY
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
@@ -154,7 +157,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 msg = f"Only {len(self.fit_data)} datapoints in the dataset."
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        y, X = dmatrices(self.formula, self.fit_data)
+        y, X = build_formula_matrices(self.formula, self.fit_data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -235,9 +238,18 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
-        if "treated" not in self.formula:
+        if not any(
+            re.search(r"\btreated\b", factor.name())
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            for factor in term.factors
+        ):
             raise FormulaException(
-                "A predictor called `treated` should be in the formula"
+                "A predictor called `treated` should be in the formula RHS"
+            )
+
+        if "treated" not in self.data.columns:
+            raise DataException(
+                "A dummy-coded `treated` column should be present in the data"
             )
 
         if not _is_variable_dummy_coded(self.data["treated"]):
@@ -298,7 +310,11 @@ class RegressionDiscontinuity(BaseExperiment):
         self,
         *,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -311,12 +327,27 @@ class RegressionDiscontinuity(BaseExperiment):
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
             ``None`` to render raw numbers.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             posterior predictive band, and the central credible interval
             reported in the figure title for the discontinuity at threshold.
             Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -337,18 +368,32 @@ class RegressionDiscontinuity(BaseExperiment):
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -369,6 +414,12 @@ class RegressionDiscontinuity(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot data: use two layers only when there are excluded observations
@@ -392,11 +443,11 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Plot model fit to data
-        plot_xY(
+        plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
             self.pred["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax,
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
             label="Posterior mean",
         )
@@ -405,10 +456,10 @@ class RegressionDiscontinuity(BaseExperiment):
         title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
         r2 = f"Bayesian $R^2$ on fit data = {title_info}"
         percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - hdi_prob) / 2, 1 - (1 - hdi_prob) / 2]
+            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values
         ci = (
-            rf"$CI_{{{hdi_prob * 100:.0f}\%}}$"
+            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         discon = f"""

@@ -11,11 +11,40 @@
 
 import os
 import sys
+from pathlib import Path
 
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
+
+
+# Generate gallery before building docs
+# This runs after dependencies are installed but before Sphinx processes files
+def generate_gallery():
+    """Generate example gallery from notebooks."""
+    try:
+        # Import here to avoid errors if dependencies aren't available
+        import subprocess
+
+        repo_root = Path(__file__).parent.parent.parent
+        script_path = repo_root / "scripts" / "generate_gallery.py"
+
+        if script_path.exists():
+            result = subprocess.run(
+                [sys.executable, str(script_path)],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                print(f"Warning: Gallery generation failed: {result.stderr}")
+    except Exception as e:
+        print(f"Warning: Could not generate gallery: {e}")
+
+
+# Generate gallery during Sphinx setup
+generate_gallery()
 
 # autodoc_mock_imports
 # This avoids autodoc breaking when it can't find packages imported in the code.
@@ -75,8 +104,56 @@ extensions = [
     "sphinx_design",
     "sphinx_sitemap",
     "sphinx_togglebutton",
+    "sphinxext.rediraffe",
     "strip_citation_labels",
 ]
+
+# -- Redirects for renamed how-to notebooks (issue #840) --------------------
+# Permanent map of old Sphinx docnames -> current docnames. sphinxext-rediraffe
+# writes stub HTML at old RTD paths (e.g. notebooks/its_pymc.html) so legacy
+# links keep working after a rename.
+#
+# Do not delete keys when cleaning up: each key protects an old public URL.
+# On a future rename, add old -> new and keep earlier keys (chains resolve).
+# New notebooks do not need entries; only renames and deletions do.
+rediraffe_redirects = {
+    "notebooks/ancova_pymc": "notebooks/ancova-pymc",
+    "notebooks/did_pymc": "notebooks/difference-in-differences-pymc",
+    "notebooks/did_pymc_banks": "notebooks/difference-in-differences-banks-pymc",
+    "notebooks/did_skl": "notebooks/difference-in-differences-sklearn",
+    "notebooks/geolift1": "notebooks/geolift-single-cell",
+    "notebooks/inv_prop_latent": "notebooks/inverse-propensity-latent",
+    "notebooks/inv_prop_pymc": "notebooks/inverse-propensity-pymc",
+    "notebooks/its_causalpy_vs_causalimpact": "notebooks/interrupted-time-series-causalpy-vs-causalimpact",
+    "notebooks/its_covid": "notebooks/interrupted-time-series-covid",
+    "notebooks/its_lift_test": "notebooks/interrupted-time-series-lift-test",
+    "notebooks/its_post_intervention_analysis": "notebooks/interrupted-time-series-post-intervention-analysis",
+    "notebooks/its_placebo_in_time_analysis": "notebooks/interrupted-time-series-placebo-in-time-analysis",
+    "notebooks/its_pymc": "notebooks/interrupted-time-series-pymc",
+    "notebooks/its_pymc_comparative": "notebooks/interrupted-time-series-comparative-pymc",
+    "notebooks/its_skl": "notebooks/interrupted-time-series-sklearn",
+    "notebooks/iv_pymc": "notebooks/instrumental-variables-pymc",
+    "notebooks/iv_vs_priors": "notebooks/instrumental-variables-variable-selection-priors",
+    "notebooks/iv_weak_instruments": "notebooks/instrumental-variables-weak-instruments",
+    "notebooks/multi_cell_geolift": "notebooks/multi-cell-geolift",
+    "notebooks/panel_fixed_effects": "notebooks/panel-fixed-effects",
+    "notebooks/piecewise_its_pymc": "notebooks/piecewise-interrupted-time-series-pymc",
+    "notebooks/pipeline_workflow": "notebooks/pipeline-workflow",
+    "notebooks/rd_donut_pymc": "notebooks/regression-discontinuity-donut-pymc",
+    "notebooks/rd_pymc": "notebooks/regression-discontinuity-pymc",
+    "notebooks/rd_pymc_drinking": "notebooks/regression-discontinuity-drinking-pymc",
+    "notebooks/rd_skl": "notebooks/regression-discontinuity-sklearn",
+    "notebooks/rd_skl_drinking": "notebooks/regression-discontinuity-drinking-sklearn",
+    "notebooks/report_demo": "notebooks/reporting-demo",
+    "notebooks/rkink_pymc": "notebooks/regression-kink-pymc",
+    "notebooks/sc_pymc": "notebooks/synthetic-control-pymc",
+    "notebooks/sc_pymc_brexit": "notebooks/synthetic-control-brexit-pymc",
+    "notebooks/sc_skl": "notebooks/synthetic-control-sklearn",
+    "notebooks/sdid_pymc": "notebooks/synthetic-difference-in-differences-pymc",
+    "notebooks/staggered_did_pymc": "notebooks/staggered-difference-in-differences-pymc",
+}
+rediraffe_branch = "main"
+rediraffe_auto_redirect_perc = 0
 
 nb_execution_mode = "off"
 
@@ -93,6 +170,13 @@ source_suffix = {
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".codespell"]
 master_doc = "index"
+
+# Suppress warnings for notebooks linked from gallery (not in toctree)
+suppress_warnings = [
+    "toc.not_included",  # Safety net for notebooks linked only from prose elsewhere
+    "bibtex.duplicate_label",  # BibTeX duplicate labels (less critical)
+    "bibtex.duplicate_citation",  # BibTeX duplicate citations (less critical)
+]
 
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
@@ -156,7 +240,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["custom.css", "gallery.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -169,6 +253,7 @@ html_theme_options = {
     },
     "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
 }
+
 html_context = {
     "github_user": "pymc-labs",
     "github_repo": "CausalPy",

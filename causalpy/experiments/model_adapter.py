@@ -25,10 +25,11 @@ import numpy as np
 import xarray as xr
 from sklearn.base import RegressorMixin, clone
 
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
 
-BackendKind = Literal["pymc", "sklearn"]
+BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
 
 
 def build_coords(
@@ -86,7 +87,7 @@ class ModelAdapter(ABC):
 
     @property
     @abstractmethod
-    def model(self) -> PyMCModel | RegressorMixin:
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
         """The underlying model instance."""
 
     @property
@@ -96,8 +97,8 @@ class ModelAdapter(ABC):
 
     @property
     def is_bayesian(self) -> bool:
-        """Whether the backend is Bayesian (PyMC)."""
-        return self.kind == "pymc"
+        """Whether the backend is Bayesian (PyMC or pymc-forecast)."""
+        return self.kind in ("pymc", "pymc-forecast")
 
     @property
     def is_ols(self) -> bool:
@@ -385,6 +386,118 @@ class SklearnModelAdapter(ModelAdapter):
         self._model.print_coefficients(labels, round_to)
 
 
+class PyMCForecastAdapter(ModelAdapter):
+    """Adapter for :class:`~causalpy.pymc_forecast_models.PyMCForecastModel`
+    backends.
+
+    The wrapped model already speaks CausalPy's Bayesian conventions
+    (``mu``/``y_hat`` posterior-predictive output on ``obs_ind`` /
+    ``treated_units`` coords), so this adapter is pure delegation.
+
+    Parameters
+    ----------
+    model : PyMCForecastModel
+        Wrapped ``pymc_forecast`` backend model.
+    """
+
+    def __init__(self, model: PyMCForecastModel) -> None:
+        self._model = model
+
+    @property
+    def model(self) -> PyMCForecastModel:
+        """The underlying pymc-forecast wrapper."""
+        return self._model
+
+    @property
+    def kind(self) -> BackendKind:
+        """Backend identifier."""
+        return "pymc-forecast"
+
+    @property
+    def idata(self) -> az.InferenceData:
+        """Return the model's InferenceData (posterior draws)."""
+        if self._model.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return self._model.idata
+
+    def fit(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> az.InferenceData:
+        """Fit the forecasting model on the pre-period.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix with dims ``["obs_ind", "coeffs"]``.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict, optional
+            Coordinate metadata; ignored (real coordinates are read from
+            ``X`` and ``y``).
+        """
+        return self._model.fit(X=X, y=y, coords=coords)
+
+    def predict(
+        self,
+        X: Any,
+        *,
+        out_of_sample: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Predict in-sample or forecast the counterfactual.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix for which to generate predictions.
+        out_of_sample : bool, default False
+            ``True`` draws the post-period counterfactual via the model's
+            forecasting path.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+        """
+        return self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+
+    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+        """Score in-sample predictions with the Bayesian :math:`R^2`.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix.
+        y : xarray.DataArray
+            Observed outcomes.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+        """
+        return self._model.score(X=X, y=y, **kwargs)
+
+    def coefficients(self) -> np.ndarray:
+        """Forecasting models have no design-matrix coefficients."""
+        raise NotImplementedError(
+            "pymc-forecast models do not expose design-matrix coefficients; "
+            "inspect the fitted posterior via `.idata` instead."
+        )
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print posterior summaries of the model's scalar parameters.
+
+        Parameters
+        ----------
+        labels : list of str
+            Design-matrix labels; ignored by forecasting models.
+        round_to : int, optional
+            Number of significant figures to round to.
+        """
+        self._model.print_coefficients(labels, round_to)
+
+
 def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:
     """Clone, augment, and validate a sklearn estimator for CausalPy."""
     try:
@@ -407,17 +520,18 @@ def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:
 
 
 def make_model_adapter(
-    model: PyMCModel | RegressorMixin | None,
+    model: PyMCModel | RegressorMixin | PyMCForecastModel | None,
     *,
     default_model_class: type[PyMCModel] | None,
     supports_bayes: bool,
     supports_ols: bool,
+    supports_pymc_forecast: bool = False,
 ) -> ModelAdapter:
     """Resolve, validate, and wrap a model in a backend adapter.
 
     Parameters
     ----------
-    model : PyMCModel, RegressorMixin, or None
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or None
         User-supplied model instance, or ``None`` to use the default.
     default_model_class : type[PyMCModel] or None
         PyMC model class used when ``model`` is ``None``.
@@ -425,6 +539,8 @@ def make_model_adapter(
         Whether the experiment supports Bayesian backends.
     supports_ols : bool
         Whether the experiment supports OLS/sklearn backends.
+    supports_pymc_forecast : bool, default False
+        Whether the experiment supports pymc-forecast backends.
 
     Returns
     -------
@@ -449,5 +565,10 @@ def make_model_adapter(
         if not supports_ols:
             raise ValueError("OLS models not supported.")
         return SklearnModelAdapter(model)
+
+    if isinstance(model, PyMCForecastModel):
+        if not supports_pymc_forecast:
+            raise ValueError("pymc-forecast models not supported.")
+        return PyMCForecastAdapter(model)
 
     raise ValueError("Unsupported model type")

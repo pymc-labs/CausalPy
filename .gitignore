@@ -1,5 +1,6 @@
 __pycache__
 _build
+.venv/
 .ipynb_checkpoints
 *_checkpoints
 *.DS_Store
@@ -14,6 +15,8 @@ dist/
 docs/build/
 docs/jupyter_execute/
 docs/source/api/generated/
+docs/source/_static/thumbnails/
+# Note: thumbnails are generated during build (see .readthedocs.yaml)
 .cursor/plans
 .marimo/
 

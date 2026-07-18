@@ -21,10 +21,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from patsy import dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
@@ -92,8 +93,8 @@ class InversePropensityWeighting(BaseExperiment):
         self.formula = formula
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme
-        self.input_validation()
         self._build_design_matrices()
+        self.input_validation()
         self.algorithm()
 
     def _build_design_matrices(self) -> None:
@@ -104,7 +105,12 @@ class InversePropensityWeighting(BaseExperiment):
         design matrix (``self.X_outcome``) that includes the treatment indicator,
         for use with doubly-robust outcome modelling.
         """
-        t, X = dmatrices(self.formula, self.data)
+        try:
+            t, X = build_formula_matrices(self.formula, self.data)
+        except PatsyError as err:
+            raise DataException(
+                f"Unable to evaluate propensity formula: {err}"
+            ) from err
         self._t_design_info = t.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -128,37 +134,25 @@ class InversePropensityWeighting(BaseExperiment):
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness.
 
-        Checks that both the treatment variable (left-hand side of the formula)
-        and the ``outcome_variable`` exist in ``self.data``, and that the
-        treatment variable has at most two unique values.  Note that a
-        constant (single-value) treatment passes this check without error
-        but may cause downstream estimators to fail or produce undefined
-        results.
+        Checks that the ``outcome_variable`` exists in ``self.data`` and that
+        the treatment values produced by the formula are binary. Note that a
+        constant (single-value) treatment passes this check without error but
+        may cause downstream estimators to fail or produce undefined results.
 
         Raises
         ------
         DataException
-            If the treatment or outcome variable is missing from the data,
-            or if the treatment variable has more than two unique values.
+            If the outcome variable is missing from the data or if the
+            formula produces treatment values other than zero and one.
         """
-        treatment = self.formula.split("~")[0]
-        test = treatment.strip() in self.data.columns
-        test = test & (self.outcome_variable in self.data.columns)
-        if not test:
+        if self.outcome_variable not in self.data.columns:
             raise DataException(
-                f"""
-                The treatment variable:
-                {treatment} must appear in the data to be used
-                as an outcome variable. And {self.outcome_variable}
-                must also be available in the data to be re-weighted
-                """
+                f"Outcome variable '{self.outcome_variable}' must be available "
+                "in the data to be re-weighted."
             )
-        T = self.data[treatment.strip()]
-        check_binary = len(np.unique(T)) > 2
-        if check_binary:
+        if not set(np.unique(self.t)).issubset({0, 1}):
             raise DataException(
-                """Warning. The treatment variable is not 0-1 Binary.
-                """
+                "The treatment values produced by the formula must be 0-1 binary."
             )
 
     def _prepare_ps(self, ps: np.ndarray, eps: float = 1e-6) -> np.ndarray:

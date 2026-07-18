@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Pretest/posttest nonequivalent group design."""
 
+import warnings
 from typing import Any, Literal
 
 import arviz as az
@@ -21,14 +22,15 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import build_design_matrices
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import plot_xY
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
@@ -118,7 +120,7 @@ class PrePostNEGD(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
+        y, X = build_formula_matrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -240,7 +242,11 @@ class PrePostNEGD(BaseExperiment):
         self,
         *,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -253,12 +259,27 @@ class PrePostNEGD(BaseExperiment):
             Number of decimals used to round numerical results in the figure.
             Defaults to ``None``, in which case 2 significant figures are
             used.
-        hdi_prob : float
+        ci_prob : float
             Probability mass of the highest density interval drawn around the
             posterior predictive bands for the control and treatment groups,
             and around the posterior of the estimated treatment effect.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 9)``.
@@ -279,18 +300,32 @@ class PrePostNEGD(BaseExperiment):
             The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
             figsize=figsize,
         )
 
     def _bayesian_plot(
         self,
         round_to: int | None = None,
-        hdi_prob: float = HDI_PROB,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -310,6 +345,12 @@ class PrePostNEGD(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         fig, ax = plt.subplots(
             2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -327,11 +368,11 @@ class PrePostNEGD(BaseExperiment):
         ax[0].set(xlabel="Pretest", ylabel="Posttest")
 
         # plot posterior predictive of untreated
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
             self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
@@ -339,11 +380,11 @@ class PrePostNEGD(BaseExperiment):
         labels = ["Control group"]
 
         # plot posterior predictive of treated
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
             self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
             ax=ax[0],
-            hdi_prob=hdi_prob,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
@@ -362,7 +403,7 @@ class PrePostNEGD(BaseExperiment):
             ref_val=0,
             ax=ax[1],
             round_to=round_to,
-            hdi_prob=hdi_prob,
+            hdi_prob=ci_prob,
         )
         ax[1].set(title="Estimated treatment effect")
         return fig, ax

@@ -18,6 +18,8 @@ Tests the extension of InterruptedTimeSeries to support temporary interventions
 with pre-intervention, intervention, and post-intervention periods.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -37,8 +39,13 @@ sample_kwargs = {
 
 
 @pytest.fixture
-def datetime_data(rng):
-    """Create datetime-indexed data with three periods."""
+def datetime_data():
+    """Create datetime-indexed data with three periods.
+
+    Uses its own seeded generator (not the session-scoped ``rng`` fixture) so
+    the data does not depend on how many draws earlier tests consumed.
+    """
+    rng = np.random.default_rng(seed=42)
     dates = pd.date_range(start="2023-01-01", end="2024-12-31", freq="W")
     n_weeks = len(dates)
 
@@ -68,8 +75,13 @@ def datetime_data(rng):
 
 
 @pytest.fixture
-def integer_data(rng):
-    """Create integer-indexed data with three periods."""
+def integer_data():
+    """Create integer-indexed data with three periods.
+
+    Uses its own seeded generator (not the session-scoped ``rng`` fixture) so
+    the data does not depend on how many draws earlier tests consumed.
+    """
+    rng = np.random.default_rng(seed=42)
     n_points = 100
     indices = np.arange(n_points)
 
@@ -569,6 +581,45 @@ def test_effect_summary_invalid_period_raises_error(datetime_data, mock_pymc_sam
 # ==============================================================================
 
 
+@pytest.mark.parametrize(
+    ("index", "treatment_time"),
+    [
+        pytest.param(pd.Index([0, 2, 1, 3]), 2, id="unsorted-numeric"),
+        pytest.param(pd.Index([0, 1, 1, 2]), 1, id="duplicate-numeric"),
+        pytest.param(
+            pd.DatetimeIndex(["2024-01-01", "2024-01-03", "2024-01-02", "2024-01-04"]),
+            pd.Timestamp("2024-01-03"),
+            id="unsorted-datetime",
+        ),
+        pytest.param(
+            pd.DatetimeIndex(["2024-01-01", "2024-01-02", "2024-01-02", "2024-01-03"]),
+            pd.Timestamp("2024-01-02"),
+            id="duplicate-datetime",
+        ),
+    ],
+)
+def test_invalid_time_index_rejected_before_design_matrices(index, treatment_time):
+    """Unsorted and duplicate time indexes fail before matrix construction."""
+    data = pd.DataFrame(
+        {"y": np.arange(len(index)), "t": np.arange(len(index))}, index=index
+    )
+
+    with (
+        patch.object(
+            cp.InterruptedTimeSeries, "_build_design_matrices"
+        ) as build_design_matrices,
+        pytest.raises(BadIndexException, match="unique and monotonically increasing"),
+    ):
+        cp.InterruptedTimeSeries(
+            data,
+            treatment_time=treatment_time,
+            formula="y ~ 1 + t",
+            model=LinearRegression(fit_intercept=False),
+        )
+
+    build_design_matrices.assert_not_called()
+
+
 def test_treatment_end_time_less_than_treatment_time_raises_error(datetime_data):
     """Test that treatment_end_time <= treatment_time raises ValueError."""
     df, treatment_time, _ = datetime_data
@@ -824,10 +875,10 @@ def test_analyze_persistence_pymc(datetime_data, mock_pymc_sample):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Persistence ratio is a decimal. It can be negative (counterfactual above
+    # the observed post-period) and can exceed 1 (post-effect > intervention-effect),
+    # so only check the type.
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
-    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
     assert persistence["mean_effect_during"] is not None
@@ -860,10 +911,10 @@ def test_analyze_persistence_sklearn(datetime_data):
     assert "total_effect_during" in persistence
     assert "total_effect_post" in persistence
 
-    # Check persistence ratio is a decimal (>= 0, can exceed 1 if post-effect > intervention-effect)
+    # Persistence ratio is a decimal. It can be negative (counterfactual above
+    # the observed post-period) and can exceed 1 (post-effect > intervention-effect),
+    # so only check the type.
     assert isinstance(persistence["persistence_ratio"], (int, float))
-    assert persistence["persistence_ratio"] >= 0
-    # Note: persistence_ratio can be > 1 if post-intervention effect is larger than intervention effect
 
     # Check values are reasonable
     assert persistence["mean_effect_during"] is not None

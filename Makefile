@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint check-exports check-architecture test test-patch-cov uml html cleandocs doctest run_notebooks_full help
+.PHONY: init setup lint check_lint check-exports check-architecture test test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
 DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
 DIFF_COVER_FAIL_UNDER ?= 95
@@ -49,7 +49,10 @@ test-patch-cov: ## Run tests and fail if patch coverage versus the base branch i
 uml: ## Generate UML diagrams from code
 	pyreverse -o png causalpy --output-directory docs/source/_static --ignore tests
 
-html: ## Build HTML documentation with Sphinx
+gallery: ## Regenerate index.md and thumbnails from gallery.yaml
+	python scripts/generate_gallery.py
+
+html: gallery ## Build HTML documentation with Sphinx
 	sphinx-build -b html docs/source docs/_build
 
 run_notebooks_full: ## Re-execute all notebooks and save outputs in place (slow)

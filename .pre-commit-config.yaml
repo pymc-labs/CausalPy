@@ -24,13 +24,13 @@ repos:
       - id: check-toml
       - id: check-json
       - id: check-added-large-files
-        exclude: &exclude_pattern '(iv_weak_instruments|its_lift_test|piecewise_its_pymc)\.ipynb'
+        exclude: &exclude_pattern '(instrumental-variables-weak-instruments|interrupted-time-series-lift-test|piecewise-interrupted-time-series-pymc)\.ipynb'
         args: ["--maxkb=1500"]
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.18
+    rev: v0.15.21
     hooks:
       # Run the linter
       - id: ruff
@@ -61,7 +61,7 @@ repos:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.1.0
+    rev: v2.3.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
@@ -75,12 +75,12 @@ repos:
   # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
   # generated docs build are intentionally out of scope.
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.38
+    rev: v0.9.39
     hooks:
       - id: pymarkdown
         args: [scan]
         files: \.md$
-        exclude: ^(docs/_build/|\.scratch/)
+        exclude: ^(docs/_build/|\.scratch/|docs/source/notebooks/index\.md)$
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
   # Dev env uses python>=3.11; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
   # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
@@ -119,6 +119,19 @@ repos:
         language: python
         files: \.ipynb$
         additional_dependencies: [nbformat]
+      - id: gallery-in-sync
+        name: Gallery index in sync with gallery.yaml
+        entry: python scripts/generate_gallery.py --check --no-thumbnails
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/notebooks/gallery\.yaml|docs/source/notebooks/index\.md|scripts/generate_gallery\.py|docs/source/notebooks/.*\.(ipynb|md))$
+        additional_dependencies: [PyYAML]
+      - id: rediraffe-redirects
+        name: Notebook renames have rediraffe redirects
+        entry: python scripts/check_rediraffe_redirects.py
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/notebooks/.*\.(ipynb|md)|docs/source/conf\.py|scripts/check_rediraffe_redirects\.py)$
       - id: validate-bibtex
         name: Validate BibTeX files
         entry: python -c "import sys; from pybtex.database.input import bibtex; parser = bibtex.Parser(); [parser.parse_file(f) for f in sys.argv[1:]]"
