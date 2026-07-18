@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
-from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.pymc_models import LinearRegression, PyMCModel, model_uses_identity_link
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
@@ -184,9 +184,42 @@ class PrePostNEGD(BaseExperiment):
         self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
-        self.causal_impact = self.model.idata.posterior["beta"].sel(
-            {"coeffs": self._get_treatment_effect_coeff()}
-        )
+        if model_uses_identity_link(self.model):
+            self.causal_impact = self.model.idata.posterior["beta"].sel(
+                {"coeffs": self._get_treatment_effect_coeff()}
+            )
+        else:
+            self.causal_impact = self._glr_att_from_g_computation()
+
+    def _glr_att_from_g_computation(self) -> xr.DataArray:
+        """Response-scale ATT averaged over treated units at observed covariates."""
+        treated = self.data[self.data[self.group_variable_name] == 1]
+        if treated.empty:
+            raise ValueError("No treated observations for ATT")
+
+        effects: list[xr.DataArray] = []
+        outcome_cols = [self.outcome_variable_name]
+        for _, row in treated.drop(columns=outcome_cols).iterrows():
+            row_treated = row.copy()
+            row_treated[self.group_variable_name] = 1
+            row_control = row.copy()
+            row_control[self.group_variable_name] = 0
+
+            (x_treated,) = build_design_matrices(
+                [self._x_design_info], pd.DataFrame([row_treated])
+            )
+            (x_control,) = build_design_matrices(
+                [self._x_design_info], pd.DataFrame([row_control])
+            )
+            mu_treated = self.model.predict(
+                X=np.asarray(x_treated)
+            ).posterior_predictive["mu"]
+            mu_control = self.model.predict(
+                X=np.asarray(x_control)
+            ).posterior_predictive["mu"]
+            effects.append((mu_treated - mu_control).squeeze("obs_ind"))
+
+        return xr.concat(effects, dim="treated_obs").mean(dim="treated_obs")
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""

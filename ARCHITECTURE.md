@@ -67,7 +67,8 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 ## PyMC Models
 
-- `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression
+- `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression (Gaussian/identity specialization of `GeneralizedLinearRegression`)
+- `GeneralizedLinearRegression` — curated GLM families (Poisson, Negative Binomial, Bernoulli) with response-scale `mu` and optional use in the same experiments as `LinearRegression`
 - `WeightedSumFitter` / `SoftmaxWeightedSumFitter` — SyntheticControl
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable

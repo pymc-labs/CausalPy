@@ -392,8 +392,15 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        if (
+            isinstance(self.score, pd.Series)
+            and "unit_0_r2" in self.score.index
+            and "unit_0_r2_std" in self.score.index
+        ):
+            title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
+            r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        else:
+            r2 = "Bayesian fit on all data"
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values

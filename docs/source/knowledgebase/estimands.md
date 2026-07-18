@@ -51,9 +51,9 @@ Each CausalPy experiment class targets a specific empirical estimand and support
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Estimator**: Coefficient-based. The ATT is estimated as the coefficient on the group-by-post interaction term. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: Coefficient-based for identity-link Gaussian and OLS models. The ATT is estimated as the coefficient on the group-by-post interaction term. For non-identity :class:`~causalpy.pymc_models.GeneralizedLinearRegression` backends (for example Poisson/log), CausalPy instead averages response-scale factual minus counterfactual ``mu`` predictions on treated post-treatment rows (g-computation). CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
 
-**Interpretation note**: Plots show counterfactual trajectories, but the reported effect is the interaction coefficient---a single summary of the treatment effect across all post-treatment observations.
+**Interpretation note**: Plots show counterfactual trajectories. For identity-link models the reported effect is the interaction coefficient; for non-identity GLMs it is a response-scale ATT summary across post-treatment treated observations.
 
 ---
 
@@ -148,4 +148,4 @@ The descriptions above assume standard usage. Always consider what your specific
 | Synthetic Control | Time-varying unit-specific impact | G-computation |
 | Regression Discontinuity | Local treatment effect at cutoff | Prediction-based |
 
-For methods not covered in detail here (IV, IPW, ANCOVA), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.
+For methods not covered in detail here (IV, IPW, ANCOVA/PrePostNEGD), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. PrePostNEGD uses the group coefficient for identity-link Gaussian models and response-scale g-computation averaged over treated units for non-identity :class:`~causalpy.pymc_models.GeneralizedLinearRegression` backends. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.

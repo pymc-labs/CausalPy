@@ -38,6 +38,7 @@ from .experiments.synthetic_difference_in_differences import (
     SyntheticDifferenceInDifferences,
 )
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
+from .pymc_models import GeneralizedLinearRegression, LinearRegression
 from .steps import (
     EstimateEffect,
     GenerateReport,
@@ -54,9 +55,11 @@ __all__ = [
     "EstimateEffect",
     "extract_lift_for_mmm",
     "GenerateReport",
+    "GeneralizedLinearRegression",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "LinearRegression",
     "load_data",
     "PiecewiseITS",
     "Pipeline",
