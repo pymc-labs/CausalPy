@@ -68,6 +68,18 @@ else:
         yield
 
 
+@pytest.fixture
+def real_pymc_sample(mock_pymc_sample):
+    """Restore real ``pm.sample`` for a single test under the session mock."""
+    import pymc as pm
+    import pymc.sampling.mcmc
+
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    yield
+    pm.sample = patched
+
+
 @pytest.fixture(autouse=True)
 def mock_sample_for_doctest(request):
     if not request.config.getoption("--doctest-modules", default=False):

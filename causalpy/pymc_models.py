@@ -88,24 +88,26 @@ def _canonical_link_for_family(family: FamilyName) -> LinkName:
     return _CANONICAL_FAMILY_LINKS[family]
 
 
-def _validate_family_link(family: str, link: str | None) -> tuple[FamilyName, LinkName]:
-    """Validate family/link pairings and resolve ``link=None`` to the canonical link."""
+def _validate_family(family: str) -> FamilyName:
+    """Validate a curated response family name."""
     if family not in _CANONICAL_FAMILY_LINKS:
         valid = ", ".join(sorted(_CANONICAL_FAMILY_LINKS))
         raise ValueError(f"Unsupported family {family!r}. Expected one of: {valid}.")
-    family_name: FamilyName = family  # type: ignore[assignment]
-    resolved_link = _canonical_link_for_family(family_name) if link is None else link
-    if resolved_link not in ("identity", "log", "logit"):
+    return family  # type: ignore[return-value]
+
+
+def _validate_glr_user_priors(
+    family: FamilyName, priors: dict[str, Any] | None
+) -> None:
+    """Reject incompatible user overrides for built-in GLM families."""
+    if not priors or "y_hat" not in priors:
+        return
+    if family != "gaussian":
         raise ValueError(
-            f"Unsupported link {resolved_link!r}. Expected 'identity', 'log', or 'logit'."
+            f"Custom priors['y_hat'] is not supported for family {family!r}. "
+            "The observation model is fixed by the family; override beta or, "
+            "for Negative Binomial models, alpha."
         )
-    if resolved_link != _canonical_link_for_family(family_name):
-        raise ValueError(
-            f"Invalid family/link pair {family!r}/{resolved_link!r}. "
-            f"Use link={_canonical_link_for_family(family_name)!r} "
-            f"or omit link to use the canonical pairing."
-        )
-    return family_name, resolved_link  # type: ignore[return-value]
 
 
 def _inverse_link(eta: Any, link: LinkName) -> Any:
@@ -200,21 +202,6 @@ def _create_family_likelihood(
         return
 
     y_hat_prior.create_likelihood_variable("y_hat", mu=mu, observed=y_obs)
-
-
-def model_uses_identity_link(model: Any) -> bool:
-    """Return whether ``model`` reports an identity-link outcome scale.
-
-    Parameters
-    ----------
-    model : PyMCModel
-        Fitted or unfitted CausalPy PyMC backend. Models without an explicit
-        ``uses_identity_link`` attribute are treated as identity-link.
-    """
-    uses_identity = getattr(model, "uses_identity_link", None)
-    if uses_identity is not None:
-        return bool(uses_identity)
-    return True
 
 
 class PyMCModel(pm.Model):
@@ -519,6 +506,7 @@ class PyMCModel(pm.Model):
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
+        var_names: list[str] | tuple[str, ...] | None = None,
         **kwargs,
     ):
         """
@@ -537,6 +525,9 @@ class PyMCModel(pm.Model):
         out_of_sample : bool, optional
             Marker for out-of-sample prediction. Reserved for subclasses;
             the base implementation does not act on it.
+        var_names : list of str or tuple of str, optional
+            Posterior predictive variables to sample. Defaults to
+            ``("y_hat", "mu")``.
         **kwargs
             Reserved for subclass extensions.
         """
@@ -547,10 +538,12 @@ class PyMCModel(pm.Model):
         # Base _data_setter doesn't use coords, but subclasses might override _data_setter to use it.
         # If a subclass needs coords in _data_setter, it should handle it.
         self._data_setter(X)
+        if var_names is None:
+            var_names = ["y_hat", "mu"]
         with self:
             pp = pm.sample_posterior_predictive(
                 self.idata,
-                var_names=["y_hat", "mu"],
+                var_names=list(var_names),
                 progressbar=False,
                 random_seed=random_seed,
             )
@@ -758,40 +751,52 @@ class GeneralizedLinearRegression(PyMCModel):
     Parameters
     ----------
     family : {"gaussian", "poisson", "negative_binomial", "bernoulli"}, optional
-        Response family. Defaults to ``"gaussian"``.
-    link : {"identity", "log", "logit"} or None, optional
-        Link function. Defaults to the canonical link for ``family``.
+        Response family. Defaults to ``"gaussian"``. The canonical inverse link
+        for the family is exposed read-only via :attr:`link`.
     sample_kwargs : dict, optional
         Keyword arguments forwarded to :func:`pymc.sample`.
     priors : dict, optional
         User priors merged over family defaults. Negative Binomial models accept
-        an ``"alpha"`` dispersion prior.
+        an ``"alpha"`` dispersion prior. Custom ``y_hat`` overrides are supported
+        only for the Gaussian family.
     """
-
-    default_priors: dict[str, Prior] = {}
 
     def __init__(
         self,
         family: FamilyName = "gaussian",
-        link: LinkName | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
     ) -> None:
-        self.family, self.link = _validate_family_link(family, link)
-        super().__init__(sample_kwargs=sample_kwargs, priors=None)
-        self._user_priors = priors
-        self.priors = {**_default_priors_for_family(self.family), **(priors or {})}
+        self._family = _validate_family(family)
+        _validate_glr_user_priors(self._family, priors)
+        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
     @property
-    def uses_identity_link(self) -> bool:
-        """Whether ``mu`` equals the linear predictor on the outcome scale."""
-        return self.family == "gaussian" and self.link == "identity"
+    def family(self) -> FamilyName:
+        """Curated response family for the built-in GLM."""
+        return self._family
+
+    @property
+    def link(self) -> LinkName:
+        """Read-only canonical inverse link for :attr:`family`."""
+        return _canonical_link_for_family(self._family)
+
+    @property
+    def default_priors(self) -> dict[str, Prior]:  # type: ignore[override]
+        """Family defaults merged with subclass ``default_priors`` overrides."""
+        defaults = dict(_default_priors_for_family(self._family))
+        for cls in type(self).__mro__:
+            if cls in (GeneralizedLinearRegression, PyMCModel, pm.Model, object):
+                continue
+            class_defaults = cls.__dict__.get("default_priors")
+            if isinstance(class_defaults, dict) and class_defaults:
+                defaults.update(class_defaults)
+        return defaults
 
     def _clone(self) -> "GeneralizedLinearRegression":
         """Create a fresh, unfitted copy with the same GLM configuration."""
         return type(self)(
-            family=self.family,
-            link=self.link,
+            family=self._family,
             sample_kwargs=dict(self.sample_kwargs),
             priors=self._user_priors,
         )
@@ -821,7 +826,7 @@ class GeneralizedLinearRegression(PyMCModel):
             beta = self.priors["beta"].create_variable("beta")
             _, mu = _build_regression_head(X_data, beta, self.link)
             _create_family_likelihood(
-                self.family,
+                self._family,
                 mu=mu,
                 y_obs=y_data,
                 priors=self.priors,
@@ -850,7 +855,7 @@ class GeneralizedLinearRegression(PyMCModel):
             Per-unit Bayesian :math:`R^2` scores for Gaussian models; ``None`` for
             non-identity families.
         """
-        if not self.uses_identity_link:
+        if self._family != "gaussian":
             return None
         return super().score(X, y, coords=coords, **kwargs)
 
@@ -901,7 +906,7 @@ class GeneralizedLinearRegression(PyMCModel):
             unit_coeffs = coeffs.sel(treated_units=unit)
             extra_rows: list[tuple[str, xr.DataArray]] = []
             posterior = self.idata.posterior
-            if self.family == "gaussian":
+            if self._family == "gaussian":
                 sigma_var_name = None
                 if "sigma" in posterior:
                     sigma_var_name = "sigma"
@@ -915,7 +920,7 @@ class GeneralizedLinearRegression(PyMCModel):
                     treated_units=unit
                 )
                 extra_rows.append(("y_hat_sigma", unit_sigma))
-            elif self.family == "negative_binomial" and "alpha" in posterior:
+            elif self._family == "negative_binomial" and "alpha" in posterior:
                 unit_alpha = az.extract(posterior, var_names="alpha").sel(
                     treated_units=unit
                 )
@@ -968,14 +973,7 @@ class LinearRegression(GeneralizedLinearRegression):
     Inference data...
     """  # noqa: W605
 
-    default_priors = {
-        "beta": Prior("Normal", mu=0, sigma=50, dims=["treated_units", "coeffs"]),
-        "y_hat": Prior(
-            "Normal",
-            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
-            dims=["obs_ind", "treated_units"],
-        ),
-    }
+    default_priors = _default_priors_for_family("gaussian")
 
     def __init__(
         self,
@@ -984,7 +982,6 @@ class LinearRegression(GeneralizedLinearRegression):
     ) -> None:
         super().__init__(
             family="gaussian",
-            link="identity",
             sample_kwargs=sample_kwargs,
             priors=priors,
         )
@@ -2482,6 +2479,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
+        var_names: list[str] | tuple[str, ...] | None = None,
         **kwargs: Any,
     ) -> az.InferenceData:
         """
@@ -2496,6 +2494,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Not used, kept for API compatibility.
         out_of_sample : bool, optional
             Not used, kept for API compatibility.
+        var_names : list of str or tuple of str, optional
+            Posterior predictive variables to sample. Defaults to
+            ``("y_hat", "mu")``.
         **kwargs
             Reserved for forward-compatibility; not consumed by this
             implementation.
@@ -2507,10 +2508,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         """
         random_seed = self.sample_kwargs.get("random_seed", None)
         self._data_setter(X)
+        if var_names is None:
+            var_names = ["y_hat", "mu"]
         with self:
             post_pred = pm.sample_posterior_predictive(
                 self.idata,
-                var_names=["y_hat", "mu"],
+                var_names=list(var_names),
                 progressbar=self.sample_kwargs.get("progressbar", False),
                 random_seed=random_seed,
             )
@@ -2875,6 +2878,7 @@ class StateSpaceTimeSeries(PyMCModel):
         X: xr.DataArray | None = None,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
+        var_names: list[str] | tuple[str, ...] | None = None,
         **kwargs: Any,
     ) -> az.InferenceData:
         """
@@ -2890,6 +2894,9 @@ class StateSpaceTimeSeries(PyMCModel):
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
             If True, forecast future values. If False, return in-sample predictions.
+        var_names : list of str or tuple of str, optional
+            Accepted for API compatibility with :class:`PyMCModel`; ignored because
+            this backend always returns ``y_hat`` and ``mu``.
         **kwargs
             Reserved for forward-compatibility; not consumed by this
             implementation.

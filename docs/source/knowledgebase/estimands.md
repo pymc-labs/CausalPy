@@ -51,9 +51,11 @@ Each CausalPy experiment class targets a specific empirical estimand and support
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Estimator**: Coefficient-based for identity-link Gaussian and OLS models. The ATT is estimated as the coefficient on the group-by-post interaction term. For non-identity :class:`~causalpy.pymc_models.GeneralizedLinearRegression` backends (for example Poisson/log), CausalPy instead averages response-scale factual minus counterfactual ``mu`` predictions on treated post-treatment rows (g-computation). CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: OLS DiD estimates the ATT as the coefficient on the group-by-post interaction term. Bayesian DiD (including identity-link :class:`~causalpy.pymc_models.LinearRegression` and :class:`~causalpy.pymc_models.GeneralizedLinearRegression`) always averages response-scale factual minus counterfactual ``mu`` predictions on treated post-treatment rows (g-computation). The ATT is a **row-weighted** average: units with more post-treatment observations contribute proportionally more to the summary.
 
-**Interpretation note**: Plots show counterfactual trajectories. For identity-link models the reported effect is the interaction coefficient; for non-identity GLMs it is a response-scale ATT summary across post-treatment treated observations.
+**Identification on the link scale**: For Poisson/log models, parallel trends apply to untreated log-mean trajectories; for Bernoulli/logit models, they apply to log-odds. Reported Bayesian DiD and PrePostNEGD effects are still **additive response-scale contrasts** (expected count or probability differences) after inverse-linking ``mu``.
+
+**Interpretation note**: Plots show counterfactual trajectories. OLS reports the interaction coefficient; Bayesian backends report a response-scale ATT averaged across treated post-treatment rows.
 
 ---
 
@@ -143,9 +145,9 @@ The descriptions above assume standard usage. Always consider what your specific
 
 | Method | Empirical Estimand | Computation |
 |--------|-------------------|-------------|
-| Difference-in-Differences | {term}`ATT` | Coefficient-based |
+| Difference-in-Differences | {term}`ATT` | OLS: coefficient-based; Bayesian: g-computation (response-scale ``mu``) |
 | Interrupted Time Series | Time-varying unit-specific impact | G-computation |
 | Synthetic Control | Time-varying unit-specific impact | G-computation |
 | Regression Discontinuity | Local treatment effect at cutoff | Prediction-based |
 
-For methods not covered in detail here (IV, IPW, ANCOVA/PrePostNEGD), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. PrePostNEGD uses the group coefficient for identity-link Gaussian models and response-scale g-computation averaged over treated units for non-identity :class:`~causalpy.pymc_models.GeneralizedLinearRegression` backends. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.
+For methods not covered in detail here (IV, IPW, ANCOVA/PrePostNEGD), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. PrePostNEGD is Bayesian-only and always uses response-scale g-computation: for each treated row it contrasts factual ``mu`` at the observed covariates with ``mu`` under control-group assignment, then averages across treated observations (row-weighted when units contribute multiple rows). Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.

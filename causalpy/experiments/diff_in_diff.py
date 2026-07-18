@@ -33,7 +33,7 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
-from causalpy.pymc_models import LinearRegression, PyMCModel, model_uses_identity_link
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _compute_statistics_did_ols,
@@ -221,17 +221,7 @@ class DifferenceInDifferences(BaseExperiment):
 
         # calculate causal impact
         if self._model_backend.is_bayesian:
-            assert self.model.idata is not None
-            if model_uses_identity_link(self.model):
-                # This is the coefficient on the interaction term
-                coeff_names = self.model.idata.posterior.coords["coeffs"].data
-                for i, label in enumerate(coeff_names):
-                    if self._is_treatment_interaction(label):
-                        self.causal_impact = self.model.idata.posterior["beta"].isel(
-                            {"coeffs": i}
-                        )
-            else:
-                self.causal_impact = self._glr_att_from_g_computation()
+            self.causal_impact = self._att_from_g_computation()
         elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
             coef_map = dict(
@@ -317,7 +307,7 @@ class DifferenceInDifferences(BaseExperiment):
                 "This interaction term identifies the difference-in-differences causal effect."
             )
 
-    def _glr_att_from_g_computation(self) -> xr.DataArray:
+    def _att_from_g_computation(self) -> xr.DataArray:
         """Response-scale ATT from treated-post factual vs counterfactual ``mu``."""
         treated_post = (
             self.data.query(f"{self.group_variable_name} == 1")
@@ -335,8 +325,12 @@ class DifferenceInDifferences(BaseExperiment):
             if self._is_treatment_interaction(label):
                 x_counter.iloc[:, i] = 0
 
-        pred_factual = self._model_backend.predict(np.asarray(x_factual))
-        pred_counter = self._model_backend.predict(np.asarray(x_counter))
+        pred_factual = self._model_backend.predict(
+            np.asarray(x_factual), var_names=["mu"]
+        )
+        pred_counter = self._model_backend.predict(
+            np.asarray(x_counter), var_names=["mu"]
+        )
         mu_factual = pred_factual.posterior_predictive["mu"]
         mu_counter = pred_counter.posterior_predictive["mu"]
         return (mu_factual - mu_counter).mean(dim="obs_ind")

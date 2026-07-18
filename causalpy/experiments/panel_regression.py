@@ -29,7 +29,7 @@ from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
-from causalpy.pymc_models import PyMCModel
+from causalpy.pymc_models import GeneralizedLinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
@@ -65,7 +65,10 @@ class PanelRegression(BaseExperiment):
           (``C(unit)``/``C(time)`` in formula). Gets individual unit effect
           estimates but creates N-1 dummy columns. Best for small N.
         - "demeaned": Use demeaned (de-meaned) transformation. Scales to large N
-          but doesn't directly estimate individual unit effects.
+          but doesn't directly estimate individual unit effects. Supported only
+          for Gaussian built-in models; non-Gaussian
+          :class:`~causalpy.pymc_models.GeneralizedLinearRegression` models
+          require ``fe_method="dummies"``.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
     **kwargs
@@ -236,6 +239,17 @@ class PanelRegression(BaseExperiment):
         if self.fe_method not in ["dummies", "demeaned"]:
             raise ValueError(
                 "fe_method must be 'dummies' (unpooled fixed effects) or 'demeaned'"
+            )
+
+        if (
+            self.fe_method == "demeaned"
+            and isinstance(self.model, GeneralizedLinearRegression)
+            and self.model.family != "gaussian"
+        ):
+            raise ValueError(
+                "fe_method='demeaned' is not supported for non-Gaussian "
+                "GeneralizedLinearRegression models. Demeaning is invalid "
+                "for discrete/count outcomes; use fe_method='dummies' instead."
             )
 
         if self.fe_method == "demeaned":

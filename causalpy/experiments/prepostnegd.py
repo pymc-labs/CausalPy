@@ -31,7 +31,7 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
-from causalpy.pymc_models import LinearRegression, PyMCModel, model_uses_identity_link
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
 from causalpy.utils import _is_variable_dummy_coded, round_num
 
@@ -183,43 +183,33 @@ class PrePostNEGD(BaseExperiment):
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
         self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
 
-        # Evaluate causal impact as equal to the treatment effect
-        if model_uses_identity_link(self.model):
-            self.causal_impact = self.model.idata.posterior["beta"].sel(
-                {"coeffs": self._get_treatment_effect_coeff()}
-            )
-        else:
-            self.causal_impact = self._glr_att_from_g_computation()
+        # Evaluate causal impact as response-scale g-computation over treated rows.
+        self.causal_impact = self._att_from_g_computation()
 
-    def _glr_att_from_g_computation(self) -> xr.DataArray:
-        """Response-scale ATT averaged over treated units at observed covariates."""
+    def _att_from_g_computation(self) -> xr.DataArray:
+        """Response-scale ATT averaged over treated observations at covariates."""
         treated = self.data[self.data[self.group_variable_name] == 1]
         if treated.empty:
             raise ValueError("No treated observations for ATT")
 
-        effects: list[xr.DataArray] = []
-        outcome_cols = [self.outcome_variable_name]
-        for _, row in treated.drop(columns=outcome_cols).iterrows():
-            row_treated = row.copy()
-            row_treated[self.group_variable_name] = 1
-            row_control = row.copy()
-            row_control[self.group_variable_name] = 0
+        treated_covariates = treated.drop(columns=[self.outcome_variable_name])
+        x_treated_df = treated_covariates.assign(**{self.group_variable_name: 1})
+        x_control_df = treated_covariates.assign(**{self.group_variable_name: 0})
 
-            (x_treated,) = build_design_matrices(
-                [self._x_design_info], pd.DataFrame([row_treated])
-            )
-            (x_control,) = build_design_matrices(
-                [self._x_design_info], pd.DataFrame([row_control])
-            )
-            mu_treated = self.model.predict(
-                X=np.asarray(x_treated)
-            ).posterior_predictive["mu"]
-            mu_control = self.model.predict(
-                X=np.asarray(x_control)
-            ).posterior_predictive["mu"]
-            effects.append((mu_treated - mu_control).squeeze("obs_ind"))
+        (x_treated,) = build_design_matrices(
+            [self._x_design_info], x_treated_df, return_type="dataframe"
+        )
+        (x_control,) = build_design_matrices(
+            [self._x_design_info], x_control_df, return_type="dataframe"
+        )
 
-        return xr.concat(effects, dim="treated_obs").mean(dim="treated_obs")
+        mu_treated = self._model_backend.predict(
+            np.asarray(x_treated), var_names=["mu"]
+        ).posterior_predictive["mu"]
+        mu_control = self._model_backend.predict(
+            np.asarray(x_control), var_names=["mu"]
+        ).posterior_predictive["mu"]
+        return (mu_treated - mu_control).mean(dim="obs_ind")
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -230,19 +220,6 @@ class PrePostNEGD(BaseExperiment):
                 {self.group_variable_name}. I.e. the treated and untreated.
                 """
             )
-
-    def _get_treatment_effect_coeff(self) -> str:
-        """Find the beta regression coefficient corresponding to the
-        group (i.e. treatment) effect.
-        For example if self.group_variable_name is 'group' and
-        the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
-        then we want `C(group)[T.1]`.
-        """
-        for label in self.labels:
-            if (self.group_variable_name in label) & (":" not in label):
-                return label
-
-        raise NameError("Unable to find coefficient name for the treatment effect")
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""

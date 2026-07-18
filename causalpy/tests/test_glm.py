@@ -15,11 +15,13 @@
 
 from __future__ import annotations
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices, dmatrix
 from pymc_extras.prior import Prior
 
 import causalpy as cp
@@ -32,12 +34,85 @@ from causalpy.pymc_models import (
     GeneralizedLinearRegression,
     LinearRegression,
     PyMCModel,
-    _validate_family_link,
-    model_uses_identity_link,
+    _validate_family,
 )
 from causalpy.tests.conftest import setup_regression_kink_data
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
+
+
+class FixedMuRegression(PyMCModel):
+    """Deterministic response-scale ``mu`` for g-computation estimand tests."""
+
+    def __init__(
+        self,
+        column_weights: dict[int, float],
+        *,
+        link: str = "log",
+    ) -> None:
+        super().__init__()
+        self.column_weights = column_weights
+        self.link = link
+        self.predict_calls: list[dict[str, object]] = []
+
+    def build_model(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict | None
+    ) -> None:
+        with self:
+            pass
+
+    def fit(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict | None = None
+    ) -> az.InferenceData:
+        self.idata = az.from_dict(posterior={"beta": np.array([[[1.0]]])})
+        return self.idata
+
+    def predict(
+        self,
+        X: xr.DataArray,
+        coords: dict | None = None,
+        out_of_sample: bool | None = False,
+        var_names: list[str] | tuple[str, ...] | None = None,
+        **kwargs,
+    ):
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit")
+        x_arr = np.asarray(X)
+        self.predict_calls.append(
+            {"n_obs": x_arr.shape[0], "var_names": list(var_names or [])}
+        )
+        eta = np.zeros(x_arr.shape[0], dtype=float)
+        for col_idx, weight in self.column_weights.items():
+            eta += x_arr[:, col_idx] * weight
+        if self.link == "log":
+            mu = np.exp(eta)
+        elif self.link == "identity":
+            mu = eta
+        else:
+            raise ValueError(f"Unsupported link {self.link!r}")
+        mu = mu[:, np.newaxis]
+        mu_da = xr.DataArray(
+            mu[np.newaxis, np.newaxis, :, :],
+            dims=["chain", "draw", "obs_ind", "treated_units"],
+            coords={
+                "chain": [0],
+                "draw": [0],
+                "obs_ind": np.arange(mu.shape[0]),
+                "treated_units": ["unit_0"],
+            },
+        )
+        return az.InferenceData(posterior_predictive=xr.Dataset({"mu": mu_da}))
+
+
+def _expected_log_link_att(
+    factual: np.ndarray, counter: np.ndarray, column_weights: dict[int, float]
+) -> float:
+    eta_f = np.zeros(factual.shape[0], dtype=float)
+    eta_c = np.zeros(counter.shape[0], dtype=float)
+    for col_idx, weight in column_weights.items():
+        eta_f += factual[:, col_idx] * weight
+        eta_c += counter[:, col_idx] * weight
+    return float(np.mean(np.exp(eta_f) - np.exp(eta_c)))
 
 
 def _poisson_glr(
@@ -84,16 +159,11 @@ def _design_matrix(
 
 
 @pytest.mark.parametrize(
-    ("family", "link"),
-    [
-        ("gaussian", "identity"),
-        ("poisson", "log"),
-        ("negative_binomial", "log"),
-        ("bernoulli", "logit"),
-    ],
+    "family",
+    ["gaussian", "poisson", "negative_binomial", "bernoulli"],
 )
-def test_glr_canonical_family_link_pairs(family, link, rng, mock_pymc_sample):
-    """Each curated family/link pair builds ``eta``, ``mu``, and ``y_hat``."""
+def test_glr_canonical_family_link_pairs(family, rng, mock_pymc_sample):
+    """Each curated family builds ``eta``, ``mu``, and ``y_hat`` with its canonical link."""
     n_obs = 12
     X = _design_matrix(n_obs, rng)
     if family == "bernoulli":
@@ -117,10 +187,18 @@ def test_glr_canonical_family_link_pairs(family, link, rng, mock_pymc_sample):
     )
     model = GeneralizedLinearRegression(
         family=family,
-        link=link,
         sample_kwargs={**sample_kwargs, "random_seed": 1},
     )
     model.fit(X, y, _single_unit_coords(n_obs))
+    assert (
+        model.link
+        == {
+            "gaussian": "identity",
+            "poisson": "log",
+            "negative_binomial": "log",
+            "bernoulli": "logit",
+        }[family]
+    )
     pred = model.predict(X)
     assert "eta" in model.named_vars
     assert "mu" in model.named_vars
@@ -129,18 +207,60 @@ def test_glr_canonical_family_link_pairs(family, link, rng, mock_pymc_sample):
     assert pred.posterior_predictive["mu"].dims[-2:] == ("obs_ind", "treated_units")
 
 
-@pytest.mark.parametrize(
-    ("family", "link"),
-    [
-        ("poisson", "identity"),
-        ("gaussian", "log"),
-        ("bernoulli", "log"),
-    ],
-)
-def test_glr_rejects_non_canonical_pairs(family, link):
-    """Only canonical family/link pairings are accepted."""
-    with pytest.raises(ValueError, match="Invalid family/link pair"):
-        GeneralizedLinearRegression(family=family, link=link)
+def test_glr_rejects_unknown_family():
+    """Unknown families are rejected at construction time."""
+    with pytest.raises(ValueError, match="Unsupported family"):
+        GeneralizedLinearRegression(family="gamma")  # type: ignore[arg-type]
+
+
+def test_glr_rejects_y_hat_prior_for_non_gaussian():
+    """Non-Gaussian GLRs reject custom observation priors."""
+    with pytest.raises(ValueError, match="y_hat"):
+        GeneralizedLinearRegression(
+            family="poisson",
+            priors={"y_hat": Prior("Normal", mu=0, sigma=1)},
+        )
+
+
+def test_glr_gaussian_allows_y_hat_prior_override():
+    """Gaussian GLRs keep ``y_hat`` customization for ``LinearRegression`` parity."""
+    model = GeneralizedLinearRegression(
+        family="gaussian",
+        priors={"y_hat": Prior("Normal", sigma=2.0, dims=["obs_ind", "treated_units"])},
+    )
+    assert "y_hat" in model.priors
+
+
+class _CustomPoissonGLR(GeneralizedLinearRegression):
+    default_priors = {
+        "beta": Prior("Normal", mu=1.0, sigma=0.25, dims=["treated_units", "coeffs"]),
+    }
+
+
+def test_glr_subclass_default_priors_override():
+    """Subclass ``default_priors`` merge into family defaults."""
+    model = _CustomPoissonGLR(family="poisson")
+    assert model.default_priors["beta"].parameters["mu"] == 1.0
+    assert model.default_priors["beta"].parameters["sigma"] == 0.25
+
+
+def test_glr_predict_mu_only(rng, mock_pymc_sample):
+    """``predict(..., var_names=['mu'])`` returns only requested variables."""
+    n_obs = 10
+    X = _design_matrix(n_obs, rng)
+    rate = np.exp(X.data @ np.array([[0.1, 0.2]]).T)
+    y = xr.DataArray(
+        rng.poisson(np.clip(rate, 0.1, None)).astype(float),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(
+        family="poisson",
+        sample_kwargs={**sample_kwargs, "random_seed": 3},
+    )
+    model.fit(X, y, _single_unit_coords(n_obs))
+    pred = model.predict(X, var_names=["mu"])
+    assert list(pred.posterior_predictive.data_vars) == ["mu"]
 
 
 def test_glr_default_link_is_canonical():
@@ -216,7 +336,6 @@ def test_linear_regression_clone_stays_gaussian_identity():
     assert isinstance(cloned, LinearRegression)
     assert cloned.family == "gaussian"
     assert cloned.link == "identity"
-    assert model_uses_identity_link(cloned)
 
 
 def test_glr_negative_binomial_alpha_prior(rng, mock_pymc_sample):
@@ -250,6 +369,100 @@ def _poisson_did_data(rng: np.random.Generator) -> pd.DataFrame:
     eta = 1.0 + 1.2 * df["group"].astype(float) * df["post_treatment"].astype(float)
     df["y"] = rng.poisson(np.exp(eta))
     return df
+
+
+def test_poisson_did_att_exact_g_computation():
+    """DiD ATT matches a hand-computed response-scale contrast."""
+    df = pd.DataFrame(
+        {
+            "group": [0, 0, 0, 0, 1, 1, 1, 1],
+            "t": [0, 0, 1, 1, 0, 0, 1, 1],
+            "unit": np.arange(8),
+            "post_treatment": [False, False, True, True, False, False, True, True],
+            "g_post": np.arange(8, dtype=float),
+            "y": np.ones(8),
+        }
+    )
+    design = dmatrix(
+        "1 + post_treatment*group + g_post",
+        df,
+        return_type="dataframe",
+    )
+    labels = list(design.design_info.column_names)
+    weights = {
+        labels.index("post_treatment[T.True]:group"): np.log(2.0),
+        labels.index("g_post"): 0.4,
+    }
+    model = FixedMuRegression(weights, link="log")
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + post_treatment*group + g_post",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=model,
+    )
+    treated_post = df.query("group == 1 and post_treatment")
+    (x_factual,) = build_design_matrices(
+        [result._x_design_info],
+        treated_post.drop(columns=["y"]),
+        return_type="dataframe",
+    )
+    x_counter = x_factual.copy()
+    for i, label in enumerate(result.labels):
+        if result._is_treatment_interaction(label):
+            x_counter.iloc[:, i] = 0
+    expected = _expected_log_link_att(
+        np.asarray(x_factual), np.asarray(x_counter), weights
+    )
+    assert float(result.causal_impact.mean()) == pytest.approx(expected)
+    assert "coeffs" not in result.causal_impact.dims
+
+
+def test_poisson_prepostnegd_att_exact_g_computation():
+    """PrePostNEGD uses two bulk ``mu`` predictions and an interaction-aware ATT."""
+    df = pd.DataFrame(
+        {
+            "group": [1, 1, 1, 0, 0, 0],
+            "pre": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
+            "post": np.ones(6),
+        }
+    )
+    design = dmatrix(
+        "1 + C(group) + pre + C(group):pre",
+        df,
+        return_type="dataframe",
+    )
+    labels = list(design.design_info.column_names)
+    weights = {
+        labels.index("C(group)[T.1]"): 0.2,
+        labels.index("C(group)[T.1]:pre"): 0.5,
+        labels.index("pre"): 0.1,
+    }
+    model = FixedMuRegression(weights, link="log")
+    result = cp.PrePostNEGD(
+        df,
+        formula="post ~ 1 + C(group) + pre + C(group):pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=model,
+    )
+    treated = df[df["group"] == 1]
+    x_treated_df = treated.assign(group=1)
+    x_control_df = treated.assign(group=0)
+    (x_treated,) = build_design_matrices(
+        [result._x_design_info], x_treated_df, return_type="dataframe"
+    )
+    (x_control,) = build_design_matrices(
+        [result._x_design_info], x_control_df, return_type="dataframe"
+    )
+    expected = _expected_log_link_att(
+        np.asarray(x_treated), np.asarray(x_control), weights
+    )
+    assert float(result.causal_impact.mean()) == pytest.approx(expected)
+    mu_calls = [call for call in model.predict_calls if call["var_names"] == ["mu"]]
+    assert len(mu_calls) == 2
+    assert mu_calls[0]["n_obs"] == len(treated)
+    assert mu_calls[1]["n_obs"] == len(treated)
 
 
 def test_poisson_did_att_uses_g_computation(mock_pymc_sample, rng):
@@ -318,7 +531,7 @@ def test_poisson_rk_plot_without_score(mock_pymc_sample, rng):
 
 
 def test_poisson_piecewise_its_smoke(mock_pymc_sample, rng):
-    """Piecewise ITS runs with Poisson GLR and response-scale impact."""
+    """Piecewise ITS runs with Poisson GLR and active interruption terms."""
     df, _ = generate_piecewise_its_data(
         N=80,
         interruption_times=[40],
@@ -327,11 +540,16 @@ def test_poisson_piecewise_its_smoke(mock_pymc_sample, rng):
         noise_sigma=0.1,
         seed=3,
     )
+    interruption = 40 / df["t"].max()
     df["t"] = df["t"] / df["t"].max()
     df["y"] = rng.poisson(np.clip(np.exp(-0.5 + 0.2 * df["t"]), 0.1, 10.0))
+    step_col = (df["t"] >= interruption).astype(float)
+    ramp_col = np.clip(df["t"] - interruption, 0.0, None)
+    assert step_col.sum() > 0
+    assert ramp_col.max() > 0
     result = cp.PiecewiseITS(
         df,
-        formula="y ~ 1 + t + step(t, 40) + ramp(t, 40)",
+        formula=f"y ~ 1 + t + step(t, {interruption}) + ramp(t, {interruption})",
         model=_poisson_glr(
             random_seed=23,
             priors={
@@ -367,63 +585,10 @@ def test_poisson_staggered_did_smoke(mock_pymc_sample, rng):
     assert isinstance(result, cp.StaggeredDifferenceInDifferences)
 
 
-def _make_poisson_its_data(
-    n: int = 120, effect: float = 3.0, seed: int = 21
-) -> tuple[pd.DataFrame, int, float]:
-    rng = np.random.default_rng(seed)
-    treatment_time = 90
-    t = np.arange(n) / max(n - 1, 1)
-    post = (np.arange(n) >= treatment_time).astype(float)
-    lam = np.maximum(1.0 + 0.5 * t + effect * post, 0.1)
-    return (
-        pd.DataFrame({"t": t, "y": rng.poisson(lam)}),
-        treatment_time,
-        effect,
-    )
-
-
-def test_poisson_its_recovers_simulated_effect(mock_pymc_sample):
-    """Poisson ITS exposes count-scale cumulative impact on the post period."""
-    effect = 3.0
-    df, treatment_time, _ = _make_poisson_its_data(effect=effect)
-    post_mean = df.loc[df.index >= treatment_time, "y"].mean()
-    pre_mean = df.loc[df.index < treatment_time, "y"].mean()
-    assert post_mean > pre_mean
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t",
-        model=_poisson_glr(
-            random_seed=31,
-            priors={
-                "beta": Prior(
-                    "Normal", mu=0, sigma=0.1, dims=["treated_units", "coeffs"]
-                ),
-            },
-        ),
-    )
-    cumulative = result.post_impact_cumulative
-    if "treated_units" in cumulative.dims:
-        cumulative = cumulative.isel(treated_units=0)
-    assert cumulative.dims[-1] == "obs_ind"
-    assert np.isfinite(float(cumulative.isel(obs_ind=-1).mean()))
-
-
-def test_validate_family_link_rejects_unknown_family():
-    """Unknown families are rejected at construction time."""
+def test_validate_family_rejects_unknown_family():
+    """Unknown families are rejected by the shared validator."""
     with pytest.raises(ValueError, match="Unsupported family"):
-        _validate_family_link("gamma", None)
-
-
-def test_validate_family_link_rejects_unknown_link():
-    """Unknown links are rejected before family pairing checks."""
-    with pytest.raises(ValueError, match="Unsupported link"):
-        _validate_family_link("gaussian", "probit")
-
-
-def test_model_uses_identity_link_defaults_to_true_for_legacy_models():
-    """Models without ``uses_identity_link`` are treated as identity-link."""
-    assert model_uses_identity_link(PyMCModel()) is True
+        _validate_family("gamma")
 
 
 def test_glr_build_model_adds_default_treated_units_coord(rng, mock_pymc_sample):
