@@ -42,12 +42,15 @@ causalpy[forecast]``).
 
 Notes
 -----
-Causal impact is computed from the noise-free latent predictor (upstream
-``mu`` / ``mu_future``), exactly like the native ``PyMCModel`` backends:
-parameter and latent uncertainty, excluding observation-level noise. The
-draw-level posterior predictive of the observed variable is reported
-separately as ``y_hat``. One posterior subsample is drawn at fit time and
-shared by every predictive call, so draw *i* of the pre-period fit and draw
+Causal impact is computed from upstream ``mu`` / ``mu_future``, which CausalPy
+interprets as the conditional expected outcome in observed outcome units:
+parameter and latent uncertainty, excluding observation-level noise. Models
+using a link function must therefore apply the inverse link before passing the
+latent to ``pymc_forecast.predict``. Passing a link-scale linear predictor
+would make CausalPy subtract quantities in incompatible units and is not
+supported. The draw-level posterior predictive of the observed variable is
+reported separately as ``y_hat``. One posterior subsample is drawn at fit time
+and shared by every predictive call, so draw *i* of the pre-period fit and draw
 *i* of the counterfactual come from the same parameter draw (upstream
 ``posterior=`` passthrough).
 
