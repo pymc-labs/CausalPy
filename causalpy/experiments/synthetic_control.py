@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
+from pymc_extras.prior import Prior
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -32,7 +33,11 @@ from causalpy.plot_utils import (
     get_hdi_to_df,
     plot_posterior_over_x,
 )
-from causalpy.pymc_models import PyMCModel, WeightedSumFitter
+from causalpy.pymc_models import (
+    PyMCModel,
+    SoftmaxWeightedSumFitter,
+    WeightedSumFitter,
+)
 from causalpy.reporting import EffectSummary
 from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
 
@@ -59,6 +64,15 @@ class SyntheticControl(BaseExperiment):
         treated unit in the pre-treatment period. Control units below this
         threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
         negatively correlated donors).
+    auto_scale_sigma : bool, default True
+        If ``True`` (default) and the model is a ``WeightedSumFitter`` or
+        ``SoftmaxWeightedSumFitter`` whose ``y_hat`` prior has not been
+        explicitly overridden, the ``sigma ~ HalfNormal(1)`` default prior is
+        replaced by ``sigma ~ Exponential(2/s)``. The scale is computed per
+        treated unit, with *s* the standard deviation of that unit's
+        pre-treatment data, so units on different scales are each calibrated
+        separately. Set to ``False`` to use the original ``HalfNormal(1)``
+        default.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
@@ -109,6 +123,7 @@ class SyntheticControl(BaseExperiment):
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
+        auto_scale_sigma: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
@@ -120,6 +135,7 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        self.auto_scale_sigma = auto_scale_sigma
         if self._model_backend.is_ols and len(treated_units) > 1:
             raise ValueError(
                 "OLS/sklearn synthetic control supports only a single treated "
@@ -286,6 +302,34 @@ class SyntheticControl(BaseExperiment):
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
+        # Auto-scale the sigma prior if the user didn't customize it
+        if (
+            self.auto_scale_sigma
+            and isinstance(self.model, (WeightedSumFitter, SoftmaxWeightedSumFitter))
+            and (
+                self.model._user_priors is None
+                or "y_hat" not in self.model._user_priors
+            )
+        ):
+            # Per-unit pre-treatment standard deviation of the treated series, so
+            # each treated unit gets a sigma prior scaled to its own outcome.
+            y_std = self.pre_design["treated"].std(dim="obs_ind", ddof=1)
+            if not np.all(np.isfinite(y_std.values)) or np.any(y_std.values == 0):
+                raise ValueError(
+                    "Cannot auto-scale the sigma prior: the pre-treatment standard "
+                    "deviation of one or more treated units is zero or undefined "
+                    "(e.g. a constant pre-treatment series, or only a single "
+                    "pre-treatment observation). Pass auto_scale_sigma=False or "
+                    "supply an explicit y_hat prior on the model."
+                )
+            self.model.priors["y_hat"] = Prior(
+                "Normal",
+                sigma=Prior(
+                    "Exponential", lam=(2 / y_std).values, dims=["treated_units"]
+                ),
+                dims=["obs_ind", "treated_units"],
+            )
+
         # fit the model to the observed (pre-intervention) data
         self._model_backend.fit(
             X=self.pre_design["control"],
