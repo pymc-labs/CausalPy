@@ -211,7 +211,7 @@ We recommend that your contribution complies with the following guidelines befor
     make test
     ```
 
-- For pull requests that change Python source or tests, also run the local patch coverage gate before pushing:
+- For pull requests that change Python source or tests, run the local patch coverage gate before marking the PR ready for review or pushing for CI (not on every commit — it runs the full suite):
 
     ```bash
     make test-patch-cov
