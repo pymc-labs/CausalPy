@@ -217,7 +217,7 @@ We recommend that your contribution complies with the following guidelines befor
     make test-patch-cov
     ```
 
-    This runs the test suite with coverage, writes `coverage.xml`, and uses `diff-cover` to fail when changed lines fall below the local patch threshold. The compare branch defaults to `upstream/main` when that tracking branch exists and falls back to `origin/main` otherwise. If your branch targets a different base, set `DIFF_COVER_COMPARE_BRANCH`, for example `DIFF_COVER_COMPARE_BRANCH=upstream/release make test-patch-cov`.
+    This runs the test suite with coverage, writes `coverage.xml`, and uses `diff-cover` to fail when changed lines in production code (excluding `causalpy/tests/*`) fall below the local patch threshold (default 96%, aligned with Codecov’s patch gate). The compare branch defaults to `upstream/main` when that tracking branch exists and falls back to `origin/main` otherwise. If your branch targets a different base, set `DIFF_COVER_COMPARE_BRANCH`, for example `DIFF_COVER_COMPARE_BRANCH=upstream/release make test-patch-cov`.
 
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
 

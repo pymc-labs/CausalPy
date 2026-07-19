@@ -81,7 +81,7 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
-- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
+- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. The gate measures **production code only** (`causalpy/tests/*` excluded) at **96%** so it tracks Codecov’s patch status more closely than counting test-file lines. Override `DIFF_COVER_COMPARE_BRANCH`, `DIFF_COVER_FAIL_UNDER`, or `DIFF_COVER_EXCLUDE` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards

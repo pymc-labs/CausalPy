@@ -18,6 +18,7 @@ from __future__ import annotations
 import arviz as az
 import numpy as np
 import pandas as pd
+import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -34,6 +35,7 @@ from causalpy.pymc_models import (
     GeneralizedLinearRegression,
     LinearRegression,
     PyMCModel,
+    _create_family_likelihood,
     _validate_family,
 )
 from causalpy.tests.conftest import setup_regression_kink_data
@@ -237,11 +239,39 @@ class _CustomPoissonGLR(GeneralizedLinearRegression):
     }
 
 
+class _CustomPoissonGLRMixin:
+    default_priors = {
+        "beta": Prior("Normal", mu=1.0, sigma=0.25, dims=["treated_units", "coeffs"]),
+    }
+
+
+class _MergedPoissonGLR(_CustomPoissonGLRMixin, GeneralizedLinearRegression):
+    """Mixin supplies class defaults; property merge is accessed explicitly."""
+
+
 def test_glr_subclass_default_priors_override():
     """Subclass ``default_priors`` merge into family defaults."""
     model = _CustomPoissonGLR(family="poisson")
     assert model.default_priors["beta"].parameters["mu"] == 1.0
     assert model.default_priors["beta"].parameters["sigma"] == 0.25
+
+
+def test_glr_default_priors_property_merges_mro_class_defaults():
+    """The GLR ``default_priors`` property merges non-empty MRO class dicts."""
+    model = _MergedPoissonGLR(family="poisson")
+    priors = GeneralizedLinearRegression.default_priors.__get__(
+        model, _MergedPoissonGLR
+    )
+    assert priors["beta"].parameters["mu"] == 1.0
+    assert "y_hat" in priors
+
+
+def test_linear_regression_default_priors_merge_class_attribute():
+    """``LinearRegression`` class-level defaults merge through the GLR property."""
+    model = LinearRegression()
+    priors = GeneralizedLinearRegression.default_priors.__get__(model, LinearRegression)
+    assert "beta" in priors
+    assert "y_hat" in priors
 
 
 def test_glr_predict_mu_only(rng, mock_pymc_sample):
@@ -675,3 +705,128 @@ def test_glr_print_coefficients_without_sigma(capsys, rng, mock_pymc_sample):
     model.print_coefficients(["x0", "x1"])
     captured = capsys.readouterr().out
     assert "y_hat_sigma" not in captured
+
+
+def test_create_family_likelihood_nb_scalar_alpha_fallback():
+    """NB likelihood uses a scalar ``alpha`` when no dispersion prior is supplied."""
+    priors = {"y_hat": Prior("NegativeBinomial", dims=["obs_ind", "treated_units"])}
+    coords = {"obs_ind": np.arange(4), "treated_units": ["unit_0"]}
+    with pm.Model(coords=coords) as model:
+        mu = pm.Data("mu", np.ones((4, 1)), dims=["obs_ind", "treated_units"])
+        y_obs = pm.Data("y", np.ones((4, 1)), dims=["obs_ind", "treated_units"])
+        _create_family_likelihood(
+            "negative_binomial", mu=mu, y_obs=y_obs, priors=priors
+        )
+    assert "y_hat" in model.named_vars
+
+
+def test_glr_print_coefficients_multi_unit_header(capsys, rng, mock_pymc_sample):
+    """Gaussian summaries print a header when multiple treated units are present."""
+    n_obs = 8
+    X = _design_matrix(n_obs, rng)
+    y = xr.DataArray(
+        rng.normal(size=(n_obs, 2)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0", "unit_1"]},
+    )
+    coords = {
+        "obs_ind": np.arange(n_obs),
+        "coeffs": ["x0", "x1"],
+        "treated_units": ["unit_0", "unit_1"],
+    }
+    model = GeneralizedLinearRegression(
+        family="gaussian",
+        sample_kwargs={**sample_kwargs, "random_seed": 45},
+    )
+    model.fit(X, y, coords)
+    model.print_coefficients(["x0", "x1"])
+    captured = capsys.readouterr().out
+    assert "Treated unit: unit_0" in captured
+    assert "Treated unit: unit_1" in captured
+
+
+def test_glr_print_coefficients_reads_sigma_variable(capsys, rng, mock_pymc_sample):
+    """Gaussian summaries accept a legacy ``sigma`` posterior variable name."""
+    n_obs = 8
+    X = _design_matrix(n_obs, rng)
+    y = xr.DataArray(
+        rng.normal(size=(n_obs, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(
+        family="gaussian",
+        sample_kwargs={**sample_kwargs, "random_seed": 49},
+    )
+    model.fit(X, y, _single_unit_coords(n_obs))
+    idata = model.idata.copy()
+    posterior = idata.posterior.rename({"y_hat_sigma": "sigma"})
+    idata.posterior = posterior
+    model.idata = idata
+    model.print_coefficients(["x0", "x1"])
+    assert "y_hat_sigma" in capsys.readouterr().out
+
+
+def test_glr_print_coefficients_requires_sigma_variable(rng, mock_pymc_sample):
+    """Gaussian summaries error when neither ``sigma`` nor ``y_hat_sigma`` exist."""
+    n_obs = 8
+    X = _design_matrix(n_obs, rng)
+    y = xr.DataArray(
+        rng.normal(size=(n_obs, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(
+        family="gaussian",
+        sample_kwargs={**sample_kwargs, "random_seed": 48},
+    )
+    model.fit(X, y, _single_unit_coords(n_obs))
+    idata = model.idata.copy()
+    idata.posterior = idata.posterior.drop_vars(["y_hat_sigma"], errors="ignore")
+    model.idata = idata
+    with pytest.raises(ValueError, match="Neither 'sigma' nor 'y_hat_sigma'"):
+        model.print_coefficients(["x0", "x1"])
+
+
+def test_fixed_mu_regression_identity_link_and_guardrails():
+    """Deterministic test double supports identity link and fit/predict guards."""
+    model = FixedMuRegression({0: 2.0}, link="identity")
+    X = xr.DataArray(
+        [[1.0]], dims=["obs_ind", "coeffs"], coords={"obs_ind": [0], "coeffs": ["x0"]}
+    )
+    with pytest.raises(RuntimeError, match="Model has not been fit"):
+        model.predict(X)
+    model.fit(X, xr.DataArray([[1.0]], dims=["obs_ind", "treated_units"]))
+    bad = FixedMuRegression({0: 1.0}, link="logit")
+    bad.fit(X, xr.DataArray([[1.0]], dims=["obs_ind", "treated_units"]))
+    with pytest.raises(ValueError, match="Unsupported link"):
+        bad.predict(X)
+
+
+def test_did_att_requires_treated_post_rows():
+    """DiD g-computation rejects designs with no treated post-treatment rows."""
+    experiment = object.__new__(cp.DifferenceInDifferences)
+    experiment.group_variable_name = "group"
+    experiment.post_treatment_variable_name = "post_treatment"
+    experiment.outcome_variable_name = "y"
+    experiment.data = pd.DataFrame(
+        {
+            "group": [0, 0, 1, 1],
+            "post_treatment": [False, True, False, False],
+            "y": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    with pytest.raises(ValueError, match="No treated post-treatment observations"):
+        experiment._att_from_g_computation()
+
+
+def test_prepost_att_requires_treated_rows():
+    """PrePostNEGD g-computation rejects designs with no treated rows."""
+    experiment = object.__new__(cp.PrePostNEGD)
+    experiment.group_variable_name = "group"
+    experiment.outcome_variable_name = "post"
+    experiment.data = pd.DataFrame(
+        {"group": [0, 0], "pre": [1.0, 2.0], "post": [1.0, 2.0]}
+    )
+    with pytest.raises(ValueError, match="No treated observations"):
+        experiment._att_from_g_computation()
