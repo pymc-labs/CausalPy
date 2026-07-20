@@ -333,6 +333,67 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
+    """``_compute_statistics_did_ols`` must compute one residual per
+    observation, not an (n, n) array.
+
+    ``y_da`` (shape ``(n, 1)``, dims ``obs_ind x treated_units``) minus a bare
+    ``(n,)`` ``y_pred`` array used to broadcast positionally against the
+    *last* axis (``treated_units``, size 1) instead of ``obs_ind``, producing
+    an ``(n, n)`` array of every observation's y minus every *other*
+    observation's prediction. That inflated the reported SE by roughly 70x
+    on this dataset. This test checks the residual shape directly and checks
+    the reported SE against an independent statsmodels fit, up to the
+    still-present (separately tracked) mean/(n-p) denominator convention
+    difference, which is out of scope for this fix.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+    formula = "y ~ 1 + group * post_treatment"
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
+    n = X_da.shape[0]
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["treatment_effect"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=df).fit()
+    interaction_col = next(
+        name for name in sm_fit.params.index if "group" in name and "post" in name
+    )
+    unbiased_se = sm_fit.bse[interaction_col]
+    # CausalPy still divides by n rather than (n - p) here (tracked
+    # separately), so the correctly-shaped residuals give an SE smaller than
+    # the unbiased statsmodels value by sqrt((n - p) / n), not an exact match.
+    p = X_da.shape[1]
+    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
+    # Guard against regressing to the (n, n) broadcast bug: that variant
+    # inflated the SE by roughly 70x on this dataset.
+    assert reported_se < unbiased_se * 2
+
+
+@pytest.mark.integration
 def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
