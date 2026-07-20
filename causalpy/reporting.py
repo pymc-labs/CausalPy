@@ -1664,10 +1664,12 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
 
     # Calculate standard error from model residuals
     residuals = _point_residuals(result)
-    mse = np.mean(residuals**2)
     X_da = result.design["X"]
     n, p = X_da.shape
     df = n - p
+    # Unbiased estimator of the residual variance: SSR / (n - p), consistent
+    # with the degrees of freedom used below for the t-distribution.
+    mse = np.sum(residuals**2) / df
 
     # Find the treated coefficient index
     coeff_idx = None
