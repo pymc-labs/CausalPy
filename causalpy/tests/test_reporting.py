@@ -335,17 +335,19 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
 @pytest.mark.integration
 def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
     """``_compute_statistics_did_ols`` must compute one residual per
-    observation, not an (n, n) array.
+    observation, not an (n, n) array, and use the unbiased SSR/(n-p)
+    estimator of the residual variance (matching the ``df = n - p`` already
+    used for the t-distribution critical value).
 
     ``y_da`` (shape ``(n, 1)``, dims ``obs_ind x treated_units``) minus a bare
     ``(n,)`` ``y_pred`` array used to broadcast positionally against the
     *last* axis (``treated_units``, size 1) instead of ``obs_ind``, producing
     an ``(n, n)`` array of every observation's y minus every *other*
-    observation's prediction. That inflated the reported SE by roughly 70x
-    on this dataset. This test checks the residual shape directly and checks
-    the reported SE against an independent statsmodels fit, up to the
-    still-present (separately tracked) mean/(n-p) denominator convention
-    difference, which is out of scope for this fix.
+    observation's prediction; that inflated the reported SE by roughly 70x
+    on this dataset. Separately, the residual variance was estimated as
+    SSR/n (biased) rather than SSR/(n-p) (unbiased). With both bugs fixed,
+    the reported SE/CI should match an independent statsmodels OLS fit
+    almost exactly, not just up to some remaining conversion factor.
     """
     from sklearn.linear_model import LinearRegression
 
@@ -378,19 +380,27 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
         name for name in sm_fit.params.index if "group" in name and "post" in name
     )
     unbiased_se = sm_fit.bse[interaction_col]
-    # CausalPy still divides by n rather than (n - p) here (tracked
-    # separately), so the correctly-shaped residuals give an SE smaller than
-    # the unbiased statsmodels value by sqrt((n - p) / n), not an exact match.
-    p = X_da.shape[1]
-    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+    expected_ci_lower, expected_ci_upper = sm_fit.conf_int(alpha=0.05).loc[
+        interaction_col
+    ]
 
-    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - X_da.shape[1])
     reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
 
-    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
-    # Guard against regressing to the (n, n) broadcast bug: that variant
-    # inflated the SE by roughly 70x on this dataset.
-    assert reported_se < unbiased_se * 2
+    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
+    assert row["ci_lower"] == pytest.approx(expected_ci_lower, rel=1e-6)
+    assert row["ci_upper"] == pytest.approx(expected_ci_upper, rel=1e-6)
+    # Guard against regressing to either the (n, n) broadcast bug (~70x
+    # inflation) or the biased SSR/n denominator (~5% understatement).
+    biased_mse = np.mean(residuals**2)
+    XtX_inv = np.linalg.inv(np.asarray(X_da).T @ np.asarray(X_da))
+    coeff_idx = next(
+        i
+        for i, label in enumerate(result.labels)
+        if "group" in label and "post_treatment" in label and ":" in label
+    )
+    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
+    assert reported_se != pytest.approx(biased_se, rel=1e-3)
 
 
 @pytest.mark.integration
