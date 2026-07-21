@@ -44,13 +44,13 @@ How is the causal estimand extracted?
 These categories can be algebraically equivalent in special cases. In the standard identity-link additive OLS Difference-in-Differences model, the group-by-post interaction coefficient is exactly the corresponding predicted treated-versus-counterfactual contrast. Coefficient extraction and prediction-based estimation are therefore computational descriptions, not necessarily disjoint estimators.
 :::
 
+This page focuses on the concepts that remain stable across implementations. The exact extraction procedure used by each CausalPy backend is documented with its experiment class in the {doc}`../api/index`.
+
 The connection between theoretical and empirical estimands requires **identification assumptions**---claims about the data-generating process that cannot be tested from data alone. These assumptions are often formalized using Directed Acyclic Graphs (DAGs). See {doc}`quasi_dags` for DAG-based identification strategies for each quasi-experimental method.
 
 The **structure of available data** also constrains which empirical estimands are even *candidates*. Panel data with treated and control groups makes the ATT a candidate; a single time series restricts you to unit-specific impacts; data with a threshold-based assignment mechanism makes local effects at the cutoff a possibility. But data structure alone does not guarantee credibility---the identification assumptions must also be defensible. The choice of empirical estimand is thus jointly determined by the research question, the available data, and the assumptions one is willing to defend.
 
-The estimator is the machinery that transforms data into an estimate. Different estimators make different bias-variance trade-offs and have different data requirements. See {doc}`structural_causal_models` for a deeper treatment of structural versus reduced-form approaches.
-
-For Bayesian experiments, the default **response-scale** additive impact (`observed - counterfactual expectation`) is documented in {doc}`prediction-contract`. That contract distinguishes the linear predictor, the conditional expected outcome (`mu`), and posterior-predictive draws (`y_hat`). Risk ratios, odds ratios, and link-scale contrasts are separate estimands and are not the default reporting scale in CausalPy.
+The estimator is the machinery that transforms data into an estimate. Different estimators make different bias-variance trade-offs and have different data requirements. See {doc}`structural_causal_models` for a deeper treatment of structural versus reduced-form approaches and {doc}`prediction-contract` for the distinction between response-scale and link-scale contrasts.
 
 :::{note}
 This is an iterative process: estimates inform new theoretical questions, refining our understanding over time.
@@ -60,7 +60,7 @@ This is an iterative process: estimates inform new theoretical questions, refini
 
 ## CausalPy Methods: From Questions to Estimates
 
-Each CausalPy experiment class targets a specific empirical estimand and supports different estimators (Bayesian or OLS). Understanding which estimand your method targets---and under what assumptions---is essential for valid causal interpretation.
+Each quasi-experimental design connects a research question to an empirical estimand under a set of identification assumptions. Understanding which estimand a design targets---and under what assumptions---is essential for valid causal interpretation.
 
 :::{note}
 **Shared assumption**: All methods below require the Stable Unit Treatment Value Assumption (SUTVA)---one unit's treatment does not affect another unit's outcomes, and there is only one version of the treatment. This assumption is listed here once rather than repeated under each method.
@@ -79,9 +79,7 @@ Each CausalPy experiment class targets a specific empirical estimand and support
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Estimator**: Direct parameter extraction, with a prediction-equivalent counterfactual representation. The ATT is estimated as the coefficient on the group-by-post interaction term. In the standard additive identity-link specification, this coefficient is algebraically identical to the corresponding predicted contrast. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
-
-**Interpretation note**: Plots show counterfactual trajectories, but the reported effect is the interaction coefficient---a single summary of the treatment effect across all post-treatment observations.
+**Interpretation note**: A single ATT summarizes the treatment effect across treated post-treatment observations and can conceal variation across units or time.
 
 ---
 
@@ -101,9 +99,7 @@ $$\text{impact}(t) = Y_{\text{observed}}(t) - \mathbb{E}[Y_{\text{counterfactual
 
 See the [Interrupted Time Series section of quasi_dags](quasi_dags.ipynb#interrupted-time-series) for the DAG representation.
 
-**Estimator**: One-sided counterfactual prediction. A model is fit to pre-intervention data only, then used to predict untreated counterfactual outcomes in the post-intervention period. The causal impact is the difference between observed treated outcomes and those predictions, rather than a contrast between two predicted potential outcomes standardized over a population. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
-
-**Interpretation note**: The effect varies over time. Summarizing with a single number (e.g., average impact) loses information about the temporal pattern. Use `effect_summary()` for both point-in-time and cumulative statistics.
+**Interpretation note**: The effect varies over time. Summarizing with a single number, such as average impact, loses information about the temporal pattern.
 
 ---
 
@@ -121,14 +117,12 @@ Like ITS, this is **not** a population-level effect.
 
 - Parallel trends in weighted combination: The synthetic control would have followed the same trajectory as the treated unit absent treatment.
 - No spillovers: Treatment of one unit does not affect control units.
-- Convex hull coverage: The treated unit can be well-approximated by a weighted combination of controls. CausalPy's Bayesian implementation enforces this via a Dirichlet prior on the weights, which constrains them to be non-negative and sum to one.
+- Convex hull coverage: The treated unit can be well-approximated by a weighted combination of controls.
 - No concurrent shocks: No other events differentially affect the treated unit.
 
 See the [Synthetic Control section of quasi_dags](quasi_dags.ipynb#synthetic-control) for the DAG representation.
 
-**Estimator**: Synthetic counterfactual construction. Weights are learned from pre-intervention data to represent the treated unit as a weighted combination of controls. These weights are then applied to construct the untreated counterfactual in the post-intervention period. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
-
-**Interpretation note**: The effect is specific to the treated unit and time period. Generalization requires additional assumptions. Use `effect_summary()` for both point-in-time and cumulative statistics.
+**Interpretation note**: The effect is specific to the treated unit and time period. Generalization requires additional assumptions.
 
 ---
 
@@ -147,9 +141,7 @@ $$\text{effect} = \lim_{x \to c^+} \mathbb{E}[Y|X=x] - \lim_{x \to c^-} \mathbb{
 
 See the [Regression Discontinuity section of quasi_dags](quasi_dags.ipynb#regression-discontinuity) for the DAG representation.
 
-**Estimator**: Local prediction contrast. A parametric regression model is fit to data on both sides of the cutoff, and the treatment effect is estimated as the discontinuity in predicted outcomes at the threshold. This prediction-based contrast is local to the cutoff rather than standardized over a target population. An optional `bandwidth` parameter restricts the data to a window around the cutoff. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
-
-**Interpretation note**: The effect is **local** to the cutoff. Units far from the threshold may experience different treatment effects. The bandwidth parameter controls how much data is used---narrower bandwidths are more local but have higher variance.
+**Interpretation note**: The effect is **local** to the cutoff. Units far from the threshold may experience different treatment effects. The bandwidth controls how much data contributes to the estimate---narrower bandwidths are more local but have higher variance.
 
 ---
 
@@ -158,7 +150,7 @@ See the [Regression Discontinuity section of quasi_dags](quasi_dags.ipynb#regres
 :::{note}
 The empirical estimand is not always uniquely determined by the experiment class. Design choices can change what you are estimating:
 
-- **IPW**: The `weighting_scheme` parameter selects between ATE (`"raw"`, `"robust"`), the overlap population estimand (`"overlap"`), and a doubly robust estimate (`"doubly_robust"`).
+- **IPW**: Different weighting schemes can target the ATE or an effect in the overlap population, while doubly robust estimators combine weighting with an outcome model.
 - **Regression Discontinuity**: Bandwidth choice affects how local the effect is (see the Regression Discontinuity section above).
 - **IV**: The instrument used defines the complier population, determining whose {term}`LATE` you estimate.
 
@@ -169,11 +161,11 @@ The descriptions above assume standard usage. Always consider what your specific
 
 ## Quick Reference
 
-| Method | Empirical Estimand | Extraction procedure |
-|--------|-------------------|----------------------|
-| Difference-in-Differences | {term}`ATT` | Direct parameter extraction |
-| Interrupted Time Series | Time-varying unit-specific impact | One-sided counterfactual prediction |
-| Synthetic Control | Time-varying unit-specific impact | Synthetic counterfactual construction |
-| Regression Discontinuity | Local treatment effect at cutoff | Local prediction contrast |
+| Method | Empirical Estimand |
+|--------|-------------------|
+| Difference-in-Differences | {term}`ATT` |
+| Interrupted Time Series | Time-varying unit-specific impact |
+| Synthetic Control | Time-varying unit-specific impact |
+| Regression Discontinuity | Local treatment effect at cutoff |
 
-For methods not covered in detail here (IV, IPW, ANCOVA), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.
+For methods not covered in detail here, including IV, IPW, and ANCOVA, see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions.

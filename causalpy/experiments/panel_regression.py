@@ -84,6 +84,10 @@ class PanelRegression(BaseExperiment):
 
     Notes
     -----
+    **Estimand extraction**
+
+    ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
+
     The demeaned transformation (de-meaning by group) removes time-invariant
     confounders but also drops time-invariant covariates from the model. For
     the ``"dummies"`` approach (unpooled FE), individual unit effects can be

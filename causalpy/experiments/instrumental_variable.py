@@ -71,6 +71,12 @@ class InstrumentalVariable(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
+    Notes
+    -----
+    **Estimand extraction**
+
+    The class computes naive OLS and two-stage least-squares reference fits, then fits a joint Bayesian model for the treatment and outcome equations. Under the instrumental-variable assumptions, the causal quantity is read from the outcome-stage coefficient associated with the instrumented treatment; no counterfactual prediction or population standardization is performed. The instrument determines the complier population to which the local effect applies.
+
     Examples
     --------
     >>> import pandas as pd
