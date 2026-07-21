@@ -184,25 +184,51 @@ bibtex_default_style = "alpha"
 bibtex_reference_style = "author_year"
 
 
-# numpydoc and autodoc typehints config
-numpydoc_show_class_members = False
-numpydoc_xref_param_type = True
-# fmt: off
-numpydoc_xref_ignore = {
-    "of", "or", "optional", "default", "numeric", "type", "scalar", "1D", "2D", "3D", "nD", "array",
-    "instance", "M", "N"
-}
-# fmt: on
-numpydoc_xref_aliases = {
+# -- Napoleon (NumPy-style docstring) config ----------------------------------
+# We use sphinx.ext.napoleon to parse NumPy-style docstrings. ``napoleon_preprocess_types``
+# turns type strings in ``Parameters``/``Returns`` blocks into cross-references (resolved
+# via intersphinx), so ``matplotlib.figure.Figure`` renders as a link rather than plain
+# text. ``napoleon_type_aliases`` lets docstrings use short forms (e.g. ``Figure``) and
+# have them resolve to the fully-qualified target.
+napoleon_preprocess_types = True
+napoleon_type_aliases = {
+    # matplotlib
+    "Figure": ":class:`~matplotlib.figure.Figure`",
+    "Axes": ":class:`~matplotlib.axes.Axes`",
+    "matplotlib.figure.Figure": ":class:`~matplotlib.figure.Figure`",
+    "matplotlib.axes.Axes": ":class:`~matplotlib.axes.Axes`",
+    # numpy
+    "ndarray": ":class:`~numpy.ndarray`",
+    "np.ndarray": ":class:`~numpy.ndarray`",
+    # pandas
+    "pd.DataFrame": ":class:`~pandas.DataFrame`",
+    "pd.Series": ":class:`~pandas.Series`",
+    "pd.Index": ":class:`~pandas.Index`",
+    "pd.Timestamp": ":class:`~pandas.Timestamp`",
+    "DataFrame": ":class:`~pandas.DataFrame`",
+    "Series": ":class:`~pandas.Series`",
+    # xarray
+    "xarray.DataArray": ":class:`~xarray.DataArray`",
+    "xarray.Dataset": ":class:`~xarray.Dataset`",
+    "DataArray": ":class:`~xarray.DataArray`",
+    "Dataset": ":class:`~xarray.Dataset`",
+    # arviz
+    "InferenceData": ":class:`~arviz.InferenceData`",
+    "az.InferenceData": ":class:`~arviz.InferenceData`",
+    "arviz.InferenceData": ":class:`~arviz.InferenceData`",
+    # pymc / pytensor
+    "Model": ":class:`~pymc.Model`",
+    "pm.Model": ":class:`~pymc.Model`",
     "TensorVariable": ":class:`~pytensor.tensor.TensorVariable`",
     "RandomVariable": ":class:`~pytensor.tensor.random.RandomVariable`",
-    "ndarray": ":class:`~numpy.ndarray`",
-    "InferenceData": ":class:`~arviz.InferenceData`",
-    "Model": ":class:`~pymc.Model`",
+    # glossary terms
     "tensor_like": ":term:`tensor_like`",
     "unnamed_distribution": ":term:`unnamed_distribution`",
 }
-# don't add a return type section, use standard return with type info
+
+# -- sphinx-autodoc-typehints config ------------------------------------------
+# Don't add a separate ``Return type`` section; the type appears alongside the
+# return value description in the standard ``Returns`` block instead.
 typehints_document_rtype = False
 
 # -- intersphinx config -------------------------------------------------------
