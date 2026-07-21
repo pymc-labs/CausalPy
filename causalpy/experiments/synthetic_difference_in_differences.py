@@ -65,7 +65,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     -----
     **Estimand extraction**
 
-    The Bayesian weight model produces posterior draws of synthetic-control unit weights and pre-period time weights. For each draw, the class constructs treated-minus-synthetic gaps and evaluates the weighted double-difference analytically to obtain the ATT posterior; the effect is not read from a regression coefficient or obtained by population-standardized g-computation.
+    The Bayesian weight model produces posterior draws of synthetic-control unit weights and pre-period time weights. For each draw, the class constructs treated-minus-synthetic gaps and evaluates the weighted double-difference analytically to obtain the scalar ``tau_posterior`` ATT; the effect is not read from a regression coefficient or obtained by population-standardized g-computation. The time-indexed ``post_impact`` consumed by ``effect_summary()`` is the post-period treated-minus-synthetic trajectory rather than this time-weighted scalar.
 
     This implements Bayesian SDiD method. The model fits two weight modules via
     MCMC:
