@@ -1494,7 +1494,14 @@ def _compute_statistics_did_ols(
     X_da = result.design["X"]
     y_da = result.design["y"]
     y_pred = result.model.predict(X_da)
-    residuals = y_da - y_pred
+    # y_da has shape (n, 1) with dims (obs_ind, treated_units); y_pred is a
+    # bare (n,) array with no dimension names. Subtracting them directly lets
+    # xarray align y_pred positionally against the *last* axis (treated_units,
+    # size 1) instead of obs_ind, producing an (n, n) array of every
+    # observation's y minus every other observation's prediction instead of
+    # per-observation residuals. Flatten both to 1-D first so they align by
+    # position on obs_ind as intended.
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
     mse = np.mean(residuals**2)
     n, p = X_da.shape
     df = n - p
