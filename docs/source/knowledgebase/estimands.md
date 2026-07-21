@@ -14,7 +14,35 @@ Theoretical Estimand     -->  Empirical Estimand      -->  Estimator
 
 - **Empirical Estimand**: A specific, data-linked quantity that can be identified under a set of assumptions. Examples: {term}`ATT`, {term}`ATE`, local treatment effect at a cutoff, time-varying unit-specific impact.
 
-- **Estimator**: The combination of a statistical model and a computational procedure used to produce an estimate from data. In CausalPy, this typically means choosing a model type (Bayesian via PyMC or OLS via scikit-learn) together with a computation to extract the causal quantity (e.g., coefficient extraction, g-computation). The same design can be implemented with different estimators---for example, a DiD design can use either a Bayesian model with g-computation or an OLS model with coefficient extraction.
+- **Estimator**: The combination of a statistical model and a computational procedure used to produce an estimate from data. The fitted model and the procedure that extracts the causal estimand are distinct choices: choosing Bayesian inference or OLS does not by itself determine how the causal quantity is computed.
+
+### How is the causal estimand extracted?
+
+Counterfactual construction or prediction is the broad prediction-based approach. G-computation is one structured member of that family, not a synonym for every procedure that constructs a {term}`counterfactual`. The hierarchy below classifies common extraction procedures by the computation they perform:
+
+```text
+How is the causal estimand extracted?
+├── Direct parameter extraction
+│   └── A model parameter is exactly the target estimand
+├── Counterfactual construction or prediction
+│   ├── G-computation and standardization
+│   ├── One-sided counterfactual prediction
+│   ├── Local prediction contrasts
+│   └── Synthetic counterfactual construction
+├── Weighting
+└── Specialized or hybrid estimators
+```
+
+- **Direct parameter extraction** reads an estimand directly from a fitted parameter when the model specification makes that parameter the target quantity.
+- **G-computation and standardization** define explicit interventions, predict conditional expected outcomes under each intervention, contrast those predictions, and average or standardize over a specified target population.
+- **One-sided counterfactual prediction** compares observed treated outcomes with predicted untreated outcomes. Because it need not predict both {term}`potential outcomes` and standardize their contrast over a population, it does not necessarily follow the full g-computation pattern. Interrupted Time Series is an example.
+- **Local prediction contrasts** compare predictions at a boundary rather than standardizing over a population. Regression Discontinuity estimates a level discontinuity, while Regression Kink estimates a change in derivatives.
+- **Synthetic counterfactual construction** predicts an untreated trajectory from weighted control units. Synthetic Control belongs here; calling it g-computation requires a broader, carefully justified use of that term.
+- **Weighting and specialized or hybrid estimators** include inverse probability weighting (IPW), instrumental variables (IV), synthetic Difference-in-Differences, and doubly robust estimators. These are acknowledged here to show that prediction and parameter extraction are not an exhaustive taxonomy.
+
+:::{note}
+These categories can be algebraically equivalent in special cases. In the standard identity-link additive OLS Difference-in-Differences model, the group-by-post interaction coefficient is exactly the corresponding predicted treated-versus-counterfactual contrast. Coefficient extraction and prediction-based estimation are therefore computational descriptions, not necessarily disjoint estimators.
+:::
 
 The connection between theoretical and empirical estimands requires **identification assumptions**---claims about the data-generating process that cannot be tested from data alone. These assumptions are often formalized using Directed Acyclic Graphs (DAGs). See {doc}`quasi_dags` for DAG-based identification strategies for each quasi-experimental method.
 
@@ -51,7 +79,7 @@ Each CausalPy experiment class targets a specific empirical estimand and support
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Estimator**: Coefficient-based. The ATT is estimated as the coefficient on the group-by-post interaction term. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: Direct parameter extraction, with a prediction-equivalent counterfactual representation. The ATT is estimated as the coefficient on the group-by-post interaction term. In the standard additive identity-link specification, this coefficient is algebraically identical to the corresponding predicted contrast. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
 
 **Interpretation note**: Plots show counterfactual trajectories, but the reported effect is the interaction coefficient---a single summary of the treatment effect across all post-treatment observations.
 
@@ -73,7 +101,7 @@ $$\text{impact}(t) = Y_{\text{observed}}(t) - \mathbb{E}[Y_{\text{counterfactual
 
 See the [Interrupted Time Series section of quasi_dags](quasi_dags.ipynb#interrupted-time-series) for the DAG representation.
 
-**Estimator**: G-computation. A model is fit to pre-intervention data only, then used to predict counterfactual outcomes in the post-intervention period. The causal impact is the difference between observed and predicted values. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: One-sided counterfactual prediction. A model is fit to pre-intervention data only, then used to predict untreated counterfactual outcomes in the post-intervention period. The causal impact is the difference between observed treated outcomes and those predictions, rather than a contrast between two predicted potential outcomes standardized over a population. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
 
 **Interpretation note**: The effect varies over time. Summarizing with a single number (e.g., average impact) loses information about the temporal pattern. Use `effect_summary()` for both point-in-time and cumulative statistics.
 
@@ -98,7 +126,7 @@ Like ITS, this is **not** a population-level effect.
 
 See the [Synthetic Control section of quasi_dags](quasi_dags.ipynb#synthetic-control) for the DAG representation.
 
-**Estimator**: G-computation. Weights are learned from pre-intervention data to minimize the distance between the treated unit and the weighted combination of controls. These weights are then applied to construct the counterfactual in the post-intervention period. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: Synthetic counterfactual construction. Weights are learned from pre-intervention data to represent the treated unit as a weighted combination of controls. These weights are then applied to construct the untreated counterfactual in the post-intervention period. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
 
 **Interpretation note**: The effect is specific to the treated unit and time period. Generalization requires additional assumptions. Use `effect_summary()` for both point-in-time and cumulative statistics.
 
@@ -119,7 +147,7 @@ $$\text{effect} = \lim_{x \to c^+} \mathbb{E}[Y|X=x] - \lim_{x \to c^-} \mathbb{
 
 See the [Regression Discontinuity section of quasi_dags](quasi_dags.ipynb#regression-discontinuity) for the DAG representation.
 
-**Estimator**: Prediction-based. A parametric regression model is fit to data on both sides of the cutoff, and the treatment effect is estimated as the discontinuity in predicted outcomes at the threshold. An optional `bandwidth` parameter restricts the data to a window around the cutoff. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
+**Estimator**: Local prediction contrast. A parametric regression model is fit to data on both sides of the cutoff, and the treatment effect is estimated as the discontinuity in predicted outcomes at the threshold. This prediction-based contrast is local to the cutoff rather than standardized over a target population. An optional `bandwidth` parameter restricts the data to a window around the cutoff. CausalPy supports both Bayesian (PyMC) and OLS (scikit-learn) models for this design.
 
 **Interpretation note**: The effect is **local** to the cutoff. Units far from the threshold may experience different treatment effects. The bandwidth parameter controls how much data is used---narrower bandwidths are more local but have higher variance.
 
@@ -141,11 +169,11 @@ The descriptions above assume standard usage. Always consider what your specific
 
 ## Quick Reference
 
-| Method | Empirical Estimand | Computation |
-|--------|-------------------|-------------|
-| Difference-in-Differences | {term}`ATT` | Coefficient-based |
-| Interrupted Time Series | Time-varying unit-specific impact | G-computation |
-| Synthetic Control | Time-varying unit-specific impact | G-computation |
-| Regression Discontinuity | Local treatment effect at cutoff | Prediction-based |
+| Method | Empirical Estimand | Extraction procedure |
+|--------|-------------------|----------------------|
+| Difference-in-Differences | {term}`ATT` | Direct parameter extraction |
+| Interrupted Time Series | Time-varying unit-specific impact | One-sided counterfactual prediction |
+| Synthetic Control | Time-varying unit-specific impact | Synthetic counterfactual construction |
+| Regression Discontinuity | Local treatment effect at cutoff | Local prediction contrast |
 
 For methods not covered in detail here (IV, IPW, ANCOVA), see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. Note that some of these methods have more limited implementation support in CausalPy---for example, IV does not yet have full `plot()` and `summary()` support, and IPW and ANCOVA are Bayesian-only.
