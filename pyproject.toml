@@ -97,7 +97,7 @@ docs = [
     "sphinx-rtd-theme",
     "sphinx-sitemap",
     "statsmodels",
-    "sphinxcontrib-bibtex",
+    "sphinxcontrib-bibtex>=2.7.0",
     "sphinx-notfound-page",
     "ipywidgets",
     "sphinx-design",

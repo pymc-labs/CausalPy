@@ -16,7 +16,6 @@ from pathlib import Path
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_extensions"))
 
 
 # Generate gallery before building docs
@@ -105,7 +104,6 @@ extensions = [
     "sphinx_sitemap",
     "sphinx_togglebutton",
     "sphinxext.rediraffe",
-    "strip_citation_labels",
 ]
 
 # -- Redirects for renamed how-to notebooks (issue #840) --------------------
@@ -180,7 +178,7 @@ suppress_warnings = [
 
 # bibtex config
 bibtex_bibfiles = ["references.bib"]
-bibtex_default_style = "alpha"
+bibtex_default_style = "unsrt"
 bibtex_reference_style = "author_year"
 
 
@@ -240,7 +238,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["custom.css", "gallery.css"]
+html_css_files = ["gallery.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
