@@ -11,10 +11,10 @@ description: Run prek checks and handle auto-fix output.
 # Fast iteration on changed files
 prek run --files path/to/file.py
 
-# Full verification before commit
+# Full verification before push/commit
 prek run --all-files
 
-# Patch coverage at PR-ready / large-task milestones (not every commit; ~90s+)
+# Python source/test changes: local patch coverage gate
 make test-patch-cov
 ```
 

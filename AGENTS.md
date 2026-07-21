@@ -81,13 +81,7 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 ## Code quality checks
 
 - **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
-- **Patch coverage (milestones, not every commit)**: `make test-patch-cov` is intentionally **not** in `prek` — it runs the full test suite (~90s+) and needs the conda env. Run it at meaningful checkpoints when Python source or tests under `causalpy/` changed, not on every small commit:
-  - A PR is ready for review, or you are about to push for CI
-  - You finished a large or multi-file task touching production code
-  - You are handing off to another person or agent
-  - During iterative work, rely on `prek` and targeted `pytest` instead
-  - Command: `$CONDA_EXE run -n CausalPy make test-patch-cov`
-  - The gate measures **production code only** (`causalpy/tests/*` excluded) at **96%**, approximating the remote Codecov patch check against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH`, `DIFF_COVER_FAIL_UNDER`, or `DIFF_COVER_EXCLUDE` only when the PR deliberately targets a different base or threshold.
+- **Patch coverage before handoff**: When Python source or tests change, run `$CONDA_EXE run -n CausalPy make test-patch-cov` before pushing or handing off. This keeps the default `prek run` fast while locally approximating the remote Codecov patch gate against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH` or `DIFF_COVER_FAIL_UNDER` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
 - **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
 - **Format**: Run `ruff format causalpy/` to format code according to project standards
