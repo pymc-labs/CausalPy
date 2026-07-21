@@ -219,11 +219,22 @@ class DifferenceInDifferences(BaseExperiment):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
-        # calculate causal impact
+        # Calculate causal impact. The estimand is owned by the experiment: the
+        # ATT is the treated-post factual-minus-counterfactual expected-outcome
+        # contrast, averaged over treated post-treatment rows. The model/backend
+        # owns E[Y | X, params] on the response scale (the ``mu`` prediction
+        # contract; see docs/source/knowledgebase/prediction-contract.md) and
+        # the uncertainty representation; how the contrast is computed below is
+        # an implementation detail, not a different estimand per backend.
         if self._model_backend.is_bayesian:
+            # All Bayesian backends promise response-scale ``mu`` draws, so the
+            # contrast is evaluated directly on ``mu``.
             self.causal_impact = self._att_from_g_computation()
         elif self._model_backend.is_ols:
-            # This is the coefficient on the interaction term
+            # Algebraic shortcut: under the validated additive design (exactly
+            # one group-by-post interaction, identity link), the interaction
+            # coefficient equals the prediction-based ATT. Equivalence is pinned
+            # by test_ols_did_coefficient_equals_prediction_contrast.
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
@@ -430,6 +441,14 @@ class DifferenceInDifferences(BaseExperiment):
             The figure that was created.
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
+
+        Notes
+        -----
+        The plotted group trajectories use one representative unit's covariate
+        row per time point, while the causal impact reported in the title
+        averages over **all** treated post-treatment rows. When covariates vary
+        across units within a time point, the plotted trajectories are
+        illustrative rather than the exact population underlying the ATT.
         """
         if hdi_prob is not None:
             warnings.warn(

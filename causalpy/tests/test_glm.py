@@ -239,39 +239,88 @@ class _CustomPoissonGLR(GeneralizedLinearRegression):
     }
 
 
-class _CustomPoissonGLRMixin:
-    default_priors = {
-        "beta": Prior("Normal", mu=1.0, sigma=0.25, dims=["treated_units", "coeffs"]),
-    }
-
-
-class _MergedPoissonGLR(_CustomPoissonGLRMixin, GeneralizedLinearRegression):
-    """Mixin supplies class defaults; property merge is accessed explicitly."""
-
-
-def test_glr_subclass_default_priors_override():
-    """Subclass ``default_priors`` merge into family defaults."""
+def test_glr_subclass_partial_default_priors_retain_family_priors():
+    """A partial class-level ``default_priors`` override keeps the family ``y_hat``."""
     model = _CustomPoissonGLR(family="poisson")
-    assert model.default_priors["beta"].parameters["mu"] == 1.0
-    assert model.default_priors["beta"].parameters["sigma"] == 0.25
+    assert model.priors["beta"].parameters["mu"] == 1.0
+    assert model.priors["beta"].parameters["sigma"] == 0.25
+    assert "y_hat" in model.priors
+    assert model.priors["y_hat"].distribution == "Poisson"
 
 
-def test_glr_default_priors_property_merges_mro_class_defaults():
-    """The GLR ``default_priors`` property merges non-empty MRO class dicts."""
-    model = _MergedPoissonGLR(family="poisson")
-    priors = GeneralizedLinearRegression.default_priors.__get__(
-        model, _MergedPoissonGLR
+def test_glr_subclass_partial_default_priors_can_fit(rng, mock_pymc_sample):
+    """A GLR subclass with partial ``default_priors`` fits with the family likelihood."""
+    n_obs = 10
+    X = _design_matrix(n_obs, rng)
+    y = xr.DataArray(
+        rng.poisson(3, size=(n_obs, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
     )
-    assert priors["beta"].parameters["mu"] == 1.0
-    assert "y_hat" in priors
+    model = _CustomPoissonGLR(
+        family="poisson", sample_kwargs={**sample_kwargs, "random_seed": 8}
+    )
+    model.fit(X, y, _single_unit_coords(n_obs))
+    assert "y_hat" in model.named_vars
 
 
-def test_linear_regression_default_priors_merge_class_attribute():
-    """``LinearRegression`` class-level defaults merge through the GLR property."""
+def test_linear_regression_priors_include_beta_and_y_hat():
+    """``LinearRegression`` keeps Gaussian ``beta`` and ``y_hat`` priors."""
     model = LinearRegression()
-    priors = GeneralizedLinearRegression.default_priors.__get__(model, LinearRegression)
-    assert "beta" in priors
-    assert "y_hat" in priors
+    assert "beta" in model.priors
+    assert "y_hat" in model.priors
+    assert model.priors["y_hat"].distribution == "Normal"
+
+
+@pytest.mark.parametrize("family", ["poisson", "bernoulli"])
+def test_glr_integer_outcome_fit_and_predict(family, rng, mock_pymc_sample):
+    """Models fit on natural integer outcomes can still predict.
+
+    Regression test: ``_data_setter`` must preserve the fitted ``y`` node's
+    dtype, otherwise a float64 placeholder fails ``pm.set_data``.
+    """
+    n_obs = 10
+    X = _design_matrix(n_obs, rng)
+    if family == "poisson":
+        y_vals = rng.poisson(3, size=(n_obs, 1))
+    else:
+        y_vals = rng.binomial(1, 0.4, size=(n_obs, 1))
+    assert np.issubdtype(y_vals.dtype, np.integer)
+    y = xr.DataArray(
+        y_vals,
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(
+        family=family,
+        sample_kwargs={**sample_kwargs, "random_seed": 7},
+    )
+    model.fit(X, y, _single_unit_coords(n_obs))
+    pred = model.predict(X, var_names=["mu"])
+    assert "mu" in pred.posterior_predictive
+
+
+@pytest.mark.parametrize(
+    "family, y_vals, match",
+    [
+        ("bernoulli", [[0.0], [1.0], [2.0]], "requires outcome values in"),
+        ("poisson", [[1.0], [-1.0], [2.0]], "non-negative integer-valued"),
+        ("poisson", [[1.0], [2.5], [3.0]], "non-negative integer-valued"),
+        ("negative_binomial", [[1.0], [np.nan], [2.0]], "finite outcome values"),
+    ],
+)
+def test_glr_fit_rejects_out_of_support_outcomes(family, y_vals, match, rng):
+    """The fit boundary rejects outcomes outside the family's support."""
+    n_obs = len(y_vals)
+    X = _design_matrix(n_obs, rng)
+    y = xr.DataArray(
+        np.asarray(y_vals),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(family=family, sample_kwargs=sample_kwargs)
+    with pytest.raises(ValueError, match=match):
+        model.fit(X, y, _single_unit_coords(n_obs))
 
 
 def test_glr_predict_mu_only(rng, mock_pymc_sample):
@@ -493,6 +542,125 @@ def test_poisson_prepostnegd_att_exact_g_computation():
     assert len(mu_calls) == 2
     assert mu_calls[0]["n_obs"] == len(treated)
     assert mu_calls[1]["n_obs"] == len(treated)
+
+
+def test_gaussian_did_att_matches_interaction_coefficient(mock_pymc_sample, rng):
+    """Gaussian DiD g-computation reproduces the former coefficient estimand.
+
+    With an identity link and the validated single-interaction design, the
+    factual-minus-counterfactual ``mu`` contrast equals the interaction
+    coefficient draw by draw.
+    """
+    df = _poisson_did_data(rng).assign(y=lambda d: rng.normal(size=len(d)))
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(sample_kwargs={**sample_kwargs, "random_seed": 31}),
+    )
+    interaction_label = next(
+        label for label in result.labels if result._is_treatment_interaction(label)
+    )
+    beta_interaction = result.model.idata.posterior["beta"].sel(
+        coeffs=interaction_label
+    )
+    np.testing.assert_allclose(
+        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        beta_interaction.transpose("chain", "draw", "treated_units").values,
+        rtol=1e-6,
+    )
+
+
+def test_gaussian_prepostnegd_att_matches_group_coefficient(mock_pymc_sample):
+    """Gaussian PrePostNEGD g-computation reproduces the group coefficient.
+
+    Without group-covariate interactions, the treated-vs-control ``mu``
+    contrast equals the group coefficient draw by draw.
+    """
+    df = generate_ancova_data(N=30, seed=5)
+    result = cp.PrePostNEGD(
+        df,
+        formula="post ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=LinearRegression(sample_kwargs={**sample_kwargs, "random_seed": 33}),
+    )
+    beta_group = result.model.idata.posterior["beta"].sel(coeffs="C(group)[T.1]")
+    np.testing.assert_allclose(
+        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        beta_group.transpose("chain", "draw", "treated_units").values,
+        rtol=1e-6,
+    )
+
+
+def test_ols_did_coefficient_equals_prediction_contrast(rng):
+    """The OLS interaction coefficient equals the prediction-based ATT.
+
+    This pins the algebraic-shortcut contract: under the validated additive
+    single-interaction design, reading the coefficient is equivalent to the
+    factual-minus-counterfactual expected-outcome contrast on treated-post rows.
+    """
+    from sklearn.linear_model import LinearRegression as SkLinearRegression
+
+    df = _poisson_did_data(rng).assign(y=lambda d: rng.normal(size=len(d)))
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=SkLinearRegression(fit_intercept=False),
+    )
+    treated_post = df.query("group == 1 and post_treatment").drop(columns=["y"])
+    (x_factual,) = build_design_matrices(
+        [result._x_design_info], treated_post, return_type="dataframe"
+    )
+    x_counter = x_factual.copy()
+    for i, label in enumerate(result.labels):
+        if result._is_treatment_interaction(label):
+            x_counter.iloc[:, i] = 0
+    contrast = np.mean(
+        result._model_backend.predict(np.asarray(x_factual))
+        - result._model_backend.predict(np.asarray(x_counter))
+    )
+    assert float(result.causal_impact) == pytest.approx(float(contrast))
+
+
+def test_poisson_glr_did_att_matches_posterior_beta_contrast(mock_pymc_sample, rng):
+    """Built-in Poisson GLR DiD ATT equals the documented response-scale contrast.
+
+    Reconstructs ``mean(exp(X_factual @ beta) - exp(X_counter @ beta))`` from
+    the model's own posterior draws and asserts numerical equality with
+    ``causal_impact``.
+    """
+    df = _poisson_did_data(rng)
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=_poisson_glr(random_seed=41),
+    )
+    treated_post = df.query("group == 1 and post_treatment").drop(columns=["y"])
+    (x_factual,) = build_design_matrices(
+        [result._x_design_info], treated_post, return_type="dataframe"
+    )
+    x_counter = x_factual.copy()
+    for i, label in enumerate(result.labels):
+        if result._is_treatment_interaction(label):
+            x_counter.iloc[:, i] = 0
+
+    beta = result.model.idata.posterior["beta"].transpose(
+        "chain", "draw", "treated_units", "coeffs"
+    )
+    eta_factual = np.einsum("cdut,rt->cdur", beta.values, np.asarray(x_factual))
+    eta_counter = np.einsum("cdut,rt->cdur", beta.values, np.asarray(x_counter))
+    expected = (np.exp(eta_factual) - np.exp(eta_counter)).mean(axis=-1)
+    np.testing.assert_allclose(
+        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        expected,
+        rtol=1e-6,
+    )
 
 
 def test_poisson_did_att_uses_g_computation(mock_pymc_sample, rng):

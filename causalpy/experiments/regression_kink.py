@@ -45,6 +45,15 @@ from causalpy.custom_exceptions import (
 class RegressionKink(BaseExperiment):
     """A class to analyse regression kink designs.
 
+    .. note::
+
+        The reported effect, ``gradient_change``, is the change in the slope of
+        the response-scale expected outcome ``mu`` at the kink point. With a
+        non-identity link (e.g. a Poisson
+        :class:`~causalpy.pymc_models.GeneralizedLinearRegression`), this is a
+        change in the slope of expected counts or probabilities, not a
+        link-scale coefficient.
+
     Parameters
     ----------
     data : pd.DataFrame

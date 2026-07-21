@@ -919,6 +919,9 @@ class SyntheticControl(BaseExperiment):
     def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
         if self._model_backend.is_bayesian:
+            if self.score is None:
+                # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+                return "Pre-intervention Bayesian fit"
             # Bayesian model - get unit-specific R² scores using unified format
             unit_index = self.treated_units.index(treated_unit)
             r2_val = round_num(

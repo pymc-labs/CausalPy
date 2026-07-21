@@ -110,6 +110,30 @@ def _validate_glr_user_priors(
         )
 
 
+def _validate_family_response(family: FamilyName, y: Any) -> None:
+    """Reject outcomes outside the family's support before sampling.
+
+    Catching invalid outcomes at the fit boundary gives users a clear error
+    instead of an opaque PyMC sampling failure.
+    """
+    if family == "gaussian":
+        return
+    values = np.asarray(y, dtype=float)
+    if not np.all(np.isfinite(values)):
+        raise ValueError(
+            f"family {family!r} requires finite outcome values, but the outcome "
+            "contains NaN or infinite entries."
+        )
+    if family == "bernoulli":
+        if not np.isin(values, (0.0, 1.0)).all():
+            raise ValueError("family 'bernoulli' requires outcome values in {0, 1}.")
+        return
+    if (values < 0).any() or not np.allclose(values, np.round(values)):
+        raise ValueError(
+            f"family {family!r} requires non-negative integer-valued outcomes (counts)."
+        )
+
+
 def _inverse_link(eta: Any, link: LinkName) -> Any:
     """Apply the inverse link draw by draw to obtain response-scale expectations."""
     if link == "identity":
@@ -453,8 +477,17 @@ class PyMCModel(pm.Model):
             )
             n_treated_units = len(treated_units_coord)
 
+            # Match the fitted data node's dtype: models fit on integer outcomes
+            # (e.g. Poisson counts) register integer mutable data, and a float64
+            # placeholder would fail pm.set_data's dtype check.
+            y_dtype = self.named_vars["y"].type.dtype
             pm.set_data(
-                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                {
+                    "X": X,
+                    "y": np.zeros(
+                        (new_no_of_observations, n_treated_units), dtype=y_dtype
+                    ),
+                },
                 coords={"obs_ind": obs_coords},
             )
 
@@ -770,6 +803,11 @@ class GeneralizedLinearRegression(PyMCModel):
         self._family = _validate_family(family)
         _validate_glr_user_priors(self._family, priors)
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+        # PyMCModel.__init__ assembles ``self.priors`` from ``self.default_priors``,
+        # which a subclass may shadow with a partial class-level dict (a released
+        # extension point). Merge the family's required priors *underneath* so a
+        # partial override can never drop the family likelihood (e.g. ``y_hat``).
+        self.priors = {**_default_priors_for_family(self._family), **self.priors}
 
     @property
     def family(self) -> FamilyName:
@@ -781,18 +819,6 @@ class GeneralizedLinearRegression(PyMCModel):
         """Read-only canonical inverse link for :attr:`family`."""
         return _canonical_link_for_family(self._family)
 
-    @property
-    def default_priors(self) -> dict[str, Prior]:  # type: ignore[override]
-        """Family defaults merged with subclass ``default_priors`` overrides."""
-        defaults = dict(_default_priors_for_family(self._family))
-        for cls in type(self).__mro__:
-            if cls in (GeneralizedLinearRegression, PyMCModel, pm.Model, object):
-                continue
-            class_defaults = cls.__dict__.get("default_priors")
-            if isinstance(class_defaults, dict) and class_defaults:
-                defaults.update(class_defaults)
-        return defaults
-
     def _clone(self) -> "GeneralizedLinearRegression":
         """Create a fresh, unfitted copy with the same GLM configuration."""
         return type(self)(
@@ -800,6 +826,30 @@ class GeneralizedLinearRegression(PyMCModel):
             sample_kwargs=dict(self.sample_kwargs),
             priors=self._user_priors,
         )
+
+    def fit(
+        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
+    ) -> az.InferenceData:
+        """Validate the outcome against the family support, then fit.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features as an xarray DataArray.
+        y : xr.DataArray
+            Target variable as an xarray DataArray. Bernoulli outcomes must be
+            0/1; Poisson and Negative Binomial outcomes must be finite,
+            non-negative, and integer-valued.
+        coords : dict, optional
+            Dictionary with coordinate names for named dimensions.
+
+        Returns
+        -------
+        az.InferenceData
+            InferenceData object containing the samples.
+        """
+        _validate_family_response(self._family, y)
+        return super().fit(X, y, coords=coords)
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
