@@ -19,11 +19,14 @@ different units receive treatment at different times.
 """
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
+from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 from patsy import PatsyError
 from sklearn.base import RegressorMixin
@@ -32,11 +35,32 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
-from causalpy.plot_utils import has_posterior_draws
+from causalpy.plot_utils import PlotSpec, has_posterior_draws, to_axes_list
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _EventTimePlotData:
+    """Tidy event-study estimates and declarative plotting metadata."""
+
+    estimates: pd.DataFrame
+    placebo_area: pd.DataFrame | None
+    colors: dict[str, str]
+    shapes: dict[str, str]
+
+
+@dataclass(frozen=True)
+class _GroupTimePlotData:
+    """Tidy cohort-time estimates and declarative plotting metadata."""
+
+    estimates: pd.DataFrame
+    cohorts: list[Any]
+    x_col: str
+    x_label: str
+    y_label: str
 
 
 class StaggeredDifferenceInDifferences(BaseExperiment):
@@ -778,12 +802,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ax : list[matplotlib.axes.Axes]
             A single-element list containing the event-study axes.
         """
-        return self._render_plot(
+        fig, ax = self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
             figsize=figsize,
         )
+        return fig, to_axes_list(ax)
 
     def plot_group_time(
         self,
@@ -844,7 +869,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             per cohort when ``layout="facet"`` and one axes when
             ``layout="overlay"``.
         """
-        return self._render_plot(
+        fig, ax = self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
@@ -854,6 +879,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
             view="group_time",
         )
+        return fig, to_axes_list(ax)
 
     def _plot(
         self,
@@ -864,7 +890,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> PlotSpec:
         """Plot the event study or cohort trajectories.
 
         Parameters
@@ -898,8 +924,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
-            Figure and axes objects.
+        :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative event-study or group-time plot specification.
         """
         with_uncertainty = has_posterior_draws(self.y_pred)
         if with_uncertainty and hdi_prob is not None and hdi_prob != self.hdi_prob_:
@@ -921,123 +947,131 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if view != "event_time":
             raise ValueError("view must be 'event_time' or 'group_time'")
 
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-
-        att_et = self.att_event_time_.copy()
-
-        # Separate pre-treatment (placebo) and post-treatment (ATT)
-        pre_treatment = att_et[att_et["event_time"] < 0]
-        post_treatment = att_et[att_et["event_time"] >= 0]
-
-        # Plot pre-treatment placebo estimates (different style)
-        if len(pre_treatment) > 0:
-            if with_uncertainty:
-                ax.errorbar(
-                    pre_treatment["event_time"],
-                    pre_treatment["att"],
-                    yerr=[
-                        pre_treatment["att"] - pre_treatment["att_lower"],
-                        pre_treatment["att_upper"] - pre_treatment["att"],
-                    ],
-                    fmt="s",  # Square markers for placebo
-                    capsize=4,
-                    capthick=2,
-                    markersize=7,
-                    color="gray",
-                    alpha=0.7,
-                    label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
-                )
-            else:
-                ax.scatter(
-                    pre_treatment["event_time"],
-                    pre_treatment["att"],
-                    s=60,
-                    color="gray",
-                    marker="s",  # Square markers for placebo
-                    zorder=3,
-                    alpha=0.7,
-                    label="Placebo estimate",
-                )
-                # Add error bars if std available
-                if "att_std" in pre_treatment.columns:
-                    se = pre_treatment["att_std"] / np.sqrt(pre_treatment["n_obs"])
-                    ax.errorbar(
-                        pre_treatment["event_time"],
-                        pre_treatment["att"],
-                        yerr=1.96 * se,
-                        fmt="none",
-                        capsize=4,
-                        capthick=2,
-                        color="gray",
-                        alpha=0.5,
-                    )
-
-        # Plot post-treatment ATT estimates
-        if len(post_treatment) > 0:
-            if with_uncertainty:
-                ax.errorbar(
-                    post_treatment["event_time"],
-                    post_treatment["att"],
-                    yerr=[
-                        post_treatment["att"] - post_treatment["att_lower"],
-                        post_treatment["att_upper"] - post_treatment["att"],
-                    ],
-                    fmt="o",
-                    capsize=4,
-                    capthick=2,
-                    markersize=8,
-                    color="C0",
-                    label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
-                )
-            else:
-                ax.scatter(
-                    post_treatment["event_time"],
-                    post_treatment["att"],
-                    s=80,
-                    color="C0",
-                    zorder=3,
-                    label="ATT estimate",
-                )
-                # Add error bars if std available
-                if "att_std" in post_treatment.columns:
-                    se = post_treatment["att_std"] / np.sqrt(post_treatment["n_obs"])
-                    ax.errorbar(
-                        post_treatment["event_time"],
-                        post_treatment["att"],
-                        yerr=1.96 * se,
-                        fmt="none",
-                        capsize=4,
-                        capthick=2,
-                        color="C0",
-                        alpha=0.7,
-                    )
-
-        # Add horizontal line at zero
-        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
-
-        # Add vertical line at event_time = 0 (treatment onset)
-        ax.axvline(x=-0.5, color="red", linestyle="-", linewidth=2, alpha=0.7)
-
-        # Shade pre-treatment region
-        event_min = att_et["event_time"].min()
-        if event_min < 0:
-            ax.axvspan(
-                event_min - 0.5,
-                -0.5,
+        plot_data = self._prepare_event_time_plot_data()
+        estimates = plot_data.estimates
+        p = (
+            p9.ggplot(
+                estimates, p9.aes("event_time", "att", color="series", shape="series")
+            )
+            + p9.geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
+            + p9.geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
+        )
+        if plot_data.placebo_area is not None:
+            p = p + p9.geom_rect(
+                plot_data.placebo_area,
+                p9.aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
+                fill="gray",
                 alpha=0.1,
-                color="gray",
+                inherit_aes=False,
+            )
+        p = (
+            p
+            + p9.geom_pointrange(
+                p9.aes(ymin="att_lower", ymax="att_upper"),
+                size=0.7,
+                fatten=6,
+            )
+            + p9.scale_color_manual(values=plot_data.colors, name="")
+            + p9.scale_shape_manual(values=plot_data.shapes, name="")
+            + p9.scale_x_continuous(breaks=list(estimates["event_time"].values))
+            + p9.labs(x="", y="")
+            + p9.theme(
+                figure_size=figsize or (10, 6),
+                legend_text=p9.element_text(size=LEGEND_FONT_SIZE),
+            )
+        )
+
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            axes[0].set(
+                xlabel="Event Time (periods relative to treatment)",
+                ylabel="Effect Estimate",
+                title="Staggered DiD Event Study",
             )
 
-        # Labels and formatting
-        ax.set_xlabel("Event Time (periods relative to treatment)", fontsize=12)
-        ax.set_ylabel("Effect Estimate", fontsize=12)
-        ax.set_title("Staggered DiD Event Study", fontsize=14)
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
+        return PlotSpec(p, overlay=overlay, n_panels=1)
 
-        # Set integer ticks for event time
-        ax.set_xticks(att_et["event_time"].values)
+    @staticmethod
+    def _ensure_interval_bounds(estimates: pd.DataFrame) -> pd.DataFrame:
+        """Ensure ``att_lower`` / ``att_upper`` interval columns exist.
 
-        return fig, [ax]
+        Aggregation caches HDI bounds when the model carries posterior
+        draws; point-estimate backends cache sample dispersion
+        (``att_std`` / ``n_obs``) instead, from which 1.96-SE bounds are
+        derived here. Bare point estimates get zero-width intervals.
+        """
+        estimates = estimates.copy()
+        if {"att_lower", "att_upper"}.issubset(estimates.columns):
+            return estimates
+        if {"att_std", "n_obs"}.issubset(estimates.columns):
+            se = (estimates["att_std"] / np.sqrt(estimates["n_obs"])).fillna(0.0)
+            estimates["att_lower"] = estimates["att"] - 1.96 * se
+            estimates["att_upper"] = estimates["att"] + 1.96 * se
+        else:
+            estimates["att_lower"] = estimates["att"]
+            estimates["att_upper"] = estimates["att"]
+        return estimates
+
+    def _prepare_event_time_plot_data(self) -> _EventTimePlotData:
+        """Prepare event-study estimates and legend metadata for plotting."""
+        estimates = self._ensure_interval_bounds(self.att_event_time_)
+        if has_posterior_draws(self.y_pred):
+            hdi_pct = int(self.hdi_prob_ * 100)
+            placebo_label = f"Placebo estimate ({hdi_pct}% HDI)"
+            att_label = f"ATT estimate ({hdi_pct}% HDI)"
+        else:
+            placebo_label = "Placebo estimate"
+            att_label = "ATT estimate"
+        estimates["series"] = np.where(
+            estimates["event_time"] < 0, placebo_label, att_label
+        )
+        event_min = estimates["event_time"].min()
+        placebo_area = (
+            pd.DataFrame(
+                {
+                    "xmin": [float(event_min) - 0.5],
+                    "xmax": [-0.5],
+                    "ymin": [-np.inf],
+                    "ymax": [np.inf],
+                }
+            )
+            if event_min < 0
+            else None
+        )
+        return _EventTimePlotData(
+            estimates=estimates,
+            placebo_area=placebo_area,
+            colors={placebo_label: "gray", att_label: "#1f77b4"},
+            shapes={placebo_label: "s", att_label: "o"},
+        )
+
+    def _prepare_group_time_plot_data(
+        self,
+        *,
+        x_axis: Literal["event_time", "calendar_time"],
+        include_placebo: bool,
+    ) -> _GroupTimePlotData:
+        """Prepare cohort-time estimates and facet metadata for plotting."""
+        estimates, x_col, x_label, y_label = self._get_group_time_plot_data(
+            x_axis=x_axis, include_placebo=include_placebo
+        )
+        cohorts = list(estimates["cohort"].drop_duplicates())
+        estimates = self._ensure_interval_bounds(estimates)
+        estimates["series"] = estimates["type"].map(
+            {"placebo": "Placebo estimate", "ATT": "ATT estimate"}
+        )
+        estimates["cohort_label"] = estimates["cohort"].map(lambda c: f"Cohort {c}")
+        estimates["cohort_label"] = pd.Categorical(
+            estimates["cohort_label"],
+            categories=[f"Cohort {cohort}" for cohort in cohorts],
+            ordered=True,
+        )
+        return _GroupTimePlotData(
+            estimates=estimates,
+            cohorts=cohorts,
+            x_col=x_col,
+            x_label=x_label,
+            y_label=y_label,
+        )
 
     def _plot_group_time(
         self,
@@ -1045,63 +1079,146 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot cohort-time ``ATT(g, t)`` trajectories."""
-        att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
-            x_axis=x_axis, include_placebo=include_placebo
+    ) -> PlotSpec:
+        """Plot cohort-time ``ATT(g, t)`` trajectories via plotnine.
+
+        Builds ribbons/lines/points as one ggplot (facet or overlay), then
+        applies axis titles, treatment vlines, and shared-y in an overlay
+        callback.
+        """
+        if layout not in {"facet", "overlay"}:
+            raise ValueError("layout must be 'facet' or 'overlay'")
+
+        plot_data = self._prepare_group_time_plot_data(
+            x_axis=x_axis,
+            include_placebo=include_placebo,
         )
-        cohort_groups = list(att_gt.groupby("cohort", sort=True))
+        estimates = plot_data.estimates
+        cohorts = plot_data.cohorts
+        x_col = plot_data.x_col
+        n_cohorts = len(cohorts)
         sharex = x_axis == "event_time"
-        fig, axes = self._make_group_time_axes(
-            att_gt=att_gt,
-            layout=layout,
-            figsize=figsize,
-            sharex=sharex,
-            sharey=layout == "facet",
-        )
-
-        for cohort_idx, (cohort, cohort_data) in enumerate(cohort_groups):
-            ax = axes[cohort] if layout == "facet" else axes["overlay"]
-            self._plot_group_time_segment(
-                ax=ax,
-                cohort_data=cohort_data[cohort_data["type"] == "placebo"],
-                x_col=x_col,
-                line_type="placebo",
-                color="gray" if layout == "facet" else f"C{cohort_idx % 10}",
-                label=(
-                    "Placebo estimate"
-                    if layout == "facet"
-                    else f"Cohort {cohort} placebo"
-                ),
+        if figsize is None:
+            figsize = (
+                (10, 6) if layout == "overlay" else (10, max(2.5 * n_cohorts, 3.0))
             )
-            self._plot_group_time_segment(
-                ax=ax,
-                cohort_data=cohort_data[cohort_data["type"] == "ATT"],
-                x_col=x_col,
-                line_type="ATT",
-                color="C0" if layout == "facet" else f"C{cohort_idx % 10}",
-                label="ATT estimate" if layout == "facet" else f"Cohort {cohort} ATT",
-            )
-            self._format_group_time_axis(
-                ax=ax,
-                cohort=cohort if layout == "facet" else None,
-                x_label=self._get_group_time_axis_label(
-                    x_label=x_label,
-                    layout=layout,
-                    sharex=sharex,
-                    axis_index=cohort_idx,
-                    n_axes=len(cohort_groups),
-                ),
-                y_label=y_label,
-                x_axis=x_axis,
-                treatment_time=cohort,
-            )
-            ax.legend(fontsize=LEGEND_FONT_SIZE)
 
-        if layout == "overlay":
-            axes["overlay"].legend(title="Treatment cohort", fontsize=LEGEND_FONT_SIZE)
+        type_linetypes = {"Placebo estimate": "dashed", "ATT estimate": "solid"}
+        type_shapes = {"Placebo estimate": "s", "ATT estimate": "o"}
 
-        return fig, list(axes.values())
+        if layout == "facet":
+            type_colors = {
+                "Placebo estimate": "gray",
+                "ATT estimate": "#1f77b4",
+            }
+            p = (
+                p9.ggplot(
+                    estimates,
+                    p9.aes(
+                        x_col, "att", color="series", fill="series", linetype="series"
+                    ),
+                )
+                + p9.geom_ribbon(
+                    p9.aes(ymin="att_lower", ymax="att_upper", group="series"),
+                    alpha=0.2,
+                    color="none",
+                    show_legend=False,
+                )
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.7
+                )
+                + p9.geom_line()
+                + p9.geom_point(p9.aes(shape="series"), size=2)
+                + p9.facet_wrap("cohort_label", ncol=1, scales="free_y")
+                + p9.scale_color_manual(values=type_colors, name="")
+                + p9.scale_fill_manual(values=type_colors, name="")
+                + p9.scale_linetype_manual(values=type_linetypes, name="")
+                + p9.scale_shape_manual(values=type_shapes, name="")
+                + p9.labs(x="", y="")
+                + p9.theme(
+                    strip_text=p9.element_blank(),
+                    strip_background=p9.element_blank(),
+                    figure_size=figsize,
+                    panel_spacing_y=0.06,
+                )
+            )
+        else:
+            # Overlay: color by cohort; dashed placebo / solid ATT.
+            # Hex values because plotnine does not parse matplotlib's
+            # "C0"-style property-cycle color names.
+            cohort_colors = {
+                f"Cohort {c}": mcolors.to_hex(f"C{i % 10}")
+                for i, c in enumerate(cohorts)
+            }
+            p = (
+                p9.ggplot(
+                    estimates,
+                    p9.aes(
+                        x_col,
+                        "att",
+                        color="cohort_label",
+                        fill="cohort_label",
+                        linetype="series",
+                        shape="series",
+                        group="cohort_label",
+                    ),
+                )
+                + p9.geom_ribbon(
+                    p9.aes(ymin="att_lower", ymax="att_upper", group="cohort_label"),
+                    alpha=0.15,
+                    color="none",
+                    # Constant linetype: the inherited series mapping varies
+                    # within a cohort ribbon, which plotnine rejects.
+                    linetype="solid",
+                    show_legend=False,
+                )
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.7
+                )
+                + p9.geom_line()
+                + p9.geom_point(size=2)
+                + p9.scale_color_manual(values=cohort_colors, name="Treatment cohort")
+                + p9.scale_fill_manual(values=cohort_colors, name="Treatment cohort")
+                + p9.scale_linetype_manual(values=type_linetypes, name="")
+                + p9.scale_shape_manual(values=type_shapes, name="")
+                + p9.labs(x="", y="", title="Staggered DiD Cohort Trajectories")
+                + p9.theme(figure_size=figsize)
+            )
+
+        if x_axis == "event_time":
+            p = p + p9.geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
+
+        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
+            if layout == "facet":
+                for a in axes[1:]:
+                    a.sharey(axes[0])
+                for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
+                    ax.set_title(f"Cohort {cohort}")
+                    ax.set_ylabel(plot_data.y_label)
+                    xlabel = self._get_group_time_axis_label(
+                        x_label=plot_data.x_label,
+                        layout=layout,
+                        sharex=sharex,
+                        axis_index=i,
+                        n_axes=n_cohorts,
+                    )
+                    ax.set_xlabel(xlabel)
+                    if x_axis == "calendar_time":
+                        ax.axvline(
+                            x=cohort - 0.5,
+                            color="red",
+                            linestyle="-",
+                            linewidth=1,
+                            alpha=0.5,
+                        )
+            else:
+                ax = axes[0]
+                ax.set_xlabel(plot_data.x_label)
+                ax.set_ylabel(plot_data.y_label)
+                ax.set_title("Staggered DiD Cohort Trajectories")
+
+        n_panels = n_cohorts if layout == "facet" else 1
+        return PlotSpec(p, overlay=overlay, n_panels=n_panels)
 
     def _get_group_time_plot_data(
         self,
@@ -1203,66 +1320,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_gt["type"] = "placebo"
         return att_gt
 
-    def _make_group_time_axes(
-        self,
-        att_gt: pd.DataFrame,
-        layout: Literal["facet", "overlay"],
-        figsize: tuple[float, float] | None,
-        sharex: bool,
-        sharey: bool,
-    ) -> tuple[plt.Figure, dict[Any, plt.Axes]]:
-        """Create axes for cohort trajectory plots."""
-        cohorts = list(att_gt["cohort"].drop_duplicates())
-        if layout == "overlay":
-            fig, ax = plt.subplots(
-                1, 1, figsize=figsize or (10, 6), layout="constrained"
-            )
-            return fig, {"overlay": ax}
-        if layout != "facet":
-            raise ValueError("layout must be 'facet' or 'overlay'")
-
-        fig_height = max(2.5 * len(cohorts), 3.0)
-        fig, axes_arr = plt.subplots(
-            len(cohorts),
-            1,
-            figsize=figsize or (10, fig_height),
-            sharex=sharex,
-            sharey=sharey,
-            squeeze=False,
-            layout="constrained",
-        )
-        return fig, {
-            cohort: axes_arr[row_idx, 0] for row_idx, cohort in enumerate(cohorts)
-        }
-
-    def _format_group_time_axis(
-        self,
-        ax: plt.Axes,
-        cohort: Any | None,
-        x_label: str,
-        y_label: str,
-        x_axis: Literal["event_time", "calendar_time"],
-        treatment_time: Any,
-    ) -> None:
-        """Apply shared formatting for cohort trajectory axes."""
-        ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
-        if x_axis == "event_time":
-            ax.axvline(x=-0.5, color="red", linestyle="-", linewidth=1, alpha=0.5)
-        elif cohort is not None:
-            ax.axvline(
-                x=treatment_time - 0.5,
-                color="red",
-                linestyle="-",
-                linewidth=1,
-                alpha=0.5,
-            )
-        ax.set_xlabel(x_label, fontsize=12)
-        ax.set_ylabel(y_label, fontsize=12)
-        if cohort is None:
-            ax.set_title("Staggered DiD Cohort Trajectories", fontsize=14)
-        else:
-            ax.set_title(f"Cohort {cohort}", fontsize=12)
-
     def _get_group_time_axis_label(
         self,
         x_label: str,
@@ -1275,66 +1332,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if layout == "facet" and sharex and axis_index < n_axes - 1:
             return ""
         return x_label
-
-    def _plot_group_time_segment(
-        self,
-        ax: plt.Axes,
-        cohort_data: pd.DataFrame,
-        x_col: str,
-        line_type: Literal["placebo", "ATT"],
-        color: str,
-        label: str,
-    ) -> None:
-        """Plot one placebo or ATT segment for a cohort.
-
-        Uncertainty rendering keys on which columns the aggregation produced:
-        HDI bounds (``att_lower`` / ``att_upper``) draw a shaded band, sample
-        dispersion (``att_std`` / ``n_obs``) draws 1.96-SE error bars, and
-        bare point estimates draw a plain line.
-        """
-        if len(cohort_data) == 0:
-            return
-
-        marker = "s" if line_type == "placebo" else "o"
-        linestyle = "--" if line_type == "placebo" else "-"
-        if {"att_lower", "att_upper"}.issubset(cohort_data.columns):
-            alpha = 0.15 if line_type == "placebo" else 0.2
-            ax.plot(
-                cohort_data[x_col],
-                cohort_data["att"],
-                marker=marker,
-                linestyle=linestyle,
-                color=color,
-                label=label,
-            )
-            ax.fill_between(
-                cohort_data[x_col],
-                cohort_data["att_lower"],
-                cohort_data["att_upper"],
-                color=color,
-                alpha=alpha,
-            )
-        elif {"att_std", "n_obs"}.issubset(cohort_data.columns):
-            se = cohort_data["att_std"] / np.sqrt(cohort_data["n_obs"])
-            ax.errorbar(
-                cohort_data[x_col],
-                cohort_data["att"],
-                yerr=1.96 * se,
-                fmt=f"{marker}{linestyle}",
-                capsize=4,
-                capthick=2,
-                color=color,
-                label=label,
-            )
-        else:
-            ax.plot(
-                cohort_data[x_col],
-                cohort_data["att"],
-                marker=marker,
-                linestyle=linestyle,
-                color=color,
-                label=label,
-            )
 
     def get_plot_data(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """Get event-time plotting data.
