@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -698,6 +699,30 @@ def test_plot_coefficients_rejects_invalid_hdi_prob(small_panel_data):
     )
     with pytest.raises(ValueError, match="hdi_prob must be between 0 and 1"):
         result.plot_coefficients(hdi_prob=1.2)
+
+
+def test_panel_coefficient_plots_reject_multiple_outcomes(
+    small_panel_data, monkeypatch
+):
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+    coefficients = result._model_backend.coefficients().isel(treated_units=0, drop=True)
+    coefficients = xr.concat(
+        [coefficients, coefficients],
+        dim=xr.IndexVariable("treated_units", ["north", "south"]),
+    ).transpose("chain", "draw", "coeffs", "treated_units")
+    monkeypatch.setattr(result._model_backend, "coefficients", lambda: coefficients)
+
+    with pytest.raises(ValueError, match="exactly one outcome unit"):
+        result.plot_coefficients()
+    with pytest.raises(ValueError, match="exactly one outcome unit"):
+        result.plot_unit_effects()
 
 
 def test_group_means_from_original_data(large_panel_data):

@@ -75,9 +75,6 @@ import pandas as pd
 import xarray as xr
 from arviz import r2_score
 
-from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
-
 __all__ = ["PyMCForecastModel"]
 
 
@@ -400,43 +397,3 @@ class PyMCForecastModel:
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         return pd.Series(scores)
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print posterior means and HDIs of the model's scalar parameters.
-
-        Forecasting-model parameters do not map onto the patsy design-matrix
-        ``labels``, so those are ignored; every scalar variable in the fitted
-        posterior is reported instead. Time-varying latents are skipped.
-
-        Parameters
-        ----------
-        labels : list of str
-            Design-matrix labels; ignored by forecasting models.
-        round_to : int, optional
-            Number of significant figures to round to. Defaults to None,
-            in which case 2 significant figures are used.
-        """
-        if self.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
-        posterior = self.idata.posterior
-        scalar_vars = [
-            name
-            for name, da in posterior.data_vars.items()
-            if set(da.dims) == {"chain", "draw"}
-        ]
-        print("Model parameters:")
-        if not scalar_vars:
-            print("  (no scalar parameters in posterior)")
-            return
-        max_label_length = max(len(name) for name in scalar_vars)
-        for name in scalar_vars:
-            samples = posterior[name]
-            formatted_val = (
-                f"{round_num(samples.mean().data, round_to)}, "
-                f"{HDI_PROB * 100:.0f}% HDI "
-                f"[{round_num(samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, "
-                f"{round_num(samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"
-            )
-            print(f"  {name: <{max_label_length}}  {formatted_val}")

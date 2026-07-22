@@ -147,7 +147,8 @@ def test_sklearn_adapter_fit_predict_score():
     np.testing.assert_allclose(mu.squeeze(), adapter.model.predict(X))
     assert list(score.index) == ["unit_0_r2"]
     assert score["unit_0_r2"] > 0.9
-    assert coeffs.shape == (2,)
+    assert coeffs.dims == ("chain", "draw", "coeffs")
+    assert coeffs.shape == (1, 1, 2)
 
 
 def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
@@ -184,7 +185,13 @@ def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
         1,
     )
     assert list(score.index) == ["unit_0_r2", "unit_0_r2_std"]
-    assert np.squeeze(coeffs).shape == (2,)
+    assert coeffs.dims == ("chain", "draw", "coeffs", "treated_units")
+    assert coeffs.shape == (
+        sample_kwargs["chains"],
+        sample_kwargs["draws"],
+        2,
+        1,
+    )
 
 
 def test_panel_regression_requires_explicit_model():
