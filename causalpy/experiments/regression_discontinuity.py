@@ -349,8 +349,7 @@ class RegressionDiscontinuity(BaseExperiment):
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
             For ``"spaghetti"``, legends use draw lines rather than a shaded
             band. For ``"histogram"``, uncertainty is shown as a 2D density
             heatmap with a mean line overlay (no ribbon patch for legends).
