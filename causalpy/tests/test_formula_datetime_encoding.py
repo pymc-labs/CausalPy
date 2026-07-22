@@ -107,7 +107,7 @@ def test_interrupted_time_series_predicts_with_bare_datetime_predictor():
 
     assert result.labels == ["Intercept", "elapsed(date)"]
     assert result.pre_design["X"].shape[1] == result.post_design["X"].shape[1] == 2
-    assert len(result.post_pred) == len(result.datapost)
+    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
 
 
 def test_piecewise_its_uses_single_datetime_baseline_column():

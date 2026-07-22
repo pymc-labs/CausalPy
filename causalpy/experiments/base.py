@@ -319,8 +319,7 @@ class BaseExperiment(ABC):
 
         1. Applies the ``arviz-darkgrid`` style for the duration of the
            draw call.
-        2. Dispatches to :meth:`_bayesian_plot` or :meth:`_ols_plot` based
-           on the model type.
+        2. Calls the subclass's backend-agnostic :meth:`_plot`.
         3. Mutates the resulting legend(s) in place when *legend_kwargs*
            is supplied, preserving custom handles built by the subclass.
         4. Optionally calls :func:`matplotlib.pyplot.show`.
@@ -347,8 +346,8 @@ class BaseExperiment(ABC):
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
-            ``_bayesian_plot`` / ``_ols_plot``. May include ``kind``,
-            ``ci_kind``, ``ci_prob``, and ``num_samples`` for
+            ``_plot``. May include ``kind``, ``ci_kind``, ``ci_prob``, and
+            ``num_samples`` for
             :func:`~causalpy.plot_utils.plot_posterior_over_x`.
 
         Notes
@@ -356,7 +355,7 @@ class BaseExperiment(ABC):
         **Legend handling and ``plot_posterior_over_x`` return types:** :func:`~causalpy.plot_utils.plot_posterior_over_x`
         returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
         ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
-        Subclass ``_bayesian_plot`` / ``_ols_plot`` implementations that assemble
+        Subclass ``_plot`` implementations that assemble
         matplotlib legends from those return values should only pack
         ``(line, patch)`` tuples when calling ``plot_posterior_over_x`` with ``kind="ribbon"``
         (the default). Many current experiment plots always use the ribbon
@@ -376,12 +375,7 @@ class BaseExperiment(ABC):
         ... )
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            if self._model_backend.is_bayesian:
-                fig, ax = self._bayesian_plot(**draw_kwargs)
-            elif self._model_backend.is_ols:
-                fig, ax = self._ols_plot(**draw_kwargs)
-            else:
-                raise ValueError("Unsupported model type")
+            fig, ax = self._plot(**draw_kwargs)
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
@@ -411,36 +405,20 @@ class BaseExperiment(ABC):
 
         return fig, ax
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Plot results for Bayesian models. Override in subclasses that support Bayesian."""
-        raise NotImplementedError("_bayesian_plot method not yet implemented")
+    def _plot(self, **kwargs: Any) -> tuple:
+        """Draw the experiment figure; called by :meth:`_render_plot`.
 
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """Plot results for OLS models. Override in subclasses that support OLS."""
-        raise NotImplementedError("_ols_plot method not yet implemented")
+        Subclasses implement a single backend-agnostic ``_plot`` that consumes
+        the canonical prediction container. Uncertainty rendering should key
+        on data properties (e.g.
+        :func:`~causalpy.plot_utils.has_posterior_draws`), not backend
+        identity.
+        """
+        raise NotImplementedError("_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Recover the data of an experiment along with the prediction and causal impact information.
 
-        Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
-        depending on the model type.
-
-        Parameters
-        ----------
-        *args
-            Positional arguments forwarded to the model-specific implementation.
-        **kwargs
-            Keyword arguments forwarded to the model-specific implementation.
-        """
-        if self._model_backend.is_bayesian:
-            return self.get_plot_data_bayesian(*args, **kwargs)
-        if self._model_backend.is_ols:
-            return self.get_plot_data_ols(*args, **kwargs)
-        raise ValueError("Unsupported model type")
-
-    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian models. Override in subclasses that support Bayesian.
-
         Parameters
         ----------
         *args
@@ -448,19 +426,7 @@ class BaseExperiment(ABC):
         **kwargs
             Keyword arguments forwarded to the subclass implementation.
         """
-        raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
-
-    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for OLS models. Override in subclasses that support OLS.
-
-        Parameters
-        ----------
-        *args
-            Positional arguments forwarded to the subclass implementation.
-        **kwargs
-            Keyword arguments forwarded to the subclass implementation.
-        """
-        raise NotImplementedError("get_plot_data_ols method not yet implemented")
+        raise NotImplementedError("get_plot_data method not yet implemented")
 
     @abstractmethod
     def effect_summary(
@@ -500,7 +466,7 @@ class BaseExperiment(ABC):
             ``hdi_prob = 1 - alpha``. Note that this is independent of the
             project-wide :data:`~causalpy.constants.HDI_PROB` constant
             (currently 0.94) used by :meth:`plot` and
-            :meth:`get_plot_data_bayesian`, so the same experiment may report
+            :meth:`get_plot_data`, so the same experiment may report
             a 95% HDI in :meth:`effect_summary` and a 94% HDI in :meth:`plot`
             with default settings.
         cumulative : bool, default=True

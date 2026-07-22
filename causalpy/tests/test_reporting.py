@@ -333,6 +333,67 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
+    """``_compute_statistics_did_ols`` must compute one residual per
+    observation, not an (n, n) array.
+
+    ``y_da`` (shape ``(n, 1)``, dims ``obs_ind x treated_units``) minus a bare
+    ``(n,)`` ``y_pred`` array used to broadcast positionally against the
+    *last* axis (``treated_units``, size 1) instead of ``obs_ind``, producing
+    an ``(n, n)`` array of every observation's y minus every *other*
+    observation's prediction. That inflated the reported SE by roughly 70x
+    on this dataset. This test checks the residual shape directly and checks
+    the reported SE against an independent statsmodels fit, up to the
+    still-present (separately tracked) mean/(n-p) denominator convention
+    difference, which is out of scope for this fix.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+    formula = "y ~ 1 + group * post_treatment"
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
+    n = X_da.shape[0]
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["treatment_effect"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=df).fit()
+    interaction_col = next(
+        name for name in sm_fit.params.index if "group" in name and "post" in name
+    )
+    unbiased_se = sm_fit.bse[interaction_col]
+    # CausalPy still divides by n rather than (n - p) here (tracked
+    # separately), so the correctly-shaped residuals give an SE smaller than
+    # the unbiased statsmodels value by sqrt((n - p) / n), not an exact match.
+    p = X_da.shape[1]
+    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
+    # Guard against regressing to the (n, n) broadcast bug: that variant
+    # inflated the SE by roughly 70x on this dataset.
+    assert reported_se < unbiased_se * 2
+
+
+@pytest.mark.integration
 def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
@@ -586,7 +647,7 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind").isel(treated_units=0)
+    avg_effect = result.post_impact.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -1102,41 +1163,45 @@ def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
     assert isinstance(stats["cum"]["relative_hdi_lower"], float)
 
 
-def test_extract_window_ols_xarray_post_impact_branch():
-    """Ensure OLS xarray post_impact path uses numpy conversion safely."""
+def test_extract_window_canonical_dataarray():
+    """_extract_window returns the canonical DataArray unchanged for 'post'."""
     import xarray as xr
 
     from causalpy.reporting import _extract_window
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_impact=xr.DataArray([1.0, 2.0, 3.0], dims=["obs_ind"]),
+        post_impact=xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
         datapost=datapost,
     )
 
     windowed_impact, window_coords = _extract_window(result, window="post")
 
-    assert isinstance(windowed_impact, np.ndarray)
+    assert isinstance(windowed_impact, xr.DataArray)
     assert window_coords.equals(datapost.index)
 
 
-def test_extract_counterfactual_ols_xarray_branch():
-    """Ensure OLS xarray post_pred branch converts via numpy safely."""
+def test_extract_counterfactual_canonical_dataarray():
+    """_extract_counterfactual selects the window from the canonical DataArray."""
     import xarray as xr
 
     from causalpy.reporting import _extract_counterfactual
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_pred=xr.DataArray([5.0, 6.0, 7.0], dims=["obs_ind"]),
+        post_pred=xr.DataArray(
+            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
         datapost=datapost,
     )
 
     window_coords = datapost.index[:2]
     counterfactual = _extract_counterfactual(result, window_coords)
 
-    assert isinstance(counterfactual, np.ndarray)
-    np.testing.assert_array_equal(counterfactual, np.array([5.0, 6.0]))
+    assert isinstance(counterfactual, xr.DataArray)
+    np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
 
 def test_compute_statistics_rope_increase():
@@ -1315,28 +1380,6 @@ def test_select_treated_unit():
     assert "treated_units" not in result.dims
 
 
-def test_select_treated_unit_numpy():
-    """Test _select_treated_unit_numpy helper."""
-    from causalpy.reporting import _select_treated_unit_numpy
-
-    # Create mock result object
-    class MockResult:
-        treated_units = ["unit_a", "unit_b", "unit_c"]
-
-    result = MockResult()
-
-    # Create mock 2D numpy array (time x units)
-    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-
-    # Select by name
-    selected = _select_treated_unit_numpy(data, result, "unit_b")
-    np.testing.assert_array_equal(selected, np.array([2, 5, 8]))
-
-    # Select first when None provided
-    selected = _select_treated_unit_numpy(data, result, None)
-    np.testing.assert_array_equal(selected, np.array([1, 4, 7]))
-
-
 # ==============================================================================
 # Tests for error handling
 # ==============================================================================
@@ -1372,11 +1415,15 @@ def test_detect_experiment_type_prepostnegd():
 
 def test_extract_window_invalid_type():
     """Test _extract_window raises error for invalid window type."""
+    import xarray as xr
+
     from causalpy.reporting import _extract_window
 
     # Create a minimal mock result
     class MockResult:
-        post_impact = np.array([1, 2, 3])
+        post_impact = xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [0, 1, 2]}
+        )
         datapost = pd.DataFrame({"y": [1, 2, 3]}, index=[0, 1, 2])
 
     result = MockResult()
@@ -1551,8 +1598,8 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
-    """Test _extract_counterfactual with dict format PyMC results."""
+def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
+    """_extract_counterfactual selects a window from canonical PyMC predictions."""
     from causalpy.reporting import _extract_counterfactual
 
     df = its_data
@@ -1564,20 +1611,11 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    # Convert InferenceData to dict format
-    post_pred_dict = {"posterior_predictive": result.post_pred.posterior_predictive}
-    original_post_pred = result.post_pred
-    result.post_pred = post_pred_dict
-
-    # Should handle dict format
     window_coords = result.datapost.index[:10]
     counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
 
-    # Restore original
-    result.post_pred = original_post_pred
-
-    assert counterfactual is not None
-    assert hasattr(counterfactual, "shape")
+    assert counterfactual.sizes["obs_ind"] == 10
+    assert {"chain", "draw"} <= set(counterfactual.dims)
 
 
 @pytest.mark.integration

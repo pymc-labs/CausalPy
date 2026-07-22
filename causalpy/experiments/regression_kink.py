@@ -26,7 +26,11 @@ from patsy import ModelDesc, build_design_matrices
 import xarray as xr
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    extract_r2_score,
+    plot_posterior_over_x,
+)
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -232,11 +236,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -346,7 +349,7 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -392,7 +395,7 @@ class RegressionKink(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -401,14 +404,12 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        if (
-            isinstance(self.score, pd.Series)
-            and "unit_0_r2" in self.score.index
-            and "unit_0_r2_std" in self.score.index
-        ):
-            title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        if r2_val is not None and r2_std_val is not None:
+            title_info = f"{round_num(r2_val, round_to if round_to is not None else 2)} (std = {round_num(r2_std_val, round_to if round_to is not None else 2)})"
             r2 = f"Bayesian $R^2$ on all data = {title_info}"
         else:
+            # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
             r2 = "Bayesian fit on all data"
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]

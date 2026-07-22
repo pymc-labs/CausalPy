@@ -16,7 +16,6 @@
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -29,12 +28,14 @@ from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
+    extract_r2_score,
     get_hdi_to_df,
+    has_posterior_draws,
     plot_posterior_over_x,
 )
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import _as_scalar, check_convex_hull_violation, round_num
+from causalpy.utils import check_convex_hull_violation, round_num
 
 from .base import BaseExperiment
 
@@ -308,17 +309,17 @@ class SyntheticControl(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self._model_backend.predict(X=self.post_design["control"])
-        self.pre_impact = self.model.calculate_impact(
-            self.pre_design["treated"], self.pre_pred
+        # Impact below relies on exact obs_ind alignment; a mismatch (e.g. a bare
+        # ndarray X getting arange coords) would silently corrupt the subtraction.
+        assert self.pre_design["treated"].obs_ind.equals(self.pre_pred.obs_ind)
+        assert self.post_design["treated"].obs_ind.equals(self.post_pred.obs_ind)
+        self.pre_impact = (self.pre_design["treated"] - self.pre_pred).transpose(
+            ..., "obs_ind", "treated_units"
         )
-
-        self.post_impact = self.model.calculate_impact(
-            self.post_design["treated"], self.post_pred
+        self.post_impact = (self.post_design["treated"] - self.post_pred).transpose(
+            ..., "obs_ind", "treated_units"
         )
-
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
-        )
+        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
@@ -359,15 +360,11 @@ class SyntheticControl(BaseExperiment):
             observed = (
                 self.pre_design["treated"].sel(treated_units=unit).values.flatten()
             )
-            if self._model_backend.is_bayesian:
-                predicted = (
-                    self.pre_pred["posterior_predictive"]["mu"]
-                    .sel(treated_units=unit)
-                    .mean(dim=["chain", "draw"])
-                    .values.flatten()
-                )
-            else:
-                predicted = np.asarray(self.pre_pred).flatten()
+            predicted = (
+                self.pre_pred.sel(treated_units=unit)
+                .mean(dim=["chain", "draw"])
+                .values.flatten()
+            )
             correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
         return correlations
 
@@ -496,7 +493,7 @@ class SyntheticControl(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         treated_unit: str | None = None,
@@ -511,6 +508,11 @@ class SyntheticControl(BaseExperiment):
         """
         Plot the results for a specific treated unit.
 
+        Consumes the canonical prediction container from any backend.
+        Uncertainty bands are drawn only when the container carries posterior
+        draws; point-estimate backends (singleton ``chain``/``draw``) get bare
+        lines.
+
         Parameters
         ----------
         round_to : int, optional
@@ -519,8 +521,8 @@ class SyntheticControl(BaseExperiment):
         treated_unit : str, optional
             Which treated unit to plot. Must be a string name of the treated unit.
             If ``None``, plots the first treated unit.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
+        ci_prob : float, optional
+            Probability mass of the credible interval drawn around the
             posterior predictive, causal impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
@@ -530,16 +532,13 @@ class SyntheticControl(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
+        with_uncertainty = has_posterior_draws(self.pre_pred)
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-        # TOP PLOT --------------------------------------------------
-        # pre-intervention period
 
         # Get treated unit name - default to first unit if None
         treated_unit = (
@@ -551,82 +550,114 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
+        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
+        post_pred = self.post_pred.sel(treated_units=treated_unit)
+        pre_impact = self.pre_impact.sel(treated_units=treated_unit)
+        post_impact = self.post_impact.sel(treated_units=treated_unit)
+        post_impact_cumulative = self.post_impact_cumulative.sel(
             treated_units=treated_unit
         )
-        post_pred = self.post_pred["posterior_predictive"].mu.sel(
-            treated_units=treated_unit
-        )
+        pre_treated = self.pre_design["treated"].sel(treated_units=treated_unit)
+        post_treated = self.post_design["treated"].sel(treated_units=treated_unit)
 
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapre.index,
-            pre_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
+        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
+        # TOP PLOT --------------------------------------------------
+        handles: list[Any] = []
+        labels: list[str] = []
+        if with_uncertainty:
+            # pre-intervention period
+            h_line, h_patch = plot_posterior_over_x(
+                self.datapre.index,
+                pre_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            handles.append((h_line, h_patch))
+            labels.append("Pre-intervention period")
 
-        # Plot observations for primary treated unit
-        (h,) = ax[0].plot(
-            self.datapre.index,
-            self.pre_design["treated"].sel(treated_units=treated_unit),
-            "k.",
-            label="Observations",
-        )
-        handles.append(h)
-        labels.append("Observations")
+            # Plot observations for primary treated unit
+            (h,) = ax[0].plot(
+                self.datapre.index,
+                pre_treated,
+                "k.",
+                label="Observations",
+            )
+            handles.append(h)
+            labels.append("Observations")
 
-        # post intervention period
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapost.index,
-            post_pred,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
+            # post intervention period
+            h_line, h_patch = plot_posterior_over_x(
+                self.datapost.index,
+                post_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            handles.append((h_line, h_patch))
+            labels.append(counterfactual_label)
 
-        ax[0].plot(
-            self.datapost.index,
-            self.post_design["treated"].sel(treated_units=treated_unit),
-            "k.",
-        )
-        # Shaded causal effect for primary treated unit
+            ax[0].plot(self.datapost.index, post_treated, "k.")
+        else:
+            ax[0].plot(pre_treated["obs_ind"], pre_treated, "k.")
+            ax[0].plot(post_treated["obs_ind"], post_treated, "k.")
+            ax[0].plot(
+                self.datapre.index,
+                pre_pred.mean(dim=["chain", "draw"]),
+                c="k",
+                label="model fit",
+            )
+            ax[0].plot(
+                self.datapost.index,
+                post_pred.mean(dim=["chain", "draw"]),
+                label=counterfactual_label,
+                ls=":",
+                c="k",
+            )
+
+        # Shaded causal effect
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.post_design["treated"].sel(treated_units=treated_unit).values,
+            y2=post_treated.values,
             color="C0",
             alpha=0.25,
             label="Causal impact",
         )
-        handles.append(h)
-        labels.append("Causal impact")
+        if with_uncertainty:
+            handles.append(h)
+            labels.append("Causal impact")
 
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
 
         # MIDDLE PLOT -----------------------------------------------
-        plot_posterior_over_x(
-            self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
+        if with_uncertainty:
+            plot_posterior_over_x(
+                self.datapre.index,
+                pre_impact,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            plot_posterior_over_x(
+                self.datapost.index,
+                post_impact,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        else:
+            ax[1].plot(self.datapre.index, pre_impact.mean(dim=["chain", "draw"]), "k.")
+            ax[1].plot(
+                self.datapost.index,
+                post_impact.mean(dim=["chain", "draw"]),
+                "k.",
+                label=counterfactual_label,
+            )
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"]).sel(treated_units=treated_unit),
+            y1=post_impact.mean(dim=["chain", "draw"]),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -634,15 +665,22 @@ class SyntheticControl(BaseExperiment):
         ax[1].set(title="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        plot_posterior_over_x(
-            self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
+        if with_uncertainty:
+            plot_posterior_over_x(
+                self.datapost.index,
+                post_impact_cumulative,
+                ax=ax[2],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        else:
+            ax[2].plot(
+                self.datapost.index,
+                post_impact_cumulative.mean(dim=["chain", "draw"]),
+                c="k",
+            )
         ax[2].axhline(y=0, c="k")
+        ax[2].set(title="Cumulative Causal Impact")
 
         # Intervention line
         for i in [0, 1, 2]:
@@ -654,13 +692,18 @@ class SyntheticControl(BaseExperiment):
                 ls="-",
                 lw=3,
                 color="r",
+                label=None if with_uncertainty else "Treatment time",
             )
 
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+        if with_uncertainty:
+            ax[0].legend(
+                handles=(h_tuple for h_tuple in handles),
+                labels=labels,
+                fontsize=LEGEND_FONT_SIZE,
+            )
+        else:
+            # Collect labelled artists (including the treatment line)
+            ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         if plot_predictors:
             # plot control units as well
@@ -690,159 +733,28 @@ class SyntheticControl(BaseExperiment):
 
         return fig, ax
 
-    def _ols_plot(
-        self,
-        round_to: int | None = None,
-        treated_unit: str | None = None,
-        figsize: tuple[float, float] = (7, 8),
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results for OLS model for a specific treated unit
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
-            Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
-        :param figsize:
-            Width and height of the figure in inches. Defaults to ``(7, 8)``.
-        """
-        counterfactual_label = "Counterfactual"
-
-        # Get treated unit name - default to first unit if None
-        treated_unit = (
-            treated_unit if treated_unit is not None else self.treated_units[0]
-        )
-
-        if treated_unit not in self.treated_units:
-            raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
-            )
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-
-        ax[0].plot(
-            self.pre_design["treated"]["obs_ind"],
-            self.pre_design["treated"].sel(treated_units=treated_unit),
-            "k.",
-        )
-        ax[0].plot(
-            self.post_design["treated"]["obs_ind"],
-            self.post_design["treated"].sel(treated_units=treated_unit),
-            "k.",
-        )
-
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
-        ax[0].plot(
-            self.datapost.index,
-            self.post_pred,
-            label=counterfactual_label,
-            ls=":",
-            c="k",
-        )
-        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
-        # Shaded causal effect
-        post_pred_values = np.squeeze(self.post_pred)
-
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred_values,
-            y2=np.squeeze(
-                self.post_design["treated"].sel(treated_units=treated_unit).data
-            ),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
-        ax[1].plot(
-            self.datapost.index,
-            self.post_impact,
-            "k.",
-            label=counterfactual_label,
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
-        # Shaded causal effect
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_impact),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        # Intervention line
-        for i in [0, 1, 2]:
-            treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
-            )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-                label="Treatment time",
-            )
-
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return (fig, ax)
-
-    def get_plot_data_ols(self) -> pd.DataFrame:
-        """
-        Recover the data of the experiment along with the prediction and causal impact information.
-        """
-        pre_data = self.datapre.copy()
-        post_data = self.datapost.copy()
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
-        self.plot_data = pd.concat([pre_data, post_data])
-
-        return self.plot_data
-
-    def get_plot_data_bayesian(
+    def get_plot_data(
         self, hdi_prob: float = HDI_PROB, treated_unit: str | None = None
     ) -> pd.DataFrame:
         """
-        Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
+        Recover the data of the experiment along with the prediction and causal impact information.
+
+        HDI columns are included only when the prediction container carries
+        posterior draws (point-estimate backends return just ``prediction``
+        and ``impact``).
 
         Parameters
         ----------
         hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
             Probability mass of the highest density interval. Defaults to
-            the project-wide :data:`~causalpy.constants.HDI_PROB`.
+            the project-wide :data:`~causalpy.constants.HDI_PROB`. Ignored
+            when the prediction container has no posterior draws.
         treated_unit : str, optional
             Which treated unit to extract data for. Must be a string name
             of the treated unit. If ``None``, uses the first treated unit.
         """
-        if not self._model_backend.is_bayesian:
-            raise ValueError("Unsupported model type")
-
+        with_uncertainty = has_posterior_draws(self.pre_pred)
         hdi_pct = int(round(hdi_prob * 100))
-
-        pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-        pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-        impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-        impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
 
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
@@ -857,60 +769,39 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        # Extract predictions - handle multi-unit case
-        pre_pred_vals = az.extract(
-            self.pre_pred, group="posterior_predictive", var_names="mu"
-        ).mean("sample")
-        post_pred_vals = az.extract(
-            self.post_pred, group="posterior_predictive", var_names="mu"
-        ).mean("sample")
+        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
+        post_pred = self.post_pred.sel(treated_units=treated_unit)
+        pre_impact = self.pre_impact.sel(treated_units=treated_unit)
+        post_impact = self.post_impact.sel(treated_units=treated_unit)
 
-        # Extract predictions for the specified treated unit (always has treated_units dimension)
-        pre_data["prediction"] = pre_pred_vals.sel(treated_units=treated_unit).values
-        post_data["prediction"] = post_pred_vals.sel(treated_units=treated_unit).values
+        pre_data["prediction"] = pre_pred.mean(dim=["chain", "draw"]).values
+        post_data["prediction"] = post_pred.mean(dim=["chain", "draw"]).values
 
-        # HDI intervals for predictions (always use treated_units dimension)
-        pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
-            hdi_prob=hdi_prob,
-        )
-        post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
-            hdi_prob=hdi_prob,
-        )
+        if with_uncertainty:
+            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+            pre_hdi = get_hdi_to_df(pre_pred, hdi_prob=hdi_prob)
+            post_hdi = get_hdi_to_df(post_pred, hdi_prob=hdi_prob)
+            # Extract only the lower and upper columns
+            pre_data[[pred_lower_col, pred_upper_col]] = pre_hdi.iloc[:, [0, -1]].values
+            post_data[[pred_lower_col, pred_upper_col]] = post_hdi.iloc[
+                :, [0, -1]
+            ].values
 
-        # Extract only the lower and upper columns and ensure proper indexing
-        pre_lower_upper = pre_hdi.iloc[:, [0, -1]].values  # Get first and last columns
-        post_lower_upper = post_hdi.iloc[:, [0, -1]].values
+        pre_data["impact"] = pre_impact.mean(dim=["chain", "draw"]).values
+        post_data["impact"] = post_impact.mean(dim=["chain", "draw"]).values
 
-        pre_data[[pred_lower_col, pred_upper_col]] = pre_lower_upper
-        post_data[[pred_lower_col, pred_upper_col]] = post_lower_upper
-
-        # Impact data - always use primary unit for main dataframe
-        pre_data["impact"] = (
-            self.pre_impact.mean(dim=["chain", "draw"])
-            .sel(treated_units=treated_unit)
-            .values
-        )
-        post_data["impact"] = (
-            self.post_impact.mean(dim=["chain", "draw"])
-            .sel(treated_units=treated_unit)
-            .values
-        )
-        # Impact HDI intervals (always use treated_units dimension)
-        pre_impact_hdi = get_hdi_to_df(
-            self.pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-        )
-        post_impact_hdi = get_hdi_to_df(
-            self.post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-        )
-
-        # Extract only the lower and upper columns for impact HDI
-        pre_impact_lower_upper = pre_impact_hdi.iloc[:, [0, -1]].values
-        post_impact_lower_upper = post_impact_hdi.iloc[:, [0, -1]].values
-
-        pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_lower_upper
-        post_data[[impact_lower_col, impact_upper_col]] = post_impact_lower_upper
+        if with_uncertainty:
+            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+            pre_impact_hdi = get_hdi_to_df(pre_impact, hdi_prob=hdi_prob)
+            post_impact_hdi = get_hdi_to_df(post_impact, hdi_prob=hdi_prob)
+            pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_hdi.iloc[
+                :, [0, -1]
+            ].values
+            post_data[[impact_lower_col, impact_upper_col]] = post_impact_hdi.iloc[
+                :, [0, -1]
+            ].values
 
         self.plot_data = pd.concat([pre_data, post_data])
 
@@ -918,24 +809,19 @@ class SyntheticControl(BaseExperiment):
 
     def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
-        if self._model_backend.is_bayesian:
-            if self.score is None:
-                # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
-                return "Pre-intervention Bayesian fit"
-            # Bayesian model - get unit-specific R² scores using unified format
-            unit_index = self.treated_units.index(treated_unit)
-            r2_val = round_num(
-                self.score[f"unit_{unit_index}_r2"],
-                round_to if round_to is not None else 2,
+        r_to = round_to if round_to is not None else 2
+        r2_val, r2_std_val = extract_r2_score(
+            self.score, unit_index=self.treated_units.index(treated_unit)
+        )
+        if r2_val is None:
+            # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+            return "Pre-intervention Bayesian fit"
+        if r2_std_val is not None:
+            return (
+                f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, r_to)} "
+                f"(std = {round_num(r2_std_val, r_to)})"
             )
-            r2_std_val = round_num(
-                self.score[f"unit_{unit_index}_r2_std"],
-                round_to if round_to is not None else 2,
-            )
-            return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
-        else:
-            # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to if round_to is not None else 2)}"
+        return f"$R^2$ on pre-intervention data = {round_num(r2_val, r_to)}"
 
     def effect_summary(
         self,
@@ -990,14 +876,9 @@ class SyntheticControl(BaseExperiment):
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
 
         # Warn if period parameter is provided (not supported for Synthetic Control)
@@ -1010,93 +891,22 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
-        is_pymc = self._model_backend.is_bayesian
-
-        # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
             self, window, treated_unit=treated_unit
         )
-
-        # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
             self, window_coords, treated_unit=treated_unit
         )
-
-        if is_pymc:
-            # PyMC model: use posterior draws
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            # Compute observed/counterfactual averages for prose
-            time_dim = "obs_ind"
-            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-        else:
-            if hasattr(windowed_impact, "values"):
-                impact_array = windowed_impact.values
-            else:
-                impact_array = np.asarray(windowed_impact)
-            if hasattr(counterfactual, "values"):
-                counterfactual_array = counterfactual.values
-            else:
-                counterfactual_array = np.asarray(counterfactual)
-
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="sc",
+        )

@@ -460,10 +460,7 @@ def _effect_summary_rd(
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
 
-    # Check if PyMC (xarray) or OLS (scalar)
-    is_pymc = isinstance(discontinuity, xr.DataArray)
-
-    if is_pymc:
+    if result._model_backend.is_bayesian:
         # PyMC model: use unified scalar functions
         hdi_prob = 1 - alpha
         stats = _compute_statistics_scalar(
@@ -516,36 +513,12 @@ def _select_treated_unit(data: xr.DataArray, treated_unit: str | None) -> xr.Dat
         return data.isel(treated_units=0)
 
 
-def _select_treated_unit_numpy(
-    data: np.ndarray, result, treated_unit: str | None
-) -> np.ndarray:
-    """Select a specific treated unit from multi-dimensional numpy array.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Multi-dimensional array where second dimension is treated units
-    result
-        Experiment result object with treated_units attribute
-    treated_unit : str or None
-        Name of treated unit to select. If None, selects first unit.
-
-    Returns
-    -------
-    np.ndarray
-        Data for the selected treated unit (1D)
-    """
-    if treated_unit is not None and hasattr(result, "treated_units"):
-        unit_idx = result.treated_units.index(treated_unit)
-        return data[:, unit_idx]
-    else:
-        return data[:, 0]
-
-
 def _extract_window(result, window, treated_unit=None):
     """Extract windowed impact data based on window specification.
 
-    Assumes result.post_impact is properly shaped xarray or numpy array.
+    Assumes ``result.post_impact`` is an :class:`xarray.DataArray` with
+    canonical prediction dimensions (singleton ``chain``/``draw`` for OLS
+    backends).
 
     Parameters
     ----------
@@ -564,28 +537,8 @@ def _extract_window(result, window, treated_unit=None):
     """
     post_impact = result.post_impact
 
-    # Check if PyMC (xarray with chain/draw dims) or OLS
-    is_pymc = isinstance(post_impact, xr.DataArray) and (
-        "chain" in post_impact.dims or "draw" in post_impact.dims
-    )
-
-    # Handle treated_unit selection using helper functions
-    if isinstance(post_impact, xr.DataArray) and "treated_units" in post_impact.dims:
+    if "treated_units" in post_impact.dims:
         post_impact = _select_treated_unit(post_impact, treated_unit)
-    elif (
-        not isinstance(post_impact, xr.DataArray)
-        and hasattr(post_impact, "ndim")
-        and post_impact.ndim > 1
-    ):
-        post_impact = _select_treated_unit_numpy(post_impact, result, treated_unit)
-
-    # Convert OLS xarray to numpy for consistent handling
-    if not is_pymc and isinstance(post_impact, xr.DataArray):
-        post_impact = np.squeeze(np.asarray(post_impact))
-
-    # Ensure OLS data is numpy array
-    if not is_pymc and not isinstance(post_impact, np.ndarray):
-        post_impact = np.asarray(post_impact)
 
     # Extract window coordinates based on window specification
     if window == "post":
@@ -643,13 +596,8 @@ def _extract_window(result, window, treated_unit=None):
     if window == "post":
         # No filtering needed - use all data
         windowed_impact = post_impact
-    elif is_pymc:
-        # PyMC: use xarray's named dimension selection
-        windowed_impact = post_impact.sel(obs_ind=window_coords)
     else:
-        # OLS: convert window_coords to integer indices and select from numpy array
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        windowed_impact = post_impact[indices]
+        windowed_impact = post_impact.sel(obs_ind=window_coords)
 
     # Validate window is not empty
     if len(window_coords) == 0:
@@ -661,7 +609,9 @@ def _extract_window(result, window, treated_unit=None):
 def _extract_counterfactual(result, window_coords, treated_unit=None):
     """Extract counterfactual predictions for the window.
 
-    Reuses logic from _extract_window for consistency.
+    Assumes ``result.post_pred`` is an :class:`xarray.DataArray` with
+    canonical prediction dimensions (singleton ``chain``/``draw`` for OLS
+    backends).
 
     Parameters
     ----------
@@ -674,60 +624,132 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
     Returns
     -------
-    xr.DataArray or np.ndarray
+    xr.DataArray
         Counterfactual predictions for the window
     """
     post_pred = result.post_pred
+    if "treated_units" in post_pred.dims:
+        post_pred = _select_treated_unit(post_pred, treated_unit)
+    return post_pred.sel(obs_ind=window_coords)
 
-    # PyMC: Extract from InferenceData
-    if hasattr(post_pred, "posterior_predictive"):
-        # PyMC model - InferenceData object
-        counterfactual = post_pred.posterior_predictive["mu"]
 
-        # Handle treated_unit selection using helper
-        if "treated_units" in counterfactual.dims:
-            counterfactual = _select_treated_unit(counterfactual, treated_unit)
+def _effect_summary_timeseries(
+    result,
+    windowed_impact: xr.DataArray,
+    counterfactual: xr.DataArray,
+    window_coords,
+    *,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    cumulative: bool = True,
+    relative: bool = True,
+    min_effect: float | None = None,
+    prefix: str = "Post-period",
+    experiment_type: str | None = None,
+) -> EffectSummary:
+    """Build an :class:`EffectSummary` for time-series experiments (ITS, SC,
+    Piecewise ITS) from canonical impact/counterfactual containers.
 
-        # Select window using named dimension
-        counterfactual = counterfactual.sel(obs_ind=window_coords)
-        return counterfactual
+    The single irreducible backend branch lives here: Bayesian backends
+    summarize posterior draws (HDIs, tail probabilities, ROPE), while OLS
+    backends report frequentist t-based intervals — an HDI computed from a
+    singleton draw would be silently meaningless.
 
-    elif isinstance(post_pred, dict) and "posterior_predictive" in post_pred:
-        # PyMC model - dict format (fallback)
-        counterfactual = post_pred["posterior_predictive"]["mu"]
+    Parameters
+    ----------
+    result
+        Experiment result object exposing ``_model_backend``.
+    windowed_impact : xr.DataArray
+        Causal impact in the analysis window with canonical prediction
+        dimensions.
+    counterfactual : xr.DataArray
+        Counterfactual predictions in the analysis window with canonical
+        prediction dimensions.
+    window_coords : pd.Index
+        Window coordinates from :func:`_extract_window`.
+    direction : {"increase", "decrease", "two-sided"}, default "increase"
+        Direction for tail probability calculation (Bayesian only).
+    alpha : float, default 0.05
+        Significance level for HDI/CI intervals.
+    cumulative : bool, default True
+        Whether to include cumulative effect statistics.
+    relative : bool, default True
+        Whether to include relative effect statistics.
+    min_effect : float, optional
+        Region of Practical Equivalence threshold (Bayesian only).
+    prefix : str, default "Post-period"
+        Prefix for prose generation.
+    experiment_type : str, optional
+        Experiment tag ("its", "sc", "piecewise_its") for tailored
+        assumptions text.
+    """
+    if result._model_backend.is_bayesian:
+        hdi_prob = 1 - alpha
+        stats = _compute_statistics(
+            windowed_impact,
+            counterfactual,
+            hdi_prob=hdi_prob,
+            direction=direction,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+        )
+        table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
-        # Handle treated_unit selection using helper
-        if "treated_units" in counterfactual.dims:
-            counterfactual = _select_treated_unit(counterfactual, treated_unit)
+        cf_avg = _as_scalar(counterfactual.mean(dim=["obs_ind", "chain", "draw"]))
+        obs_avg = cf_avg + stats["avg"]["mean"]
+        cf_cum = _as_scalar(
+            counterfactual.sum(dim="obs_ind").mean(dim=["chain", "draw"])
+        )
+        obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
 
-        # Select window using named dimension
-        counterfactual = counterfactual.sel(obs_ind=window_coords)
-        return counterfactual
-
-    # OLS: Handle xarray or numpy
-    if isinstance(post_pred, xr.DataArray):
-        # OLS with xarray (e.g., SyntheticControl)
-        # Select treated_unit using helper
-        if "treated_units" in post_pred.dims:
-            post_pred = _select_treated_unit(post_pred, treated_unit)
-
-        # Convert window_coords to integer indices for isel
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = np.asarray(post_pred.isel(obs_ind=indices))
-        return np.squeeze(counterfactual)
+        text = _generate_prose_detailed(
+            stats,
+            window_coords,
+            alpha=alpha,
+            direction=direction,
+            cumulative=cumulative,
+            relative=relative,
+            prefix=prefix,
+            observed_avg=obs_avg,
+            counterfactual_avg=cf_avg,
+            observed_cum=obs_cum,
+            counterfactual_cum=cf_cum if cumulative else None,
+            experiment_type=experiment_type,
+        )
     else:
-        # OLS with numpy array
-        # Convert window_coords to indices
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred[indices]
+        impact_array = np.asarray(windowed_impact.isel(chain=0, draw=0))
+        counterfactual_array = np.asarray(counterfactual.isel(chain=0, draw=0))
 
-        # Handle treated_unit for multi-unit numpy arrays using helper
-        if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
-            counterfactual = _select_treated_unit_numpy(
-                counterfactual, result, treated_unit
-            )
+        stats = _compute_statistics_ols(
+            impact_array,
+            counterfactual_array,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+        )
+        table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
-        return np.squeeze(counterfactual)
+        cf_avg = float(np.mean(counterfactual_array))
+        obs_avg = cf_avg + stats["avg"]["mean"]
+        cf_cum = float(np.sum(counterfactual_array))
+        obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+        text = _generate_prose_detailed_ols(
+            stats,
+            window_coords,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            prefix=prefix,
+            observed_avg=obs_avg,
+            counterfactual_avg=cf_avg,
+            observed_cum=obs_cum,
+            counterfactual_cum=cf_cum if cumulative else None,
+            experiment_type=experiment_type,
+        )
+
+    return EffectSummary(table=table, text=text)
 
 
 def _compute_statistics(
@@ -1494,7 +1516,14 @@ def _compute_statistics_did_ols(
     X_da = result.design["X"]
     y_da = result.design["y"]
     y_pred = result.model.predict(X_da)
-    residuals = y_da - y_pred
+    # y_da has shape (n, 1) with dims (obs_ind, treated_units); y_pred is a
+    # bare (n,) array with no dimension names. Subtracting them directly lets
+    # xarray align y_pred positionally against the *last* axis (treated_units,
+    # size 1) instead of obs_ind, producing an (n, n) array of every
+    # observation's y minus every other observation's prediction instead of
+    # per-observation residuals. Flatten both to 1-D first so they align by
+    # position on obs_ind as intended.
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
     mse = np.mean(residuals**2)
     n, p = X_da.shape
     df = n - p
@@ -1621,7 +1650,7 @@ def _generate_prose_did_ols(stats, alpha=0.05):
 
 def _compute_statistics_rd_ols(result, alpha=0.05):
     """Compute statistics for RD scalar effect with OLS model."""
-    discontinuity = result.discontinuity_at_threshold  # scalar
+    discontinuity = _as_scalar(result.discontinuity_at_threshold)
 
     # Calculate standard error from model
     X_da = result.design["X"]

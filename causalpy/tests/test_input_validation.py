@@ -283,7 +283,9 @@ def test_did_ols_matches_only_exact_interaction(did_data):
     expected_counterfactual = (
         1 + 2 + 3 + 5 * result.x_pred_counterfactual["g_post"].to_numpy()
     )
-    np.testing.assert_allclose(result.y_pred_counterfactual, expected_counterfactual)
+    np.testing.assert_allclose(
+        np.squeeze(result.y_pred_counterfactual), expected_counterfactual
+    )
 
 
 def test_did_bayesian_matches_only_exact_interaction(did_data):
