@@ -80,7 +80,7 @@ def extract_r2_score(
 
 
 class _PosteriorPlotStyle(TypedDict):
-    """Typed kwargs bundle forwarded from ``_bayesian_plot`` to every ``plot_posterior_over_x`` call."""
+    """Typed kwargs bundle forwarded from experiment ``_plot`` methods to every ``plot_posterior_over_x`` call."""
 
     ci_prob: float
     kind: Literal["ribbon", "histogram", "spaghetti"]

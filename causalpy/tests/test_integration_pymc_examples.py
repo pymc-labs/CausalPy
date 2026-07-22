@@ -686,7 +686,7 @@ def test_sdid(mock_pymc_sample):
 @pytest.mark.integration
 def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
     """SDiD with a DatetimeIndex panel exercises the datetime branch in
-    ``_bayesian_plot`` and the full ``effect_summary`` body, including the
+    ``_plot`` and the full ``effect_summary`` body, including the
     ``period``-warning path and the ``cumulative=False`` branch.
     """
     df = cp.load_data("sc").copy()
@@ -703,7 +703,7 @@ def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
         ),
     )
 
-    # DatetimeIndex branch in _bayesian_plot calls format_date_axes.
+    # DatetimeIndex branch in _plot calls format_date_axes.
     fig, _ = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
 
