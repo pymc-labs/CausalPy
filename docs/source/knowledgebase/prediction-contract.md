@@ -39,6 +39,14 @@ This is a user-visible change for sklearn experiments: ``experiment.score`` is a
 
 For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
 
+## Canonical coefficient container
+
+The model adapter's ``coefficients()`` method preserves coefficient uncertainty in a canonical :class:`xarray.DataArray` named ``"coefficients"``. Every supported backend returns dimensions ``("chain", "draw", "coeffs")`` in that order, with an optional trailing ``"treated_units"`` dimension when the model fits a separate coefficient vector per outcome. The ``coeffs`` coordinate contains the fitted design-matrix labels; ``treated_units`` contains the corresponding outcome labels.
+
+PyMC adapters return all posterior draws, normalizing the built-in model families' native coefficient names and label dimensions at the adapter boundary. sklearn adapters embed fitted point estimates with singleton ``chain`` and ``draw`` dimensions. Consumers therefore use the same xarray operations for every backend: point estimates are ``coefficients.mean(("chain", "draw"))``, while intervals are only meaningful when ``coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1``.
+
+Coefficients remain on their model's parameter scale; unlike the prediction contract, CausalPy does not inverse-link them to the response scale. Models without design-matrix coefficients, including the ``pymc-forecast`` adapter, raise ``NotImplementedError``. Instrumental variables also retain a dedicated two-stage summary because its treatment and outcome equations are distinct coefficient surfaces rather than interchangeable backend containers.
+
 ## Public name and compatibility
 
 The public posterior predictive name remains ``mu`` for backward compatibility. The contract is **semantic**, not lexical: ``mu`` must denote the conditional expected outcome in observed units. A future explicit name such as ``expected_outcome`` may be added in a minor release once all built-in backends are audited; until then, custom model authors should treat ``mu`` as that quantity.

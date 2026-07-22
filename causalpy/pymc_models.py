@@ -27,8 +27,6 @@ from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
-from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
@@ -456,72 +454,6 @@ class PyMCModel(pm.Model):
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
 
         return pd.Series(scores)
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print the model coefficients with their labels.
-
-        Parameters
-        ----------
-        labels : list of str
-            List of strings representing the coefficient names.
-        round_to : int, optional
-            Number of significant figures to round to. Defaults to None,
-            in which case 2 significant figures are used.
-        """
-        if self.idata is None:
-            raise RuntimeError("Model has not been fit")
-
-        def _print_row(
-            max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
-        ) -> None:
-            """Print one row of the coefficient table."""
-            formatted_name = f"  {name: <{max_label_length}}"
-            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
-            print(f"  {formatted_name}  {formatted_val}")
-
-        def _print_coefficients_for_unit(
-            unit_coeffs: xr.DataArray,
-            unit_sigma: xr.DataArray,
-            labels: list,
-            round_to: int,
-        ) -> None:
-            """Print coefficients for a single unit."""
-            # Determine the width of the longest label
-            max_label_length = max(len(name) for name in labels + ["y_hat_sigma"])
-
-            for name in labels:
-                coeff_samples = unit_coeffs.sel(coeffs=name)
-                _print_row(max_label_length, name, coeff_samples, round_to)
-
-            # Add coefficient for measurement std
-            _print_row(max_label_length, "y_hat_sigma", unit_sigma, round_to)
-
-        print("Model coefficients:")
-        coeffs = az.extract(self.idata.posterior, var_names="beta")
-
-        # Check if sigma or y_hat_sigma variable exists
-        sigma_var_name = None
-        if "sigma" in self.idata.posterior:
-            sigma_var_name = "sigma"
-        elif "y_hat_sigma" in self.idata.posterior:
-            sigma_var_name = "y_hat_sigma"
-        else:
-            raise ValueError(
-                "Neither 'sigma' nor 'y_hat_sigma' found in posterior"
-            )  # pragma: no cover
-
-        treated_units = coeffs.coords["treated_units"].values
-        for unit in treated_units:
-            if len(treated_units) > 1:
-                print(f"\nTreated unit: {unit}")
-
-            unit_coeffs = coeffs.sel(treated_units=unit)
-            unit_sigma = az.extract(self.idata.posterior, var_names=sigma_var_name).sel(
-                treated_units=unit
-            )
-            _print_coefficients_for_unit(unit_coeffs, unit_sigma, labels, round_to or 2)
 
 
 class LinearRegression(PyMCModel):

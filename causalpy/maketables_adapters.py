@@ -34,16 +34,6 @@ from causalpy.experiments.model_adapter import ModelAdapter
 class MaketablesAdapter(Protocol):
     """Protocol for backend-specific maketables extraction."""
 
-    def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Return canonical coefficient table for maketables.
-
-        Parameters
-        ----------
-        experiment : Any
-            Fitted CausalPy experiment.
-        """
-        ...
-
     def stat(self, experiment: Any, key: str) -> Any:
         """Return a single model-level statistic by key.
 
@@ -199,21 +189,23 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     return hdi_prob
 
 
-def _resolve_pymc_coef_draws(experiment: Any) -> xr.DataArray:
-    """Resolve posterior coefficient draws across supported PyMC model families."""
-    posterior = experiment._model_backend.require_idata().posterior
+def coefficient_table(experiment: Any) -> pd.DataFrame:
+    """Build a maketables coefficient frame from the canonical container.
+
+    Parameters
+    ----------
+    experiment : Any
+        Fitted experiment exposing labels and a model adapter.
+
+    Returns
+    -------
+    pd.DataFrame
+        Coefficient estimates and available uncertainty statistics.
+    """
     labels = list(getattr(experiment, "labels", []))
-
-    coef_var_candidates = ("beta", "b", "beta_z")
-    coef_name = next((name for name in coef_var_candidates if name in posterior), None)
-    if coef_name is None:
-        msg = (
-            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' for "
-            "maketables coefficient export."
-        )
-        raise ValueError(msg)
-
-    coef_draws = posterior[coef_name]
+    if not labels:
+        raise ValueError("Experiment has no coefficient labels for maketables export.")
+    coef_draws = experiment._model_backend.coefficients()
 
     if (
         "treated_units" in coef_draws.dims
@@ -227,59 +219,39 @@ def _resolve_pymc_coef_draws(experiment: Any) -> xr.DataArray:
     if "treated_units" in coef_draws.dims:
         coef_draws = coef_draws.isel(treated_units=0)
 
-    if not labels:
-        return coef_draws
+    try:
+        coef_draws = coef_draws.sel(coeffs=labels)
+    except KeyError as err:
+        raise ValueError(
+            "Coefficient labels do not match the fitted model: "
+            f"expected {labels!r}, got {list(coef_draws.coords['coeffs'].values)!r}."
+        ) from err
 
-    possible_label_dims = ("coeffs", "covariates", "instruments", "outcome_coeffs")
-    label_dim = next(
-        (dim for dim in possible_label_dims if dim in coef_draws.dims), None
+    mean = coef_draws.mean(dim=["chain", "draw"]).values.astype(float)
+    if coef_draws.sizes["chain"] * coef_draws.sizes["draw"] == 1:
+        n = len(labels)
+        nans = np.full(n, np.nan)
+        return _canonical_frame(labels=labels, b=mean, se=nans, p=nans)
+
+    std = coef_draws.std(dim=["chain", "draw"]).values.astype(float)
+    hdi_prob = _get_maketables_hdi_prob(experiment)
+    ci95l = np.empty(len(labels), dtype=float)
+    ci95u = np.empty(len(labels), dtype=float)
+    for i, coeff_name in enumerate(labels):
+        coeff_hdi = az.hdi(coef_draws.sel(coeffs=coeff_name), hdi_prob=hdi_prob)
+        lower, upper = _extract_hdi_bounds(coeff_hdi)
+        ci95l[i] = lower
+        ci95u[i] = upper
+
+    # Bayesian p-value semantics are deliberately not inferred from draws.
+    p_vals = np.full(len(labels), np.nan)
+    return _canonical_frame(
+        labels=labels, b=mean, se=std, p=p_vals, ci95l=ci95l, ci95u=ci95u
     )
-    if label_dim is None:
-        msg = (
-            "Resolved PyMC coefficient draws do not include a label dimension "
-            f"compatible with experiment labels: expected one of {possible_label_dims}, "
-            f"got dims={tuple(coef_draws.dims)!r}."
-        )
-        raise ValueError(msg)
-
-    coef_draws = coef_draws.sel({label_dim: labels})
-    if label_dim != "coeffs":
-        coef_draws = coef_draws.rename({label_dim: "coeffs"})
-    return coef_draws
 
 
 class PyMCMaketablesAdapter:
     """Adapter for experiments backed by PyMCModel."""
-
-    def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Build coefficient table from PyMC posterior draws with HDI intervals.
-
-        Parameters
-        ----------
-        experiment : Any
-            Fitted CausalPy experiment with a PyMC model.
-        """
-        labels = list(getattr(experiment, "labels", []))
-        if not labels:
-            msg = "Experiment has no coefficient labels for maketables export."
-            raise ValueError(msg)
-        coef_draws = _resolve_pymc_coef_draws(experiment)
-        mean = coef_draws.mean(dim=["chain", "draw"]).values.astype(float)
-        std = coef_draws.std(dim=["chain", "draw"]).values.astype(float)
-        hdi_prob = _get_maketables_hdi_prob(experiment)
-        ci95l = np.empty(len(labels), dtype=float)
-        ci95u = np.empty(len(labels), dtype=float)
-        for i, coeff_name in enumerate(labels):
-            coeff_hdi = az.hdi(coef_draws.sel(coeffs=coeff_name), hdi_prob=hdi_prob)
-            lower, upper = _extract_hdi_bounds(coeff_hdi)
-            ci95l[i] = lower
-            ci95u[i] = upper
-
-        # Bayesian p-value semantics are deferred for this MVP.
-        p_vals = np.full(len(labels), np.nan)
-        return _canonical_frame(
-            labels=labels, b=mean, se=std, p=p_vals, ci95l=ci95l, ci95u=ci95u
-        )
 
     def stat(self, experiment: Any, key: str) -> Any:
         """Return a single Bayesian model-level statistic by key.
@@ -336,33 +308,6 @@ class PyMCMaketablesAdapter:
 
 class SklearnMaketablesAdapter:
     """Adapter for experiments backed by sklearn RegressorMixin."""
-
-    def coef_table(self, experiment: Any) -> pd.DataFrame:
-        """Build coefficient table from sklearn model coefficients.
-
-        Parameters
-        ----------
-        experiment : Any
-            Fitted CausalPy experiment with an sklearn model.
-        """
-        labels = list(getattr(experiment, "labels", []))
-        if not labels:
-            msg = "Experiment has no coefficient labels for maketables export."
-            raise ValueError(msg)
-
-        coeffs = np.asarray(
-            experiment._model_backend.coefficients(), dtype=float
-        ).reshape(-1)
-        if coeffs.shape[0] != len(labels):
-            msg = (
-                f"Coefficient count mismatch for maketables export: "
-                f"{coeffs.shape[0]} values for {len(labels)} labels."
-            )
-            raise ValueError(msg)
-
-        n = len(labels)
-        nans = np.full(n, np.nan)
-        return _canonical_frame(labels=labels, b=coeffs, se=nans, p=nans)
 
     def stat(self, experiment: Any, key: str) -> Any:
         """Return a single OLS model-level statistic by key.

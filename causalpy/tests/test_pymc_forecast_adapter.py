@@ -183,11 +183,11 @@ class TestRoundTripAgainstPyMCBackend:
         assert list(forecast_result.score.index) == list(pymc_result.score.index)
         assert forecast_result.score["unit_0_r2"] > 0.7
 
-    def test_plot_and_summaries_smoke(self, forecast_result, capsys):
+    def test_plot_and_summaries_smoke(self, forecast_result):
         fig, ax = forecast_result.plot(show=False)
         assert len(ax) == 3
-        forecast_result.summary()
-        assert "Model parameters:" in capsys.readouterr().out
+        with pytest.raises(NotImplementedError, match="do not expose"):
+            forecast_result.summary()
         summary = forecast_result.effect_summary()
         assert len(summary.text) > 0
         plot_df = forecast_result.get_plot_data()

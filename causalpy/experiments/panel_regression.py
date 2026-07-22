@@ -31,7 +31,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.utils import round_num
 
 from .base import BaseExperiment
 
@@ -434,25 +433,7 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        # Backend-identity branch is justified: coefficient access is
-        # backend-native (PanelRegression stores no canonical container).
-        if self._model_backend.is_bayesian:
-            # PyMC print_coefficients uses coordinate-based lookup so a
-            # filtered label list works correctly.
-            self.model.print_coefficients(coeff_labels, round_to)
-        else:
-            # For OLS models the base print_coefficients uses positional zip
-            # which would pair filtered labels with the wrong coefficient
-            # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
-            max_label_length = max(len(name) for name in coeff_labels)
-            rd = round_to if round_to is not None else 2
-            print("Model coefficients:")
-            for name in coeff_labels:
-                idx = self.labels.index(name)
-                formatted_name = f"{name:<{max_label_length}}"
-                formatted_val = f"{round_num(coefs[idx], rd):>10}"
-                print(f"  {formatted_name}\t{formatted_val}")
+        self._model_backend.print_coefficients(coeff_labels, round_to)
 
     def effect_summary(
         self,
@@ -598,14 +579,17 @@ class PanelRegression(BaseExperiment):
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
-        # Backend-identity branch is justified: coefficient posteriors live in
-        # backend-native storage (idata vs get_coeffs); no canonical container.
-        if self._model_backend.is_bayesian:
-            # Bayesian: use az.plot_forest directly
+        coefficients = self._model_backend.coefficients().sel(coeffs=coeff_names)
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel coefficient plots require exactly one outcome unit."
+                )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if with_uncertainty:
             axes = az.plot_forest(
-                self._model_backend.require_idata(),
-                var_names=["beta"],
-                coords={"coeffs": coeff_names},
+                coefficients,
                 combined=True,
                 hdi_prob=hdi_prob,
             )
@@ -613,10 +597,8 @@ class PanelRegression(BaseExperiment):
             fig = ax.figure
             ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
         else:
-            # OLS: point estimates
+            coefs = coefficients.mean(("chain", "draw")).values
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
-            coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -737,37 +719,19 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        # Backend-identity branch is justified: coefficient posteriors live in
-        # backend-native storage (idata vs get_coeffs); no canonical container.
-        if self._model_backend.is_bayesian:
-            # Bayesian: get posterior means
-            beta = self._model_backend.require_idata().posterior["beta"]
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-
-            # Get mean and std for each unit FE
-            fe_means = []
-            for idx in unit_fe_indices:
-                fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
-                    .mean(dim=["chain", "draw"])
-                    .squeeze("treated_units", drop=True)
-                    .item()
+        coefficients = self._model_backend.coefficients().sel(coeffs=unit_fe_names)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel unit-effect plots require exactly one outcome unit."
                 )
-
-            ax.hist(
-                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
-            )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        fe_means = coefficients.mean(("chain", "draw")).values
+        ax.hist(fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black")
+        if with_uncertainty:
             ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
-
         else:
-            # OLS: get point estimates
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
-            fe_values = [coefs[idx] for idx in unit_fe_indices]
-
-            ax.hist(
-                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
-            )
             ax.set_xlabel("Unit Fixed Effect")
 
         ax.set_ylabel("Count")
