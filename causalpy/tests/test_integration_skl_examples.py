@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 from sklearn.linear_model import LinearRegression
@@ -113,6 +114,20 @@ def test_rd_drinking():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.pred_discon.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    (discontinuity_design,) = build_design_matrices(
+        [result._x_design_info], result.x_discon
+    )
+    legacy_prediction = result.model.predict(np.asarray(discontinuity_design))
+    expected = np.squeeze(legacy_prediction[1]) - np.squeeze(legacy_prediction[0])
+    assert np.asarray(result.discontinuity_at_threshold).item() == pytest.approx(
+        expected
+    )
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -226,25 +241,6 @@ def test_sc_datetime_treatment_time_plot(geolift1_data):
     assert isinstance(ax, np.ndarray) and all(
         isinstance(item, plt.Axes) for item in ax
     ), "ax must be a numpy.ndarray of plt.Axes"
-
-
-@pytest.mark.parametrize("error_type", [TypeError, ValueError])
-def test_sc_convert_treatment_time_for_axis_fallback(error_type):
-    """Return original treatment_time when axis conversion raises."""
-
-    class FailingXAxis:
-        def convert_units(self, _value):
-            raise error_type("conversion failed")
-
-    class FailingAxis:
-        xaxis = FailingXAxis()
-
-    treatment_time = pd.Timestamp("2022-01-01")
-    converted = cp.SyntheticControl._convert_treatment_time_for_axis(
-        FailingAxis(), treatment_time
-    )
-
-    assert converted is treatment_time
 
 
 @pytest.mark.integration

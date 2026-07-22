@@ -21,12 +21,13 @@ import numpy as np
 import pandas as pd
 import plotnine as p9
 import polars as pl
-from patsy import ModelDesc, dmatrices
+from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     PlotSpec,
     dataarray_draws,
@@ -296,7 +297,7 @@ class PanelRegression(BaseExperiment):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = dmatrices(self.formula, data)
+        y, X = build_formula_matrices(self.formula, data)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -441,7 +442,7 @@ class PanelRegression(BaseExperiment):
             # For OLS models the base print_coefficients uses positional zip
             # which would pair filtered labels with the wrong coefficient
             # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             max_label_length = max(len(name) for name in coeff_labels)
             rd = round_to if round_to is not None else 2
             print("Model coefficients:")
@@ -527,7 +528,7 @@ class PanelRegression(BaseExperiment):
         ----------
         hdi_prob : float
             Probability mass of the highest density interval drawn around
-            each posterior coefficient via :func:`arviz.plot_forest`. Must
+            each posterior coefficient. Must
             be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         show : bool
@@ -552,16 +553,20 @@ class PanelRegression(BaseExperiment):
             hdi_prob=hdi_prob,
         )
 
-    def _bayesian_plot(self, hdi_prob: float = HDI_PROB, **kwargs: Any) -> PlotSpec:
-        """Create coefficient plot for Bayesian model.
+    def _plot(self, hdi_prob: float = HDI_PROB, **kwargs: Any) -> PlotSpec:
+        """Create coefficient plot.
+
+        Models carrying posterior draws render a forest plot with HDI
+        intervals; point-estimate models render a bar plot of coefficient
+        values.
 
         Parameters
         ----------
         hdi_prob : float, optional
             Probability mass of the highest density interval drawn around each
-            posterior coefficient via :func:`arviz.plot_forest`. Must be in
-            ``(0, 1]``. Defaults to :data:`~causalpy.constants.HDI_PROB`
-            (currently 0.94).
+            posterior coefficient. Must be in ``(0, 1]``. Ignored for
+            point-estimate models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
@@ -569,16 +574,6 @@ class PanelRegression(BaseExperiment):
             Declarative coefficient plot for the base ``plot()`` draw path.
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob)
-
-    def _ols_plot(self, **kwargs: Any) -> PlotSpec:
-        """Create coefficient plot for OLS model.
-
-        Returns
-        -------
-        tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
-        """
-        return self._plot_coefficients_internal()
 
     def _plot_coefficients_internal(
         self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
@@ -641,7 +636,7 @@ class PanelRegression(BaseExperiment):
             )
         else:
             coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]
+            coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
             tidy = pd.DataFrame({"coeffs": coeff_names, "coef": coefs})
             tidy["coeffs"] = pd.Categorical(
                 tidy["coeffs"], categories=coeff_names, ordered=True
@@ -665,8 +660,11 @@ class PanelRegression(BaseExperiment):
                 n_panels=1,
             )
 
-    def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
-        """Get plot data for Bayesian model.
+    def get_plot_data(self, **kwargs: Any) -> pd.DataFrame:
+        """Get plot data with fitted values.
+
+        Bayesian models additionally return ``y_fitted_lower`` /
+        ``y_fitted_upper`` 95% credible-interval columns.
 
         Parameters
         ----------
@@ -677,58 +675,29 @@ class PanelRegression(BaseExperiment):
         Returns
         -------
         pd.DataFrame
-            DataFrame with fitted values and credible intervals
+            DataFrame with fitted values (and credible intervals when the
+            model carries posterior draws).
         """
-        # Get posterior predictions
+        columns: dict[str, Any] = {"y_actual": self.design["y"].values.flatten()}
+
+        # ponytail: PanelRegression stores no canonical prediction container,
+        # so in-sample fitted values must come from backend-native objects
+        # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
+        # path: store canonical in-sample predictions at fit time.
         if self._model_backend.is_bayesian:
             mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
-            pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
-            pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
-            pred_upper = mu.quantile(0.975, dim=["chain", "draw"]).values.flatten()
+            columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
+            columns["y_fitted_lower"] = mu.quantile(
+                0.025, dim=["chain", "draw"]
+            ).values.flatten()
+            columns["y_fitted_upper"] = mu.quantile(
+                0.975, dim=["chain", "draw"]
+            ).values.flatten()
         else:
-            raise ValueError("Model is not a PyMC model")
+            columns["y_fitted"] = np.squeeze(self.model.predict(self.design["X"]))
+        columns[self.unit_fe_variable] = self.data[self.unit_fe_variable].values
 
-        plot_data = pd.DataFrame(
-            {
-                "y_actual": self.design["y"].values.flatten(),
-                "y_fitted": pred_mean,
-                "y_fitted_lower": pred_lower,
-                "y_fitted_upper": pred_upper,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
-            }
-        )
-
-        if self.time_fe_variable:
-            plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
-
-        return plot_data
-
-    def get_plot_data_ols(self, **kwargs: Any) -> pd.DataFrame:
-        """Get plot data for OLS model.
-
-        Parameters
-        ----------
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with fitted values
-        """
-        if self._model_backend.is_ols:
-            y_fitted = np.squeeze(self.model.predict(self.design["X"]))
-        else:
-            raise ValueError("Model is not an OLS model")
-
-        plot_data = pd.DataFrame(
-            {
-                "y_actual": self.design["y"].values.flatten(),
-                "y_fitted": y_fitted,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
-            }
-        )
+        plot_data = pd.DataFrame(columns)
 
         if self.time_fe_variable:
             plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
@@ -759,12 +728,9 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        import arviz as az
-
-        with plt.style.context(az.style.library["arviz-darkgrid"]):
-            result = self._plot_coefficients_internal(
-                var_names=var_names, hdi_prob=hdi_prob
-            )
+        result = self._plot_coefficients_internal(
+            var_names=var_names, hdi_prob=hdi_prob
+        )
         return self._finalize_plot(result, show=False, legend_kwargs=None)
 
     def plot_unit_effects(
@@ -818,7 +784,7 @@ class PanelRegression(BaseExperiment):
             values = fe_means
         else:
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()
+            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
             values = [coefs[idx] for idx in unit_fe_indices]
             x_label = "Unit Fixed Effect"
 
@@ -1005,7 +971,7 @@ class PanelRegression(BaseExperiment):
             else:
                 y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
                     sorted_obs_indices
-                ]
+                ]  # type: ignore[union-attr]
                 for t, y in zip(sorted_time_vals, y_fitted, strict=True):
                     fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
 
@@ -1092,11 +1058,7 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        # Get plot data
-        if self._model_backend.is_bayesian:
-            plot_data = self.get_plot_data_bayesian()
-        else:
-            plot_data = self.get_plot_data_ols()
+        plot_data = self.get_plot_data()
 
         # Calculate residuals
         residuals = plot_data["y_actual"] - plot_data["y_fitted"]

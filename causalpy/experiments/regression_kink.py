@@ -17,34 +17,37 @@
 import re  # noqa: I001
 import warnings
 from dataclasses import dataclass
-from typing import Any, Literal
 
+
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotnine as p9
+import polars as pl
+from patsy import ModelDesc, build_design_matrices
 import xarray as xr
-from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
-
-from causalpy.constants import HDI_PROB
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
+    dataarray_draws,
     label_draws,
     posterior_kind_layers,
-    prediction_draws,
 )
+
+from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_rkink
+
+from causalpy.constants import HDI_PROB
+
+from .base import BaseExperiment
+from typing import Any, Literal
+from causalpy.utils import _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.experiments.model_adapter import build_coords
-from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import EffectSummary, _effect_summary_rkink
-from causalpy.utils import _is_variable_dummy_coded, round_num
-
-from .base import BaseExperiment
 
 
 @dataclass(frozen=True)
@@ -120,9 +123,9 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
+            y, X = build_formula_matrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = build_formula_matrices(self.formula, self.data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -236,11 +239,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -298,11 +300,11 @@ class RegressionKink(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti", "histogram"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` draws individual posterior
-            predictive lines. ``"histogram"`` uses plotnine two-dimensional
-            histogram layers.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -311,19 +313,24 @@ class RegressionKink(BaseExperiment):
             to 50. Ignored for other kinds.
 
         figsize : tuple of (float, float), optional
-            Width and height of the figure in inches.
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-            Matplotlib figure and axes for the rendered plot.
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -344,16 +351,14 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-    ) -> _RKPlotData:
+    def _prepare_plot_data(self) -> _RKPlotData:
         """Prepare observed and posterior tables for plotting."""
         points = self.data.copy()
         points["series"] = "data"
         newdata = self.x_pred.reset_index(drop=True)
         newdata["obs_ind"] = range(len(newdata))
         draws = label_draws(
-            prediction_draws(self.pred, newdata),
+            dataarray_draws(self.pred).join(pl.from_pandas(newdata), on="obs_ind"),
             series="Posterior mean",
         )
         return _RKPlotData(
@@ -361,7 +366,7 @@ class RegressionKink(BaseExperiment):
             draws=draws,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -371,7 +376,7 @@ class RegressionKink(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> PlotSpec:
-        """Build the Bayesian RK plot from tidy declarative layers."""
+        """Build the RK plot from tidy declarative layers."""
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
         round_digits = round_to if round_to is not None else 2
@@ -380,7 +385,7 @@ class RegressionKink(BaseExperiment):
             "Posterior mean": "#ff7f0e",
             "treatment threshold": "red",
         }
-        plot_data = self._prepare_bayesian_plot_data()
+        plot_data = self._prepare_plot_data()
         _, posterior_layers = posterior_kind_layers(
             plot_data.draws,
             kind,

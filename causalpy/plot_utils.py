@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -32,6 +33,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.utils import _as_scalar
 
 HISTOGRAM_PANEL_THEME = p9.theme(
     panel_background=p9.element_rect(fill="white"),
@@ -122,12 +124,6 @@ def validate_posterior_plot_options(
         raise ValueError(msg)
 
 
-def _validate_ci_kind(ci_kind: str) -> None:
-    if ci_kind not in _VALID_CI_KINDS:
-        msg = f"Unknown ci_kind: {ci_kind!r}. Must be 'hdi' or 'eti'."
-        raise ValueError(msg)
-
-
 def _validate_num_samples(num_samples: int) -> None:
     if num_samples <= 0:
         msg = f"num_samples must be positive, got {num_samples}."
@@ -214,39 +210,17 @@ def _filter_treated_unit(draws: pl.DataFrame, treated_unit: str | None) -> pl.Da
     return draws
 
 
-def prediction_draws(
-    pred: Any,
-    newdata: pd.DataFrame,
-    *,
-    var_name: str = "mu",
-    treated_unit: str | None = None,
-) -> pl.DataFrame:
-    """Extract posterior predictive draws once for summary and spaghetti.
-
-    Parameters
-    ----------
-    pred : Any
-        Prediction container for :func:`tidydraws.prediction_draws`.
-    newdata : pandas.DataFrame
-        Grid passed as ``newdata`` to tidydraws.
-    var_name : str, optional
-        Posterior variable name. Defaults to ``"mu"``.
-    treated_unit : str, optional
-        When draws include ``treated_units``, filter to this unit.
-    """
-    draws = td.prediction_draws(
-        pred, newdata=newdata, var_name=var_name, idata_group="posterior_predictive"
-    )
-    return _filter_treated_unit(draws, treated_unit)
-
-
 def dataarray_draws(
     da: xr.DataArray,
     *,
     var_name: str = "mu",
     treated_unit: str | None = None,
 ) -> pl.DataFrame:
-    """Convert a posterior DataArray to the same long form as tidydraws.
+    """Convert a canonical prediction container to long tidydraws form.
+
+    The canonical container (see ``ModelAdapter.predict``) is an
+    :class:`xarray.DataArray` with ``chain`` and ``draw`` dimensions on every
+    backend; point-estimate backends carry singleton dimensions.
 
     Parameters
     ----------
@@ -779,6 +753,16 @@ def build_causal_panel_plot(
     frames = [intervals, obs]
     if effect_area is not None:
         frames.append(effect_area)
+    # Layers built by posterior_kind_layers carry their own frames (mean-line
+    # subsets, spaghetti paths, histogram bins) with plain-string panel
+    # columns; categorize them too so facet order is deterministic and does
+    # not depend on layer encounter order.
+    frames.extend(
+        layer.data
+        for layer in posterior_layers
+        if isinstance(getattr(layer, "data", None), pd.DataFrame)
+        and "panel" in layer.data.columns
+    )
     _categorize_panels(frames, panels)
 
     mid, bot = panels[1], panels[2]
@@ -810,7 +794,7 @@ def build_causal_panel_plot(
         p
         + p9.geom_point(obs, p9.aes(x, "y", color="series"), size=1)
         + p9.geom_hline(zero_df, p9.aes(yintercept="yintercept"), **hline_kwargs)
-        + p9.facet_wrap("panel", ncol=1, scales="free_y", as_table=False)
+        + p9.facet_wrap("panel", ncol=1, scales="free_y")
         + scales[0]
         + (scales[1] if len(scales) > 1 else p9.guides())
         + p9.labs(x="", y="")
@@ -827,3 +811,86 @@ def build_causal_panel_plot(
             show_legend=False,
         )
     return p
+
+
+def has_posterior_draws(Y: xr.DataArray) -> bool:
+    """Whether *Y* carries genuine posterior uncertainty.
+
+    The canonical prediction container has ``chain`` and ``draw`` dimensions
+    on every backend; point-estimate backends emit singleton dimensions (a
+    point estimate is a posterior with one atom). Plot code should key
+    uncertainty rendering (ribbons, HDI labels, ...) on this data property
+    rather than on backend identity.
+
+    Parameters
+    ----------
+    Y : xr.DataArray
+        A canonical prediction container with ``chain`` and ``draw``
+        dimensions.
+    """
+    return Y.sizes.get("chain", 1) * Y.sizes.get("draw", 1) > 1
+
+
+def extract_r2_score(
+    score: pd.Series | float, unit_index: int = 0
+) -> tuple[float | None, float | None]:
+    """Extract ``(r2, r2_std)`` from a backend score container.
+
+    Bayesian backends return a :class:`pandas.Series` with
+    ``unit_{i}_r2`` / ``unit_{i}_r2_std`` (or plain ``r2`` / ``r2_std``)
+    entries; point-estimate backends return a scalar. ``r2_std`` is ``None``
+    when the container carries no dispersion, so callers can render
+    ``(std = ...)`` only when it exists.
+
+    Parameters
+    ----------
+    score : pd.Series or float
+        Backend score container as stored on ``experiment.score``.
+    unit_index : int, optional
+        Index of the treated unit whose score to extract. Defaults to 0.
+    """
+    if isinstance(score, pd.Series):
+        key = f"unit_{unit_index}_r2"
+        if key not in score.index:
+            key = "r2"
+        if key not in score.index:
+            return None, None
+        std = score.get(f"{key}_std")
+        return float(score[key]), None if std is None else float(std)
+    return float(_as_scalar(score)), None
+
+
+def get_hdi_to_df(
+    x: xr.DataArray,
+    hdi_prob: float = HDI_PROB,
+) -> pd.DataFrame:
+    """Calculate and recover HDI intervals.
+
+    Parameters
+    ----------
+    x : xr.DataArray
+        Xarray data array.
+    hdi_prob : float, optional
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the HDI intervals with 'lower' and 'higher'
+        columns.
+    """
+    hdi_result = az.hdi(x, hdi_prob=hdi_prob)
+
+    # Get the data variable name (typically 'mu' or 'x')
+    # We select only the data variable column to exclude coordinates like 'treated_units'
+    data_var = list(hdi_result.data_vars)[0]
+
+    # Convert to DataFrame, select only the data variable column, then unstack
+    # This prevents coordinate values (like 'treated_agg') from appearing as columns
+    hdi_df = hdi_result[data_var].to_dataframe()[[data_var]].unstack(level="hdi")
+
+    # Remove the top level of column MultiIndex to get just 'lower' and 'higher'
+    hdi_df.columns = hdi_df.columns.droplevel(0)
+
+    return hdi_df

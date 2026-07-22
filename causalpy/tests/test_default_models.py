@@ -216,16 +216,10 @@ def test_missing_default_model_class_raises_valueerror():
         supports_bayes = True
         supports_ols = True
 
-        def _bayesian_plot(self):
+        def _plot(self):
             pass
 
-        def _ols_plot(self):
-            pass
-
-        def get_plot_data_bayesian(self):
-            pass
-
-        def get_plot_data_ols(self):
+        def get_plot_data(self):
             pass
 
         def effect_summary(self):

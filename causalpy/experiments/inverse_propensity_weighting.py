@@ -21,10 +21,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
@@ -105,7 +106,7 @@ class InversePropensityWeighting(BaseExperiment):
         for use with doubly-robust outcome modelling.
         """
         try:
-            t, X = dmatrices(self.formula, self.data)
+            t, X = build_formula_matrices(self.formula, self.data)
         except PatsyError as err:
             raise DataException(
                 f"Unable to evaluate propensity formula: {err}"

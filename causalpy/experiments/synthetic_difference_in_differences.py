@@ -33,7 +33,6 @@ from causalpy.plot_utils import (
     PlotSpec,
     build_causal_panel_plot,
     dataarray_draws,
-    prediction_draws,
 )
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
@@ -466,9 +465,9 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Sets the following attributes on ``self``:
 
-        - ``pre_pred`` / ``post_pred``: ``az.InferenceData`` objects holding
-          the synthetic-control predictions in a ``posterior_predictive``
-          group.
+        - ``pre_pred`` / ``post_pred``: ``xr.DataArray`` synthetic-control
+          predictions with canonical dims ``(chain, draw, obs_ind,
+          treated_units)``.
         - ``pre_impact`` / ``post_impact``: ``xr.DataArray`` of observed
           minus counterfactual with dims ``(chain, draw, obs_ind,
           treated_units)``.
@@ -490,10 +489,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_inference_data(
+        self.pre_pred = self._build_prediction(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_inference_data(
+        self.post_pred = self._build_prediction(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -525,18 +524,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
-    def _build_inference_data(
+    def _build_prediction(
         self,
         mu_vals: np.ndarray,
         index: pd.Index,
         n_chains: int,
         n_draws: int,
-    ) -> az.InferenceData:
-        """Build an InferenceData-like object with posterior_predictive group.
-
-        Constructs a minimal InferenceData containing a ``mu`` variable in the
-        ``posterior_predictive`` group, shaped to be compatible with the
-        reporting helpers that expect SC-style predictions.
+    ) -> xr.DataArray:
+        """Build a prediction DataArray with canonical dimensions.
 
         Parameters
         ----------
@@ -551,14 +546,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        az.InferenceData
-            InferenceData with posterior_predictive group containing ``mu``.
+        xr.DataArray
+            Predictions with dims ``(chain, draw, obs_ind, treated_units)``.
         """
-        # Add a singleton treated_units dim: (chain, draw, T, 1)
-        mu_4d = mu_vals[..., np.newaxis]
-
-        mu_da = xr.DataArray(
-            mu_4d,
+        return xr.DataArray(
+            mu_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
@@ -567,8 +559,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        ds = xr.Dataset({"mu": mu_da})
-        return az.InferenceData(posterior_predictive=ds)
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results.
@@ -628,16 +618,18 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "spaghetti", "histogram"}, optional
             How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band).
+            (mean + credible band). ``"spaghetti"`` draws posterior sample
+            lines via plotnine. ``"histogram"`` renders plotnine
+            two-dimensional histogram layers.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws to overlay when ``kind="spaghetti"``.
-            Defaults to 50.
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
         figsize : tuple of (float, float)
             Width and height of the figure in inches. Defaults to ``(7, 11)``
-            so the three panels and date tick labels have room.
+            so the three panels and tick labels have room.
         show : bool, optional
             Whether to call :func:`matplotlib.pyplot.show` after drawing.
             Defaults to ``True``.
@@ -651,9 +643,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure containing the three stacked panels (plotnine base
-            plus matplotlib overlays for the treatment line and date
-            formatting).
+            The figure containing the three stacked panels.
         ax : numpy.ndarray
             Array of the three :class:`matplotlib.axes.Axes` instances.
         """
@@ -678,16 +668,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     def _causal_panel_data(self, *, treated_unit: str) -> CausalPanelData:
         """Extract semantic long-form draws and observations for plotting."""
-        pre_predictions = prediction_draws(
-            self.pre_pred,
-            pd.DataFrame({"obs_ind": self.datapre.index}),
-            treated_unit=treated_unit,
-        )
-        post_predictions = prediction_draws(
-            self.post_pred,
-            pd.DataFrame({"obs_ind": self.datapost.index}),
-            treated_unit=treated_unit,
-        )
         observations = pd.DataFrame(
             {
                 "obs_ind": self.data.index,
@@ -695,8 +675,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             }
         )
         return CausalPanelData(
-            fitted=pre_predictions,
-            counterfactual=post_predictions,
+            fitted=dataarray_draws(self.pre_pred, treated_unit=treated_unit),
+            counterfactual=dataarray_draws(self.post_pred, treated_unit=treated_unit),
             pre_effect=dataarray_draws(self.pre_impact, treated_unit=treated_unit),
             post_effect=dataarray_draws(self.post_impact, treated_unit=treated_unit),
             cumulative_effect=dataarray_draws(
@@ -705,7 +685,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             observations=observations,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
@@ -715,7 +695,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
     ) -> PlotSpec:
-        """Build the Bayesian synthetic DiD plot from tidy declarative layers."""
+        """Build the synthetic DiD plot from tidy declarative layers."""
         treated_unit = self.treated_units[0]
         tau_mean = float(self.tau_posterior.mean())
         r_to = round_to if round_to is not None else 2
@@ -760,13 +740,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
         return PlotSpec(p, n_panels=3)
-
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """OLS not supported for SDiD."""
-        raise NotImplementedError(
-            "OLS models are not supported for "
-            "SyntheticDifferenceInDifferences. Use a Bayesian model."
-        )
 
     def effect_summary(
         self,

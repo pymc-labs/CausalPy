@@ -17,7 +17,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import plotnine as p9
@@ -25,19 +24,20 @@ import polars as pl
 import tidydraws as td
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices, dmatrices
+from patsy import build_design_matrices
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
+    dataarray_draws,
     label_draws,
     posterior_kind_layers,
-    prediction_draws,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
@@ -125,8 +125,8 @@ class PrePostNEGD(BaseExperiment):
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
         self.pred_xi: np.ndarray
-        self.pred_untreated: az.InferenceData
-        self.pred_treated: az.InferenceData
+        self.pred_untreated: xr.DataArray
+        self.pred_treated: xr.DataArray
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
@@ -139,7 +139,7 @@ class PrePostNEGD(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
+        y, X = build_formula_matrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -191,7 +191,7 @@ class PrePostNEGD(BaseExperiment):
         (new_x_untreated,) = build_design_matrices(
             [self._x_design_info], x_pred_untreated
         )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+        self.pred_untreated = self._model_backend.predict(X=np.asarray(new_x_untreated))
         # treated
         x_pred_treated = pd.DataFrame(
             {
@@ -200,7 +200,7 @@ class PrePostNEGD(BaseExperiment):
             }
         )
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+        self.pred_treated = self._model_backend.predict(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
@@ -269,7 +269,7 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the pre-post non-equivalent group design results.
 
         Parameters
@@ -286,29 +286,36 @@ class PrePostNEGD(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti", "histogram"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws to overlay when ``kind="spaghetti"``.
-            Defaults to 50.
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
         figsize : tuple of (float, float)
-            Width and height of the figure in inches. Defaults to ``(7, 9)``.
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 9)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes or numpy.ndarray]
-            Two-facet plot (top: scatter + posterior predictive bands;
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes]
+            The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """
         if hdi_prob is not None:
@@ -330,7 +337,7 @@ class PrePostNEGD(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
+    def _prepare_plot_data(
         self,
         *,
         ci_prob: float,
@@ -347,14 +354,14 @@ class PrePostNEGD(BaseExperiment):
         )
         scatter["panel"] = panels[0]
 
-        newdata = pd.DataFrame(
+        newdata = pl.DataFrame(
             {
-                "pre": np.asarray(self.pred_xi),
+                "pre": np.asarray(self.pred_xi, dtype=float),
                 "obs_ind": range(len(self.pred_xi)),
             }
         )
-        untreated = prediction_draws(self.pred_untreated, newdata)
-        treated = prediction_draws(self.pred_treated, newdata)
+        untreated = dataarray_draws(self.pred_untreated).join(newdata, on="obs_ind")
+        treated = dataarray_draws(self.pred_treated).join(newdata, on="obs_ind")
         draws = pl.concat(
             [
                 label_draws(untreated, series="Control group"),
@@ -404,7 +411,7 @@ class PrePostNEGD(BaseExperiment):
             title=title,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
@@ -414,8 +421,8 @@ class PrePostNEGD(BaseExperiment):
         figsize: tuple[float, float] = (7, 9),
         **kwargs: Any,
     ) -> PlotSpec:
-        """Build the Bayesian pre/post plot from tidy declarative layers."""
-        plot_data = self._prepare_bayesian_plot_data(
+        """Build the pre/post plot from tidy declarative layers."""
+        plot_data = self._prepare_plot_data(
             ci_prob=ci_prob,
             interval=ci_kind,
             round_to=round_to,
@@ -432,6 +439,15 @@ class PrePostNEGD(BaseExperiment):
             var_name="_y",
             colors=colors,
         )
+        # Categorize the layer frames too so facet_wrap(as_table=True)
+        # renders panels in declaration order, not alphabetical order.
+        panels = plot_data.scatter["panel"].cat.categories
+        for layer in posterior_layers:
+            data = getattr(layer, "data", None)
+            if isinstance(data, pd.DataFrame) and "panel" in data.columns:
+                data["panel"] = pd.Categorical(
+                    data["panel"], categories=panels, ordered=True
+                )
         p = p9.ggplot() + p9.geom_point(
             plot_data.scatter, p9.aes("_x", "_y", color="series"), alpha=0.5
         )
@@ -451,7 +467,7 @@ class PrePostNEGD(BaseExperiment):
                 color="black",
                 linetype="dashed",
             )
-            + p9.facet_wrap("panel", ncol=1, scales="free", as_table=False)
+            + p9.facet_wrap("panel", ncol=1, scales="free", as_table=True)
             + p9.scale_color_manual(values=colors, name="")
             + (
                 p9.scale_fill_manual(values=colors, name="")

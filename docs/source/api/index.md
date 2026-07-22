@@ -12,6 +12,7 @@
   data
   pymc_models
   skl_models
+  pymc_forecast_models
   experiments
   pipeline
   steps

@@ -21,25 +21,26 @@ import numpy as np
 import pandas as pd
 import plotnine as p9
 import polars as pl
-import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     HISTOGRAM_PANEL_THEME,
     PlotSpec,
     coord_xlim_for_column,
+    dataarray_draws,
+    has_posterior_draws,
     label_draws,
     posterior_kind_layers,
-    prediction_draws,
     scale_for_x_column,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -54,7 +55,6 @@ from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
-    round_num,
 )
 
 from .base import BaseExperiment
@@ -151,7 +151,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
-        y, X = dmatrices(self.formula, self.data)
+        y, X = build_formula_matrices(self.formula, self.data)
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
@@ -398,15 +398,17 @@ class DifferenceInDifferences(BaseExperiment):
             (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti", "histogram"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
-            Number of posterior draws to overlay when ``kind="spaghetti"``.
-            Defaults to 50.
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -448,9 +450,7 @@ class DifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-    ) -> _DiDPlotData:
+    def _prepare_plot_data(self) -> _DiDPlotData:
         """Prepare observed, posterior, and annotation data for plotting."""
         tcol = self.time_variable_name
         ycol = self.outcome_variable_name
@@ -461,16 +461,15 @@ class DifferenceInDifferences(BaseExperiment):
             self.data[self.group_variable_name].map(group_to_series).to_numpy()
         )
 
-        control_grid = self.x_pred_control.reset_index(drop=True)
-        control_grid["obs_ind"] = range(len(control_grid))
-        treatment_grid = self.x_pred_treatment.reset_index(drop=True)
-        treatment_grid["obs_ind"] = range(len(treatment_grid))
-        counterfactual_grid = self.x_pred_counterfactual.reset_index(drop=True)
-        counterfactual_grid["obs_ind"] = range(len(counterfactual_grid))
-        control = prediction_draws(self.y_pred_control, control_grid)
-        treatment = prediction_draws(self.y_pred_treatment, treatment_grid)
-        counterfactual = prediction_draws(
-            self.y_pred_counterfactual, counterfactual_grid
+        def grid_draws(pred: xr.DataArray, grid: pd.DataFrame) -> pl.DataFrame:
+            lookup = grid.reset_index(drop=True)
+            lookup["obs_ind"] = range(len(lookup))
+            return dataarray_draws(pred).join(pl.from_pandas(lookup), on="obs_ind")
+
+        control = grid_draws(self.y_pred_control, self.x_pred_control)
+        treatment = grid_draws(self.y_pred_treatment, self.x_pred_treatment)
+        counterfactual = grid_draws(
+            self.y_pred_counterfactual, self.x_pred_counterfactual
         )
         time_points = self.x_pred_counterfactual[tcol].to_numpy()
         draw_parts = [
@@ -481,15 +480,8 @@ class DifferenceInDifferences(BaseExperiment):
             draw_parts.append(label_draws(counterfactual, series="Counterfactual"))
         draws = pl.concat(draw_parts, how="diagonal_relaxed")
 
-        treatment_y = _as_scalar(
-            self.y_pred_treatment["posterior_predictive"]
-            .mu.isel({"obs_ind": 1})
-            .mean()
-            .data
-        )
-        counterfactual_y = _as_scalar(
-            self.y_pred_counterfactual["posterior_predictive"].mu.mean().data
-        )
+        treatment_y = _as_scalar(self.y_pred_treatment.isel(obs_ind=1).mean().data)
+        counterfactual_y = _as_scalar(self.y_pred_counterfactual.mean().data)
         treatment_times = self.x_pred_treatment[tcol].to_numpy()
         arrow_x: Any
         if np.issubdtype(treatment_times.dtype, np.datetime64):
@@ -511,7 +503,7 @@ class DifferenceInDifferences(BaseExperiment):
             counterfactual_y=counterfactual_y,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
@@ -521,7 +513,14 @@ class DifferenceInDifferences(BaseExperiment):
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> PlotSpec:
-        """Build the Bayesian DiD plot from tidy data and declarative layers."""
+        """Build the DiD plot from tidy data and declarative layers.
+
+        Consumes the canonical prediction container from any backend. When
+        the container carries posterior draws, the single-time-point
+        counterfactual renders as a violin of draws; point-estimate backends
+        (singleton ``chain``/``draw``) get a point marker instead.
+        """
+        with_uncertainty = has_posterior_draws(self.y_pred_control)
         tcol = self.time_variable_name
         ycol = self.outcome_variable_name
         colors = {
@@ -529,7 +528,7 @@ class DifferenceInDifferences(BaseExperiment):
             "Treatment group": "#ff7f0e",
             "Counterfactual": "#2ca02c",
         }
-        plot_data = self._prepare_bayesian_plot_data()
+        plot_data = self._prepare_plot_data()
         _, posterior_layers = posterior_kind_layers(
             plot_data.draws,
             kind,
@@ -563,16 +562,28 @@ class DifferenceInDifferences(BaseExperiment):
         if kind == "histogram":
             p = p + HISTOGRAM_PANEL_THEME
         if len(plot_data.time_points) == 1:
-            p = p + p9.geom_violin(
-                plot_data.counterfactual_draws,
-                p9.aes(tcol, "mu"),
-                width=0.2,
-                fill="#1f77b4",
-                color=None,
-                alpha=0.5,
-                show_legend=False,
-                inherit_aes=False,
-            )
+            if with_uncertainty:
+                p = p + p9.geom_violin(
+                    plot_data.counterfactual_draws,
+                    p9.aes(tcol, "mu"),
+                    width=0.2,
+                    fill="#1f77b4",
+                    color=None,
+                    alpha=0.5,
+                    show_legend=False,
+                    inherit_aes=False,
+                )
+            else:
+                # A singleton container has no spread to shape a violin;
+                # mark the counterfactual point estimate instead.
+                p = p + p9.geom_point(
+                    plot_data.counterfactual_draws,
+                    p9.aes(tcol, "mu"),
+                    color="#2ca02c",
+                    size=3,
+                    show_legend=False,
+                    inherit_aes=False,
+                )
         p += p9.annotate(
             "segment",
             x=plot_data.arrow_x,
@@ -593,99 +604,6 @@ class DifferenceInDifferences(BaseExperiment):
         )
 
         return PlotSpec(p, n_panels=1)
-
-    def _ols_plot(
-        self,
-        round_to: int | None = 2,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for difference-in-differences.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot raw data
-        sns.lineplot(
-            self.data,
-            x=self.time_variable_name,
-            y=self.outcome_variable_name,
-            hue="group",
-            units="unit",
-            estimator=None,
-            alpha=0.25,
-            ax=ax,
-        )
-        # Plot model fit to control group
-        ax.plot(
-            self.x_pred_control[self.time_variable_name],
-            self.y_pred_control,
-            "o",
-            c="C0",
-            markersize=10,
-            label="model fit (control group)",
-        )
-        # Plot model fit to treatment group
-        ax.plot(
-            self.x_pred_treatment[self.time_variable_name],
-            self.y_pred_treatment,
-            "o",
-            c="C1",
-            markersize=10,
-            label="model fit (treatment group)",
-        )
-        # Plot counterfactual - post-test for treatment group IF no treatment
-        # had occurred.
-        ax.plot(
-            self.x_pred_counterfactual[self.time_variable_name],
-            self.y_pred_counterfactual,
-            "go",
-            markersize=10,
-            label="counterfactual",
-        )
-        y_pred_counterfactual_scalar = _as_scalar(self.y_pred_counterfactual)
-        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment[1])
-        # arrow to label the causal impact
-        ax.annotate(
-            "",
-            xy=(1.05, y_pred_counterfactual_scalar),
-            xycoords="data",
-            xytext=(1.05, y_pred_treatment_post_scalar),
-            textcoords="data",
-            arrowprops={"arrowstyle": "<->", "color": "green", "lw": 3},
-        )
-        ax.annotate(
-            "causal\nimpact",
-            xy=(
-                1.05,
-                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_post_scalar]),
-            ),
-            xycoords="data",
-            xytext=(5, 0),
-            textcoords="offset points",
-            color="green",
-            va="center",
-        )
-        # formatting
-        # In OLS context, causal_impact should be a float, but mypy doesn't know this
-        causal_impact_value = (
-            float(self.causal_impact) if self.causal_impact is not None else 0.0
-        )
-        ax.set(
-            xlim=[-0.05, 1.1],
-            xticks=[0, 1],
-            xticklabels=["pre", "post"],
-            title=f"Causal impact = {round_num(causal_impact_value, round_to)}",
-        )
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return fig, ax
 
     def effect_summary(
         self,
