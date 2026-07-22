@@ -1533,10 +1533,12 @@ def _compute_statistics_did_ols(
 
     # Calculate standard error from model residuals
     residuals = _point_residuals(result)
-    mse = np.mean(residuals**2)
     X_da = result.design["X"]
     n, p = X_da.shape
     df = n - p
+    # Unbiased estimator of the residual variance: SSR / (n - p), consistent
+    # with the degrees of freedom used below for the t-distribution.
+    mse = np.sum(residuals**2) / df
 
     # Find the interaction term coefficient index
     interaction_term = (
