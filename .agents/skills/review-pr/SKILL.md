@@ -16,6 +16,16 @@ Use this skill to evaluate whether a PR is correct, safe, understandable, and me
 - Never post review comments, approve, request changes, or merge through GitHub without explicit human approval.
 - Do not duplicate mechanical checks already covered by hooks and CI. If a recurring issue is mechanically enforceable but not enforced, recommend a follow-up issue instead of treating each instance as bespoke review work.
 
+## Review Stance
+
+A review must actively try to falsify the PR's claims; passing CI is evidence, not the conclusion. Before reading the whole diff, state a private review brief with:
+
+- The user outcome and two to four concrete wins the PR intends to deliver.
+- The changed contracts, assumptions, and public surfaces most likely to regress.
+- At least three PR-specific failure hypotheses, each paired with the code path, caller, test, or runtime behavior that could disprove it.
+
+For every changed production behavior, trace both directions across its seam: its inputs/producers and its outputs/consumers. Compare old and new behavior at the most fragile boundary (multi-output, empty or degenerate data, optional backend, custom subclass, serialization, or backwards-compatible call) rather than only the happy path. Read existing PR comments as review leads, not as conclusions. Do not report “no findings” until these probes have either found a concrete issue or produced evidence that the concern is handled.
+
 ## Intake
 
 Follow `resources/workflow.md` for the full workflow. At a glance:
@@ -54,6 +64,7 @@ Read these when the PR touches the relevant surface:
 ## Universal Checks
 
 - Correctness: the implementation matches the PR's stated intent, handles important edge cases, and does not introduce silent behavior changes.
+- Active probing: review comments and the PR description identify concrete concerns; independently formulate and test additional failure hypotheses that fit the changed surface. For contract, adapter, or dispatch changes, audit every producer and consumer rather than only the files named in the PR.
 - Security and privacy: no secrets, credentials, tokens, private data, unsafe deserialization, command injection, path traversal, or unnecessary network access.
 - Causal/statistical accuracy: causal claims, model assumptions, estimands, priors, simulations, and examples are technically accurate and not overstated.
 - Public API: released APIs remain compatible unless the PR intentionally changes them and documents the change; new public APIs have explicit signatures and documentation.
@@ -73,11 +84,21 @@ Read these when the PR touches the relevant surface:
 
 ## Review Output
 
-Lead with findings, ordered by severity. If there are no findings, say so clearly and mention residual risk or checks not run.
+Lead with an executive summary. Explain the PR's user-facing value and the strongest evidence it delivers that value, then surface findings in severity order. If there are no findings, say which concrete probes were performed and what residual risk remains; never substitute generic praise for an evidence-backed win.
 
 Use this structure:
 
 ```markdown
+## Executive Summary
+Recommendation: approve / request changes / blocked / needs maintainer decision.
+
+Value delivered:
+- [Concrete user or maintainer win, tied to an implementation detail.]
+- [Second concrete win when applicable.]
+
+Review focus:
+- [Highest-risk assumption and the evidence that supports or challenges it.]
+
 ## Findings
 
 - [severity] `path`: issue, why it matters, and what should change.
@@ -88,7 +109,7 @@ Branch status: up to date or behind base; conflicts if any.
 CI status: green, failing, pending, skipped, or unavailable.
 
 ## PR Summary
-One short paragraph describing what the PR changes and why.
+One short paragraph describing the implementation, why it was needed, and its most important trade-off or compatibility impact.
 
 ## Test Evidence
 List local and remote checks observed. Include commands only when they were actually run.
