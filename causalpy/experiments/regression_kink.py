@@ -336,7 +336,7 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,

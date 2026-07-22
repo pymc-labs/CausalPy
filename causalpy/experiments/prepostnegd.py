@@ -319,7 +319,7 @@ class PrePostNEGD(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
