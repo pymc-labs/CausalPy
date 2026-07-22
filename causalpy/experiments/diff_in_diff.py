@@ -14,17 +14,19 @@
 """Difference in differences."""
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
+import plotnine as p9
+import polars as pl
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
@@ -32,9 +34,14 @@ from causalpy.custom_exceptions import (
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
-    _PosteriorPlotStyle,
+    HISTOGRAM_PANEL_THEME,
+    PlotSpec,
+    coord_xlim_for_column,
+    dataarray_draws,
     has_posterior_draws,
-    plot_posterior_over_x,
+    label_draws,
+    posterior_kind_layers,
+    scale_for_x_column,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
@@ -48,10 +55,22 @@ from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
     convert_to_string,
-    round_num,
 )
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _DiDPlotData:
+    """Tidy tables and annotation coordinates consumed by the DiD plot."""
+
+    scatter: pd.DataFrame
+    draws: pl.DataFrame
+    counterfactual_draws: pd.DataFrame
+    time_points: np.ndarray
+    arrow_x: Any
+    treatment_y: float
+    counterfactual_y: float
 
 
 class DifferenceInDifferences(BaseExperiment):
@@ -380,8 +399,7 @@ class DifferenceInDifferences(BaseExperiment):
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
             For ``"spaghetti"``, legends use draw lines rather than a shaded
             band. For ``"histogram"``, uncertainty is shown as a 2D density
             heatmap with a mean line overlay (no ribbon patch for legends).
@@ -432,6 +450,59 @@ class DifferenceInDifferences(BaseExperiment):
             figsize=figsize,
         )
 
+    def _prepare_plot_data(self) -> _DiDPlotData:
+        """Prepare observed, posterior, and annotation data for plotting."""
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        levels = sorted(self.data[self.group_variable_name].unique())
+        group_to_series = {levels[0]: "Control group", levels[1]: "Treatment group"}
+        scatter = self.data[[tcol, ycol]].copy()
+        scatter["series"] = (
+            self.data[self.group_variable_name].map(group_to_series).to_numpy()
+        )
+
+        def grid_draws(pred: xr.DataArray, grid: pd.DataFrame) -> pl.DataFrame:
+            lookup = grid.reset_index(drop=True)
+            lookup["obs_ind"] = range(len(lookup))
+            return dataarray_draws(pred).join(pl.from_pandas(lookup), on="obs_ind")
+
+        control = grid_draws(self.y_pred_control, self.x_pred_control)
+        treatment = grid_draws(self.y_pred_treatment, self.x_pred_treatment)
+        counterfactual = grid_draws(
+            self.y_pred_counterfactual, self.x_pred_counterfactual
+        )
+        time_points = self.x_pred_counterfactual[tcol].to_numpy()
+        draw_parts = [
+            label_draws(control, series="Control group"),
+            label_draws(treatment, series="Treatment group"),
+        ]
+        if len(time_points) > 1:
+            draw_parts.append(label_draws(counterfactual, series="Counterfactual"))
+        draws = pl.concat(draw_parts, how="diagonal_relaxed")
+
+        treatment_y = _as_scalar(self.y_pred_treatment.isel(obs_ind=1).mean().data)
+        counterfactual_y = _as_scalar(self.y_pred_counterfactual.mean().data)
+        treatment_times = self.x_pred_treatment[tcol].to_numpy()
+        arrow_x: Any
+        if np.issubdtype(treatment_times.dtype, np.datetime64):
+            time_min = pd.Timestamp(treatment_times.min())
+            time_max = pd.Timestamp(treatment_times.max())
+            arrow_x = time_max + 0.1 * (time_max - time_min)
+        elif np.issubdtype(treatment_times.dtype, np.number):
+            time_span = float(np.ptp(treatment_times.astype(float)))
+            arrow_x = float(np.max(treatment_times)) + 0.1 * time_span
+        else:
+            arrow_x = treatment_times[-1]
+        return _DiDPlotData(
+            scatter=scatter,
+            draws=draws,
+            counterfactual_draws=counterfactual.to_pandas(),
+            time_points=time_points,
+            arrow_x=arrow_x,
+            treatment_y=treatment_y,
+            counterfactual_y=counterfactual_y,
+        )
+
     def _plot(
         self,
         round_to: int | None = None,
@@ -441,213 +512,98 @@ class DifferenceInDifferences(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """
-        Plot the results.
+    ) -> PlotSpec:
+        """Build the DiD plot from tidy data and declarative layers.
 
-        Consumes the canonical prediction container from any backend. When the
-        container carries posterior draws, group fits render as uncertainty
-        bands with a counterfactual violin/band; point-estimate backends
-        (singleton ``chain``/``draw``) get point markers.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        ci_prob : float, optional
-            Probability mass of the credible interval drawn around the
-            posterior predictive bands for the control, treatment, and
-            counterfactual trajectories. Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
+        Consumes the canonical prediction container from any backend. When
+        the container carries posterior draws, the single-time-point
+        counterfactual renders as a violin of draws; point-estimate backends
+        (singleton ``chain``/``draw``) get a point marker instead.
         """
         with_uncertainty = has_posterior_draws(self.y_pred_control)
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
+        tcol = self.time_variable_name
+        ycol = self.outcome_variable_name
+        colors = {
+            "Control group": "#1f77b4",
+            "Treatment group": "#ff7f0e",
+            "Counterfactual": "#2ca02c",
         }
-
-        fig, ax = plt.subplots(figsize=figsize)
-
-        if with_uncertainty:
-            # Plot raw data
-            sns.scatterplot(
-                self.data,
-                x=self.time_variable_name,
-                y=self.outcome_variable_name,
-                hue=self.group_variable_name,
-                alpha=1,
-                legend=False,
-                markers=True,
-                ax=ax,
+        plot_data = self._prepare_plot_data()
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x=tcol,
+            group_by=["series", tcol],
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            colors=colors,
+        )
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.scatter, p9.aes(tcol, ycol, color="series"), size=1.5
+        )
+        for layer in posterior_layers:
+            p += layer
+        x_values = plot_data.scatter[tcol]
+        p = (
+            p
+            + p9.scale_color_manual(values=colors, name="")
+            + (
+                p9.scale_fill_manual(values=colors, name="")
+                if kind == "ribbon"
+                else p9.guides()
             )
-
-            # Plot model fit to control group
-            time_points = self.x_pred_control[self.time_variable_name].values
-            h_line, h_patch = plot_posterior_over_x(
-                time_points,
-                self.y_pred_control.isel(treated_units=0),
-                ax=ax,
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-                label="Control group",
-            )
-            handles = [(h_line, h_patch)]
-            labels = ["Control group"]
-
-            # Plot model fit to treatment group
-            time_points = self.x_pred_control[self.time_variable_name].values
-            h_line, h_patch = plot_posterior_over_x(
-                time_points,
-                self.y_pred_treatment.isel(treated_units=0),
-                ax=ax,
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-                label="Treatment group",
-            )
-            handles.append((h_line, h_patch))
-            labels.append("Treatment group")
-
-            # Plot counterfactual - post-test for treatment group IF no treatment
-            # had occurred.
-            time_points = self.x_pred_counterfactual[self.time_variable_name].values
-            if len(time_points) == 1:
-                violin_data = np.asarray(
-                    self.y_pred_counterfactual.isel(treated_units=0)
-                ).reshape(-1)
-                parts = ax.violinplot(
-                    [violin_data],
-                    positions=self.x_pred_counterfactual[
-                        self.time_variable_name
-                    ].values,
-                    showmeans=False,
-                    showmedians=False,
-                    widths=0.2,
+            + scale_for_x_column(x_values)
+            + coord_xlim_for_column(x_values)
+            + p9.labs(title=self._causal_impact_summary_stat(round_to), x=tcol, y=ycol)
+        )
+        if figsize is not None:
+            p += p9.theme(figure_size=figsize)
+        if kind == "histogram":
+            p = p + HISTOGRAM_PANEL_THEME
+        if len(plot_data.time_points) == 1:
+            if with_uncertainty:
+                p = p + p9.geom_violin(
+                    plot_data.counterfactual_draws,
+                    p9.aes(tcol, "mu"),
+                    width=0.2,
+                    fill="#1f77b4",
+                    color=None,
+                    alpha=0.5,
+                    show_legend=False,
+                    inherit_aes=False,
                 )
-                for pc in parts["bodies"]:
-                    pc.set_facecolor("C0")
-                    pc.set_edgecolor("None")
-                    pc.set_alpha(0.5)
             else:
-                h_line, h_patch = plot_posterior_over_x(
-                    time_points,
-                    self.y_pred_counterfactual.isel(treated_units=0),
-                    ax=ax,
-                    **style,
-                    plot_hdi_kwargs={"color": "C2"},
-                    label="Counterfactual",
+                # A singleton container has no spread to shape a violin;
+                # mark the counterfactual point estimate instead.
+                p = p + p9.geom_point(
+                    plot_data.counterfactual_draws,
+                    p9.aes(tcol, "mu"),
+                    color="#2ca02c",
+                    size=3,
+                    show_legend=False,
+                    inherit_aes=False,
                 )
-                handles.append((h_line, h_patch))
-                labels.append("Counterfactual")
-        else:
-            # Plot raw data
-            sns.lineplot(
-                self.data,
-                x=self.time_variable_name,
-                y=self.outcome_variable_name,
-                hue="group",
-                units="unit",
-                estimator=None,
-                alpha=0.25,
-                ax=ax,
-            )
-            # Plot model fit to control group
-            ax.plot(
-                self.x_pred_control[self.time_variable_name],
-                np.squeeze(self.y_pred_control),
-                "o",
-                c="C0",
-                markersize=10,
-                label="model fit (control group)",
-            )
-            # Plot model fit to treatment group
-            ax.plot(
-                self.x_pred_treatment[self.time_variable_name],
-                np.squeeze(self.y_pred_treatment),
-                "o",
-                c="C1",
-                markersize=10,
-                label="model fit (treatment group)",
-            )
-            # Plot counterfactual - post-test for treatment group IF no treatment
-            # had occurred.
-            ax.plot(
-                self.x_pred_counterfactual[self.time_variable_name],
-                np.squeeze(self.y_pred_counterfactual),
-                "go",
-                markersize=10,
-                label="counterfactual",
-            )
-
-        # arrow to label the causal impact: drawn between the counterfactual
-        # and the post-period treatment-group prediction (posterior means for
-        # containers with draws; the point estimates coincide for singletons)
-        y_pred_treatment_scalar = _as_scalar(
-            self.y_pred_treatment.isel(obs_ind=1).mean().data
-        )
-        y_pred_counterfactual_scalar = _as_scalar(
-            self.y_pred_counterfactual.mean().data
-        )
-        if with_uncertainty:
-            # Note that we force to be float to avoid a type error using np.ptp
-            # with boolean values
-            time_values = np.array(
-                self.x_pred_treatment[self.time_variable_name].values
-            ).astype(float)
-            arrow_x = np.max(time_values) + 0.1 * np.ptp(time_values)
-            arrow_style = "<-"
-        else:
-            arrow_x = 1.05
-            arrow_style = "<->"
-        ax.annotate(
-            "",
-            xy=(arrow_x, y_pred_counterfactual_scalar),
-            xycoords="data",
-            xytext=(arrow_x, y_pred_treatment_scalar),
-            textcoords="data",
-            arrowprops={"arrowstyle": arrow_style, "color": "green", "lw": 3},
-        )
-        ax.annotate(
-            "causal\nimpact",
-            xy=(
-                arrow_x,
-                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
-            ),
-            xycoords="data",
-            xytext=(5, 0),
-            textcoords="offset points",
+        p += p9.annotate(
+            "segment",
+            x=plot_data.arrow_x,
+            xend=plot_data.arrow_x,
+            y=plot_data.treatment_y,
+            yend=plot_data.counterfactual_y,
+            arrow=p9.arrow(length=0.1, ends="first", type="closed"),
             color="green",
-            va="center",
+            size=1.5,
+        )
+        p += p9.annotate(
+            "text",
+            x=plot_data.arrow_x,
+            y=np.mean([plot_data.counterfactual_y, plot_data.treatment_y]),
+            label="causal\nimpact",
+            color="green",
+            ha="left",
         )
 
-        # formatting
-        if with_uncertainty:
-            ax.set(
-                xticks=self.x_pred_treatment[self.time_variable_name].values,
-                title=self._causal_impact_summary_stat(round_to),
-            )
-            ax.legend(
-                handles=(h_tuple for h_tuple in handles),
-                labels=labels,
-                fontsize=LEGEND_FONT_SIZE,
-            )
-        else:
-            causal_impact_value = (
-                float(self.causal_impact) if self.causal_impact is not None else 0.0
-            )
-            ax.set(
-                xlim=[-0.05, 1.1],
-                xticks=[0, 1],
-                xticklabels=["pre", "post"],
-                title=f"Causal impact = {round_num(causal_impact_value, round_to)}",
-            )
-            ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return fig, ax
+        return PlotSpec(p, n_panels=1)
 
     def effect_summary(
         self,
