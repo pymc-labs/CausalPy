@@ -1181,8 +1181,9 @@ def test_staggered_did_plot_elements_ols():
     # Check title
     assert "Staggered DiD" in ax.get_title()
 
-    # Check legend exists
-    assert ax.get_legend() is not None
+    # Check legend exists (plotnine draws a figure-level legend)
+    legend_labels = {text.get_text() for text in _legend_texts(_plotnine_legend(fig))}
+    assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
 
     plt.close(fig)
 
@@ -1215,10 +1216,8 @@ def test_staggered_did_plot_group_time_elements_ols():
         assert "ATT(g, e)" in ax.get_ylabel()
         assert "placebo" in ax.get_ylabel()
         assert f"Cohort {cohort}" in ax.get_title()
-        legend = ax.get_legend()
-        assert legend is not None
-        legend_labels = {text.get_text() for text in legend.get_texts()}
-        assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
+    legend_labels = {text.get_text() for text in _legend_texts(_plotnine_legend(fig))}
+    assert {"Placebo estimate", "ATT estimate"}.issubset(legend_labels)
 
     plt.close(fig)
 
@@ -1251,14 +1250,11 @@ def test_staggered_did_plot_group_time_overlay_calendar_ols():
     assert "ATT(g, t)" in ax.get_ylabel()
     assert "Cohort Trajectories" in ax.get_title()
 
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_labels = {text.get_text() for text in legend.get_texts()}
-    expected_labels = {
-        label
-        for cohort in result.cohorts
-        for label in (f"Cohort {cohort} placebo", f"Cohort {cohort} ATT")
-    }
+    # The declarative overlay legend maps cohorts to colors and
+    # placebo/ATT to linetypes, so labels are cohort names plus series.
+    legend_labels = {text.get_text() for text in _legend_texts(_plotnine_legend(fig))}
+    expected_labels = {f"Cohort {cohort}" for cohort in result.cohorts}
+    expected_labels |= {"Placebo estimate", "ATT estimate"}
     assert expected_labels.issubset(legend_labels)
 
     plt.close(fig)

@@ -443,9 +443,10 @@ class PrePostNEGD(BaseExperiment):
         # renders panels in declaration order, not alphabetical order.
         panels = plot_data.scatter["panel"].cat.categories
         for layer in posterior_layers:
-            if isinstance(layer.data, pd.DataFrame) and "panel" in layer.data.columns:
-                layer.data["panel"] = pd.Categorical(
-                    layer.data["panel"], categories=panels, ordered=True
+            data = getattr(layer, "data", None)
+            if isinstance(data, pd.DataFrame) and "panel" in data.columns:
+                data["panel"] = pd.Categorical(
+                    data["panel"], categories=panels, ordered=True
                 )
         p = p9.ggplot() + p9.geom_point(
             plot_data.scatter, p9.aes("_x", "_y", color="series"), alpha=0.5
