@@ -172,7 +172,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self._model_backend.predict_mu(np.asarray(new_x))
+        self.y_pred_control = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for treatment group
         self.x_pred_treatment = (
@@ -189,7 +189,7 @@ class DifferenceInDifferences(BaseExperiment):
         if self.x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self._model_backend.predict_mu(np.asarray(new_x))
+        self.y_pred_treatment = self._model_backend.predict(np.asarray(new_x))
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
@@ -216,7 +216,7 @@ class DifferenceInDifferences(BaseExperiment):
         for i, label in enumerate(self.labels):
             if self._is_treatment_interaction(label):
                 new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self._model_backend.predict_mu(np.asarray(new_x))
+        self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
         # calculate causal impact
         if self._model_backend.is_bayesian:

@@ -61,6 +61,13 @@ def build_coords(
     }
 
 
+def _extract_mu(prediction: Any) -> xr.DataArray:
+    """Pull response-scale ``mu`` out of a Bayesian prediction container."""
+    return prediction.posterior_predictive["mu"].transpose(
+        "chain", "draw", "obs_ind", "treated_units"
+    )
+
+
 def _sklearn_array(value: Any) -> np.ndarray:
     """Coerce xarray or array-like inputs to a numpy array for sklearn."""
     if isinstance(value, xr.DataArray):
@@ -137,8 +144,14 @@ class ModelAdapter(ABC):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict with backend-appropriate conventions.
+    ) -> xr.DataArray:
+        """Return expected outcomes with canonical prediction dimensions.
+
+        Every backend returns the same container: response-scale expected
+        outcomes as an :class:`xarray.DataArray` with dimensions
+        ``("chain", "draw", "obs_ind", "treated_units")``. Point-estimate
+        backends (sklearn) return singleton ``chain``/``draw`` dimensions —
+        a point estimate is a posterior with one atom.
 
         Parameters
         ----------
@@ -148,36 +161,13 @@ class ModelAdapter(ABC):
             Whether predictions are out-of-sample. Used by PyMC backends only.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
-        """
-
-    def predict_mu(
-        self,
-        X: Any,
-        *,
-        out_of_sample: bool = False,
-        **kwargs: Any,
-    ) -> xr.DataArray:
-        """Return expected outcomes with canonical prediction dimensions.
-
-        Parameters
-        ----------
-        X : array-like or xarray.DataArray
-            Predictor matrix for which to generate predictions.
-        out_of_sample : bool, default False
-            Whether predictions are out-of-sample.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
 
         Returns
         -------
         xr.DataArray
-            Response-scale expected outcomes with dimensions ``("chain",
-            "draw", "obs_ind", "treated_units")``.
+            Expected outcomes with dimensions ``("chain", "draw", "obs_ind",
+            "treated_units")``.
         """
-        prediction = self.predict(
-            X=X, out_of_sample=out_of_sample, **kwargs
-        ).posterior_predictive["mu"]
-        return prediction.transpose("chain", "draw", "obs_ind", "treated_units")
 
     @abstractmethod
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
@@ -265,8 +255,8 @@ class PyMCModelAdapter(ModelAdapter):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict using the PyMC model.
+    ) -> xr.DataArray:
+        """Predict expected outcomes using the PyMC model.
 
         Parameters
         ----------
@@ -276,8 +266,15 @@ class PyMCModelAdapter(ModelAdapter):
             Whether predictions are out-of-sample.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Posterior draws of ``mu`` with canonical prediction dimensions.
         """
-        return self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        return _extract_mu(
+            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        )
 
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
         """Score predictions from the PyMC model.
@@ -373,26 +370,6 @@ class SklearnModelAdapter(ModelAdapter):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict using the sklearn model.
-
-        Parameters
-        ----------
-        X : array-like
-            Predictor matrix for which to generate predictions.
-        out_of_sample : bool, default False
-            Ignored for sklearn backends.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
-        """
-        return self._model.predict(X=_sklearn_array(X), **kwargs)
-
-    def predict_mu(
-        self,
-        X: Any,
-        *,
-        out_of_sample: bool = False,
-        **kwargs: Any,
     ) -> xr.DataArray:
         """Return point predictions as singleton posterior draws.
 
@@ -408,9 +385,10 @@ class SklearnModelAdapter(ModelAdapter):
         Returns
         -------
         xr.DataArray
-            Point predictions with canonical prediction dimensions.
+            Point predictions with canonical prediction dimensions and
+            singleton ``chain``/``draw`` dimensions.
         """
-        values = np.asarray(self.predict(X=X, out_of_sample=out_of_sample, **kwargs))
+        values = np.asarray(self._model.predict(X=_sklearn_array(X), **kwargs))
         if values.ndim == 1:
             values = values[:, None]
         if values.ndim != 2:
@@ -539,7 +517,7 @@ class PyMCForecastAdapter(ModelAdapter):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
+    ) -> xr.DataArray:
         """Predict in-sample or forecast the counterfactual.
 
         Parameters
@@ -551,8 +529,15 @@ class PyMCForecastAdapter(ModelAdapter):
             forecasting path.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Posterior draws of ``mu`` with canonical prediction dimensions.
         """
-        return self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        return _extract_mu(
+            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        )
 
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
         """Score in-sample predictions with the Bayesian :math:`R^2`.

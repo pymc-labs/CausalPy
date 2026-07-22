@@ -16,7 +16,6 @@
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -308,17 +307,13 @@ class SyntheticControl(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self._model_backend.predict(X=self.post_design["control"])
-        self.pre_impact = self.model.calculate_impact(
-            self.pre_design["treated"], self.pre_pred
+        self.pre_impact = (self.pre_design["treated"] - self.pre_pred).transpose(
+            ..., "obs_ind", "treated_units"
         )
-
-        self.post_impact = self.model.calculate_impact(
-            self.post_design["treated"], self.post_pred
+        self.post_impact = (self.post_design["treated"] - self.post_pred).transpose(
+            ..., "obs_ind", "treated_units"
         )
-
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
-        )
+        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
@@ -359,15 +354,11 @@ class SyntheticControl(BaseExperiment):
             observed = (
                 self.pre_design["treated"].sel(treated_units=unit).values.flatten()
             )
-            if self._model_backend.is_bayesian:
-                predicted = (
-                    self.pre_pred["posterior_predictive"]["mu"]
-                    .sel(treated_units=unit)
-                    .mean(dim=["chain", "draw"])
-                    .values.flatten()
-                )
-            else:
-                predicted = np.asarray(self.pre_pred).flatten()
+            predicted = (
+                self.pre_pred.sel(treated_units=unit)
+                .mean(dim=["chain", "draw"])
+                .values.flatten()
+            )
             correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
         return correlations
 
@@ -551,12 +542,8 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred["posterior_predictive"].mu.sel(
-            treated_units=treated_unit
-        )
-        post_pred = self.post_pred["posterior_predictive"].mu.sel(
-            treated_units=treated_unit
-        )
+        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
+        post_pred = self.post_pred.sel(treated_units=treated_unit)
 
         h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
@@ -720,6 +707,19 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
+        # Point estimates from the singleton chain/draw dimensions
+        pre_pred = self.pre_pred.isel(chain=0, draw=0).sel(treated_units=treated_unit)
+        post_pred = self.post_pred.isel(chain=0, draw=0).sel(treated_units=treated_unit)
+        pre_impact = self.pre_impact.isel(chain=0, draw=0).sel(
+            treated_units=treated_unit
+        )
+        post_impact = self.post_impact.isel(chain=0, draw=0).sel(
+            treated_units=treated_unit
+        )
+        post_impact_cumulative = self.post_impact_cumulative.isel(chain=0, draw=0).sel(
+            treated_units=treated_unit
+        )
+
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         ax[0].plot(
@@ -733,47 +733,43 @@ class SyntheticControl(BaseExperiment):
             "k.",
         )
 
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(self.datapre.index, pre_pred, c="k", label="model fit")
         ax[0].plot(
             self.datapost.index,
-            self.post_pred,
+            post_pred,
             label=counterfactual_label,
             ls=":",
             c="k",
         )
         ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
         # Shaded causal effect
-        post_pred_values = np.squeeze(self.post_pred)
-
         ax[0].fill_between(
             self.datapost.index,
-            y1=post_pred_values,
-            y2=np.squeeze(
-                self.post_design["treated"].sel(treated_units=treated_unit).data
-            ),
+            y1=post_pred,
+            y2=self.post_design["treated"].sel(treated_units=treated_unit),
             color="C0",
             alpha=0.25,
             label="Causal impact",
         )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(self.datapre.index, pre_impact, "k.")
         ax[1].plot(
             self.datapost.index,
-            self.post_impact,
+            post_impact,
             "k.",
             label=counterfactual_label,
         )
         ax[1].axhline(y=0, c="k")
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].plot(self.datapost.index, post_impact_cumulative, c="k")
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
         # Shaded causal effect
         ax[1].fill_between(
             self.datapost.index,
-            y1=np.squeeze(self.post_impact),
+            y1=post_impact,
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -811,10 +807,18 @@ class SyntheticControl(BaseExperiment):
         """
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
+        pre_data["prediction"] = self.pre_pred.isel(
+            chain=0, draw=0, treated_units=0
+        ).values
+        post_data["prediction"] = self.post_pred.isel(
+            chain=0, draw=0, treated_units=0
+        ).values
+        pre_data["impact"] = self.pre_impact.isel(
+            chain=0, draw=0, treated_units=0
+        ).values
+        post_data["impact"] = self.post_impact.isel(
+            chain=0, draw=0, treated_units=0
+        ).values
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
@@ -857,25 +861,25 @@ class SyntheticControl(BaseExperiment):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
 
-        # Extract predictions - handle multi-unit case
-        pre_pred_vals = az.extract(
-            self.pre_pred, group="posterior_predictive", var_names="mu"
-        ).mean("sample")
-        post_pred_vals = az.extract(
-            self.post_pred, group="posterior_predictive", var_names="mu"
-        ).mean("sample")
-
-        # Extract predictions for the specified treated unit (always has treated_units dimension)
-        pre_data["prediction"] = pre_pred_vals.sel(treated_units=treated_unit).values
-        post_data["prediction"] = post_pred_vals.sel(treated_units=treated_unit).values
+        # Extract predictions for the specified treated unit
+        pre_data["prediction"] = (
+            self.pre_pred.sel(treated_units=treated_unit)
+            .mean(dim=["chain", "draw"])
+            .values
+        )
+        post_data["prediction"] = (
+            self.post_pred.sel(treated_units=treated_unit)
+            .mean(dim=["chain", "draw"])
+            .values
+        )
 
         # HDI intervals for predictions (always use treated_units dimension)
         pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.pre_pred.sel(treated_units=treated_unit),
             hdi_prob=hdi_prob,
         )
         post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"].mu.sel(treated_units=treated_unit),
+            self.post_pred.sel(treated_units=treated_unit),
             hdi_prob=hdi_prob,
         )
 
@@ -987,14 +991,9 @@ class SyntheticControl(BaseExperiment):
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
 
         # Warn if period parameter is provided (not supported for Synthetic Control)
@@ -1007,93 +1006,22 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
-        is_pymc = self._model_backend.is_bayesian
-
-        # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
             self, window, treated_unit=treated_unit
         )
-
-        # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
             self, window_coords, treated_unit=treated_unit
         )
-
-        if is_pymc:
-            # PyMC model: use posterior draws
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            # Compute observed/counterfactual averages for prose
-            time_dim = "obs_ind"
-            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-        else:
-            if hasattr(windowed_impact, "values"):
-                impact_array = windowed_impact.values
-            else:
-                impact_array = np.asarray(windowed_impact)
-            if hasattr(counterfactual, "values"):
-                counterfactual_array = counterfactual.values
-            else:
-                counterfactual_array = np.asarray(counterfactual)
-
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="sc",
+        )

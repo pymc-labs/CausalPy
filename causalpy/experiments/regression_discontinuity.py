@@ -222,7 +222,7 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self._model_backend.predict_mu(X=np.asarray(new_x))
+        self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
         self.discontinuity_at_threshold = self.pred_discon.isel(
             obs_ind=1, treated_units=0
         ) - self.pred_discon.isel(obs_ind=0, treated_units=0)
@@ -439,7 +439,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # Plot model fit to data
         plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -530,7 +530,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # Plot model fit to data
         ax.plot(
             self.x_pred[self.running_variable_name],
-            self.pred,
+            self.pred.isel(chain=0, draw=0, treated_units=0),
             "k",
             markersize=10,
             label="model fit",

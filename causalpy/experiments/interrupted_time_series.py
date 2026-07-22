@@ -220,8 +220,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
         self.score = self._model_backend.score(X=pre_X, y=pre_y)
 
-        self.pre_pred = self._model_backend.predict_mu(X=pre_X)
-        self.post_pred = self._model_backend.predict_mu(X=post_X, out_of_sample=True)
+        self.pre_pred = self._model_backend.predict(X=pre_X)
+        self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
         self.pre_impact = (
             pre_y.isel(treated_units=0) - self.pre_pred.isel(treated_units=0)
         ).transpose(..., "obs_ind")
@@ -440,20 +440,16 @@ class InterruptedTimeSeries(BaseExperiment):
             from causalpy.reporting import _compute_statistics_ols
 
             intervention_stats = _compute_statistics_ols(
-                self.intervention_impact.values
-                if hasattr(self.intervention_impact, "values")
-                else np.asarray(self.intervention_impact),
-                self.intervention_pred,
+                np.asarray(self.intervention_impact).ravel(),
+                np.asarray(self.intervention_pred).ravel(),
                 alpha=alpha,
                 cumulative=False,
                 relative=False,
             )
 
             post_stats = _compute_statistics_ols(
-                self.post_intervention_impact.values
-                if hasattr(self.post_intervention_impact, "values")
-                else np.asarray(self.post_intervention_impact),
-                self.post_intervention_pred,
+                np.asarray(self.post_intervention_impact).ravel(),
+                np.asarray(self.post_intervention_pred).ravel(),
                 alpha=alpha,
                 cumulative=False,
                 relative=False,
@@ -1243,16 +1239,10 @@ class InterruptedTimeSeries(BaseExperiment):
             # OLS: Compute statistics using numpy operations
             from causalpy.reporting import _compute_statistics_ols
 
-            # Get counterfactual predictions for each period
-            intervention_counterfactual = self.intervention_pred
-            post_counterfactual = self.post_intervention_pred
-
             # Compute statistics for intervention period
             intervention_stats = _compute_statistics_ols(
-                self.intervention_impact.values
-                if hasattr(self.intervention_impact, "values")
-                else np.asarray(self.intervention_impact),
-                intervention_counterfactual,
+                np.asarray(self.intervention_impact).ravel(),
+                np.asarray(self.intervention_pred).ravel(),
                 alpha=1 - hdi_prob,
                 cumulative=True,
                 relative=False,
@@ -1260,10 +1250,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Compute statistics for post-intervention period
             post_stats = _compute_statistics_ols(
-                self.post_intervention_impact.values
-                if hasattr(self.post_intervention_impact, "values")
-                else np.asarray(self.post_intervention_impact),
-                post_counterfactual,
+                np.asarray(self.post_intervention_impact).ravel(),
+                np.asarray(self.post_intervention_pred).ravel(),
                 alpha=1 - hdi_prob,
                 cumulative=True,
                 relative=False,
@@ -1366,17 +1354,10 @@ class InterruptedTimeSeries(BaseExperiment):
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
-
-        is_pymc = self._model_backend.is_bayesian
 
         # Handle period parameter for three-period designs
         if period is not None:
@@ -1439,82 +1420,16 @@ class InterruptedTimeSeries(BaseExperiment):
                 self, window_coords, treated_unit=treated_unit
             )
 
-        if is_pymc:
-            # PyMC model: use posterior draws
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            # Compute observed/counterfactual averages for prose
-            time_dim = "obs_ind"
-            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = _as_scalar(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="its",
-            )
-        else:
-            # OLS model: use point estimates and CIs
-            if hasattr(windowed_impact, "values"):
-                impact_array = windowed_impact.values
-            else:
-                impact_array = np.asarray(windowed_impact)
-            if hasattr(counterfactual, "values"):
-                counterfactual_array = counterfactual.values
-            else:
-                counterfactual_array = np.asarray(counterfactual)
-
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="its",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="its",
+        )

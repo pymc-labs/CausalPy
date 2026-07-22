@@ -1163,41 +1163,45 @@ def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
     assert isinstance(stats["cum"]["relative_hdi_lower"], float)
 
 
-def test_extract_window_ols_xarray_post_impact_branch():
-    """Ensure OLS xarray post_impact path uses numpy conversion safely."""
+def test_extract_window_canonical_dataarray():
+    """_extract_window returns the canonical DataArray unchanged for 'post'."""
     import xarray as xr
 
     from causalpy.reporting import _extract_window
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_impact=xr.DataArray([1.0, 2.0, 3.0], dims=["obs_ind"]),
+        post_impact=xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
         datapost=datapost,
     )
 
     windowed_impact, window_coords = _extract_window(result, window="post")
 
-    assert isinstance(windowed_impact, np.ndarray)
+    assert isinstance(windowed_impact, xr.DataArray)
     assert window_coords.equals(datapost.index)
 
 
-def test_extract_counterfactual_ols_xarray_branch():
-    """Ensure OLS xarray post_pred branch converts via numpy safely."""
+def test_extract_counterfactual_canonical_dataarray():
+    """_extract_counterfactual selects the window from the canonical DataArray."""
     import xarray as xr
 
     from causalpy.reporting import _extract_counterfactual
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
     result = SimpleNamespace(
-        post_pred=xr.DataArray([5.0, 6.0, 7.0], dims=["obs_ind"]),
+        post_pred=xr.DataArray(
+            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
         datapost=datapost,
     )
 
     window_coords = datapost.index[:2]
     counterfactual = _extract_counterfactual(result, window_coords)
 
-    assert isinstance(counterfactual, np.ndarray)
-    np.testing.assert_array_equal(counterfactual, np.array([5.0, 6.0]))
+    assert isinstance(counterfactual, xr.DataArray)
+    np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
 
 def test_compute_statistics_rope_increase():
@@ -1376,28 +1380,6 @@ def test_select_treated_unit():
     assert "treated_units" not in result.dims
 
 
-def test_select_treated_unit_numpy():
-    """Test _select_treated_unit_numpy helper."""
-    from causalpy.reporting import _select_treated_unit_numpy
-
-    # Create mock result object
-    class MockResult:
-        treated_units = ["unit_a", "unit_b", "unit_c"]
-
-    result = MockResult()
-
-    # Create mock 2D numpy array (time x units)
-    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-
-    # Select by name
-    selected = _select_treated_unit_numpy(data, result, "unit_b")
-    np.testing.assert_array_equal(selected, np.array([2, 5, 8]))
-
-    # Select first when None provided
-    selected = _select_treated_unit_numpy(data, result, None)
-    np.testing.assert_array_equal(selected, np.array([1, 4, 7]))
-
-
 # ==============================================================================
 # Tests for error handling
 # ==============================================================================
@@ -1433,11 +1415,15 @@ def test_detect_experiment_type_prepostnegd():
 
 def test_extract_window_invalid_type():
     """Test _extract_window raises error for invalid window type."""
+    import xarray as xr
+
     from causalpy.reporting import _extract_window
 
     # Create a minimal mock result
     class MockResult:
-        post_impact = np.array([1, 2, 3])
+        post_impact = xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [0, 1, 2]}
+        )
         datapost = pd.DataFrame({"y": [1, 2, 3]}, index=[0, 1, 2])
 
     result = MockResult()
@@ -1612,8 +1598,8 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
-    """Test _extract_counterfactual with dict format PyMC results."""
+def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
+    """_extract_counterfactual selects a window from canonical PyMC predictions."""
     from causalpy.reporting import _extract_counterfactual
 
     df = its_data
@@ -1625,20 +1611,11 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    full_prediction = result.model.predict(result.post_design["X"], out_of_sample=True)
-    post_pred_dict = {"posterior_predictive": full_prediction.posterior_predictive}
-    original_post_pred = result.post_pred
-    result.post_pred = post_pred_dict
-
-    # Should handle dict format
     window_coords = result.datapost.index[:10]
     counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
 
-    # Restore original
-    result.post_pred = original_post_pred
-
-    assert counterfactual is not None
-    assert hasattr(counterfactual, "shape")
+    assert counterfactual.sizes["obs_ind"] == 10
+    assert {"chain", "draw"} <= set(counterfactual.dims)
 
 
 @pytest.mark.integration

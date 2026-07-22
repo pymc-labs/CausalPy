@@ -172,9 +172,7 @@ class PrePostNEGD(BaseExperiment):
         (new_x_untreated,) = build_design_matrices(
             [self._x_design_info], x_pred_untreated
         )
-        self.pred_untreated = self._model_backend.predict_mu(
-            X=np.asarray(new_x_untreated)
-        )
+        self.pred_untreated = self._model_backend.predict(X=np.asarray(new_x_untreated))
         # treated
         x_pred_treated = pd.DataFrame(
             {
@@ -183,7 +181,7 @@ class PrePostNEGD(BaseExperiment):
             }
         )
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self._model_backend.predict_mu(X=np.asarray(new_x_treated))
+        self.pred_treated = self._model_backend.predict(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(

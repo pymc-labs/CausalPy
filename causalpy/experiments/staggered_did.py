@@ -471,7 +471,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
-        self.y_pred = self._model_backend.predict_mu(X=X_full_xr)
+        self.y_pred = self._model_backend.predict(X=X_full_xr)
         self.data["y_hat0"] = (
             self.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
         )

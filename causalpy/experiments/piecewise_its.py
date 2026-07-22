@@ -211,7 +211,7 @@ class PiecewiseITS(BaseExperiment):
             coords=build_coords(self.labels, X.shape[0]),
         )
 
-        self.y_pred = self._model_backend.predict_mu(X=X)
+        self.y_pred = self._model_backend.predict(X=X)
         self.score = self._model_backend.score(X=X, y=y)
 
         # Compute counterfactual and effects
@@ -349,7 +349,7 @@ class PiecewiseITS(BaseExperiment):
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
 
-        self.y_counterfactual = self._model_backend.predict_mu(X=X_cf)
+        self.y_counterfactual = self._model_backend.predict(X=X_cf)
         self.effect = self.y_pred.isel(treated_units=0) - self.y_counterfactual.isel(
             treated_units=0
         )
@@ -843,14 +843,9 @@ class PiecewiseITS(BaseExperiment):
             Reserved for forward-compatibility.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
 
         if period is not None:
@@ -865,71 +860,16 @@ class PiecewiseITS(BaseExperiment):
         counterfactual = _extract_counterfactual(
             self, window_coords, treated_unit=treated_unit
         )
-
-        if self._model_backend.is_bayesian:
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            time_dim = "obs_ind"
-            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = _as_scalar(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="piecewise_its",
-            )
-        else:
-            impact_array = np.asarray(windowed_impact)
-            counterfactual_array = np.asarray(counterfactual)
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="piecewise_its",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="piecewise_its",
+        )

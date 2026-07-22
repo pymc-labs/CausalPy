@@ -460,9 +460,9 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Sets the following attributes on ``self``:
 
-        - ``pre_pred`` / ``post_pred``: ``az.InferenceData`` objects holding
-          the synthetic-control predictions in a ``posterior_predictive``
-          group.
+        - ``pre_pred`` / ``post_pred``: ``xr.DataArray`` synthetic-control
+          predictions with canonical dims ``(chain, draw, obs_ind,
+          treated_units)``.
         - ``pre_impact`` / ``post_impact``: ``xr.DataArray`` of observed
           minus counterfactual with dims ``(chain, draw, obs_ind,
           treated_units)``.
@@ -484,10 +484,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_inference_data(
+        self.pre_pred = self._build_prediction(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_inference_data(
+        self.post_pred = self._build_prediction(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -519,18 +519,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
-    def _build_inference_data(
+    def _build_prediction(
         self,
         mu_vals: np.ndarray,
         index: pd.Index,
         n_chains: int,
         n_draws: int,
-    ) -> az.InferenceData:
-        """Build an InferenceData-like object with posterior_predictive group.
-
-        Constructs a minimal InferenceData containing a ``mu`` variable in the
-        ``posterior_predictive`` group, shaped to be compatible with the
-        reporting helpers that expect SC-style predictions.
+    ) -> xr.DataArray:
+        """Build a prediction DataArray with canonical dimensions.
 
         Parameters
         ----------
@@ -545,14 +541,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        az.InferenceData
-            InferenceData with posterior_predictive group containing ``mu``.
+        xr.DataArray
+            Predictions with dims ``(chain, draw, obs_ind, treated_units)``.
         """
-        # Add a singleton treated_units dim: (chain, draw, T, 1)
-        mu_4d = mu_vals[..., np.newaxis]
-
-        mu_da = xr.DataArray(
-            mu_4d,
+        return xr.DataArray(
+            mu_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
@@ -561,8 +554,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        ds = xr.Dataset({"mu": mu_da})
-        return az.InferenceData(posterior_predictive=ds)
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results.
@@ -720,12 +711,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # ---- TOP PLOT: Observed vs counterfactual ----
-        pre_pred = self.pre_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
-        post_pred = self.post_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
+        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
+        post_pred = self.post_pred.sel(treated_units=treated_unit)
 
         # Pre-intervention synthetic control fit
         h_line, h_patch = plot_posterior_over_x(
