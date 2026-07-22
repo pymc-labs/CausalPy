@@ -376,12 +376,7 @@ class BaseExperiment(ABC):
         ... )
         """
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            if self._model_backend.is_bayesian:
-                fig, ax = self._bayesian_plot(**draw_kwargs)
-            elif self._model_backend.is_ols:
-                fig, ax = self._ols_plot(**draw_kwargs)
-            else:
-                raise ValueError("Unsupported model type")
+            fig, ax = self._plot(**draw_kwargs)
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
@@ -410,6 +405,22 @@ class BaseExperiment(ABC):
             plt.show()
 
         return fig, ax
+
+    def _plot(self, **kwargs: Any) -> tuple:
+        """Draw the experiment figure; called by :meth:`_render_plot`.
+
+        Subclasses implement a single backend-agnostic ``_plot`` that consumes
+        the canonical prediction container. Experiments not yet migrated keep
+        paired ``_bayesian_plot`` / ``_ols_plot`` methods, which this default
+        dispatches to.
+        """
+        # ponytail: transitional dispatch while experiments migrate one at a
+        # time to a unified _plot (issue #1037); delete once all are migrated.
+        if self._model_backend.is_bayesian:
+            return self._bayesian_plot(**kwargs)
+        if self._model_backend.is_ols:
+            return self._ols_plot(**kwargs)
+        raise ValueError("Unsupported model type")
 
     def _bayesian_plot(self, *args: Any, **kwargs: Any) -> tuple:
         """Plot results for Bayesian models. Override in subclasses that support Bayesian."""

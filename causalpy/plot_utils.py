@@ -29,6 +29,54 @@ from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
 from causalpy.constants import HDI_PROB
+from causalpy.utils import _as_scalar
+
+
+def has_posterior_draws(Y: xr.DataArray) -> bool:
+    """Whether *Y* carries genuine posterior uncertainty.
+
+    The canonical prediction container has ``chain`` and ``draw`` dimensions
+    on every backend; point-estimate backends emit singleton dimensions (a
+    point estimate is a posterior with one atom). Plot code should key
+    uncertainty rendering (ribbons, HDI labels, ...) on this data property
+    rather than on backend identity.
+
+    Parameters
+    ----------
+    Y : xr.DataArray
+        A canonical prediction container with ``chain`` and ``draw``
+        dimensions.
+    """
+    return Y.sizes.get("chain", 1) * Y.sizes.get("draw", 1) > 1
+
+
+def extract_r2_score(
+    score: pd.Series | float, unit_index: int = 0
+) -> tuple[float | None, float | None]:
+    """Extract ``(r2, r2_std)`` from a backend score container.
+
+    Bayesian backends return a :class:`pandas.Series` with
+    ``unit_{i}_r2`` / ``unit_{i}_r2_std`` (or plain ``r2`` / ``r2_std``)
+    entries; point-estimate backends return a scalar. ``r2_std`` is ``None``
+    when the container carries no dispersion, so callers can render
+    ``(std = ...)`` only when it exists.
+
+    Parameters
+    ----------
+    score : pd.Series or float
+        Backend score container as stored on ``experiment.score``.
+    unit_index : int, optional
+        Index of the treated unit whose score to extract. Defaults to 0.
+    """
+    if isinstance(score, pd.Series):
+        key = f"unit_{unit_index}_r2"
+        if key not in score.index:
+            key = "r2"
+        if key not in score.index:
+            return None, None
+        std = score.get(f"{key}_std")
+        return float(score[key]), None if std is None else float(std)
+    return float(_as_scalar(score)), None
 
 
 class _PosteriorPlotStyle(TypedDict):
