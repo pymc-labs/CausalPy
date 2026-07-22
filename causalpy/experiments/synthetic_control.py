@@ -18,20 +18,22 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
-    _PosteriorPlotStyle,
+    CausalPanelData,
+    PlotSpec,
+    build_causal_panel_plot,
+    dataarray_draws,
     extract_r2_score,
     get_hdi_to_df,
     has_posterior_draws,
-    plot_posterior_over_x,
 )
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
@@ -388,18 +390,6 @@ class SyntheticControl(BaseExperiment):
         for unit, r in corrs.items():
             print(f"Pre-treatment correlation ({unit}): {r:.4f}")
 
-    @staticmethod
-    def _convert_treatment_time_for_axis(
-        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
-    ) -> int | float | pd.Timestamp:
-        """
-        Convert treatment time into the plotting units expected by a specific axis.
-        """
-        try:
-            return axis.xaxis.convert_units(treatment_time)
-        except (TypeError, ValueError):
-            return treatment_time
-
     def plot(
         self,
         *,
@@ -411,10 +401,10 @@ class SyntheticControl(BaseExperiment):
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
         plot_predictors: bool = False,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot the synthetic control results for a specific treated unit.
 
         Parameters
@@ -434,25 +424,23 @@ class SyntheticControl(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` draws posterior sample
+            lines via plotnine. ``"histogram"`` renders plotnine
+            two-dimensional histogram layers.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
-
         plot_predictors : bool
             Whether to overlay the donor (control) unit trajectories on the
             top panel. Defaults to ``False``.
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+            Width and height of the figure in inches. Defaults to ``(7, 11)``
+            so the three panels and date tick labels have room.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
             Set to ``False`` if you want to modify the figure before
@@ -467,8 +455,8 @@ class SyntheticControl(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+            The rendered plotnine figure.
+        ax : numpy.ndarray
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
@@ -493,6 +481,34 @@ class SyntheticControl(BaseExperiment):
             figsize=figsize,
         )
 
+    def _causal_panel_data(self, *, treated_unit: str) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
+        observations = pd.DataFrame(
+            {
+                "obs_ind": self.data.index,
+                "value": np.concatenate(
+                    [
+                        self.pre_design["treated"]
+                        .sel(treated_units=treated_unit)
+                        .to_numpy(),
+                        self.post_design["treated"]
+                        .sel(treated_units=treated_unit)
+                        .to_numpy(),
+                    ]
+                ),
+            }
+        )
+        return CausalPanelData(
+            fitted=dataarray_draws(self.pre_pred, treated_unit=treated_unit),
+            counterfactual=dataarray_draws(self.post_pred, treated_unit=treated_unit),
+            pre_effect=dataarray_draws(self.pre_impact, treated_unit=treated_unit),
+            post_effect=dataarray_draws(self.post_impact, treated_unit=treated_unit),
+            cumulative_effect=dataarray_draws(
+                self.post_impact_cumulative, treated_unit=treated_unit
+            ),
+            observations=observations,
+        )
+
     def _plot(
         self,
         round_to: int | None = None,
@@ -502,236 +518,84 @@ class SyntheticControl(BaseExperiment):
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
         plot_predictors: bool = False,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results for a specific treated unit.
+    ) -> PlotSpec:
+        """Build the synthetic-control plot from tidy declarative layers.
 
         Consumes the canonical prediction container from any backend.
-        Uncertainty bands are drawn only when the container carries posterior
-        draws; point-estimate backends (singleton ``chain``/``draw``) get bare
-        lines.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        treated_unit : str, optional
-            Which treated unit to plot. Must be a string name of the treated unit.
-            If ``None``, plots the first treated unit.
-        ci_prob : float, optional
-            Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        plot_predictors : bool, optional
-            Whether to overlay control-unit trajectories. Defaults to ``False``.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(7, 8)``.
+        Point-estimate backends (singleton ``chain``/``draw``) collapse the
+        uncertainty layers to bare mean lines.
         """
-        counterfactual_label = "Counterfactual"
-        with_uncertainty = has_posterior_draws(self.pre_pred)
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-
-        # Get treated unit name - default to first unit if None
         treated_unit = (
             treated_unit if treated_unit is not None else self.treated_units[0]
         )
-
         if treated_unit not in self.treated_units:
             raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
+                f"treated_unit '{treated_unit}' not found. "
+                f"Available units: {self.treated_units}"
             )
 
-        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
-        post_pred = self.post_pred.sel(treated_units=treated_unit)
-        pre_impact = self.pre_impact.sel(treated_units=treated_unit)
-        post_impact = self.post_impact.sel(treated_units=treated_unit)
-        post_impact_cumulative = self.post_impact_cumulative.sel(
-            treated_units=treated_unit
+        panels = (
+            self._get_score_title(treated_unit, round_to),
+            "Causal Impact",
+            "Cumulative Causal Impact",
         )
-        pre_treated = self.pre_design["treated"].sel(treated_units=treated_unit)
-        post_treated = self.post_design["treated"].sel(treated_units=treated_unit)
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-        # TOP PLOT --------------------------------------------------
-        handles: list[Any] = []
-        labels: list[str] = []
-        if with_uncertainty:
-            # pre-intervention period
-            h_line, h_patch = plot_posterior_over_x(
-                self.datapre.index,
-                pre_pred,
-                ax=ax[0],
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-            )
-            handles.append((h_line, h_patch))
-            labels.append("Pre-intervention period")
-
-            # Plot observations for primary treated unit
-            (h,) = ax[0].plot(
-                self.datapre.index,
-                pre_treated,
-                "k.",
-                label="Observations",
-            )
-            handles.append(h)
-            labels.append("Observations")
-
-            # post intervention period
-            h_line, h_patch = plot_posterior_over_x(
-                self.datapost.index,
-                post_pred,
-                ax=ax[0],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-            handles.append((h_line, h_patch))
-            labels.append(counterfactual_label)
-
-            ax[0].plot(self.datapost.index, post_treated, "k.")
-        else:
-            ax[0].plot(pre_treated["obs_ind"], pre_treated, "k.")
-            ax[0].plot(post_treated["obs_ind"], post_treated, "k.")
-            ax[0].plot(
-                self.datapre.index,
-                pre_pred.mean(dim=["chain", "draw"]),
-                c="k",
-                label="model fit",
-            )
-            ax[0].plot(
-                self.datapost.index,
-                post_pred.mean(dim=["chain", "draw"]),
-                label=counterfactual_label,
-                ls=":",
-                c="k",
-            )
-
-        # Shaded causal effect
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=post_treated.values,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
+        plot_data = self._causal_panel_data(treated_unit=treated_unit)
+        series_labels = {
+            "fitted": "Pre-intervention period",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
+        }
+        colors = {
+            "Pre-intervention period": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "pre": "#1f77b4",
+            "post": "#ff7f0e",
+        }
+        p = build_causal_panel_plot(
+            plot_data,
+            panels=panels,
+            series_labels=series_labels,
+            colors=colors,
+            kind=kind,
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            figsize=figsize,
         )
-        if with_uncertainty:
-            handles.append(h)
-            labels.append("Causal impact")
-
-        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
-
-        # MIDDLE PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapre.index,
-                pre_impact,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-            )
-            plot_posterior_over_x(
-                self.datapost.index,
-                post_impact,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-        else:
-            ax[1].plot(self.datapre.index, pre_impact.mean(dim=["chain", "draw"]), "k.")
-            ax[1].plot(
-                self.datapost.index,
-                post_impact.mean(dim=["chain", "draw"]),
-                "k.",
-                label=counterfactual_label,
-            )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=post_impact.mean(dim=["chain", "draw"]),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
+        p += p9.geom_vline(
+            pd.DataFrame({"obs_ind": [self.treatment_time]}),
+            p9.aes(xintercept="obs_ind"),
+            color="red",
+            size=2,
         )
-        ax[1].set(title="Causal Impact")
-
-        # BOTTOM PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapost.index,
-                post_impact_cumulative,
-                ax=ax[2],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-        else:
-            ax[2].plot(
-                self.datapost.index,
-                post_impact_cumulative.mean(dim=["chain", "draw"]),
-                c="k",
-            )
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
-        # Intervention line
-        for i in [0, 1, 2]:
-            treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
-            )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-                label=None if with_uncertainty else "Treatment time",
-            )
-
-        if with_uncertainty:
-            ax[0].legend(
-                handles=(h_tuple for h_tuple in handles),
-                labels=labels,
-                fontsize=LEGEND_FONT_SIZE,
-            )
-        else:
-            # Collect labelled artists (including the treatment line)
-            ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
         if plot_predictors:
-            # plot control units as well
-            ax[0].plot(
-                self.datapre.index,
-                self.pre_design["control"],
-                "-",
-                c=[0.8, 0.8, 0.8],
-                zorder=1,
+            predictors = (
+                self.data[self.control_units]
+                .rename_axis("obs_ind")
+                .reset_index()
+                .melt(
+                    id_vars="obs_ind",
+                    var_name="predictor",
+                    value_name="y",
+                )
             )
-            ax[0].plot(
-                self.datapost.index,
-                self.post_design["control"],
-                "-",
-                c=[0.8, 0.8, 0.8],
-                zorder=1,
+            p += p9.geom_line(
+                predictors,
+                p9.aes("obs_ind", "y", group="predictor"),
+                color="#cccccc",
+                size=0.5,
+                inherit_aes=False,
+                show_legend=False,
             )
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return fig, ax
+        return PlotSpec(p, n_panels=3)
 
     def get_plot_data(
         self, hdi_prob: float = HDI_PROB, treated_unit: str | None = None
