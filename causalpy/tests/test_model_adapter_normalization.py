@@ -93,6 +93,13 @@ def test_sklearn_adapter_xarray_inputs_match_numpy():
     assert np.allclose(adapter_np.coefficients(), adapter_xr.coefficients())
     assert adapter_np.score(X_np, y_np) == adapter_xr.score(X_xr, y_xr)
     assert np.allclose(adapter_np.predict(X_np), adapter_xr.predict(X_xr))
+    mu = adapter_xr.predict_mu(X_xr)
+    assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
+    np.testing.assert_array_equal(mu.coords["obs_ind"], X_xr.coords["obs_ind"])
+    np.testing.assert_array_equal(
+        mu.coords["treated_units"], y_xr.coords["treated_units"]
+    )
+    np.testing.assert_allclose(mu.squeeze(), adapter_xr.predict(X_xr))
 
 
 def test_sklearn_adapter_predict_ignores_out_of_sample():
@@ -106,3 +113,28 @@ def test_sklearn_adapter_predict_ignores_out_of_sample():
     preds_default = adapter.predict(X)
     preds_oos = adapter.predict(X, out_of_sample=True)
     assert np.allclose(preds_default, preds_oos)
+
+
+def test_sklearn_predict_mu_preserves_multi_output_coordinates():
+    X = xr.DataArray(
+        np.arange(16).reshape(8, 2),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(10, 18), "coeffs": ["a", "b"]},
+    )
+    y = xr.DataArray(
+        np.column_stack((X[:, 0] + X[:, 1], X[:, 0] - X[:, 1])),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": X.obs_ind, "treated_units": ["north", "south"]},
+    )
+    adapter = SklearnModelAdapter(
+        create_causalpy_compatible_class(LinearRegression(fit_intercept=False))
+    )
+    adapter.fit(X, y)
+
+    mu = adapter.predict_mu(X)
+
+    assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
+    assert mu.shape == (1, 1, 8, 2)
+    np.testing.assert_array_equal(mu.obs_ind, X.obs_ind)
+    np.testing.assert_array_equal(mu.treated_units, y.treated_units)
+    np.testing.assert_allclose(mu.squeeze(("chain", "draw")), adapter.predict(X))

@@ -106,8 +106,8 @@ class PrePostNEGD(BaseExperiment):
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
         self.pred_xi: np.ndarray
-        self.pred_untreated: az.InferenceData
-        self.pred_treated: az.InferenceData
+        self.pred_untreated: xr.DataArray
+        self.pred_treated: xr.DataArray
         self.data = data
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
@@ -172,7 +172,9 @@ class PrePostNEGD(BaseExperiment):
         (new_x_untreated,) = build_design_matrices(
             [self._x_design_info], x_pred_untreated
         )
-        self.pred_untreated = self.model.predict(X=np.asarray(new_x_untreated))
+        self.pred_untreated = self._model_backend.predict_mu(
+            X=np.asarray(new_x_untreated)
+        )
         # treated
         x_pred_treated = pd.DataFrame(
             {
@@ -181,7 +183,7 @@ class PrePostNEGD(BaseExperiment):
             }
         )
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
-        self.pred_treated = self.model.predict(X=np.asarray(new_x_treated))
+        self.pred_treated = self._model_backend.predict_mu(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
         self.causal_impact = self.model.idata.posterior["beta"].sel(
@@ -370,7 +372,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of untreated
         h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
-            self.pred_untreated["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred_untreated.isel(treated_units=0),
             ax=ax[0],
             **style,
             plot_hdi_kwargs={"color": "C0"},
@@ -382,7 +384,7 @@ class PrePostNEGD(BaseExperiment):
         # plot posterior predictive of treated
         h_line, h_patch = plot_posterior_over_x(
             self.pred_xi,
-            self.pred_treated["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred_treated.isel(treated_units=0),
             ax=ax[0],
             **style,
             plot_hdi_kwargs={"color": "C1"},

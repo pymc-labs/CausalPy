@@ -647,7 +647,7 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind").isel(treated_units=0)
+    avg_effect = result.post_impact.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -1625,8 +1625,8 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    # Convert InferenceData to dict format
-    post_pred_dict = {"posterior_predictive": result.post_pred.posterior_predictive}
+    full_prediction = result.model.predict(result.post_design["X"], out_of_sample=True)
+    post_pred_dict = {"posterior_predictive": full_prediction.posterior_predictive}
     original_post_pred = result.post_pred
     result.post_pred = post_pred_dict
 

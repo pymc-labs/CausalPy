@@ -222,19 +222,10 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if self._model_backend.is_bayesian:
-            self.discontinuity_at_threshold = (
-                self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-                - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-            )
-        else:
-            self.discontinuity_at_threshold = np.squeeze(
-                self.pred_discon[1]
-            ) - np.squeeze(self.pred_discon[0])
-        # ******************************************************************************
+        self.pred_discon = self._model_backend.predict_mu(X=np.asarray(new_x))
+        self.discontinuity_at_threshold = self.pred_discon.isel(
+            obs_ind=1, treated_units=0
+        ) - self.pred_discon.isel(obs_ind=0, treated_units=0)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -300,9 +291,12 @@ class RegressionDiscontinuity(BaseExperiment):
         print(f"Donut hole: {self.donut_hole}")
         print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
-        print(
-            f"Discontinuity at threshold = {convert_to_string(self.discontinuity_at_threshold)}"
+        discontinuity = (
+            self.discontinuity_at_threshold
+            if self._model_backend.is_bayesian
+            else _as_scalar(self.discontinuity_at_threshold)
         )
+        print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
         self.print_coefficients(round_to)
 
@@ -544,7 +538,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
         # create strings to compose title
         r2 = f"$R^2$ on fit data = {round_num(_as_scalar(self.score), round_to)}"
-        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
+        discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
         ax.set(title=r2 + "\n" + discon)
 
         # Treatment threshold line

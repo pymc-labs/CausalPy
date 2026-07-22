@@ -150,6 +150,35 @@ class ModelAdapter(ABC):
             Additional keyword arguments forwarded to the underlying model.
         """
 
+    def predict_mu(
+        self,
+        X: Any,
+        *,
+        out_of_sample: bool = False,
+        **kwargs: Any,
+    ) -> xr.DataArray:
+        """Return expected outcomes with canonical prediction dimensions.
+
+        Parameters
+        ----------
+        X : array-like or xarray.DataArray
+            Predictor matrix for which to generate predictions.
+        out_of_sample : bool, default False
+            Whether predictions are out-of-sample.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Response-scale expected outcomes with dimensions ``("chain",
+            "draw", "obs_ind", "treated_units")``.
+        """
+        prediction = self.predict(
+            X=X, out_of_sample=out_of_sample, **kwargs
+        ).posterior_predictive["mu"]
+        return prediction.transpose("chain", "draw", "obs_ind", "treated_units")
+
     @abstractmethod
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
         """Score predictions against observed outcomes.
@@ -297,6 +326,7 @@ class SklearnModelAdapter(ModelAdapter):
 
     def __init__(self, model: RegressorMixin) -> None:
         self._model = model
+        self._treated_units: np.ndarray | None = None
 
     @property
     def model(self) -> RegressorMixin:
@@ -331,6 +361,10 @@ class SklearnModelAdapter(ModelAdapter):
         coords : dict, optional
             Ignored for sklearn backends.
         """
+        if isinstance(y, xr.DataArray) and "treated_units" in y.coords:
+            self._treated_units = np.asarray(y.coords["treated_units"])
+        else:
+            self._treated_units = None
         return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
 
     def predict(
@@ -352,6 +386,64 @@ class SklearnModelAdapter(ModelAdapter):
             Additional keyword arguments forwarded to the underlying model.
         """
         return self._model.predict(X=_sklearn_array(X), **kwargs)
+
+    def predict_mu(
+        self,
+        X: Any,
+        *,
+        out_of_sample: bool = False,
+        **kwargs: Any,
+    ) -> xr.DataArray:
+        """Return point predictions as singleton posterior draws.
+
+        Parameters
+        ----------
+        X : array-like or xarray.DataArray
+            Predictor matrix for which to generate predictions.
+        out_of_sample : bool, default False
+            Ignored for sklearn backends.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Point predictions with canonical prediction dimensions.
+        """
+        values = np.asarray(self.predict(X=X, out_of_sample=out_of_sample, **kwargs))
+        if values.ndim == 1:
+            values = values[:, None]
+        if values.ndim != 2:
+            raise ValueError(
+                "Expected sklearn predictions with shape (obs,) or "
+                f"(obs, treated_units), got {values.shape}."
+            )
+
+        obs_ind = (
+            np.asarray(X.coords["obs_ind"])
+            if isinstance(X, xr.DataArray) and "obs_ind" in X.coords
+            else np.arange(values.shape[0])
+        )
+        treated_units = (
+            self._treated_units
+            if self._treated_units is not None
+            else np.asarray([f"unit_{i}" for i in range(values.shape[1])])
+        )
+        if len(treated_units) != values.shape[1]:
+            raise ValueError(
+                "Prediction output columns do not match the treated units used for fit."
+            )
+
+        return xr.DataArray(
+            values[None, None, :, :],
+            dims=("chain", "draw", "obs_ind", "treated_units"),
+            coords={
+                "chain": [0],
+                "draw": [0],
+                "obs_ind": obs_ind,
+                "treated_units": treated_units,
+            },
+        )
 
     def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
         """Score predictions from the sklearn model.

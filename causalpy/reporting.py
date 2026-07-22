@@ -460,10 +460,7 @@ def _effect_summary_rd(
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
 
-    # Check if PyMC (xarray) or OLS (scalar)
-    is_pymc = isinstance(discontinuity, xr.DataArray)
-
-    if is_pymc:
+    if result._model_backend.is_bayesian:
         # PyMC model: use unified scalar functions
         hdi_prob = 1 - alpha
         stats = _compute_statistics_scalar(
@@ -564,9 +561,12 @@ def _extract_window(result, window, treated_unit=None):
     """
     post_impact = result.post_impact
 
-    # Check if PyMC (xarray with chain/draw dims) or OLS
-    is_pymc = isinstance(post_impact, xr.DataArray) and (
-        "chain" in post_impact.dims or "draw" in post_impact.dims
+    backend = getattr(result, "_model_backend", None)
+    is_pymc = (
+        backend.is_bayesian
+        if backend is not None
+        else isinstance(post_impact, xr.DataArray)
+        and ("chain" in post_impact.dims or "draw" in post_impact.dims)
     )
 
     # Handle treated_unit selection using helper functions
@@ -678,6 +678,16 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
         Counterfactual predictions for the window
     """
     post_pred = result.post_pred
+    backend = getattr(result, "_model_backend", None)
+    is_pymc = backend.is_bayesian if backend is not None else False
+
+    if isinstance(post_pred, xr.DataArray):
+        if "treated_units" in post_pred.dims:
+            post_pred = _select_treated_unit(post_pred, treated_unit)
+        if is_pymc:
+            return post_pred.sel(obs_ind=window_coords)
+        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+        return np.squeeze(np.asarray(post_pred.isel(obs_ind=indices)))
 
     # PyMC: Extract from InferenceData
     if hasattr(post_pred, "posterior_predictive"):
@@ -704,30 +714,16 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
         counterfactual = counterfactual.sel(obs_ind=window_coords)
         return counterfactual
 
-    # OLS: Handle xarray or numpy
-    if isinstance(post_pred, xr.DataArray):
-        # OLS with xarray (e.g., SyntheticControl)
-        # Select treated_unit using helper
-        if "treated_units" in post_pred.dims:
-            post_pred = _select_treated_unit(post_pred, treated_unit)
+    # OLS with numpy array
+    indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
+    counterfactual = post_pred[indices]
 
-        # Convert window_coords to integer indices for isel
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = np.asarray(post_pred.isel(obs_ind=indices))
-        return np.squeeze(counterfactual)
-    else:
-        # OLS with numpy array
-        # Convert window_coords to indices
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred[indices]
+    if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
+        counterfactual = _select_treated_unit_numpy(
+            counterfactual, result, treated_unit
+        )
 
-        # Handle treated_unit for multi-unit numpy arrays using helper
-        if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
-            counterfactual = _select_treated_unit_numpy(
-                counterfactual, result, treated_unit
-            )
-
-        return np.squeeze(counterfactual)
+    return np.squeeze(counterfactual)
 
 
 def _compute_statistics(
@@ -1628,7 +1624,7 @@ def _generate_prose_did_ols(stats, alpha=0.05):
 
 def _compute_statistics_rd_ols(result, alpha=0.05):
     """Compute statistics for RD scalar effect with OLS model."""
-    discontinuity = result.discontinuity_at_threshold  # scalar
+    discontinuity = _as_scalar(result.discontinuity_at_threshold)
 
     # Calculate standard error from model
     X_da = result.design["X"]
