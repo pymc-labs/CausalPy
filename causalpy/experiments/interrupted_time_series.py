@@ -19,22 +19,24 @@ from typing import Any, Literal
 import arviz as az
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import build_design_matrices
 from sklearn.base import RegressorMixin
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
-    _PosteriorPlotStyle,
+    CausalPanelData,
+    PlotSpec,
+    build_causal_panel_plot,
+    dataarray_draws,
     extract_r2_score,
     get_hdi_to_df,
     has_posterior_draws,
-    plot_posterior_over_x,
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
@@ -542,10 +544,10 @@ class InterruptedTimeSeries(BaseExperiment):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, np.ndarray]:
         """Plot the interrupted time-series results.
 
         Parameters
@@ -557,26 +559,25 @@ class InterruptedTimeSeries(BaseExperiment):
         ci_prob : float
             Probability mass of the credible interval drawn around the
             posterior predictive, causal impact, and cumulative impact bands.
-            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            Must be in ``(0, 1]``. Has no visible effect for point-estimate
+            backends. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered via
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
-            For ``"spaghetti"``, legends use draw lines rather than a shaded
-            band. For ``"histogram"``, uncertainty is shown as a 2D density
-            heatmap with a mean line overlay (no ribbon patch for legends).
+        kind : {"ribbon", "spaghetti", "histogram"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
+            (mean + credible band). ``"spaghetti"`` draws posterior sample
+            lines via plotnine. ``"histogram"`` renders plotnine
+            two-dimensional histogram layers.
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
-
         figsize : tuple of (float, float)
-            Width and height of the figure in inches, passed to
-            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+            Width and height of the figure in inches. Defaults to ``(7, 11)``
+            so the three panels and date tick labels have room.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
             Set to ``False`` if you want to modify the figure before
@@ -591,8 +592,8 @@ class InterruptedTimeSeries(BaseExperiment):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+            The rendered plotnine figure.
+        ax : numpy.ndarray
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """
@@ -615,39 +616,26 @@ class InterruptedTimeSeries(BaseExperiment):
             figsize=figsize,
         )
 
-    @staticmethod
-    def _draw_singleton_hdi_marker(
-        ax: plt.Axes,
-        x: Any,
-        Y: xr.DataArray,
-        color: str,
-        hdi_prob: float = HDI_PROB,
-    ) -> Any:
-        """Overlay a median dot + HDI errorbar for a single post-period datum.
-
-        When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
-        HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
-        when the post-period contains a single observation, so neither the median
-        line nor the HDI ribbon is visible. Drawing an explicit point and errorbar
-        makes both the central tendency and the uncertainty plain to read in that
-        edge case. Returns the matplotlib ``ErrorbarContainer`` so callers can use
-        it as a legend handle.
-        """
-        Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
-        median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
-        hdi = az.hdi(Y_plot, hdi_prob=hdi_prob)
-        data_var = list(hdi.data_vars)[0]
-        bounds = np.asarray(hdi[data_var].values).reshape(-1)
-        lower, upper = float(bounds[0]), float(bounds[1])
-        return ax.errorbar(
-            x,
-            [median],
-            yerr=[[median - lower], [upper - median]],
-            fmt="o",
-            color=color,
-            ecolor=color,
-            capsize=4,
-            zorder=3,
+    def _causal_panel_data(self) -> CausalPanelData:
+        """Extract semantic long-form draws and observations for plotting."""
+        observations = pd.DataFrame(
+            {
+                "obs_ind": self.data.index,
+                "value": np.concatenate(
+                    [
+                        self.pre_design["y"].isel(treated_units=0).to_numpy(),
+                        self.post_design["y"].isel(treated_units=0).to_numpy(),
+                    ]
+                ),
+            }
+        )
+        return CausalPanelData(
+            fitted=dataarray_draws(self.pre_pred),
+            counterfactual=dataarray_draws(self.post_pred),
+            pre_effect=dataarray_draws(self.pre_impact),
+            post_effect=dataarray_draws(self.post_impact),
+            cumulative_effect=dataarray_draws(self.post_impact_cumulative),
+            observations=observations,
         )
 
     def _plot(
@@ -657,246 +645,73 @@ class InterruptedTimeSeries(BaseExperiment):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
-        figsize: tuple[float, float] = (7, 8),
+        figsize: tuple[float, float] = (7, 11),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results.
+    ) -> PlotSpec:
+        """Build the ITS plot from tidy tables and declarative layers.
 
         Consumes the canonical prediction container from any backend.
-        Uncertainty bands are drawn only when the container carries posterior
-        draws; point-estimate backends (singleton ``chain``/``draw``) get bare
-        lines.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        ci_prob : float, optional
-            Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(7, 8)``.
+        Point-estimate backends (singleton ``chain``/``draw``) collapse the
+        uncertainty layers to bare mean lines.
         """
-        counterfactual_label = "Counterfactual"
-        with_uncertainty = has_posterior_draws(self.pre_pred)
-        single_post_obs = len(self.datapost) <= 1
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-
-        pre_pred = self.pre_pred.isel(treated_units=0)
-        post_pred = self.post_pred.isel(treated_units=0)
-        pre_y = self.pre_design["y"].isel(treated_units=0)
-        post_y = self.post_design["y"].isel(treated_units=0)
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-        # TOP PLOT --------------------------------------------------
-        handles: list[Any] = []
-        labels: list[str] = []
-        if with_uncertainty:
-            # pre-intervention period
-            h_line, h_patch = plot_posterior_over_x(
-                self.datapre.index,
-                pre_pred,
-                ax=ax[0],
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-            )
-            handles.append((h_line, h_patch))
-            labels.append("Pre-intervention period")
-
-            (h,) = ax[0].plot(
-                self.datapre.index,
-                pre_y,
-                "k.",
-                label="Observations",
-            )
-            handles.append(h)
-            labels.append("Observations")
-
-            # post intervention period
-            h_line, h_patch = plot_posterior_over_x(
-                self.datapost.index,
-                post_pred,
-                ax=ax[0],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-            if single_post_obs:
-                # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
-                # single post-period datum; overlay an explicit median + HDI
-                # errorbar so the counterfactual is still visible. Use the
-                # errorbar artist itself as the legend handle so the legend
-                # matches what is actually drawn.
-                errbar = self._draw_singleton_hdi_marker(
-                    ax[0], self.datapost.index, self.post_pred, color="C1"
-                )
-                handles.append(errbar)
-            else:
-                handles.append((h_line, h_patch))
-            labels.append(counterfactual_label)
-
-            ax[0].plot(self.datapost.index, post_y, "k.", zorder=3)
-        else:
-            ax[0].plot(self.datapre.index, pre_y, "k.")
-            ax[0].plot(
-                self.datapre.index,
-                pre_pred.mean(("chain", "draw")),
-                c="k",
-                label="model fit",
-            )
-            ax[0].plot(self.datapost.index, post_y, "k.")
-            ax[0].plot(
-                self.datapost.index,
-                post_pred.mean(("chain", "draw")),
-                label=counterfactual_label,
-                ls=":",
-                c="k",
-            )
-
-        # Shaded causal effect (only meaningful when there are >=2 post-period
-        # points; with a single datum the fill_between collapses to nothing,
-        # so we omit the legend entry to avoid misleading the reader).
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(("chain", "draw")),
-            y2=post_y,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        if with_uncertainty and not single_post_obs:
-            handles.append(h)
-            labels.append("Causal impact")
-
-        # Title with R^2; scores carrying a dispersion entry render as Bayesian
         r2_val, r2_std_val = extract_r2_score(self.score)
         assert r2_val is not None  # both backends' score containers carry R^2
         if r2_std_val is not None:
-            title_str = (
+            top_title = (
                 f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, round_to)}"
                 f"\n(std = {round_num(r2_std_val, round_to)})"
             )
         else:
-            title_str = (
+            top_title = (
                 f"$R^2$ on pre-intervention data = {round_num(r2_val, round_to)}"
             )
-        ax[0].set(title=title_str)
-
-        # MIDDLE PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapre.index,
-                self.pre_impact,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-            )
-            plot_posterior_over_x(
-                self.datapost.index,
-                self.post_impact,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-            if single_post_obs:
-                self._draw_singleton_hdi_marker(
-                    ax[1], self.datapost.index, self.post_impact, color="C1"
-                )
-        else:
-            ax[1].plot(
-                self.datapre.index, self.pre_impact.mean(("chain", "draw")), "k."
-            )
-            ax[1].plot(
-                self.datapost.index,
-                self.post_impact.mean(("chain", "draw")),
-                "k.",
-                label=counterfactual_label,
-            )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=self.post_impact.mean(("chain", "draw")),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
+        panels = (top_title, "Causal Impact", "Cumulative Causal Impact")
+        plot_data = self._causal_panel_data()
+        series_labels = {
+            "fitted": "Pre-intervention period",
+            "counterfactual": "Counterfactual",
+            "pre_effect": "pre",
+            "post_effect": "post",
+            "cumulative_effect": "post",
+        }
+        colors = {
+            "Pre-intervention period": "#1f77b4",
+            "Counterfactual": "#ff7f0e",
+            "Observations": "black",
+            "pre": "#1f77b4",
+            "post": "#ff7f0e",
+        }
+        p = build_causal_panel_plot(
+            plot_data,
+            panels=panels,
+            series_labels=series_labels,
+            colors=colors,
+            kind=kind,
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            figsize=figsize,
+            post_index=self.datapost.index,
         )
-        ax[1].set(title="Causal Impact")
-
-        # BOTTOM PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapost.index,
-                self.post_impact_cumulative,
-                ax=ax[2],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
+        p += p9.geom_vline(
+            pd.DataFrame({"obs_ind": [self.treatment_time]}),
+            p9.aes(xintercept="obs_ind"),
+            linetype="dashed",
+            color="black",
+            size=1,
+        )
+        if self.treatment_end_time is not None:
+            p += p9.geom_vline(
+                pd.DataFrame({"obs_ind": [self.treatment_end_time]}),
+                p9.aes(xintercept="obs_ind"),
+                linetype="dotted",
+                color="black",
+                size=1,
             )
-            if single_post_obs:
-                self._draw_singleton_hdi_marker(
-                    ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
-                )
-        else:
-            ax[2].plot(
-                self.datapost.index,
-                self.post_impact_cumulative.mean(("chain", "draw")),
-                c="k",
-            )
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            p += p9.theme(axis_text_x=p9.element_text(rotation=45, ha="right"))
 
-        # Intervention lines. Use a thin dashed black style and a zorder just
-        # below the data so the treatment marker reads as a neutral
-        # annotation rather than data, and never occludes data points or HDI
-        # ribbons - important for the edge case of very few post-treatment
-        # observations where the marker can land exactly on top of the only
-        # post-period datum.
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="--",
-                lw=1.5,
-                color="k",
-                zorder=1.5,
-                label="Treatment start" if i == 0 else None,
-            )
-            if self.treatment_end_time is not None:
-                ax[i].axvline(
-                    x=self.treatment_end_time,
-                    ls=":",
-                    lw=1.5,
-                    color="k",
-                    zorder=1.5,
-                    label="Treatment end" if i == 0 else None,
-                )
-
-        if with_uncertainty:
-            ax[0].legend(
-                handles=(h_tuple for h_tuple in handles),
-                labels=labels,
-                fontsize=LEGEND_FONT_SIZE,
-            )
-        else:
-            # Collect labelled artists (including the treatment lines)
-            ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return fig, ax
+        return PlotSpec(p, n_panels=3)
 
     def get_plot_data(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """

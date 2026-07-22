@@ -757,6 +757,16 @@ def build_causal_panel_plot(
     frames = [intervals, obs]
     if effect_area is not None:
         frames.append(effect_area)
+    # Layers built by posterior_kind_layers carry their own frames (mean-line
+    # subsets, spaghetti paths, histogram bins) with plain-string panel
+    # columns; categorize them too so facet order is deterministic and does
+    # not depend on layer encounter order.
+    frames.extend(
+        layer.data
+        for layer in posterior_layers
+        if isinstance(getattr(layer, "data", None), pd.DataFrame)
+        and "panel" in layer.data.columns
+    )
     _categorize_panels(frames, panels)
 
     mid, bot = panels[1], panels[2]
@@ -788,7 +798,7 @@ def build_causal_panel_plot(
         p
         + p9.geom_point(obs, p9.aes(x, "y", color="series"), size=1)
         + p9.geom_hline(zero_df, p9.aes(yintercept="yintercept"), **hline_kwargs)
-        + p9.facet_wrap("panel", ncol=1, scales="free_y", as_table=False)
+        + p9.facet_wrap("panel", ncol=1, scales="free_y")
         + scales[0]
         + (scales[1] if len(scales) > 1 else p9.guides())
         + p9.labs(x="", y="")
