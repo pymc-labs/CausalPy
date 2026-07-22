@@ -78,7 +78,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is the upper prediction minus the lower prediction, evaluated at ``threshold ± epsilon``. This is a local prediction contrast, not a population-standardized effect.
 

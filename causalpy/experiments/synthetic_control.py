@@ -64,7 +64,7 @@ class SyntheticControl(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     The model learns control-unit weights from pre-intervention outcomes and applies them to post-intervention controls to construct a synthetic untreated trajectory. Pointwise impact is the observed treated outcome minus this synthetic counterfactual, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its weighted point prediction.
 

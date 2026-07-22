@@ -84,7 +84,7 @@ class PanelRegression(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
 

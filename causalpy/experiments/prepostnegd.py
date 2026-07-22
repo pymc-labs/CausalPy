@@ -60,7 +60,7 @@ class PrePostNEGD(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     The reported ``causal_impact`` is the posterior coefficient on the treatment-group term, conditional on the pretreatment outcome and any other formula covariates. Treated and untreated prediction curves are also computed for visualization, but they do not determine the reported scalar effect. With the current additive identity-link model, the treatment coefficient equals the corresponding conditional prediction contrast.
 

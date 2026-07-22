@@ -82,9 +82,11 @@ class InterruptedTimeSeries(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     The model is fitted to pre-intervention observations and predicts the untreated trajectory after the intervention. Pointwise impact is the observed post-intervention outcome minus that one-sided counterfactual prediction, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its point prediction.
+
+    This fit-predict-subtract procedure is a reduced-form estimator. From a Bayesian structural perspective, the same impact can be viewed as the response to an intervention shock in a state-space model of the outcome series; see the knowledgebase page on structural causal models for the reduced-form versus structural distinction.
 
     The three-period design is useful for analyzing temporary interventions such as:
 

@@ -79,7 +79,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     Both Bayesian and OLS backends store the fitted group-by-post interaction coefficient as ``causal_impact``. The class also constructs treated-post counterfactual predictions for visualization by setting that interaction term to zero, but those predictions do not determine the reported scalar effect. In an additive identity-link model, the coefficient and the corresponding predicted contrast are algebraically identical.
 

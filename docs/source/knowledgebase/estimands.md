@@ -14,14 +14,14 @@ Theoretical Estimand     -->  Empirical Estimand      -->  Estimator
 
 - **Empirical Estimand**: A specific, data-linked quantity that can be identified under a set of assumptions. Examples: {term}`ATT`, {term}`ATE`, local treatment effect at a cutoff, time-varying unit-specific impact.
 
-- **Estimator**: The combination of a statistical model and a computational procedure used to produce an estimate from data. The fitted model and the procedure that extracts the causal estimand are distinct choices: choosing Bayesian inference or OLS does not by itself determine how the causal quantity is computed.
+- **Estimator**: The combination of a statistical model and a computational procedure used to produce an estimate from data. The fitted model and the procedure that extracts the causal estimate are distinct choices: choosing Bayesian inference or OLS does not by itself determine how the causal quantity is computed.
 
-### How is the causal estimand extracted?
+### How is the causal estimate extracted?
 
 Counterfactual construction or prediction is the broad prediction-based approach. G-computation is one structured member of that family, not a synonym for every procedure that constructs a {term}`counterfactual`. The hierarchy below classifies common extraction procedures by the computation they perform:
 
 ```text
-How is the causal estimand extracted?
+How is the causal estimate extracted?
 ├── Direct parameter extraction
 │   └── A model parameter is exactly the target estimand
 ├── Counterfactual construction or prediction
@@ -38,7 +38,7 @@ How is the causal estimand extracted?
 - **One-sided counterfactual prediction** compares observed treated outcomes with predicted untreated outcomes. Because it need not predict both {term}`potential outcomes` and standardize their contrast over a population, it does not necessarily follow the full g-computation pattern. Interrupted Time Series is an example.
 - **Local prediction contrasts** compare predictions at a boundary rather than standardizing over a population. Regression Discontinuity estimates a level discontinuity, while Regression Kink estimates a change in derivatives.
 - **Synthetic counterfactual construction** predicts an untreated trajectory from weighted control units. Synthetic Control belongs here; calling it g-computation requires a broader, carefully justified use of that term.
-- **Weighting and specialized or hybrid estimators** include inverse probability weighting (IPW), instrumental variables (IV), synthetic Difference-in-Differences, and doubly robust estimators. These are acknowledged here to show that prediction and parameter extraction are not an exhaustive taxonomy.
+- **Weighting and specialized or hybrid estimators** include inverse probability weighting (IPW), instrumental variables (IV), synthetic Difference-in-Differences, and doubly robust estimators. These are not mutually exclusive alternatives to the branches above---they are routinely combined with parameter extraction or counterfactual prediction. IPW reweights observed or predicted outcomes before contrasting them, IV reads the effect from a coefficient in a model that accounts for endogeneity, and doubly robust estimators explicitly combine weighting with an outcome model. They appear as separate branches because their defining computation is neither pure parameter extraction nor pure counterfactual prediction.
 
 :::{note}
 These categories can be algebraically equivalent in special cases. In the standard identity-link additive OLS Difference-in-Differences model, the group-by-post interaction coefficient is exactly the corresponding predicted treated-versus-counterfactual contrast. Coefficient extraction and prediction-based estimation are therefore computational descriptions, not necessarily disjoint estimators.

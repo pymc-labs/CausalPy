@@ -87,7 +87,7 @@ class PiecewiseITS(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     One model is fitted to the full time series. The no-intervention counterfactual is predicted after setting every ``step()`` and ``ramp()`` design-matrix column to zero, and the pointwise effect is the fitted conditional expectation minus that counterfactual expectation. Bayesian backends contrast posterior ``mu`` values, OLS contrasts point predictions, and the cumulative effect is the running sum.
 

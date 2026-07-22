@@ -67,7 +67,7 @@ class RegressionKink(BaseExperiment):
 
     Notes
     -----
-    **Estimand extraction**
+    **Estimate extraction**
 
     The class predicts the conditional expectation at ``kink_point - epsilon``, ``kink_point``, and ``kink_point + epsilon``. It forms finite-difference slopes on the left and right and stores their difference as ``gradient_change``. This is a local prediction contrast on derivatives, not a population-standardized effect.
     """
