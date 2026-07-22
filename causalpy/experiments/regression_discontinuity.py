@@ -31,7 +31,12 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    extract_r2_score,
+    has_posterior_draws,
+    plot_posterior_over_x,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
@@ -381,7 +386,7 @@ class RegressionDiscontinuity(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -398,22 +403,23 @@ class RegressionDiscontinuity(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use ``None``
             to return raw numbers.
-        hdi_prob : float, optional
+        ci_prob : float, optional
             Probability mass of the highest density interval drawn around the
             posterior predictive band, and the central credible interval
             reported in the figure title for the discontinuity at threshold.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+            Must be in ``(0, 1]``. Ignored for point-estimate models. Defaults
+            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
+        with_uncertainty = has_posterior_draws(self.pred)
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot data: use two layers only when there are excluded observations
@@ -437,109 +443,52 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Plot model fit to data
-        plot_posterior_over_x(
-            self.x_pred[self.running_variable_name],
-            self.pred.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Posterior mean",
-        )
+        if with_uncertainty:
+            style: _PosteriorPlotStyle = {
+                "ci_prob": ci_prob,
+                "kind": kind,
+                "ci_kind": ci_kind,
+                "num_samples": num_samples,
+            }
+            plot_posterior_over_x(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(treated_units=0),
+                ax=ax,
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+                label="Posterior mean",
+            )
+        else:
+            ax.plot(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(chain=0, draw=0, treated_units=0),
+                "k",
+                markersize=10,
+                label="model fit",
+            )
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
-        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-        ).values
-        ci = (
-            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        discon = f"""
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        assert r2_val is not None
+        if with_uncertainty:
+            assert r2_std_val is not None
+            title_info = f"{round_num(r2_val, round_to)} (std = {round_num(r2_std_val, round_to)})"
+            r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+            percentiles = self.discontinuity_at_threshold.quantile(
+                [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+            ).values
+            ci = (
+                rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
+                + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+            )
+            discon = f"""
             Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
             """
-        ax.set(title=r2 + "\n" + discon + ci)
-
-        # Treatment threshold line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-
-        # Add donut hole boundary lines if donut_hole > 0
-        if self.donut_hole > 0:
-            ax.axvline(
-                x=self.treatment_threshold - self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-                label="donut boundary",
-            )
-            ax.axvline(
-                x=self.treatment_threshold + self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-            )
-
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
-
-    def _ols_plot(
-        self,
-        round_to: int | None = None,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot data: use two layers only when there are excluded observations
-        has_exclusion = len(self.fit_data) < len(self.data)
-        if has_exclusion:
-            sns.scatterplot(
-                self.data,
-                x=self.running_variable_name,
-                y=self.outcome_variable_name,
-                color="lightgray",
-                ax=ax,
-                label="excluded data",
-            )
-        sns.scatterplot(
-            self.fit_data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="k",
-            ax=ax,
-            label="fit data" if has_exclusion else "data",
-        )
-
-        # Plot model fit to data
-        ax.plot(
-            self.x_pred[self.running_variable_name],
-            self.pred.isel(chain=0, draw=0, treated_units=0),
-            "k",
-            markersize=10,
-            label="model fit",
-        )
-
-        # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(_as_scalar(self.score), round_to)}"
-        discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
-        ax.set(title=r2 + "\n" + discon)
+            ax.set(title=r2 + "\n" + discon + ci)
+        else:
+            r2 = f"$R^2$ on fit data = {round_num(r2_val, round_to)}"
+            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
+            ax.set(title=r2 + "\n" + discon)
 
         # Treatment threshold line
         ax.axvline(
