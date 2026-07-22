@@ -298,7 +298,7 @@ class RegressionDiscontinuity(BaseExperiment):
         print("\nResults:")
         discontinuity = (
             self.discontinuity_at_threshold
-            if self._model_backend.is_bayesian
+            if has_posterior_draws(self.discontinuity_at_threshold)
             else _as_scalar(self.discontinuity_at_threshold)
         )
         print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")

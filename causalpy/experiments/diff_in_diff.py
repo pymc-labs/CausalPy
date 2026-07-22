@@ -223,6 +223,9 @@ class DifferenceInDifferences(BaseExperiment):
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
         # calculate causal impact
+        # Backend-identity branch is justified here: this is the adapter seam,
+        # extracting the treatment coefficient from backend-native storage
+        # (full posterior of `beta` from idata vs point coefficients).
         if self._model_backend.is_bayesian:
             assert self.model.idata is not None
             # This is the coefficient on the interaction term
@@ -663,11 +666,13 @@ class DifferenceInDifferences(BaseExperiment):
         Parameters
         ----------
         direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for tail probability calculation (PyMC only, ignored for OLS).
+            Direction for tail probability calculation (ignored for
+            point-estimate predictions).
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+            Region of Practical Equivalence (ROPE) threshold (ignored for
+            point-estimate predictions).
         **kwargs
             Reserved for forward-compatibility; not consumed by this
             implementation.
@@ -677,9 +682,7 @@ class DifferenceInDifferences(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        is_pymc = self._model_backend.is_bayesian
-
-        if is_pymc:
+        if has_posterior_draws(self.y_pred_control):
             return _effect_summary_did(
                 self,
                 direction=direction,

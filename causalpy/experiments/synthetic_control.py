@@ -121,6 +121,8 @@ class SyntheticControl(BaseExperiment):
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        # Backend-identity check is justified here: constructor-time
+        # capability validation (trust boundary), not statistical dispatch.
         if self._model_backend.is_ols and len(treated_units) > 1:
             raise ValueError(
                 "OLS/sklearn synthetic control supports only a single treated "
@@ -896,7 +898,6 @@ class SyntheticControl(BaseExperiment):
             self, window_coords, treated_unit=treated_unit
         )
         return _effect_summary_timeseries(
-            self,
             windowed_impact,
             counterfactual,
             window_coords,

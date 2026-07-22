@@ -514,7 +514,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         is_pre_treatment = self.data["event_time"] < 0
         pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
 
-        if self._model_backend.is_bayesian:
+        # The two helpers compute genuinely different statistics: HDI bounds
+        # need posterior draws, sample dispersion needs only point residuals.
+        if has_posterior_draws(self.y_pred):
             self._aggregate_effects_bayesian(treated_data, pretreatment_data)
         else:
             self._aggregate_effects_ols(treated_data, pretreatment_data)

@@ -430,6 +430,8 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
+        # Backend-identity branch is justified: coefficient access is
+        # backend-native (PanelRegression stores no canonical container).
         if self._model_backend.is_bayesian:
             # PyMC print_coefficients uses coordinate-based lookup so a
             # filtered label list works correctly.
@@ -592,6 +594,8 @@ class PanelRegression(BaseExperiment):
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
 
+        # Backend-identity branch is justified: coefficient posteriors live in
+        # backend-native storage (idata vs get_coeffs); no canonical container.
         if self._model_backend.is_bayesian:
             # Bayesian: use az.plot_forest directly
             axes = az.plot_forest(
@@ -729,6 +733,8 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
+        # Backend-identity branch is justified: coefficient posteriors live in
+        # backend-native storage (idata vs get_coeffs); no canonical container.
         if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
@@ -822,7 +828,9 @@ class PanelRegression(BaseExperiment):
         if interval_type not in {"mean", "predictive"}:
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
-        # Check if model is Bayesian
+        # Backend-identity branch is justified: in-sample mu / y_hat draws
+        # live in backend-native idata (PanelRegression stores no canonical
+        # prediction container; see the ponytail note in get_plot_data).
         is_bayesian = self._model_backend.is_bayesian
 
         # Get posterior for HDI plotting (Bayesian only)

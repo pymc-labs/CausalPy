@@ -33,7 +33,7 @@ import xarray as xr
 from scipy.stats import t
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import _as_scalar
+from causalpy.utils import _as_scalar, has_posterior_draws
 
 
 @dataclass
@@ -460,8 +460,8 @@ def _effect_summary_rd(
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
 
-    if result._model_backend.is_bayesian:
-        # PyMC model: use unified scalar functions
+    if has_posterior_draws(discontinuity):
+        # Posterior draws present: use unified scalar functions
         hdi_prob = 1 - alpha
         stats = _compute_statistics_scalar(
             discontinuity, hdi_prob=hdi_prob, direction=direction, min_effect=min_effect
@@ -634,7 +634,6 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
 
 def _effect_summary_timeseries(
-    result,
     windowed_impact: xr.DataArray,
     counterfactual: xr.DataArray,
     window_coords,
@@ -650,15 +649,14 @@ def _effect_summary_timeseries(
     """Build an :class:`EffectSummary` for time-series experiments (ITS, SC,
     Piecewise ITS) from canonical impact/counterfactual containers.
 
-    The single irreducible backend branch lives here: Bayesian backends
-    summarize posterior draws (HDIs, tail probabilities, ROPE), while OLS
-    backends report frequentist t-based intervals — an HDI computed from a
-    singleton draw would be silently meaningless.
+    The single irreducible statistical branch lives here, keyed on the
+    container itself: predictions carrying posterior draws are summarized
+    with HDIs, tail probabilities, and ROPE, while single-draw (point
+    estimate) predictions report frequentist t-based intervals — an HDI
+    computed from a singleton draw would be silently meaningless.
 
     Parameters
     ----------
-    result
-        Experiment result object exposing ``_model_backend``.
     windowed_impact : xr.DataArray
         Causal impact in the analysis window with canonical prediction
         dimensions.
@@ -683,7 +681,7 @@ def _effect_summary_timeseries(
         Experiment tag ("its", "sc", "piecewise_its") for tailored
         assumptions text.
     """
-    if result._model_backend.is_bayesian:
+    if has_posterior_draws(windowed_impact):
         hdi_prob = 1 - alpha
         stats = _compute_statistics(
             windowed_impact,
@@ -1491,6 +1489,26 @@ def _compute_statistics_ols(
     return stats
 
 
+def _point_residuals(result) -> np.ndarray:
+    """In-sample point residuals via the canonical prediction container.
+
+    Uses the model adapter's canonical ``predict`` output (a point estimate
+    is the first — and for point backends only — draw), so the t-based
+    point-summary path works for any backend, including a degenerate
+    single-draw Bayesian run.
+
+    ``y`` may have shape ``(n, 1)`` with dims ``(obs_ind, treated_units)``
+    while the fitted values are conceptually ``(n,)``; both are flattened to
+    1-D so they align positionally on ``obs_ind`` (letting xarray align them
+    would broadcast against ``treated_units`` and produce an ``(n, n)``
+    array).
+    """
+    y = np.asarray(result.design["y"]).reshape(-1)
+    pred = result._model_backend.predict(X=np.asarray(result.design["X"]))
+    y_fitted = np.asarray(pred.isel(chain=0, draw=0)).reshape(-1)
+    return y - y_fitted
+
+
 def _compute_statistics_did_ols(
     result,
     alpha=0.05,
@@ -1509,22 +1527,12 @@ def _compute_statistics_did_ols(
     dict
         Dictionary of statistics
     """
-    causal_impact = result.causal_impact  # scalar
+    causal_impact = _as_scalar(result.causal_impact)
 
     # Calculate standard error from model residuals
-    # Get fitted values and residuals
-    X_da = result.design["X"]
-    y_da = result.design["y"]
-    y_pred = result.model.predict(X_da)
-    # y_da has shape (n, 1) with dims (obs_ind, treated_units); y_pred is a
-    # bare (n,) array with no dimension names. Subtracting them directly lets
-    # xarray align y_pred positionally against the *last* axis (treated_units,
-    # size 1) instead of obs_ind, producing an (n, n) array of every
-    # observation's y minus every other observation's prediction instead of
-    # per-observation residuals. Flatten both to 1-D first so they align by
-    # position on obs_ind as intended.
-    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
+    residuals = _point_residuals(result)
     mse = np.mean(residuals**2)
+    X_da = result.design["X"]
     n, p = X_da.shape
     df = n - p
 
@@ -1652,12 +1660,10 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     """Compute statistics for RD scalar effect with OLS model."""
     discontinuity = _as_scalar(result.discontinuity_at_threshold)
 
-    # Calculate standard error from model
-    X_da = result.design["X"]
-    y_da = result.design["y"]
-    y_pred = result.model.predict(X_da)
-    residuals = y_da - y_pred
+    # Calculate standard error from model residuals
+    residuals = _point_residuals(result)
     mse = np.mean(residuals**2)
+    X_da = result.design["X"]
     n, p = X_da.shape
     df = n - p
 

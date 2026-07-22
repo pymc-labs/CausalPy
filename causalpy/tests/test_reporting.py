@@ -1380,6 +1380,45 @@ def test_select_treated_unit():
     assert "treated_units" not in result.dims
 
 
+def test_effect_summary_timeseries_dispatches_on_draws_not_backend():
+    """Contract: the container, not backend identity, decides the statistics.
+
+    A prediction container carrying posterior draws gets HDI summaries; a
+    singleton (chain=1, draw=1) container falls back to t-based intervals —
+    regardless of which backend produced it.
+    """
+    import xarray as xr
+
+    from causalpy.reporting import _effect_summary_timeseries
+
+    def containers(n_draws):
+        rng = np.random.default_rng(42)
+        obs_ind = [0, 1, 2, 3]
+        impact = xr.DataArray(
+            rng.normal(5.0, 0.5, size=(1, n_draws, 4)),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        counterfactual = xr.DataArray(
+            np.full((1, n_draws, 4), 10.0),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        return impact, counterfactual, pd.Index(obs_ind)
+
+    impact, counterfactual, window_coords = containers(n_draws=200)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "hdi_lower" in summary.table.columns
+    assert "ci_lower" not in summary.table.columns
+
+    impact, counterfactual, window_coords = containers(n_draws=1)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "ci_lower" in summary.table.columns
+    assert "hdi_lower" not in summary.table.columns
+
+
 # ==============================================================================
 # Tests for error handling
 # ==============================================================================
