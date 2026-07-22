@@ -20,6 +20,7 @@ import xarray as xr
 from pymc_extras.prior import Prior
 
 import causalpy as cp
+from causalpy.experiments.model_adapter import PyMCModelAdapter
 from causalpy.pymc_models import (
     LinearRegression,
     PyMCModel,
@@ -552,15 +553,17 @@ class TestWeightedSumFitterMultiUnit:
         expected_shape = (sample_kwargs["chains"], sample_kwargs["draws"], len(X), 1)
         assert mu_shape == expected_shape
 
-    def test_print_coefficients_multi_unit(self, synthetic_control_data, capsys):
-        """Test that print_coefficients works correctly with multiple treated units."""
+    def test_adapter_print_coefficients_multi_unit(
+        self, synthetic_control_data, capsys
+    ):
+        """The shared adapter formatter handles multiple treated units."""
         X, y, coords, control_units, treated_units = synthetic_control_data
 
         wsf = WeightedSumFitter(sample_kwargs=sample_kwargs)
         wsf.fit(X, y, coords=coords)
 
         # Test coefficient printing
-        wsf.print_coefficients(control_units, round_to=3)
+        PyMCModelAdapter(wsf).print_coefficients(control_units, round_to=3)
 
         captured = capsys.readouterr()
         output = captured.out
@@ -573,8 +576,7 @@ class TestWeightedSumFitterMultiUnit:
         for control in control_units:
             assert control in output
 
-        # Check that sigma is printed for each unit
-        assert output.count("y_hat_sigma") == len(treated_units)
+        assert "y_hat_sigma" not in output
 
     def test_scoring_multi_unit(self, synthetic_control_data):
         """Test that scoring works with multiple treated units."""

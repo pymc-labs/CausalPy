@@ -229,29 +229,12 @@ class DifferenceInDifferences(BaseExperiment):
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
         # calculate causal impact
-        # Backend-identity branch is justified here: this is the adapter seam,
-        # extracting the treatment coefficient from backend-native storage
-        # (full posterior of `beta` from idata vs point coefficients).
-        if self._model_backend.is_bayesian:
-            idata = self._model_backend.require_idata()
-            # This is the coefficient on the interaction term
-            coeff_names = idata.posterior.coords["coeffs"].data
-            for i, label in enumerate(coeff_names):
-                if self._is_treatment_interaction(label):
-                    self.causal_impact = idata.posterior["beta"].isel({"coeffs": i})
-        elif self._model_backend.is_ols:
-            # This is the coefficient on the interaction term
-            coef_map = dict(
-                zip(self.labels, self._model_backend.coefficients(), strict=False)
-            )
-            matched_key = next(
-                (key for key in coef_map if self._is_treatment_interaction(key)),
-                None,
-            )
-            att = coef_map.get(matched_key) if matched_key is not None else None
-            self.causal_impact = att
-        else:
-            raise ValueError("Model type not recognized")
+        treatment_coefficient = next(
+            label for label in self.labels if self._is_treatment_interaction(label)
+        )
+        self.causal_impact = self._model_backend.coefficients().sel(
+            coeffs=treatment_coefficient
+        )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -645,7 +628,9 @@ class DifferenceInDifferences(BaseExperiment):
             )
         else:
             causal_impact_value = (
-                float(self.causal_impact) if self.causal_impact is not None else 0.0
+                _as_scalar(self.causal_impact)
+                if self.causal_impact is not None
+                else 0.0
             )
             ax.set(
                 xlim=[-0.05, 1.1],

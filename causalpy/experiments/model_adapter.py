@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Backend adapters for experiment model fitting and prediction."""
+"""Backend adapters for model fitting, prediction, and coefficients."""
 
 from __future__ import annotations
 
@@ -27,9 +27,11 @@ import xarray as xr
 from sklearn.base import RegressorMixin, clone
 from sklearn.metrics import r2_score
 
+from causalpy.constants import HDI_PROB
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.utils import round_num
 
 BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
 
@@ -93,6 +95,91 @@ def _sklearn_y(y: Any) -> np.ndarray:
     if arr.ndim == 2 and arr.shape[1] == 1:
         return np.squeeze(arr, axis=1)
     return arr
+
+
+def _canonical_pymc_coefficients(posterior: xr.Dataset) -> xr.DataArray:
+    """Normalize supported PyMC coefficient variables to the canonical contract."""
+    coefficient_names = ("beta", "b", "beta_z")
+    coefficient_name = next(
+        (name for name in coefficient_names if name in posterior), None
+    )
+    if coefficient_name is None:
+        raise ValueError(
+            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' "
+            "as design-matrix coefficients."
+        )
+
+    coefficients = posterior[coefficient_name]
+    label_dims = ("coeffs", "covariates", "instruments", "outcome_coeffs")
+    label_dim = next((dim for dim in label_dims if dim in coefficients.dims), None)
+    if label_dim is None:
+        raise ValueError(
+            "PyMC coefficient draws must include one of "
+            f"{label_dims!r}, got dims={coefficients.dims!r}."
+        )
+    if label_dim != "coeffs":
+        coefficients = coefficients.rename({label_dim: "coeffs"})
+
+    required_dims = {"chain", "draw", "coeffs"}
+    if not required_dims.issubset(coefficients.dims):
+        raise ValueError(
+            "PyMC coefficient draws must include dimensions "
+            f"{required_dims!r}, got dims={coefficients.dims!r}."
+        )
+    unexpected_dims = set(coefficients.dims) - required_dims - {"treated_units"}
+    if unexpected_dims:
+        raise ValueError(
+            "PyMC coefficient draws include unsupported dimensions "
+            f"{unexpected_dims!r}."
+        )
+
+    dims = ["chain", "draw", "coeffs"]
+    if "treated_units" in coefficients.dims:
+        dims.append("treated_units")
+    coefficients = coefficients.transpose(*dims).rename("coefficients")
+    return coefficients.drop_vars(
+        [name for name in coefficients.coords if name not in coefficients.dims]
+    )
+
+
+def _print_coefficients(
+    coefficients: xr.DataArray,
+    labels: list[str],
+    round_to: int | None,
+) -> None:
+    """Print a coefficient container without dispatching on backend type."""
+    coefficients = coefficients.sel(coeffs=labels)
+    with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+    treated_units: list[Any] = (
+        list(coefficients.coords["treated_units"].values)
+        if "treated_units" in coefficients.dims
+        else [None]
+    )
+    max_label_length = max(len(name) for name in labels)
+
+    print("Model coefficients:")
+    for unit in treated_units:
+        if len(treated_units) > 1:
+            print(f"\nTreated unit: {unit}")
+        unit_coefficients = (
+            coefficients.sel(treated_units=unit) if unit is not None else coefficients
+        )
+        for name in labels:
+            samples = unit_coefficients.sel(coeffs=name)
+            formatted_name = f"{name:<{max_label_length}}"
+            mean = round_num(float(samples.mean()), round_to)
+            if with_uncertainty:
+                lower, upper = az.hdi(
+                    np.asarray(samples).reshape(-1), hdi_prob=HDI_PROB
+                )
+                value = (
+                    f"{mean}, {HDI_PROB * 100:.0f}% HDI "
+                    f"[{round_num(float(lower), round_to)}, "
+                    f"{round_num(float(upper), round_to)}]"
+                )
+            else:
+                value = mean
+            print(f"  {formatted_name}  {value}")
 
 
 class ModelAdapter(ABC):
@@ -214,10 +301,15 @@ class ModelAdapter(ABC):
         """
 
     @abstractmethod
-    def coefficients(self) -> np.ndarray:
-        """Return point estimates of model coefficients."""
+    def coefficients(self) -> xr.DataArray:
+        """Return model coefficients with canonical coefficient dimensions.
 
-    @abstractmethod
+        Every supported backend returns an :class:`xarray.DataArray` with
+        dimensions ``("chain", "draw", "coeffs")`` and an optional trailing
+        ``"treated_units"`` dimension. Point-estimate backends return singleton
+        ``chain`` and ``draw`` dimensions.
+        """
+
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:
@@ -230,6 +322,7 @@ class ModelAdapter(ABC):
         round_to : int, optional
             Number of significant figures to round to.
         """
+        _print_coefficients(self.coefficients(), labels, round_to)
 
 
 class PyMCModelAdapter(ModelAdapter):
@@ -320,24 +413,11 @@ class PyMCModelAdapter(ModelAdapter):
         """
         return self._model.score(X=X, y=y, **kwargs)
 
-    def coefficients(self) -> np.ndarray:
-        """Return posterior mean coefficients."""
-        beta = self.require_idata().posterior["beta"]
-        return beta.mean(dim=["chain", "draw"]).values
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print PyMC model coefficients.
-
-        Parameters
-        ----------
-        labels : list of str
-            Coefficient names aligned with the fitted model.
-        round_to : int, optional
-            Number of significant figures to round to.
-        """
-        self._model.print_coefficients(labels, round_to)
+    def coefficients(self) -> xr.DataArray:
+        """Return posterior coefficient draws in the canonical container."""
+        if self._model.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return _canonical_pymc_coefficients(self._model.idata.posterior)
 
 
 class SklearnModelAdapter(ModelAdapter):
@@ -351,6 +431,7 @@ class SklearnModelAdapter(ModelAdapter):
 
     def __init__(self, model: RegressorMixin) -> None:
         self._model = model
+        self._coeffs: np.ndarray | None = None
         self._treated_units: np.ndarray | None = None
 
     @property
@@ -386,11 +467,16 @@ class SklearnModelAdapter(ModelAdapter):
         coords : dict, optional
             Ignored for sklearn backends.
         """
+        X_array = _sklearn_array(X)
+        if isinstance(X, xr.DataArray) and "coeffs" in X.coords:
+            self._coeffs = np.asarray(X.coords["coeffs"])
+        else:
+            self._coeffs = np.asarray([f"coeff_{i}" for i in range(X_array.shape[1])])
         if isinstance(y, xr.DataArray) and "treated_units" in y.coords:
             self._treated_units = np.asarray(y.coords["treated_units"])
         else:
             self._treated_units = None
-        return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
+        return self._model.fit(X=X_array, y=_sklearn_y(y))
 
     def predict(
         self,
@@ -491,23 +577,60 @@ class SklearnModelAdapter(ModelAdapter):
             {f"unit_{i}_r2": float(score) for i, score in enumerate(scores)}
         )
 
-    def coefficients(self) -> np.ndarray:
-        """Return fitted sklearn coefficients."""
-        return self._model.get_coeffs()
+    def coefficients(self) -> xr.DataArray:
+        """Return fitted sklearn coefficients as singleton posterior draws."""
+        values = np.asarray(self._model.coef_)
+        n_coeffs = values.shape[-1]
+        coeffs = (
+            self._coeffs
+            if self._coeffs is not None
+            else np.asarray([f"coeff_{i}" for i in range(n_coeffs)])
+        )
+        if len(coeffs) != n_coeffs:
+            raise ValueError(
+                "Coefficient output does not match the predictors used for fit."
+            )
 
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print sklearn model coefficients.
+        if values.ndim == 1:
+            if self._treated_units is None:
+                return xr.DataArray(
+                    values[None, None, :],
+                    dims=("chain", "draw", "coeffs"),
+                    coords={"chain": [0], "draw": [0], "coeffs": coeffs},
+                    name="coefficients",
+                )
+            if len(self._treated_units) != 1:
+                raise ValueError(
+                    "Coefficient output columns do not match the treated units "
+                    "used for fit."
+                )
+            values = values[None, :]
+        elif values.ndim != 2:
+            raise ValueError(
+                "Expected sklearn coefficients with shape (coeffs,) or "
+                f"(treated_units, coeffs), got {values.shape}."
+            )
 
-        Parameters
-        ----------
-        labels : list of str
-            Coefficient names aligned with the fitted model.
-        round_to : int, optional
-            Number of significant figures to round to.
-        """
-        self._model.print_coefficients(labels, round_to)
+        treated_units = (
+            self._treated_units
+            if self._treated_units is not None
+            else np.asarray([f"unit_{i}" for i in range(values.shape[0])])
+        )
+        if len(treated_units) != values.shape[0]:
+            raise ValueError(
+                "Coefficient output rows do not match the treated units used for fit."
+            )
+        return xr.DataArray(
+            values.T[None, None, :, :],
+            dims=("chain", "draw", "coeffs", "treated_units"),
+            coords={
+                "chain": [0],
+                "draw": [0],
+                "coeffs": coeffs,
+                "treated_units": treated_units,
+            },
+            name="coefficients",
+        )
 
 
 class PyMCForecastAdapter(ModelAdapter):
@@ -605,26 +728,12 @@ class PyMCForecastAdapter(ModelAdapter):
         """
         return self._model.score(X=X, y=y, **kwargs)
 
-    def coefficients(self) -> np.ndarray:
+    def coefficients(self) -> xr.DataArray:
         """Forecasting models have no design-matrix coefficients."""
         raise NotImplementedError(
             "pymc-forecast models do not expose design-matrix coefficients; "
             "inspect the fitted posterior via `.idata` instead."
         )
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print posterior summaries of the model's scalar parameters.
-
-        Parameters
-        ----------
-        labels : list of str
-            Design-matrix labels; ignored by forecasting models.
-        round_to : int, optional
-            Number of significant figures to round to.
-        """
-        self._model.print_coefficients(labels, round_to)
 
 
 def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:

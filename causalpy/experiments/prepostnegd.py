@@ -192,8 +192,8 @@ class PrePostNEGD(BaseExperiment):
         self.pred_treated = self._model_backend.predict(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
-        self.causal_impact = idata.posterior["beta"].sel(
-            {"coeffs": self._get_treatment_effect_coeff()}
+        self.causal_impact = self._model_backend.coefficients().sel(
+            coeffs=self._get_treatment_effect_coeff()
         )
 
     def input_validation(self) -> None:

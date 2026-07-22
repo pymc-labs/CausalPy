@@ -31,7 +31,7 @@ import xarray as xr
 from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
-from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.maketables_adapters import coefficient_table, get_maketables_adapter
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -268,10 +268,11 @@ class BaseExperiment(ABC):
     def __maketables_coef_table__(self) -> pd.DataFrame:
         """Optional maketables plugin hook for coefficient tables.
 
-        For PyMC-backed experiments, interval columns use the HDI probability set
-        by :meth:`set_maketables_options` (or backend defaults if not set).
+        Interval columns use the HDI probability set by
+        :meth:`set_maketables_options` when the canonical coefficient container
+        carries posterior draws.
         """
-        return get_maketables_adapter(self._model_backend).coef_table(self)
+        return coefficient_table(self)
 
     def __maketables_stat__(self, key: str) -> Any:
         """Optional maketables plugin hook for model-level statistics."""

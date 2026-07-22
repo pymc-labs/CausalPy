@@ -19,6 +19,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -39,6 +40,7 @@ from causalpy.maketables_adapters import (
     _get_maketables_hdi_prob,
     _safe_observation_count,
     _safe_r2_value,
+    coefficient_table,
     get_maketables_adapter,
 )
 
@@ -550,7 +552,7 @@ def test_maketables_incompatible_pymc_label_dim_raises(mock_pymc_sample):
 
     with pytest.raises(
         ValueError,
-        match="do not include a label dimension compatible with experiment labels",
+        match="must include one of",
     ):
         _ = result.__maketables_coef_table__
 
@@ -743,10 +745,14 @@ class TestGetMaketablesAdapter:
 
 class TestSklearnAdapterUnit:
     def test_coef_table_success(self):
-        adapter = SklearnMaketablesAdapter()
-        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        coefficients = xr.DataArray(
+            [[[1.0, 2.0]]],
+            dims=("chain", "draw", "coeffs"),
+            coords={"chain": [0], "draw": [0], "coeffs": ["a", "b"]},
+        )
+        backend = _Stub(coefficients=lambda: coefficients)
         stub = _Stub(labels=["a", "b"], _model_backend=backend)
-        frame = adapter.coef_table(stub)
+        frame = coefficient_table(stub)
         assert list(frame.index) == ["a", "b"]
         assert frame["b"].notna().all()
         assert frame["se"].isna().all()
@@ -787,19 +793,22 @@ class TestSklearnAdapterUnit:
 
 class TestSklearnAdapterCoefMismatch:
     def test_coef_count_mismatch_raises(self):
-        adapter = SklearnMaketablesAdapter()
-        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        coefficients = xr.DataArray(
+            [[[1.0, 2.0]]],
+            dims=("chain", "draw", "coeffs"),
+            coords={"chain": [0], "draw": [0], "coeffs": ["a", "b"]},
+        )
+        backend = _Stub(coefficients=lambda: coefficients)
         stub = _Stub(labels=["a", "b", "c"], _model_backend=backend)
-        with pytest.raises(ValueError, match="Coefficient count mismatch"):
-            adapter.coef_table(stub)
+        with pytest.raises(ValueError, match="labels do not match"):
+            coefficient_table(stub)
 
 
 class TestSklearnAdapterNoLabelsRaises:
     def test_empty_labels_raises(self):
-        adapter = SklearnMaketablesAdapter()
         stub = _Stub(labels=[])
         with pytest.raises(ValueError, match="no coefficient labels"):
-            adapter.coef_table(stub)
+            coefficient_table(stub)
 
 
 @pytest.mark.integration
@@ -833,7 +842,6 @@ def test_maketables_pymc_stat_hooks(mock_pymc_sample):
 @pytest.mark.integration
 def test_maketables_pymc_no_labels_raises(mock_pymc_sample):
     """PyMC adapter should raise when experiment has empty labels."""
-    adapter = PyMCMaketablesAdapter()
     stub = _Stub(labels=[])
     with pytest.raises(ValueError, match="no coefficient labels"):
-        adapter.coef_table(stub)
+        coefficient_table(stub)
