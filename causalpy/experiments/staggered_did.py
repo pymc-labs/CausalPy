@@ -19,46 +19,24 @@ different units receive treatment at different times.
 """
 
 import warnings
-from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import plotnine as p9
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import PlotSpec, to_axes_list
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import has_posterior_draws
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
-
-
-@dataclass(frozen=True)
-class _EventTimePlotData:
-    """Tidy event-study estimates and declarative plotting metadata."""
-
-    estimates: pd.DataFrame
-    placebo_area: pd.DataFrame | None
-    colors: dict[str, str]
-    shapes: dict[str, str]
-
-
-@dataclass(frozen=True)
-class _GroupTimePlotData:
-    """Tidy cohort-time estimates and declarative plotting metadata."""
-
-    estimates: pd.DataFrame
-    cohorts: list[Any]
-    x_col: str
-    x_label: str
-    y_label: str
 
 
 class StaggeredDifferenceInDifferences(BaseExperiment):
@@ -443,7 +421,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """Build design matrices using patsy."""
         # Build design matrix for the full data
         try:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = build_formula_matrices(self.formula, self.data)
         except PatsyError as err:
             raise FormulaException(f"Unable to evaluate formula: {err}") from err
         self._y_design_info = y.design_info
@@ -495,17 +473,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             },
         )
         self.y_pred = self._model_backend.predict(X=X_full_xr)
-
-        if self._model_backend.is_bayesian:
-            y_hat0_mean = (
-                self.y_pred["posterior_predictive"]
-                .mu.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-                .values
-            )
-            self.data["y_hat0"] = y_hat0_mean
-        else:
-            self.data["y_hat0"] = np.squeeze(self.y_pred)
+        self.data["y_hat0"] = (
+            self.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
 
     def _compute_treatment_effects(self) -> None:
         """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
@@ -574,7 +544,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()
@@ -808,13 +778,12 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ax : list[matplotlib.axes.Axes]
             A single-element list containing the event-study axes.
         """
-        fig, ax = self._render_plot(
+        return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
             figsize=figsize,
         )
-        return fig, to_axes_list(ax)
 
     def plot_group_time(
         self,
@@ -875,7 +844,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             per cohort when ``layout="facet"`` and one axes when
             ``layout="overlay"``.
         """
-        fig, ax = self._render_plot(
+        return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
             hdi_prob=hdi_prob,
@@ -885,67 +854,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             figsize=figsize,
             view="group_time",
         )
-        return fig, to_axes_list(ax)
 
-    def _prepare_event_time_plot_data(self) -> _EventTimePlotData:
-        """Prepare event-study estimates and legend metadata for plotting."""
-        estimates = self.att_event_time_.copy()
-        hdi_pct = int(self.hdi_prob_ * 100)
-        placebo_label = f"Placebo estimate ({hdi_pct}% HDI)"
-        att_label = f"ATT estimate ({hdi_pct}% HDI)"
-        estimates["series"] = np.where(
-            estimates["event_time"] < 0, placebo_label, att_label
-        )
-        event_min = estimates["event_time"].min()
-        placebo_area = (
-            pd.DataFrame(
-                {
-                    "xmin": [float(event_min) - 0.5],
-                    "xmax": [-0.5],
-                    "ymin": [-np.inf],
-                    "ymax": [np.inf],
-                }
-            )
-            if event_min < 0
-            else None
-        )
-        return _EventTimePlotData(
-            estimates=estimates,
-            placebo_area=placebo_area,
-            colors={placebo_label: "gray", att_label: "#1f77b4"},
-            shapes={placebo_label: "s", att_label: "o"},
-        )
-
-    def _prepare_group_time_plot_data(
-        self,
-        *,
-        x_axis: Literal["event_time", "calendar_time"],
-        include_placebo: bool,
-    ) -> _GroupTimePlotData:
-        """Prepare cohort-time estimates and facet metadata for plotting."""
-        estimates, x_col, x_label, y_label = self._get_group_time_plot_data(
-            x_axis=x_axis, include_placebo=include_placebo
-        )
-        cohorts = list(estimates["cohort"].drop_duplicates())
-        estimates = estimates.copy()
-        estimates["series"] = estimates["type"].map(
-            {"placebo": "Placebo estimate", "ATT": "ATT estimate"}
-        )
-        estimates["cohort_label"] = estimates["cohort"].map(lambda c: f"Cohort {c}")
-        estimates["cohort_label"] = pd.Categorical(
-            estimates["cohort_label"],
-            categories=[f"Cohort {cohort}" for cohort in cohorts],
-            ordered=True,
-        )
-        return _GroupTimePlotData(
-            estimates=estimates,
-            cohorts=cohorts,
-            x_col=x_col,
-            x_label=x_label,
-            y_label=y_label,
-        )
-
-    def _bayesian_plot(
+    def _plot(
         self,
         hdi_prob: float | None = None,
         figsize: tuple[float, float] | None = (10, 6),
@@ -954,8 +864,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
         **kwargs: Any,
-    ) -> PlotSpec:
-        """Plot results for Bayesian model.
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the event study or cohort trajectories.
 
         Parameters
         ----------
@@ -968,243 +878,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             the value must match the cached
             :attr:`~causalpy.experiments.staggered_did.StaggeredDiD.hdi_prob_`;
             otherwise a :class:`ValueError` is raised. Pass ``None`` (the
-            default) to plot using the cached value.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``(10, 6)``.
-        view : {"event_time", "group_time"}, optional
-            Plot view to render. ``"event_time"`` draws the aggregated event
-            study and ``"group_time"`` draws cohort-specific ``ATT(g, t)``
-            trajectories. Defaults to ``"event_time"``.
-        layout : {"facet", "overlay"}, optional
-            Plot layout for the ``"group_time"`` view. Defaults to
-            ``"facet"``.
-        x_axis : {"event_time", "calendar_time"}, optional
-            Time scale for the ``"group_time"`` view. Defaults to
-            ``"event_time"``.
-        include_placebo : bool, optional
-            Whether to include pre-treatment residual estimates in the
-            ``"group_time"`` view. Defaults to ``True``.
-
-        Returns
-        -------
-        :class:`~causalpy.plot_utils.PlotSpec`
-            Declarative event-study or group-time plot specification.
-        """
-        if hdi_prob is not None and hdi_prob != self.hdi_prob_:
-            raise ValueError(
-                "StaggeredDiD HDI bounds are computed during effect "
-                "aggregation, not at plot time. The cached HDI probability "
-                f"is {self.hdi_prob_}, but plot() received hdi_prob="
-                f"{hdi_prob}. To plot at a different HDI probability, "
-                "re-fit the experiment so that aggregation uses the desired "
-                "value, or omit hdi_prob to use the cached value."
-            )
-        if view == "group_time":
-            return self._bayesian_plot_group_time(
-                figsize=figsize,
-                layout=layout,
-                x_axis=x_axis,
-                include_placebo=include_placebo,
-            )
-        if view != "event_time":
-            raise ValueError("view must be 'event_time' or 'group_time'")
-
-        plot_data = self._prepare_event_time_plot_data()
-        estimates = plot_data.estimates
-        p = (
-            p9.ggplot(
-                estimates, p9.aes("event_time", "att", color="series", shape="series")
-            )
-            + p9.geom_hline(yintercept=0, color="black", linetype="dashed", alpha=0.7)
-            + p9.geom_vline(xintercept=-0.5, color="red", size=1, alpha=0.7)
-        )
-        if plot_data.placebo_area is not None:
-            p = p + p9.geom_rect(
-                plot_data.placebo_area,
-                p9.aes(xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"),
-                fill="gray",
-                alpha=0.1,
-                inherit_aes=False,
-            )
-        p = (
-            p
-            + p9.geom_pointrange(
-                p9.aes(ymin="att_lower", ymax="att_upper"),
-                size=0.7,
-                fatten=6,
-            )
-            + p9.scale_color_manual(values=plot_data.colors, name="")
-            + p9.scale_shape_manual(values=plot_data.shapes, name="")
-            + p9.scale_x_continuous(breaks=list(estimates["event_time"].values))
-            + p9.labs(x="", y="")
-            + p9.theme(
-                figure_size=figsize or (10, 6),
-                legend_text=p9.element_text(size=LEGEND_FONT_SIZE),
-            )
-        )
-
-        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            axes[0].set(
-                xlabel="Event Time (periods relative to treatment)",
-                ylabel="Effect Estimate",
-                title="Staggered DiD Event Study",
-            )
-
-        return PlotSpec(p, overlay=overlay, n_panels=1)
-
-    def _bayesian_plot_group_time(
-        self,
-        figsize: tuple[float, float] | None = None,
-        layout: Literal["facet", "overlay"] = "facet",
-        x_axis: Literal["event_time", "calendar_time"] = "event_time",
-        include_placebo: bool = True,
-    ) -> PlotSpec:
-        """Plot Bayesian cohort-time ``ATT(g, t)`` trajectories via plotnine.
-
-        Builds ribbons/lines/points as one ggplot (facet or overlay), then
-        applies axis titles, treatment vlines, and shared-y in an overlay
-        callback. OLS helpers (``_make_group_time_axes``, etc.) are
-        unused here.
-        """
-        if layout not in {"facet", "overlay"}:
-            raise ValueError("layout must be 'facet' or 'overlay'")
-
-        plot_data = self._prepare_group_time_plot_data(
-            x_axis=x_axis,
-            include_placebo=include_placebo,
-        )
-        estimates = plot_data.estimates
-        cohorts = plot_data.cohorts
-        x_col = plot_data.x_col
-        n_cohorts = len(cohorts)
-        sharex = x_axis == "event_time"
-        if figsize is None:
-            figsize = (
-                (10, 6) if layout == "overlay" else (10, max(2.5 * n_cohorts, 3.0))
-            )
-
-        type_linetypes = {"Placebo estimate": "dashed", "ATT estimate": "solid"}
-        type_shapes = {"Placebo estimate": "s", "ATT estimate": "o"}
-
-        if layout == "facet":
-            type_colors = {
-                "Placebo estimate": "gray",
-                "ATT estimate": "#1f77b4",
-            }
-            p = (
-                p9.ggplot(
-                    estimates,
-                    p9.aes(
-                        x_col, "att", color="series", fill="series", linetype="series"
-                    ),
-                )
-                + p9.geom_ribbon(
-                    p9.aes(ymin="att_lower", ymax="att_upper", group="series"),
-                    alpha=0.2,
-                    color="none",
-                    show_legend=False,
-                )
-                + p9.geom_hline(
-                    yintercept=0, color="black", linetype="dashed", alpha=0.7
-                )
-                + p9.geom_line()
-                + p9.geom_point(p9.aes(shape="series"), size=2)
-                + p9.facet_wrap("cohort_label", ncol=1, scales="free_y")
-                + p9.scale_color_manual(values=type_colors, name="")
-                + p9.scale_fill_manual(values=type_colors, name="")
-                + p9.scale_linetype_manual(values=type_linetypes, name="")
-                + p9.scale_shape_manual(values=type_shapes, name="")
-                + p9.labs(x="", y="")
-                + p9.theme(
-                    strip_text=p9.element_blank(),
-                    strip_background=p9.element_blank(),
-                    figure_size=figsize,
-                    panel_spacing_y=0.06,
-                )
-            )
-        else:
-            # Overlay: color by cohort; dashed placebo / solid ATT.
-            cohort_colors = {f"Cohort {c}": f"C{i % 10}" for i, c in enumerate(cohorts)}
-            p = (
-                p9.ggplot(
-                    estimates,
-                    p9.aes(
-                        x_col,
-                        "att",
-                        color="cohort_label",
-                        fill="cohort_label",
-                        linetype="series",
-                        shape="series",
-                        group="cohort_label",
-                    ),
-                )
-                + p9.geom_ribbon(
-                    p9.aes(ymin="att_lower", ymax="att_upper", group="cohort_label"),
-                    alpha=0.15,
-                    color="none",
-                    show_legend=False,
-                )
-                + p9.geom_hline(
-                    yintercept=0, color="black", linetype="dashed", alpha=0.7
-                )
-                + p9.geom_line()
-                + p9.geom_point(size=2)
-                + p9.scale_color_manual(values=cohort_colors, name="Treatment cohort")
-                + p9.scale_fill_manual(values=cohort_colors, name="Treatment cohort")
-                + p9.scale_linetype_manual(values=type_linetypes, name="")
-                + p9.scale_shape_manual(values=type_shapes, name="")
-                + p9.labs(x="", y="", title="Staggered DiD Cohort Trajectories")
-                + p9.theme(figure_size=figsize)
-            )
-
-        if x_axis == "event_time":
-            p = p + p9.geom_vline(xintercept=-0.5, color="red", size=0.7, alpha=0.5)
-
-        def overlay(_fig: plt.Figure, axes: list[plt.Axes]) -> None:
-            if layout == "facet":
-                for a in axes[1:]:
-                    a.sharey(axes[0])
-                for i, (ax, cohort) in enumerate(zip(axes, cohorts, strict=True)):
-                    ax.set_title(f"Cohort {cohort}")
-                    ax.set_ylabel(plot_data.y_label)
-                    xlabel = self._get_group_time_axis_label(
-                        x_label=plot_data.x_label,
-                        layout=layout,
-                        sharex=sharex,
-                        axis_index=i,
-                        n_axes=n_cohorts,
-                    )
-                    ax.set_xlabel(xlabel)
-                    if x_axis == "calendar_time":
-                        ax.axvline(
-                            x=cohort - 0.5,
-                            color="red",
-                            linestyle="-",
-                            linewidth=1,
-                            alpha=0.5,
-                        )
-            else:
-                ax = axes[0]
-                ax.set_xlabel(plot_data.x_label)
-                ax.set_ylabel(plot_data.y_label)
-                ax.set_title("Staggered DiD Cohort Trajectories")
-
-        n_panels = n_cohorts if layout == "facet" else 1
-        return PlotSpec(p, overlay=overlay, n_panels=n_panels)
-
-    def _ols_plot(
-        self,
-        figsize: tuple[float, float] | None = (10, 6),
-        view: Literal["event_time", "group_time"] = "event_time",
-        layout: Literal["facet", "overlay"] = "facet",
-        x_axis: Literal["event_time", "calendar_time"] = "event_time",
-        include_placebo: bool = True,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot results for OLS model.
-
-        Parameters
-        ----------
+            default) to plot using the cached value. Ignored for
+            point-estimate models.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
         view : {"event_time", "group_time"}, optional
@@ -1226,8 +901,18 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
+        with_uncertainty = has_posterior_draws(self.y_pred)
+        if with_uncertainty and hdi_prob is not None and hdi_prob != self.hdi_prob_:
+            raise ValueError(
+                "StaggeredDiD HDI bounds are computed during effect "
+                "aggregation, not at plot time. The cached HDI probability "
+                f"is {self.hdi_prob_}, but plot() received hdi_prob="
+                f"{hdi_prob}. To plot at a different HDI probability, "
+                "re-fit the experiment so that aggregation uses the desired "
+                "value, or omit hdi_prob to use the cached value."
+            )
         if view == "group_time":
-            return self._ols_plot_group_time(
+            return self._plot_group_time(
                 figsize=figsize,
                 layout=layout,
                 x_axis=x_axis,
@@ -1246,53 +931,86 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Plot pre-treatment placebo estimates (different style)
         if len(pre_treatment) > 0:
-            ax.scatter(
-                pre_treatment["event_time"],
-                pre_treatment["att"],
-                s=60,
-                color="gray",
-                marker="s",  # Square markers for placebo
-                zorder=3,
-                alpha=0.7,
-                label="Placebo estimate",
-            )
-            # Add error bars if std available
-            if "att_std" in pre_treatment.columns:
-                se = pre_treatment["att_std"] / np.sqrt(pre_treatment["n_obs"])
+            if with_uncertainty:
                 ax.errorbar(
                     pre_treatment["event_time"],
                     pre_treatment["att"],
-                    yerr=1.96 * se,
-                    fmt="none",
+                    yerr=[
+                        pre_treatment["att"] - pre_treatment["att_lower"],
+                        pre_treatment["att_upper"] - pre_treatment["att"],
+                    ],
+                    fmt="s",  # Square markers for placebo
                     capsize=4,
                     capthick=2,
+                    markersize=7,
                     color="gray",
-                    alpha=0.5,
+                    alpha=0.7,
+                    label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
                 )
+            else:
+                ax.scatter(
+                    pre_treatment["event_time"],
+                    pre_treatment["att"],
+                    s=60,
+                    color="gray",
+                    marker="s",  # Square markers for placebo
+                    zorder=3,
+                    alpha=0.7,
+                    label="Placebo estimate",
+                )
+                # Add error bars if std available
+                if "att_std" in pre_treatment.columns:
+                    se = pre_treatment["att_std"] / np.sqrt(pre_treatment["n_obs"])
+                    ax.errorbar(
+                        pre_treatment["event_time"],
+                        pre_treatment["att"],
+                        yerr=1.96 * se,
+                        fmt="none",
+                        capsize=4,
+                        capthick=2,
+                        color="gray",
+                        alpha=0.5,
+                    )
 
         # Plot post-treatment ATT estimates
         if len(post_treatment) > 0:
-            ax.scatter(
-                post_treatment["event_time"],
-                post_treatment["att"],
-                s=80,
-                color="C0",
-                zorder=3,
-                label="ATT estimate",
-            )
-            # Add error bars if std available
-            if "att_std" in post_treatment.columns:
-                se = post_treatment["att_std"] / np.sqrt(post_treatment["n_obs"])
+            if with_uncertainty:
                 ax.errorbar(
                     post_treatment["event_time"],
                     post_treatment["att"],
-                    yerr=1.96 * se,
-                    fmt="none",
+                    yerr=[
+                        post_treatment["att"] - post_treatment["att_lower"],
+                        post_treatment["att_upper"] - post_treatment["att"],
+                    ],
+                    fmt="o",
                     capsize=4,
                     capthick=2,
+                    markersize=8,
                     color="C0",
-                    alpha=0.7,
+                    label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
                 )
+            else:
+                ax.scatter(
+                    post_treatment["event_time"],
+                    post_treatment["att"],
+                    s=80,
+                    color="C0",
+                    zorder=3,
+                    label="ATT estimate",
+                )
+                # Add error bars if std available
+                if "att_std" in post_treatment.columns:
+                    se = post_treatment["att_std"] / np.sqrt(post_treatment["n_obs"])
+                    ax.errorbar(
+                        post_treatment["event_time"],
+                        post_treatment["att"],
+                        yerr=1.96 * se,
+                        fmt="none",
+                        capsize=4,
+                        capthick=2,
+                        color="C0",
+                        alpha=0.7,
+                    )
 
         # Add horizontal line at zero
         ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)
@@ -1321,14 +1039,14 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
-    def _ols_plot_group_time(
+    def _plot_group_time(
         self,
         figsize: tuple[float, float] | None = None,
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """Plot OLS cohort-time ``ATT(g, t)`` trajectories."""
+        """Plot cohort-time ``ATT(g, t)`` trajectories."""
         att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
             x_axis=x_axis, include_placebo=include_placebo
         )
@@ -1344,7 +1062,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         for cohort_idx, (cohort, cohort_data) in enumerate(cohort_groups):
             ax = axes[cohort] if layout == "facet" else axes["overlay"]
-            self._plot_ols_group_time_segment(
+            self._plot_group_time_segment(
                 ax=ax,
                 cohort_data=cohort_data[cohort_data["type"] == "placebo"],
                 x_col=x_col,
@@ -1356,7 +1074,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     else f"Cohort {cohort} placebo"
                 ),
             )
-            self._plot_ols_group_time_segment(
+            self._plot_group_time_segment(
                 ax=ax,
                 cohort_data=cohort_data[cohort_data["type"] == "ATT"],
                 x_col=x_col,
@@ -1418,8 +1136,12 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         return att_gt, "time", "Calendar Time", y_label
 
     def _get_group_time_placebo_data(self) -> pd.DataFrame:
-        """Return cohort-time placebo estimates for eventually-treated units."""
-        if self._model_backend.is_bayesian:
+        """Return cohort-time placebo estimates for eventually-treated units.
+
+        The two helpers compute genuinely different statistics: HDI bounds
+        need posterior draws, sample dispersion needs only point residuals.
+        """
+        if has_posterior_draws(self.y_pred):
             return self._get_group_time_placebo_data_bayesian()
         return self._get_group_time_placebo_data_ols()
 
@@ -1438,7 +1160,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
         y_observed = self._observed_outcome.to_numpy()
         tau_draws_all = y_observed - mu_draws.values
 
@@ -1554,7 +1276,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             return ""
         return x_label
 
-    def _plot_ols_group_time_segment(
+    def _plot_group_time_segment(
         self,
         ax: plt.Axes,
         cohort_data: pd.DataFrame,
@@ -1563,13 +1285,36 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         color: str,
         label: str,
     ) -> None:
-        """Plot one OLS placebo or ATT segment for a cohort."""
+        """Plot one placebo or ATT segment for a cohort.
+
+        Uncertainty rendering keys on which columns the aggregation produced:
+        HDI bounds (``att_lower`` / ``att_upper``) draw a shaded band, sample
+        dispersion (``att_std`` / ``n_obs``) draws 1.96-SE error bars, and
+        bare point estimates draw a plain line.
+        """
         if len(cohort_data) == 0:
             return
 
         marker = "s" if line_type == "placebo" else "o"
         linestyle = "--" if line_type == "placebo" else "-"
-        if {"att_std", "n_obs"}.issubset(cohort_data.columns):
+        if {"att_lower", "att_upper"}.issubset(cohort_data.columns):
+            alpha = 0.15 if line_type == "placebo" else 0.2
+            ax.plot(
+                cohort_data[x_col],
+                cohort_data["att"],
+                marker=marker,
+                linestyle=linestyle,
+                color=color,
+                label=label,
+            )
+            ax.fill_between(
+                cohort_data[x_col],
+                cohort_data["att_lower"],
+                cohort_data["att_upper"],
+                color=color,
+                alpha=alpha,
+            )
+        elif {"att_std", "n_obs"}.issubset(cohort_data.columns):
             se = cohort_data["att_std"] / np.sqrt(cohort_data["n_obs"])
             ax.errorbar(
                 cohort_data[x_col],
@@ -1591,25 +1336,31 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 label=label,
             )
 
-    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
-        """Get plotting data for Bayesian model.
+    def get_plot_data(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
+        """Get event-time plotting data.
 
         Parameters
         ----------
         hdi_prob : float, optional
-            Probability for HDI interval. Defaults to
+            Probability for HDI interval. Only used by models carrying
+            posterior draws; when it differs from the value cached at fit
+            time, the intervals are recomputed. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
         pd.DataFrame
-            DataFrame with event_time, att, att_lower, att_upper columns.
+            DataFrame with ``event_time`` and ``att`` columns plus
+            ``att_lower`` / ``att_upper`` HDI bounds (posterior draws) or
+            ``att_std`` / ``n_obs`` dispersion columns (point estimates).
             Includes both pre-treatment (placebo) and post-treatment effects.
         """
-        # If the requested hdi_prob matches what was used during aggregation,
-        # return the pre-computed results
+        # If there are no posterior draws, or the requested hdi_prob matches
+        # what was used during aggregation, return the pre-computed results
         stored_hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
-        if np.isclose(hdi_prob, stored_hdi_prob):
+        if not has_posterior_draws(self.y_pred) or np.isclose(
+            hdi_prob, stored_hdi_prob
+        ):
             return self.att_event_time_.copy()
 
         # Recompute intervals with the requested hdi_prob
@@ -1617,7 +1368,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()
@@ -1698,16 +1449,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
 
         return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
-
-    def get_plot_data_ols(self) -> pd.DataFrame:
-        """Get plotting data for OLS model.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with event_time, att, att_std, n_obs columns.
-        """
-        return self.att_event_time_.copy()
 
     def effect_summary(
         self,

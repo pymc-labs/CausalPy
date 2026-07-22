@@ -27,13 +27,12 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotnine as p9
 import xarray as xr
 from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
-from causalpy.plot_utils import PlotSpec, as_axes_result, panel_axes
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -42,8 +41,9 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     """Mutate an existing Legend in place without recreating it.
 
     This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
-    for ribbon mean+band legends) that would be lost if the legend were
-    rebuilt with ``ax.legend()``.
+    built by :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+    ``kind="ribbon"``) that would be lost if the legend were rebuilt with
+    ``ax.legend()``.
 
     Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
     with ``bbox_to_anchor``), ``fontsize``, ``frameon``, ``title``.
@@ -79,10 +79,6 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
         # numeric codes since _set_loc may not accept strings.
         if hasattr(legend, "set_loc"):
             legend.set_loc(loc)
-        elif hasattr(legend, "loc") and not hasattr(legend, "get_texts"):
-            from matplotlib.legend import Legend
-
-            legend.loc = Legend.codes.get(loc, loc) if isinstance(loc, str) else loc
         else:
             if isinstance(loc, str):  # pragma: no cover
                 loc = legend.codes.get(loc, loc)
@@ -92,51 +88,12 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
             kwargs["bbox_to_anchor"], kwargs.get("bbox_transform")
         )
     if "fontsize" in kwargs:
-        for text in _legend_texts(legend):
+        for text in legend.get_texts():
             text.set_fontsize(kwargs["fontsize"])
     if "frameon" in kwargs:
-        if hasattr(legend, "set_frame_on"):
-            legend.set_frame_on(kwargs["frameon"])
-        else:
-            legend.patch.set_visible(kwargs["frameon"])
+        legend.set_frame_on(kwargs["frameon"])
     if "title" in kwargs:
-        if hasattr(legend, "set_title"):
-            legend.set_title(kwargs["title"])
-        else:
-            texts = _legend_texts(legend)
-            if texts:
-                texts[0].set_text(kwargs["title"])
-
-
-def _legend_texts(legend: Any) -> list[Any]:
-    """Return text artists from Matplotlib or Plotnine legends."""
-    if hasattr(legend, "get_texts"):
-        return list(legend.get_texts())
-    texts: list[Any] = []
-
-    def collect(artist: Any) -> None:
-        if (
-            hasattr(artist, "get_text")
-            and hasattr(artist, "set_fontsize")
-            and artist.get_text()
-        ):
-            texts.append(artist)
-        for child in artist.get_children():
-            collect(child)
-
-    collect(legend)
-    return texts
-
-
-def _patch_plotnine_gridspec_for_matplotlib(fig: plt.Figure) -> None:
-    """Keep Matplotlib's ``tight_layout`` compatible with Plotnine figures."""
-    for axis in fig.axes:
-        subplotspec = axis.get_subplotspec()
-        if subplotspec is None:
-            continue
-        gridspec = subplotspec.get_gridspec()
-        if not hasattr(gridspec, "locally_modified_subplot_params"):
-            type(gridspec).locally_modified_subplot_params = lambda _self: False
+        legend.set_title(kwargs["title"])
 
 
 class BaseExperiment(ABC):
@@ -144,11 +101,14 @@ class BaseExperiment(ABC):
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
     (e.g. ``LinearRegression``) so that ``model=None`` instantiates a sensible
-    Bayesian default. To use an OLS/sklearn model, pass one explicitly.
+    Bayesian default. To use an OLS/sklearn model — or, for experiments that
+    declare ``supports_pymc_forecast``, a
+    :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` — pass one
+    explicitly.
 
     Parameters
     ----------
-    model : PyMCModel, RegressorMixin, or None, default None
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or None, default None
         Model instance to use. If ``None`` and ``_default_model_class`` is set,
         an instance of that default class is constructed.
 
@@ -165,6 +125,7 @@ class BaseExperiment(ABC):
 
     supports_bayes: bool
     supports_ols: bool
+    supports_pymc_forecast: bool = False
 
     _default_model_class: type[PyMCModel] | None = None
 
@@ -231,12 +192,15 @@ class BaseExperiment(ABC):
 
     _model_backend: ModelAdapter
 
-    def __init__(self, model: PyMCModel | RegressorMixin | None = None) -> None:
+    def __init__(
+        self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
+    ) -> None:
         adapter = make_model_adapter(
             model,
             default_model_class=self._default_model_class,
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
+            supports_pymc_forecast=self.supports_pymc_forecast,
         )
         self._model_backend = adapter
         self.model = adapter.model
@@ -345,7 +309,7 @@ class BaseExperiment(ABC):
         show: bool,
         legend_kwargs: dict[str, Any] | None,
         **draw_kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
+    ) -> tuple:
         """Template Method shared by every subclass's public ``plot``.
 
         Each :class:`BaseExperiment` subclass exposes its own explicit,
@@ -355,8 +319,7 @@ class BaseExperiment(ABC):
 
         1. Applies the ``arviz-darkgrid`` style for the duration of the
            draw call.
-        2. Dispatches to :meth:`_bayesian_plot` or :meth:`_ols_plot` based
-           on the model type.
+        2. Calls the subclass's backend-agnostic :meth:`_plot`.
         3. Mutates the resulting legend(s) in place when *legend_kwargs*
            is supplied, preserving custom handles built by the subclass.
         4. Optionally calls :func:`matplotlib.pyplot.show`.
@@ -375,19 +338,32 @@ class BaseExperiment(ABC):
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling. The
             existing legend is modified **in place** so that custom
-            matplotlib handles are preserved.
+            handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
+            :func:`~causalpy.plot_utils.plot_posterior_over_x` with
+            ``kind="ribbon"``) are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
-            ``_bayesian_plot`` / ``_ols_plot``.
+            ``_plot``. May include ``kind``, ``ci_kind``, ``ci_prob``, and
+            ``num_samples`` for
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`.
 
         Notes
         -----
-        ``legend_kwargs`` mutates an existing matplotlib legend in place, which
-        preserves whatever handle objects the subclass attached (including
-        tuple handles used for ribbon mean+band on hybrid ``(fig, ax)`` plots).
+        **Legend handling and ``plot_posterior_over_x`` return types:** :func:`~causalpy.plot_utils.plot_posterior_over_x`
+        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
+        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
+        Subclass ``_plot`` implementations that assemble
+        matplotlib legends from those return values should only pack
+        ``(line, patch)`` tuples when calling ``plot_posterior_over_x`` with ``kind="ribbon"``
+        (the default). Many current experiment plots always use the ribbon
+        default and never forward ``kind``; if a subclass forwards non-ribbon
+        kinds, it must build legend handles accordingly. The base class applies
+        ``legend_kwargs`` by mutating an existing legend in place, which preserves
+        whatever handle objects the subclass attached (including tuple handles
+        used for ribbon mean+band).
 
         Examples
         --------
@@ -398,40 +374,13 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
-        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            if self._model_backend.is_bayesian:
-                result = self._bayesian_plot(**draw_kwargs)
-            elif self._model_backend.is_ols:
-                result = self._ols_plot(**draw_kwargs)
-            else:
-                raise ValueError("Unsupported model type")
-
-        return self._finalize_plot(result, show=show, legend_kwargs=legend_kwargs)
-
-    def _finalize_plot(
-        self,
-        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray],
-        *,
-        show: bool,
-        legend_kwargs: dict[str, Any] | None,
-    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
-        """Draw a ggplot, PlotSpec, or legacy matplotlib return for public APIs."""
-        declarative = isinstance(result, (PlotSpec, p9.ggplot))
-        if isinstance(result, PlotSpec):
-            fig = result.plot.draw(show=False)
-            axes = panel_axes(fig, result.n_panels)
-            if result.overlay is not None:
-                result.overlay(fig, axes)
-            ax = as_axes_result(axes)
-        elif isinstance(result, p9.ggplot):
-            fig = result.draw(show=False)
-            ax = as_axes_result(panel_axes(fig))
-        else:
-            fig, ax = result
+            fig, ax = self._plot(**draw_kwargs)
 
         # Apply legend customization if requested.  We mutate the existing
-        # Legend object in place so that custom handles are preserved
+        # Legend object in place so that custom handles — especially the
+        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x with
+        # kind="ribbon" — are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
             # Normalise ax to a flat list so we can iterate uniformly.
@@ -441,73 +390,35 @@ class BaseExperiment(ABC):
                 axes = ax
             else:
                 axes = [ax]
-            legends = list(fig.legends)
-            legends.extend(
-                artist
-                for artist in fig.artists
-                if hasattr(artist, "set_bbox_to_anchor")
-                and hasattr(artist, "loc")
-                and not hasattr(artist, "get_texts")
-            )
             for a in axes:
                 legend = a.get_legend()
                 if legend is not None:
-                    legends.append(legend)
-            for legend in legends:
-                _apply_legend_kwargs(legend, legend_kwargs)
+                    _apply_legend_kwargs(legend, legend_kwargs)
             # Recompute layout when the legend is placed outside the axes
             # so it is not clipped (some subclass plots already call
             # tight_layout before we get here).
             if "bbox_to_anchor" in legend_kwargs:
                 fig.tight_layout()
 
-        if declarative:
-            # Plotnine closes and unregisters figures rendered with show=False.
-            # Re-register it so both plt.show() and manual display still work.
-            _patch_plotnine_gridspec_for_matplotlib(fig)
-            plt.figure(fig)
-
         if show:
             plt.show()
 
         return fig, ax
 
-    def _bayesian_plot(self, *args: Any, **kwargs: Any) -> PlotSpec:
-        """Plot results for Bayesian models. Override in subclasses that support Bayesian.
+    def _plot(self, **kwargs: Any) -> tuple:
+        """Draw the experiment figure; called by :meth:`_render_plot`.
 
-        Bayesian plot builders return a :class:`~causalpy.plot_utils.PlotSpec`;
-        public methods render it to the stable ``(fig, ax)`` contract.
+        Subclasses implement a single backend-agnostic ``_plot`` that consumes
+        the canonical prediction container. Uncertainty rendering should key
+        on data properties (e.g.
+        :func:`~causalpy.plot_utils.has_posterior_draws`), not backend
+        identity.
         """
-        raise NotImplementedError("_bayesian_plot method not yet implemented")
-
-    def _ols_plot(
-        self, *args: Any, **kwargs: Any
-    ) -> p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]:
-        """Plot results for OLS models. Override in subclasses that support OLS."""
-        raise NotImplementedError("_ols_plot method not yet implemented")
+        raise NotImplementedError("_plot method not yet implemented")
 
     def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         """Recover the data of an experiment along with the prediction and causal impact information.
 
-        Internally, this function dispatches to either :func:`get_plot_data_bayesian` or :func:`get_plot_data_ols`
-        depending on the model type.
-
-        Parameters
-        ----------
-        *args
-            Positional arguments forwarded to the model-specific implementation.
-        **kwargs
-            Keyword arguments forwarded to the model-specific implementation.
-        """
-        if self._model_backend.is_bayesian:
-            return self.get_plot_data_bayesian(*args, **kwargs)
-        if self._model_backend.is_ols:
-            return self.get_plot_data_ols(*args, **kwargs)
-        raise ValueError("Unsupported model type")
-
-    def get_plot_data_bayesian(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for Bayesian models. Override in subclasses that support Bayesian.
-
         Parameters
         ----------
         *args
@@ -515,19 +426,7 @@ class BaseExperiment(ABC):
         **kwargs
             Keyword arguments forwarded to the subclass implementation.
         """
-        raise NotImplementedError("get_plot_data_bayesian method not yet implemented")
-
-    def get_plot_data_ols(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Return plot data for OLS models. Override in subclasses that support OLS.
-
-        Parameters
-        ----------
-        *args
-            Positional arguments forwarded to the subclass implementation.
-        **kwargs
-            Keyword arguments forwarded to the subclass implementation.
-        """
-        raise NotImplementedError("get_plot_data_ols method not yet implemented")
+        raise NotImplementedError("get_plot_data method not yet implemented")
 
     @abstractmethod
     def effect_summary(
@@ -567,7 +466,7 @@ class BaseExperiment(ABC):
             ``hdi_prob = 1 - alpha``. Note that this is independent of the
             project-wide :data:`~causalpy.constants.HDI_PROB` constant
             (currently 0.94) used by :meth:`plot` and
-            :meth:`get_plot_data_bayesian`, so the same experiment may report
+            :meth:`get_plot_data`, so the same experiment may report
             a 95% HDI in :meth:`effect_summary` and a 94% HDI in :meth:`plot`
             with default settings.
         cumulative : bool, default=True

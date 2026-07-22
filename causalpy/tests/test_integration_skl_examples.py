@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 from sklearn.linear_model import LinearRegression
@@ -113,6 +114,20 @@ def test_rd_drinking():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.pred_discon.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    (discontinuity_design,) = build_design_matrices(
+        [result._x_design_info], result.x_discon
+    )
+    legacy_prediction = result.model.predict(np.asarray(discontinuity_design))
+    expected = np.squeeze(legacy_prediction[1]) - np.squeeze(legacy_prediction[0])
+    assert np.asarray(result.discontinuity_at_threshold).item() == pytest.approx(
+        expected
+    )
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)

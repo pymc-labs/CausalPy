@@ -29,8 +29,8 @@ Supports two fold-selection strategies:
   fraction, minimum gap between folds, and optional period exclusion.
 
 Supports experiments with a ``treatment_time`` parameter
-(InterruptedTimeSeries, SyntheticControl).  Requires a PyMC model
-for posterior extraction.
+(InterruptedTimeSeries, SyntheticControl).  Requires a Bayesian model
+backend (PyMC or pymc-forecast) for posterior extraction.
 """
 
 from __future__ import annotations
@@ -50,7 +50,6 @@ from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
-from causalpy.pymc_models import PyMCModel
 
 logger = logging.getLogger(__name__)
 
@@ -300,8 +299,8 @@ class PlaceboInTime:
         Raises
         ------
         TypeError
-            If the experiment lacks ``treatment_time`` or uses a non-PyMC
-            model.
+            If the experiment lacks ``treatment_time`` or uses a
+            non-Bayesian model backend.
         """
         if not hasattr(experiment, "treatment_time"):
             raise TypeError(
@@ -309,11 +308,17 @@ class PlaceboInTime:
                 f"attribute. PlaceboInTime requires experiments with an "
                 f"explicit treatment time."
             )
-        if not isinstance(experiment.model, PyMCModel):
+        # Validate against the backend capability, not a concrete model
+        # class: any Bayesian backend (PyMCModel or PyMCForecastModel)
+        # yields the draw-level post_impact this check consumes.
+        backend = getattr(experiment, "_model_backend", None)
+        if backend is None or not backend.is_bayesian:
             raise TypeError(
-                f"PlaceboInTime requires a PyMC model for posterior "
-                f"extraction, but got {type(experiment.model).__name__}. "
-                f"Use a PyMC model (e.g. cp.pymc_models.LinearRegression)."
+                f"PlaceboInTime requires a Bayesian model backend for "
+                f"posterior extraction, but got "
+                f"{type(experiment.model).__name__}. Use a PyMC model "
+                f"(e.g. cp.pymc_models.LinearRegression) or a pymc-forecast "
+                f"backend (cp.pymc_forecast_models.PyMCForecastModel)."
             )
 
     def _get_factory(self, context: PipelineContext | None) -> Any:

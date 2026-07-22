@@ -349,7 +349,7 @@ def test_staggered_did_bayesian_plot_data_accepts_transformed_outcome(
     )
 
     assert not result._get_group_time_placebo_data().empty
-    assert not result.get_plot_data_bayesian(hdi_prob=0.8).empty
+    assert not result.get_plot_data(hdi_prob=0.8).empty
 
 
 # ==============================================================================
@@ -852,7 +852,7 @@ def test_staggered_did_get_plot_data_bayesian_masks_non_identified_on_recompute(
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
-    plot_data = result.get_plot_data_bayesian(hdi_prob=0.80)
+    plot_data = result.get_plot_data(hdi_prob=0.80)
 
     assert "identified" in plot_data.columns
     non_identified_post = plot_data[
@@ -1561,8 +1561,8 @@ def test_staggered_did_training_data_shape():
 
 
 @pytest.mark.integration
-def test_staggered_did_get_plot_data_bayesian(mock_pymc_sample):
-    """Test get_plot_data_bayesian method."""
+def test_staggered_did_get_plot_data_pymc(mock_pymc_sample):
+    """Test get_plot_data returns HDI columns for models with posterior draws."""
     df = generate_staggered_did_data(
         n_units=30,
         n_time_periods=15,
@@ -1579,7 +1579,7 @@ def test_staggered_did_get_plot_data_bayesian(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    plot_data = result.get_plot_data_bayesian()
+    plot_data = result.get_plot_data()
 
     assert isinstance(plot_data, pd.DataFrame)
     assert "event_time" in plot_data.columns
@@ -1590,7 +1590,7 @@ def test_staggered_did_get_plot_data_bayesian(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_staggered_did_get_plot_data_bayesian_hdi_prob_respected(mock_pymc_sample):
-    """Test that get_plot_data_bayesian respects the hdi_prob parameter.
+    """Test that get_plot_data respects the hdi_prob parameter.
 
     This verifies the fix for the bug where hdi_prob was accepted but ignored,
     always returning pre-computed 94% intervals.
@@ -1612,13 +1612,13 @@ def test_staggered_did_get_plot_data_bayesian_hdi_prob_respected(mock_pymc_sampl
     )
 
     # Get intervals with default 94% HDI
-    plot_data_94 = result.get_plot_data_bayesian(hdi_prob=0.94)
+    plot_data_94 = result.get_plot_data(hdi_prob=0.94)
 
     # Get intervals with narrower 80% HDI
-    plot_data_80 = result.get_plot_data_bayesian(hdi_prob=0.80)
+    plot_data_80 = result.get_plot_data(hdi_prob=0.80)
 
     # Get intervals with wider 99% HDI
-    plot_data_99 = result.get_plot_data_bayesian(hdi_prob=0.99)
+    plot_data_99 = result.get_plot_data(hdi_prob=0.99)
 
     # Verify structure is correct for all
     for df_plot in [plot_data_94, plot_data_80, plot_data_99]:
@@ -1647,7 +1647,7 @@ def test_staggered_did_get_plot_data_bayesian_hdi_prob_respected(mock_pymc_sampl
 
 
 def test_staggered_did_get_plot_data_ols():
-    """Test get_plot_data_ols method."""
+    """Test get_plot_data returns dispersion columns for point-estimate models."""
     df = generate_staggered_did_data(
         n_units=30,
         n_time_periods=15,
@@ -1664,7 +1664,7 @@ def test_staggered_did_get_plot_data_ols():
         model=LinearRegression(),
     )
 
-    plot_data = result.get_plot_data_ols()
+    plot_data = result.get_plot_data()
 
     assert isinstance(plot_data, pd.DataFrame)
     assert "event_time" in plot_data.columns

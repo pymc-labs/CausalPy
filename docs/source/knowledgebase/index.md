@@ -5,6 +5,7 @@
 
 glossary
 estimands
+prediction-contract
 reporting_statistics
 design_notation
 quasi_dags.ipynb

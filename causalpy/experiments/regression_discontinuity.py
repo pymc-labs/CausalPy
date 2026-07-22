@@ -15,17 +15,16 @@
 
 import re  # noqa: I001
 import warnings
-from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import polars as pl
-import plotnine as p9
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
+
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -33,11 +32,10 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.plot_utils import (
-    HISTOGRAM_PANEL_THEME,
-    PlotSpec,
-    label_draws,
-    posterior_kind_layers,
-    prediction_draws,
+    _PosteriorPlotStyle,
+    extract_r2_score,
+    has_posterior_draws,
+    plot_posterior_over_x,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
@@ -49,15 +47,6 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
-
-
-@dataclass(frozen=True)
-class _RDPlotData:
-    """Tidy tables consumed by the declarative RD plot."""
-
-    points: pd.DataFrame
-    draws: pl.DataFrame
-    colors: dict[str, str]
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -173,7 +162,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 msg = f"Only {len(self.fit_data)} datapoints in the dataset."
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        y, X = dmatrices(self.formula, self.fit_data)
+        y, X = build_formula_matrices(self.formula, self.fit_data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -238,19 +227,10 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if self._model_backend.is_bayesian:
-            self.discontinuity_at_threshold = (
-                self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-                - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-            )
-        else:
-            self.discontinuity_at_threshold = np.squeeze(
-                self.pred_discon[1]
-            ) - np.squeeze(self.pred_discon[0])
-        # ******************************************************************************
+        self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
+        self.discontinuity_at_threshold = self.pred_discon.isel(
+            obs_ind=1, treated_units=0
+        ) - self.pred_discon.isel(obs_ind=0, treated_units=0)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -316,9 +296,12 @@ class RegressionDiscontinuity(BaseExperiment):
         print(f"Donut hole: {self.donut_hole}")
         print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
-        print(
-            f"Discontinuity at threshold = {convert_to_string(self.discontinuity_at_threshold)}"
+        discontinuity = (
+            self.discontinuity_at_threshold
+            if self._model_backend.is_bayesian
+            else _as_scalar(self.discontinuity_at_threshold)
         )
+        print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
         self.print_coefficients(round_to)
 
@@ -351,11 +334,12 @@ class RegressionDiscontinuity(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti", "histogram"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` draws individual posterior
-            predictive lines. ``"histogram"`` uses plotnine two-dimensional
-            histogram layers.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -364,19 +348,24 @@ class RegressionDiscontinuity(BaseExperiment):
             to 50. Ignored for other kinds.
 
         figsize : tuple of (float, float), optional
-            Width and height of the figure in inches.
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-            Matplotlib figure and axes for the rendered plot.
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -397,36 +386,7 @@ class RegressionDiscontinuity(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-    ) -> _RDPlotData:
-        """Prepare observed and posterior tables for plotting."""
-        points = self.data.copy()
-        has_exclusion = len(self.fit_data) < len(self.data)
-        point_label = "fit data" if has_exclusion else "data"
-        points["series"] = (
-            np.where(
-                points.index.isin(self.fit_data.index), "fit data", "excluded data"
-            )
-            if has_exclusion
-            else "data"
-        )
-        newdata = self.x_pred.reset_index(drop=True)
-        newdata["obs_ind"] = range(len(newdata))
-        draws = label_draws(
-            prediction_draws(self.pred, newdata),
-            series="Posterior mean",
-        )
-        colors = {point_label: "black", "Posterior mean": "#ff7f0e"}
-        if has_exclusion:
-            colors["excluded data"] = "lightgray"
-        return _RDPlotData(
-            points=points,
-            draws=draws,
-            colors=colors,
-        )
-
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -435,96 +395,31 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> PlotSpec:
-        """Build the Bayesian RD plot from tidy declarative layers."""
-        xcol = self.running_variable_name
-        ycol = self.outcome_variable_name
-        plot_data = self._prepare_bayesian_plot_data()
-        colors = {**plot_data.colors, "treatment threshold": "red"}
-        _, posterior_layers = posterior_kind_layers(
-            plot_data.draws,
-            kind,
-            x=xcol,
-            group_by=["series", xcol],
-            ci_prob=ci_prob,
-            interval=ci_kind,
-            num_samples=num_samples,
-            colors=colors,
-        )
-        p = p9.ggplot() + p9.geom_point(
-            plot_data.points, p9.aes(xcol, ycol, color="series"), size=1.5
-        )
-        for layer in posterior_layers:
-            p += layer
-
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
-        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-        ).values
-        ci = (
-            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}, "
-
-        # Treatment threshold (and optional donut boundaries) as legend-mapped
-        # vertical lines.
-        thr_df = pd.DataFrame(
-            {
-                "xintercept": [self.treatment_threshold],
-                "series": ["treatment threshold"],
-            }
-        )
-        p = p + p9.geom_vline(
-            thr_df, p9.aes(xintercept="xintercept", color="series"), size=1.5
-        )
-        if self.donut_hole > 0:
-            donut_df = pd.DataFrame(
-                {
-                    "xintercept": [
-                        self.treatment_threshold - self.donut_hole,
-                        self.treatment_threshold + self.donut_hole,
-                    ],
-                    "series": ["donut boundary", "donut boundary"],
-                }
-            )
-            p = p + p9.geom_vline(
-                donut_df,
-                p9.aes(xintercept="xintercept", color="series"),
-                linetype="dashed",
-                size=1,
-            )
-            colors["donut boundary"] = "orange"
-
-        p = (
-            p
-            + p9.scale_color_manual(values=colors, name="")
-            + p9.labs(title=r2 + "\n" + discon + ci, x=xcol, y=ycol)
-        )
-        if figsize is not None:
-            p += p9.theme(figure_size=figsize)
-        if kind == "histogram":
-            p = p + HISTOGRAM_PANEL_THEME
-
-        return PlotSpec(p, n_panels=1)
-
-    def _ols_plot(
-        self,
-        round_to: int | None = None,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Generate plot for regression discontinuity designs.
 
         Parameters
         ----------
         round_to : int, optional
-            Number of decimals used to round results.
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        ci_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the discontinuity at threshold.
+            Must be in ``(0, 1]``. Ignored for point-estimate models. Defaults
+            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        with_uncertainty = has_posterior_draws(self.pred)
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot data: use two layers only when there are excluded observations
@@ -548,18 +443,52 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Plot model fit to data
-        ax.plot(
-            self.x_pred[self.running_variable_name],
-            self.pred,
-            "k",
-            markersize=10,
-            label="model fit",
-        )
+        if with_uncertainty:
+            style: _PosteriorPlotStyle = {
+                "ci_prob": ci_prob,
+                "kind": kind,
+                "ci_kind": ci_kind,
+                "num_samples": num_samples,
+            }
+            plot_posterior_over_x(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(treated_units=0),
+                ax=ax,
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+                label="Posterior mean",
+            )
+        else:
+            ax.plot(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(chain=0, draw=0, treated_units=0),
+                "k",
+                markersize=10,
+                label="model fit",
+            )
 
         # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(_as_scalar(self.score), round_to)}"
-        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
-        ax.set(title=r2 + "\n" + discon)
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        assert r2_val is not None
+        if with_uncertainty:
+            assert r2_std_val is not None
+            title_info = f"{round_num(r2_val, round_to)} (std = {round_num(r2_std_val, round_to)})"
+            r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+            percentiles = self.discontinuity_at_threshold.quantile(
+                [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+            ).values
+            ci = (
+                rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
+                + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+            )
+            discon = f"""
+            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
+            """
+            ax.set(title=r2 + "\n" + discon + ci)
+        else:
+            r2 = f"$R^2$ on fit data = {round_num(r2_val, round_to)}"
+            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
+            ax.set(title=r2 + "\n" + discon)
 
         # Treatment threshold line
         ax.axvline(

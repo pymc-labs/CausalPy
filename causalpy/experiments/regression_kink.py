@@ -16,43 +16,30 @@
 
 import re  # noqa: I001
 import warnings
-from dataclasses import dataclass
-from typing import Any, Literal
 
+
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-import polars as pl
-import plotnine as p9
+import seaborn as sns
+from patsy import ModelDesc, build_design_matrices
 import xarray as xr
-from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 
-from causalpy.constants import HDI_PROB
-from causalpy.plot_utils import (
-    HISTOGRAM_PANEL_THEME,
-    PlotSpec,
-    label_draws,
-    posterior_kind_layers,
-    prediction_draws,
-)
+from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.reporting import EffectSummary, _effect_summary_rkink
+
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+
+from .base import BaseExperiment
+from typing import Any, Literal
+from causalpy.utils import _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.experiments.model_adapter import build_coords
-from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import EffectSummary, _effect_summary_rkink
-from causalpy.utils import _is_variable_dummy_coded, round_num
-
-from .base import BaseExperiment
-
-
-@dataclass(frozen=True)
-class _RKPlotData:
-    """Tidy tables consumed by the declarative RK plot."""
-
-    points: pd.DataFrame
-    draws: pl.DataFrame
 
 
 class RegressionKink(BaseExperiment):
@@ -120,9 +107,9 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
+            y, X = build_formula_matrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = build_formula_matrices(self.formula, self.data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -236,11 +223,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -298,11 +284,12 @@ class RegressionKink(BaseExperiment):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         hdi_prob : float, optional
             Deprecated. Use ``ci_prob`` instead.
-        kind : {"ribbon", "spaghetti", "histogram"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``
-            (mean + credible band). ``"spaghetti"`` draws individual posterior
-            predictive lines. ``"histogram"`` uses plotnine two-dimensional
-            histogram layers.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
             ``"hdi"``.
@@ -311,19 +298,24 @@ class RegressionKink(BaseExperiment):
             to 50. Ignored for other kinds.
 
         figsize : tuple of (float, float), optional
-            Width and height of the figure in inches.
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
-            ``bbox_to_anchor``). Applied to the rendered matplotlib legend.
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-            Matplotlib figure and axes for the rendered plot.
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
         """
         if hdi_prob is not None:
             warnings.warn(
@@ -344,24 +336,7 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _prepare_bayesian_plot_data(
-        self,
-    ) -> _RKPlotData:
-        """Prepare observed and posterior tables for plotting."""
-        points = self.data.copy()
-        points["series"] = "data"
-        newdata = self.x_pred.reset_index(drop=True)
-        newdata["obs_ind"] = range(len(newdata))
-        draws = label_draws(
-            prediction_draws(self.pred, newdata),
-            series="Posterior mean",
-        )
-        return _RKPlotData(
-            points=points,
-            draws=draws,
-        )
-
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -370,67 +345,79 @@ class RegressionKink(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> PlotSpec:
-        """Build the Bayesian RK plot from tidy declarative layers."""
-        xcol = self.running_variable_name
-        ycol = self.outcome_variable_name
-        round_digits = round_to if round_to is not None else 2
-        color_values = {
-            "data": "black",
-            "Posterior mean": "#ff7f0e",
-            "treatment threshold": "red",
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Generate plot for regression kink designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the change in gradient at the
+            kink point. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
+        """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
         }
-        plot_data = self._prepare_bayesian_plot_data()
-        _, posterior_layers = posterior_kind_layers(
-            plot_data.draws,
-            kind,
-            x=xcol,
-            group_by=["series", xcol],
-            ci_prob=ci_prob,
-            interval=ci_kind,
-            num_samples=num_samples,
-            colors=color_values,
+        fig, ax = plt.subplots(figsize=figsize)
+        # Plot raw data
+        sns.scatterplot(
+            self.data,
+            x=self.running_variable_name,
+            y=self.outcome_variable_name,
+            c="k",  # hue="treated",
+            ax=ax,
         )
 
-        p = p9.ggplot() + p9.geom_point(
-            plot_data.points, p9.aes(xcol, ycol, color="series"), size=1.5
+        # Plot model fit to data
+        h_line, h_patch = plot_posterior_over_x(
+            self.x_pred[self.running_variable_name],
+            self.pred.isel(treated_units=0),
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
         )
-        for layer in posterior_layers:
-            p += layer
+        handles = [(h_line, h_patch)]
+        labels = ["Posterior mean"]
 
-        title_info = (
-            f"{round_num(self.score['unit_0_r2'], round_digits)} "
-            f"(std = {round_num(self.score['unit_0_r2_std'], round_digits)})"
-        )
+        # create strings to compose title
+        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
         r2 = f"Bayesian $R^2$ on all data = {title_info}"
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values
         ci = (
             rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_digits)}, "
-            f"{round_num(percentiles[1], round_digits)}]"
+            + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
-        grad_change = f"Change in gradient = {round_num(self.gradient_change.mean(), round_digits)}, "
-
-        thr_df = pd.DataFrame(
-            {"xintercept": [self.kink_point], "series": ["treatment threshold"]}
+        grad_change = f"""
+            Change in gradient = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)},
+            """
+        ax.set(title=r2 + "\n" + grad_change + ci)
+        # Intervention line
+        ax.axvline(
+            x=self.kink_point,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
         )
-        p = p + p9.geom_vline(
-            thr_df, p9.aes(xintercept="xintercept", color="series"), size=1.5
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
         )
-
-        p = (
-            p
-            + p9.scale_color_manual(values=color_values, name="")
-            + p9.labs(title=r2 + "\n" + grad_change + ci, x=xcol, y=ycol)
-        )
-        if figsize is not None:
-            p += p9.theme(figure_size=figsize)
-        if kind == "histogram":
-            p = p + HISTOGRAM_PANEL_THEME
-
-        return PlotSpec(p, n_panels=1)
+        return fig, ax
 
     def effect_summary(
         self,

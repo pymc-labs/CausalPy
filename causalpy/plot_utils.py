@@ -15,815 +15,464 @@
 Plotting utility functions.
 """
 
-from __future__ import annotations
+import warnings
+from typing import Any, Literal, TypedDict
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
-
+import arviz as az
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotnine as p9
-import polars as pl
-import tidydraws as td
 import xarray as xr
+from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from pandas.api.extensions import ExtensionArray
 
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-
-HISTOGRAM_PANEL_THEME = p9.theme(
-    panel_background=p9.element_rect(fill="white"),
-    panel_grid_major=p9.element_blank(),
-    panel_grid_minor=p9.element_blank(),
-)
-
-_VALID_POSTERIOR_KINDS = frozenset({"ribbon", "histogram", "spaghetti"})
-_VALID_CI_KINDS = frozenset({"hdi", "eti"})
+from causalpy.constants import HDI_PROB
+from causalpy.utils import _as_scalar
 
 
-@dataclass(frozen=True)
-class PlotSpec:
-    """Declarative plot plus optional post-draw matplotlib overlay."""
+def has_posterior_draws(Y: xr.DataArray) -> bool:
+    """Whether *Y* carries genuine posterior uncertainty.
 
-    plot: Any
-    overlay: Callable[[plt.Figure, list[plt.Axes]], None] | None = None
-    n_panels: int | None = None
-
-
-def panel_axes(fig: plt.Figure, n: int | None = None) -> list[plt.Axes]:
-    """Facet axes from a plotnine ``.draw()`` figure, excluding colorbars.
+    The canonical prediction container has ``chain`` and ``draw`` dimensions
+    on every backend; point-estimate backends emit singleton dimensions (a
+    point estimate is a posterior with one atom). Plot code should key
+    uncertainty rendering (ribbons, HDI labels, ...) on this data property
+    rather than on backend identity.
 
     Parameters
     ----------
-    fig : matplotlib.figure.Figure
-        Figure returned by :meth:`plotnine.ggplot.draw`.
-    n : int, optional
-        When set, return at most this many panel axes.
+    Y : xr.DataArray
+        A canonical prediction container with ``chain`` and ``draw``
+        dimensions.
     """
-    axes = [a for a in fig.axes if a.get_subplotspec() is not None]
-    return axes[:n] if n is not None else axes
+    return Y.sizes.get("chain", 1) * Y.sizes.get("draw", 1) > 1
 
 
-def as_axes_result(axes: list[plt.Axes]) -> plt.Axes | np.ndarray:
-    """Normalize a panel list to a single Axes or ndarray for public return.
+def extract_r2_score(
+    score: pd.Series | float, unit_index: int = 0
+) -> tuple[float | None, float | None]:
+    """Extract ``(r2, r2_std)`` from a backend score container.
+
+    Bayesian backends return a :class:`pandas.Series` with
+    ``unit_{i}_r2`` / ``unit_{i}_r2_std`` (or plain ``r2`` / ``r2_std``)
+    entries; point-estimate backends return a scalar. ``r2_std`` is ``None``
+    when the container carries no dispersion, so callers can render
+    ``(std = ...)`` only when it exists.
 
     Parameters
     ----------
-    axes : list of matplotlib.axes.Axes
-        Panel axes discovered via :func:`panel_axes`.
+    score : pd.Series or float
+        Backend score container as stored on ``experiment.score``.
+    unit_index : int, optional
+        Index of the treated unit whose score to extract. Defaults to 0.
     """
-    if len(axes) == 1:
-        return axes[0]
-    return np.asarray(axes)
+    if isinstance(score, pd.Series):
+        key = f"unit_{unit_index}_r2"
+        if key not in score.index:
+            key = "r2"
+        if key not in score.index:
+            return None, None
+        std = score.get(f"{key}_std")
+        return float(score[key]), None if std is None else float(std)
+    return float(_as_scalar(score)), None
 
 
-def to_axes_list(ax: plt.Axes | np.ndarray | list[plt.Axes]) -> list[plt.Axes]:
-    """Normalize public multi-panel returns that promise a list of axes.
+class _PosteriorPlotStyle(TypedDict):
+    """Typed kwargs bundle forwarded from experiment ``_plot`` methods to every ``plot_posterior_over_x`` call."""
 
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes, numpy.ndarray, or list
-        Single axes, ndarray of axes, or list from :func:`as_axes_result`.
-    """
-    if isinstance(ax, list):
-        return ax
-    if isinstance(ax, np.ndarray):
-        return list(ax.flat)
-    return [ax]
+    ci_prob: float
+    kind: Literal["ribbon", "histogram", "spaghetti"]
+    ci_kind: Literal["hdi", "eti"]
+    num_samples: int
 
 
-def validate_posterior_plot_options(
-    kind: str,
-    *,
-    ci_kind: str = "hdi",
+def plot_posterior_over_x(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
+    ax: plt.Axes,
+    plot_hdi_kwargs: dict[str, Any] | None = None,
+    ci_prob: float = HDI_PROB,
+    label: str | None = None,
+    kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+    ci_kind: Literal["hdi", "eti"] = "hdi",
     num_samples: int = 50,
-) -> None:
-    """Validate shared posterior plot kwargs once at the plotting boundary.
+    # Backward compatibility: hdi_prob was in original API
+    hdi_prob: float | None = None,
+) -> tuple[Line2D | list[Line2D], PolyCollection | None]:
+    """Plot a posterior :class:`xarray.DataArray` along an x-axis.
+
+    Dispatches on ``kind`` to render ribbon (mean + interval band), spaghetti
+    (posterior draw lines), or histogram (2D density heatmap) visualizations.
 
     Parameters
     ----------
-    kind : str
-        Posterior rendering mode.
-    ci_kind : str, optional
-        Credible interval type for ribbon summaries.
+    x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
+        Values for the x-axis (e.g. time, a running variable, or a prediction
+        grid). Need not be temporal.
+    Y : xr.DataArray
+        Posterior samples with ``chain`` and ``draw`` dimensions and one
+        dimension aligned with ``x``.
+    ax : plt.Axes
+        Matplotlib axes object.
+    plot_hdi_kwargs : dict, optional
+        Keyword arguments for line, band, heatmap, or sample styling (passed through
+        to matplotlib / ArviZ helpers depending on ``kind`` and ``ci_kind``).
+    ci_prob : float, optional
+        Credible interval width when ``kind="ribbon"``. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94). Ignored for
+        other kinds.
+    label : str, optional
+        The plot label.
+    kind : {"ribbon", "histogram", "spaghetti"}, optional
+        Type of visualization. Default is "ribbon".
+    ci_kind : {"hdi", "eti"}, optional
+        Type of interval for ribbon plots. Default is "hdi".
     num_samples : int, optional
-        Number of spaghetti paths to sample.
-    """
-    if kind not in _VALID_POSTERIOR_KINDS:
-        msg = f"Unknown kind: {kind!r}. Must be 'ribbon', 'histogram', or 'spaghetti'."
-        raise ValueError(msg)
-    if ci_kind not in _VALID_CI_KINDS:
-        msg = f"Unknown ci_kind: {ci_kind!r}. Must be 'hdi' or 'eti'."
-        raise ValueError(msg)
-    if num_samples <= 0:
-        msg = f"num_samples must be positive, got {num_samples}."
-        raise ValueError(msg)
-
-
-def _validate_ci_kind(ci_kind: str) -> None:
-    if ci_kind not in _VALID_CI_KINDS:
-        msg = f"Unknown ci_kind: {ci_kind!r}. Must be 'hdi' or 'eti'."
-        raise ValueError(msg)
-
-
-def _validate_num_samples(num_samples: int) -> None:
-    if num_samples <= 0:
-        msg = f"num_samples must be positive, got {num_samples}."
-        raise ValueError(msg)
-
-
-def scale_for_x_column(x: pd.Series | np.ndarray) -> Any:
-    """Choose a plotnine x scale that matches the column dtype.
-
-    Parameters
-    ----------
-    x : pandas.Series or numpy.ndarray
-        Values used on the shared x aesthetic.
-    """
-    series = pd.Series(x)
-    if pd.api.types.is_bool_dtype(series) or isinstance(
-        series.dtype, pd.CategoricalDtype
-    ):
-        return p9.guides()
-    if not pd.api.types.is_numeric_dtype(series):
-        return p9.guides()
-    breaks = sorted(series.astype(float).unique())
-    return p9.scale_x_continuous(breaks=breaks)
-
-
-def coord_xlim_for_column(
-    x: pd.Series | np.ndarray,
-    *,
-    padding: float = 0.15,
-) -> Any:
-    """Return ``coord_cartesian`` x limits for numeric x columns only.
-
-    Parameters
-    ----------
-    x : pandas.Series or numpy.ndarray
-        Values used on the shared x aesthetic.
-    padding : float, optional
-        Extra span added beyond the maximum x value for annotations.
-    """
-    series = pd.Series(x)
-    if pd.api.types.is_bool_dtype(series) or isinstance(
-        series.dtype, pd.CategoricalDtype
-    ):
-        return p9.coord_cartesian()
-    if not pd.api.types.is_numeric_dtype(series):
-        return p9.coord_cartesian()
-    vals = series.astype(float).to_numpy()
-    span = float(np.ptp(vals) or 1.0)
-    return p9.coord_cartesian(
-        xlim=(float(np.min(vals)) - 0.05, float(np.max(vals)) + padding * span)
-    )
-
-
-def sample_draw_lines(
-    draws: pl.DataFrame,
-    num_samples: int,
-    *,
-    sort_by: str | list[str],
-) -> pl.DataFrame:
-    """Subsample posterior draws and tag each with a unique ``_draw_id``.
-
-    Parameters
-    ----------
-    draws : polars.DataFrame
-        Long posterior draws with ``chain`` and ``draw`` columns.
-    num_samples : int
-        Maximum number of draw lines to keep.
-    sort_by : str or list of str
-        Column(s) passed to :meth:`polars.DataFrame.sort`.
-    """
-    tagged = draws.with_columns(
-        (pl.col("chain") * 1_000_000 + pl.col("draw")).alias("_draw_id")
-    )
-    ids = tagged.select("_draw_id").unique()
-    chosen = ids.sample(n=min(num_samples, ids.height), seed=42)
-    return tagged.join(chosen, on="_draw_id").sort(sort_by)
-
-
-def _filter_treated_unit(draws: pl.DataFrame, treated_unit: str | None) -> pl.DataFrame:
-    if treated_unit is not None and "treated_units" in draws.columns:
-        draws = draws.filter(pl.col("treated_units") == treated_unit)
-    if "treated_units" in draws.columns and draws["treated_units"].n_unique() == 1:
-        return draws.drop("treated_units")
-    return draws
-
-
-def prediction_draws(
-    pred: Any,
-    newdata: pd.DataFrame,
-    *,
-    var_name: str = "mu",
-    treated_unit: str | None = None,
-) -> pl.DataFrame:
-    """Extract posterior predictive draws once for summary and spaghetti.
-
-    Parameters
-    ----------
-    pred : Any
-        Prediction container for :func:`tidydraws.prediction_draws`.
-    newdata : pandas.DataFrame
-        Grid passed as ``newdata`` to tidydraws.
-    var_name : str, optional
-        Posterior variable name. Defaults to ``"mu"``.
-    treated_unit : str, optional
-        When draws include ``treated_units``, filter to this unit.
-    """
-    draws = td.prediction_draws(
-        pred, newdata=newdata, var_name=var_name, idata_group="posterior_predictive"
-    )
-    return _filter_treated_unit(draws, treated_unit)
-
-
-def dataarray_draws(
-    da: xr.DataArray,
-    *,
-    var_name: str = "mu",
-    treated_unit: str | None = None,
-) -> pl.DataFrame:
-    """Convert a posterior DataArray to the same long form as tidydraws.
-
-    Parameters
-    ----------
-    da : xarray.DataArray
-        Posterior samples with ``chain`` and ``draw`` dimensions.
-    var_name : str, optional
-        Name for the posterior value column.
-    treated_unit : str, optional
-        Treated unit to select when that dimension is present.
-    """
-    if treated_unit is not None:
-        da = da.sel(treated_units=treated_unit)
-    elif "treated_units" in da.dims:
-        da = da.isel(treated_units=0)
-    return _filter_treated_unit(
-        pl.from_pandas(da.to_dataframe(name=var_name).reset_index()),
-        treated_unit,
-    )
-
-
-def label_draws(
-    draws: pl.DataFrame,
-    *,
-    series: str,
-    panel: str | None = None,
-) -> pl.DataFrame:
-    """Attach plotting identity to a canonical posterior-draw table.
-
-    Parameters
-    ----------
-    draws : polars.DataFrame
-        Canonical long posterior draws.
-    series : str
-        Series label.
-    panel : str, optional
-        Facet label.
-    """
-    labels = [pl.lit(series).alias("series")]
-    if panel is not None:
-        labels.append(pl.lit(panel).alias("panel"))
-    return draws.with_columns(labels)
-
-
-def summarize_draws(
-    draws: pl.DataFrame,
-    *,
-    group_by: str | list[str],
-    ci_prob: float,
-    interval: Literal["hdi", "eti"] = "hdi",
-    var_name: str = "mu",
-) -> pd.DataFrame:
-    """Summarize one canonical long posterior-draw table.
-
-    Parameters
-    ----------
-    draws : polars.DataFrame
-        Canonical long posterior draws.
-    group_by : str or list of str
-        Columns identifying one plotted point.
-    ci_prob : float
-        Credible interval probability mass.
-    interval : {"hdi", "eti"}, optional
-        Interval type.
-    var_name : str, optional
-        Posterior value column.
-    """
-    return (
-        td.point_interval(
-            draws,
-            var_name,
-            group_by=group_by,
-            probs=(ci_prob,),
-            point="mean",
-            interval=interval,
-        )
-        .sort(group_by)
-        .to_pandas()
-    )
-
-
-def spaghetti_draws(
-    draws: pl.DataFrame,
-    *,
-    group_by: str | list[str],
-    num_samples: int,
-    sort_by: str | list[str] | None = None,
-) -> pd.DataFrame:
-    """Sample complete posterior paths from one canonical draw table.
-
-    Parameters
-    ----------
-    draws : polars.DataFrame
-        Canonical long posterior draws.
-    group_by : str or list of str
-        Columns that order each path.
-    num_samples : int
-        Maximum number of complete paths to retain.
-    sort_by : str or list of str, optional
-        Explicit output sort columns.
-    """
-    _validate_num_samples(num_samples)
-    sampled = sample_draw_lines(draws, num_samples, sort_by=sort_by or group_by)
-    identity = [col for col in ("panel", "series") if col in sampled.columns]
-    if identity:
-        sampled = sampled.with_columns(
-            pl.concat_str(
-                [pl.col(col) for col in identity] + [pl.col("_draw_id")],
-                separator=":",
-            ).alias("_line_id")
-        )
-    else:
-        sampled = sampled.with_columns(pl.col("_draw_id").alias("_line_id"))
-    return sampled.to_pandas()
-
-
-def posterior_kind_layers(
-    draws: pl.DataFrame,
-    kind: Literal["ribbon", "histogram", "spaghetti"],
-    *,
-    x: str,
-    group_by: str | list[str],
-    ci_prob: float,
-    interval: Literal["hdi", "eti"] = "hdi",
-    num_samples: int = 50,
-    var_name: str = "mu",
-    colors: dict[str, str] | None = None,
-) -> tuple[pd.DataFrame, list[Any]]:
-    """Summarize canonical draws and build the requested posterior layers.
-
-    Parameters
-    ----------
-    draws : polars.DataFrame
-        Canonical posterior draws. A ``series`` column enables colored
-        multi-series layers; a ``panel`` column enables facets.
-    kind : {"ribbon", "histogram", "spaghetti"}
-        Posterior rendering mode.
-    x : str
-        Column used for the horizontal axis.
-    group_by : str or list of str
-        Columns identifying one summarized posterior point.
-    ci_prob : float
-        Credible interval probability mass.
-    interval : {"hdi", "eti"}, optional
-        Credible interval type.
-    num_samples : int, optional
-        Complete posterior paths retained for spaghetti mode.
-    var_name : str, optional
-        Posterior value column.
-    colors : dict, optional
-        Fixed fill colors by series for histogram mode.
+        Number of posterior samples to plot for spaghetti visualization.
+        Default is 50.
+    hdi_prob : float, optional
+        Backward-compatibility alias for ``ci_prob`` (same meaning as in earlier
+        releases). There is no deprecation schedule; it may remain indefinitely.
 
     Returns
     -------
-    tuple[pandas.DataFrame, list]
-        Point/interval summaries and plotnine layers.
+    tuple
+        Depends on ``kind``:
+
+        - ``kind="ribbon"``: ``(Line2D, PolyCollection)`` — mean line and
+          interval band (HDI or ETI).
+        - ``kind="histogram"`` or ``"spaghetti"``: ``(list[Line2D], None)`` —
+          sample/mean lines and no single band patch.
+
+        Experiment :meth:`~causalpy.experiments.base.BaseExperiment.plot` code
+        that builds legends from ``plot_posterior_over_x`` return values should only assume
+        the ribbon shape when it passes ``kind="ribbon"`` (the default) through
+        to :func:`plot_posterior_over_x`.
     """
-    validate_posterior_plot_options(kind, ci_kind=interval, num_samples=num_samples)
-    bands = summarize_draws(
-        draws,
-        group_by=group_by,
-        ci_prob=ci_prob,
-        interval=interval,
-        var_name=var_name,
-    )
-    has_series = "series" in draws.columns
-    line_aes = (
-        p9.aes(x, var_name, color="series") if has_series else p9.aes(x, var_name)
-    )
-    line_bands = (
-        bands.groupby("series", observed=True)
-        .filter(lambda group: len(group) > 1)
-        .reset_index(drop=True)
-        if has_series
-        else bands
-        if len(bands) > 1
-        else bands.iloc[0:0]
-    )
-    mean_line = [p9.geom_line(line_bands, line_aes)] if not line_bands.empty else []
+    # Handle backward compatibility: hdi_prob was in original API
+    if hdi_prob is not None:
+        ci_prob = hdi_prob
 
-    if kind == "histogram":
-        layers: list[Any] = []
-        frame = draws.to_pandas()
-        series = list(frame["series"].drop_duplicates()) if has_series else [None]
-        for label in series:
-            subset = frame if label is None else frame.loc[frame["series"] == label]
-            fill = "grey" if label is None else (colors or {}).get(label, "grey")
-            layers.append(
-                p9.geom_bin_2d(
-                    subset,
-                    p9.aes(x, var_name, alpha=p9.after_stat("count")),
-                    bins=(max(int(subset[x].nunique()), 1), 50),
-                    drop=True,
-                    fill=fill,
-                    raster=True,
-                    inherit_aes=False,
-                    show_legend=False,
-                )
-            )
-        layers.extend(
-            [
-                p9.scale_alpha_continuous(range=(0.0, 0.85)),
-                p9.guides(alpha="none"),
-                *mean_line,
-            ]
+    if kind != "ribbon" and ci_kind != "hdi":
+        warnings.warn(
+            f"ci_kind={ci_kind!r} is ignored when kind={kind!r}. "
+            "ci_kind only applies to kind='ribbon'.",
+            UserWarning,
+            stacklevel=2,
         )
-        return bands, layers
-
-    if kind == "spaghetti":
-        paths = spaghetti_draws(
-            draws,
-            group_by=group_by,
-            num_samples=num_samples,
+    if kind != "spaghetti" and num_samples != 50:
+        warnings.warn(
+            f"num_samples={num_samples} is ignored when kind={kind!r}. "
+            "num_samples only applies to kind='spaghetti'.",
+            UserWarning,
+            stacklevel=2,
         )
-        layers = [
-            p9.geom_line(
-                paths,
-                p9.aes(x, var_name, group="_line_id", color="series")
-                if has_series
-                else p9.aes(x, var_name, group="_line_id"),
-                alpha=0.1,
-                size=0.3,
-                show_legend=False,
-            ),
-            *mean_line,
-        ]
-        return bands, layers
 
-    return bands, [
-        p9.geom_ribbon(
-            bands,
-            p9.aes(
-                x,
-                ymin=f"{var_name}_lower",
-                ymax=f"{var_name}_upper",
-                fill="series",
-            )
-            if has_series
-            else p9.aes(
-                x,
-                ymin=f"{var_name}_lower",
-                ymax=f"{var_name}_upper",
-            ),
-            alpha=0.3,
-            show_legend=False,
-        ),
-        *mean_line,
-    ]
-
-
-def _categorize_panels(
-    frames: list[pd.DataFrame],
-    panels: list[str] | tuple[str, ...],
-) -> None:
-    for frame in frames:
-        frame["panel"] = pd.Categorical(frame["panel"], categories=panels, ordered=True)
-
-
-@dataclass(frozen=True)
-class CausalPanelData:
-    """Posterior quantities and observations for a three-panel causal plot."""
-
-    fitted: pl.DataFrame
-    counterfactual: pl.DataFrame
-    post_effect: pl.DataFrame
-    cumulative_effect: pl.DataFrame
-    observations: pd.DataFrame
-    pre_effect: pl.DataFrame | None = None
-
-
-def _causal_panel_draws(
-    data: CausalPanelData,
-    *,
-    panel_titles: tuple[str, str, str],
-    series_labels: dict[str, str],
-) -> pl.DataFrame:
-    top, middle, bottom = panel_titles
-    parts = [
-        label_draws(data.fitted, series=series_labels["fitted"], panel=top),
-        label_draws(
-            data.counterfactual,
-            series=series_labels["counterfactual"],
-            panel=top,
-        ),
-        label_draws(
-            data.post_effect,
-            series=series_labels["post_effect"],
-            panel=middle,
-        ),
-        label_draws(
-            data.cumulative_effect,
-            series=series_labels["cumulative_effect"],
-            panel=bottom,
-        ),
-    ]
-    if data.pre_effect is not None:
-        parts.append(
-            label_draws(
-                data.pre_effect,
-                series=series_labels["pre_effect"],
-                panel=middle,
-            )
+    if kind == "ribbon":
+        return _plot_ribbon(x, Y, ax, plot_hdi_kwargs, ci_prob, label, ci_kind)
+    elif kind == "histogram":
+        return _plot_histogram(x, Y, ax, plot_hdi_kwargs, label)
+    elif kind == "spaghetti":
+        return _plot_spaghetti(x, Y, ax, plot_hdi_kwargs, num_samples, label)
+    else:
+        raise ValueError(
+            f"Unknown kind: {kind}. Must be 'ribbon', 'histogram', or 'spaghetti'."
         )
-    return pl.concat(parts, how="diagonal_relaxed")
 
 
-def _observations_for_plot(
-    observations: pd.DataFrame,
-    *,
-    x: str,
-    panel: str,
-) -> pd.DataFrame:
-    obs = observations.rename(columns={"value": "y"})
-    obs["series"] = "Observations"
-    obs["panel"] = panel
-    return obs
+def _equal_tailed_interval(
+    Y: xr.DataArray, prob: float
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Equal-tailed interval using posterior quantiles (no arviz_stats dependency)."""
+    q_lo = (1.0 - prob) / 2.0
+    q_hi = 1.0 - q_lo
+    stacked = Y.stack(sample=("chain", "draw"))
+    lower = stacked.quantile(q_lo, dim="sample", skipna=True)
+    upper = stacked.quantile(q_hi, dim="sample", skipna=True)
+    return lower, upper
 
 
-def _derive_effect_area(
-    intervals: pd.DataFrame,
-    observations: pd.DataFrame,
-    *,
-    panel_titles: tuple[str, str, str],
-    series_labels: dict[str, str],
-    shade_outcome: bool,
-    x: str,
-    post_index: pd.Index | None,
-) -> pd.DataFrame | None:
-    top, middle, _bottom = panel_titles
-    counterfactual_label = series_labels["counterfactual"]
-    post_effect_label = series_labels["post_effect"]
-    post_prediction = intervals[
-        (intervals["panel"] == top) & (intervals["series"] == counterfactual_label)
-    ]
-    post_impact = intervals[
-        (intervals["panel"] == middle) & (intervals["series"] == post_effect_label)
-    ]
-    areas: list[pd.DataFrame] = []
-    if (
-        shade_outcome
-        and not post_prediction.empty
-        and (post_index is None or len(post_index) > 1)
-    ):
-        obs_frame = observations.rename(columns={"value": "y"})
-        if post_index is not None:
-            post_obs = obs_frame.loc[obs_frame[x].isin(post_index.tolist()), [x, "y"]]
-        else:
-            post_obs = obs_frame.loc[obs_frame[x].isin(post_prediction[x]), [x, "y"]]
-        areas.append(
-            post_prediction[[x, "mu"]]
-            .merge(post_obs, on=x)
-            .rename(columns={"mu": "y1", "y": "y2"})
-            .assign(panel=top)
-        )
-    if not post_impact.empty and (post_index is None or len(post_index) > 1):
-        areas.append(
-            post_impact[[x, "mu"]]
-            .rename(columns={"mu": "y1"})
-            .assign(y2=0.0, panel=middle)
-        )
-    if not areas:
-        return None
-    return pd.concat(areas, ignore_index=True)
-
-
-def _derive_singleton_intervals(
-    intervals: pd.DataFrame,
-    *,
-    panel_titles: tuple[str, str, str],
-    series_labels: dict[str, str],
-    post_index: pd.Index | None,
-) -> pd.DataFrame:
-    if post_index is None or len(post_index) != 1:
-        return intervals.iloc[0:0].copy()
-    top, middle, bottom = panel_titles
-    counterfactual_label = series_labels["counterfactual"]
-    post_effect_label = series_labels["post_effect"]
-    cumulative_label = series_labels["cumulative_effect"]
-    return pd.concat(
-        [
-            intervals[
-                (intervals["panel"] == top)
-                & (intervals["series"] == counterfactual_label)
-            ],
-            intervals[
-                (intervals["panel"] == middle)
-                & (intervals["series"] == post_effect_label)
-            ],
-            intervals[
-                (intervals["panel"] == bottom)
-                & (intervals["series"] == cumulative_label)
-            ],
-        ],
-        ignore_index=True,
-    )
-
-
-def add_causal_panel_legend(
+def _plot_ribbon(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
     ax: plt.Axes,
-    *,
-    labels: list[str],
-    colors: dict[str, str],
-    area_labels: set[str] | None = None,
-) -> None:
-    """Add the Matplotlib legend required by the public ``legend_kwargs`` API.
+    plot_hdi_kwargs: dict[str, Any] | None,
+    ci_prob: float,
+    label: str | None,
+    ci_kind: Literal["hdi", "eti"],
+) -> tuple[Line2D, PolyCollection]:
+    """Plot ribbon visualization with HDI or ETI intervals."""
+    if plot_hdi_kwargs is None:
+        plot_hdi_kwargs = {}
 
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Top panel that owns the legend.
-    labels : list of str
-        Ordered legend entries.
-    colors : dict
-        Color for each legend entry.
-    area_labels : set of str, optional
-        Entries represented by filled areas rather than lines.
-    """
-    area_labels = area_labels or set()
-    handles = []
-    for label in labels:
-        if label in area_labels:
-            handles.append(Patch(facecolor=colors[label], alpha=0.25))
-        elif label == "Observations":
-            handles.append(
-                Line2D([0], [0], color=colors[label], marker=".", linestyle="")
+    # Separate fill_kwargs for az.plot_hdi, as ax.plot doesn't accept them
+    line_kwargs = plot_hdi_kwargs.copy()
+    if "fill_kwargs" in line_kwargs:
+        del line_kwargs["fill_kwargs"]
+
+    # Plot mean line
+    (h_line,) = ax.plot(
+        x,
+        Y.mean(dim=["chain", "draw"]),
+        ls="-",
+        **line_kwargs,
+        label=label,
+    )
+
+    # Plot interval ribbon
+    if ci_kind == "hdi":
+        # Use ArviZ's plot_hdi for HDI
+        ax_hdi = az.plot_hdi(
+            x,
+            Y,
+            hdi_prob=ci_prob,
+            ax=ax,
+            smooth=False,
+            **plot_hdi_kwargs,
+        )
+    else:  # ci_kind == "eti"
+        lower, upper = _equal_tailed_interval(Y, ci_prob)
+        lower_vals = np.asarray(lower.values, dtype=float).ravel()
+        upper_vals = np.asarray(upper.values, dtype=float).ravel()
+        n_x = len(np.asarray(x))
+        if lower_vals.size != n_x or upper_vals.size != n_x:
+            msg = (
+                "ETI ribbon: length mismatch between x and interval bounds "
+                f"(x={n_x}, lower={lower_vals.size}, upper={upper_vals.size})."
             )
-        else:
-            handles.append(Line2D([0], [0], color=colors[label]))
-    ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONT_SIZE)
+            raise ValueError(msg)
+
+        # Extract fill_kwargs if provided
+        fill_kwargs = plot_hdi_kwargs.get("fill_kwargs", {})
+        line_color = plot_hdi_kwargs.get("color", "C0")
+        fill_color = fill_kwargs.get("color", line_color)
+        fill_alpha = fill_kwargs.get("alpha", 0.3)
+
+        ax.fill_between(
+            x,
+            lower_vals,
+            upper_vals,
+            color=fill_color,
+            alpha=fill_alpha,
+            **{k: v for k, v in fill_kwargs.items() if k not in ["color", "alpha"]},
+        )
+        ax_hdi = ax
+
+    # Return handle to patch. We get a list of the children of the axis. Filter for just
+    # the PolyCollection objects. Take the last one.
+    if ci_kind == "hdi":
+        h_patch = list(
+            filter(lambda x: isinstance(x, PolyCollection), ax_hdi.get_children())
+        )[-1]
+    else:  # ci_kind == "eti"
+        # For ETI, we used fill_between which creates a PolyCollection
+        # Get the last PolyCollection from the axes
+        h_patch = (
+            list(
+                filter(lambda x: isinstance(x, PolyCollection), ax_hdi.get_children())
+            )[-1]
+            if any(isinstance(x, PolyCollection) for x in ax_hdi.get_children())
+            else None
+        )
+    return (h_line, h_patch)
 
 
-def build_causal_panel_plot(
-    panel_data: CausalPanelData,
-    *,
-    panels: tuple[str, str, str],
-    series_labels: dict[str, str],
-    colors: dict[str, str],
-    kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-    ci_prob: float = HDI_PROB,
-    interval: Literal["hdi", "eti"] = "hdi",
-    num_samples: int = 50,
-    x: str = "obs_ind",
-    shade_fill: str = "#1f77b4",
-    figsize: tuple[float, float] = (7, 11),
-    zero_linetype: str | None = None,
-    zero_alpha: float = 1.0,
-    post_index: pd.Index | None = None,
-    singleton_color: str = "#ff7f0e",
-    shade_outcome: bool = True,
-) -> Any:
-    """Three-panel causal-impact layout shared by ITS, SC, SDiD, and PiecewiseITS.
+def _x_as_numeric_mesh(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+) -> tuple[np.ndarray, bool]:
+    """Convert x to floats for pcolormesh edges; return (values, is_datetime)."""
+    if isinstance(x, pd.DatetimeIndex):
+        return mdates.date2num(x.to_numpy()), True
+    x_arr = np.asarray(x)
+    if np.issubdtype(x_arr.dtype, np.datetime64):
+        return mdates.date2num(pd.to_datetime(x_arr)), True
+    if x_arr.dtype == object:
+        try:
+            dt = pd.to_datetime(x_arr)
+            if pd.api.types.is_datetime64_any_dtype(dt):
+                return mdates.date2num(dt), True
+        except (ValueError, TypeError):
+            pass
+    return np.asarray(x_arr, dtype=float), False
 
-    Derives interval summaries, shading, posterior layers, and singleton
-    point-ranges from explicit ``CausalPanelData`` quantities.
+
+def _plot_histogram(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
+    ax: plt.Axes,
+    plot_hdi_kwargs: dict[str, Any] | None,
+    label: str | None,
+) -> tuple[list[Line2D], None]:
+    """Plot histogram visualization of the posterior as a 2D heatmap.
+
+    Columns are positions along ``x``; rows are y-value bins. Cell values are
+    per-column histogram counts, column-normalized for display. The posterior
+    mean line is overlaid on top.
+    """
+    if plot_hdi_kwargs is None:
+        plot_hdi_kwargs = {}
+
+    Y_flat = Y.stack(sample=("chain", "draw"))
+    time_dims = [d for d in Y.dims if d not in ("chain", "draw")]
+    if len(time_dims) != 1:
+        msg = (
+            "plot_posterior_over_x histogram expects Y with exactly one non-chain/draw dimension; "
+            f"got {time_dims!r}"
+        )
+        raise ValueError(msg)
+    time_dim = time_dims[0]
+    n_time = Y.sizes[time_dim]
+    n_x = len(np.asarray(x))
+    if n_x != n_time:
+        msg = f"Length of x ({n_x}) != length of time dimension {time_dim!r} ({n_time})"
+        raise ValueError(msg)
+
+    y_min = float(np.nanmin(Y_flat.values))
+    y_max = float(np.nanmax(Y_flat.values))
+    y_pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
+    y_edges = np.linspace(y_min - y_pad, y_max + y_pad, 51)
+    n_bins = len(y_edges) - 1
+
+    hist2d = np.zeros((n_bins, n_time), dtype=float)
+    for t in range(n_time):
+        col = Y_flat.isel({time_dim: t}).values.ravel()
+        counts, _ = np.histogram(col, bins=y_edges)
+        hist2d[:, t] = counts
+
+    col_max = hist2d.max(axis=0, keepdims=True)
+    hist2d_norm = np.divide(
+        hist2d,
+        col_max + 1e-12,
+        out=np.zeros_like(hist2d, dtype=float),
+        where=col_max > 0,
+    )
+
+    x_num, is_dt = _x_as_numeric_mesh(x)
+    if len(x_num) == 1:
+        x_edges = np.array([x_num[0] - 0.5, x_num[0] + 0.5])
+    else:
+        dx = np.diff(x_num)
+        x_edges = np.zeros(len(x_num) + 1)
+        x_edges[0] = x_num[0] - dx[0] / 2
+        x_edges[-1] = x_num[-1] + dx[-1] / 2
+        x_edges[1:-1] = x_num[:-1] + dx / 2
+
+    cmap = plot_hdi_kwargs.get("cmap", "viridis")
+    alpha = float(plot_hdi_kwargs.get("alpha", 0.85))
+    color_line = plot_hdi_kwargs.get("color", "C0")
+
+    ax.pcolormesh(
+        x_edges,
+        y_edges,
+        hist2d_norm,
+        cmap=cmap,
+        shading="flat",
+        alpha=alpha,
+    )
+    if is_dt:
+        ax.xaxis_date()
+
+    mean_y = Y.mean(dim=["chain", "draw"])
+    mean_vals = np.asarray(mean_y.values, dtype=float).ravel()
+    if mean_vals.size != n_time:
+        msg = f"Mean line length {mean_vals.size} != n_time {n_time}"
+        raise ValueError(msg)
+
+    (mean_line,) = ax.plot(
+        x_num,
+        mean_vals,
+        ls="-",
+        color=color_line,
+        label=label if label else "Posterior mean",
+    )
+    return ([mean_line], None)
+
+
+def _plot_spaghetti(
+    x: pd.DatetimeIndex | np.ndarray | pd.Index | pd.Series | ExtensionArray,
+    Y: xr.DataArray,
+    ax: plt.Axes,
+    plot_hdi_kwargs: dict[str, Any] | None,
+    num_samples: int,
+    label: str | None,
+) -> tuple[list[Line2D], None]:
+    """Plot spaghetti plot with random posterior samples."""
+    if plot_hdi_kwargs is None:
+        plot_hdi_kwargs = {}
+
+    # Flatten posterior samples across chains and draws
+    Y_flat = Y.stack(sample=("chain", "draw"))
+    n_samples_total = Y_flat.sizes["sample"]
+
+    # Randomly select samples
+    n_draw = min(num_samples, n_samples_total)
+    rng = np.random.default_rng(seed=42)
+    sample_indices = rng.choice(n_samples_total, size=n_draw, replace=False)
+
+    # Plot each selected sample as a line
+    handles = []
+    color = plot_hdi_kwargs.get("color", "C0")
+    alpha = plot_hdi_kwargs.get("alpha", 0.1)
+
+    for idx in sample_indices:
+        sample_data = Y_flat.isel(sample=idx)
+        h = ax.plot(
+            x,
+            sample_data.values,
+            color=color,
+            alpha=alpha,
+            linewidth=0.5,
+            label=label if idx == sample_indices[0] else None,
+        )
+        handles.extend(h)
+
+    # Plot mean line on top
+    mean_line = ax.plot(
+        x,
+        Y.mean(dim=["chain", "draw"]),
+        ls="-",
+        color=plot_hdi_kwargs.get("color", "C0"),
+        linewidth=2,
+        label="Posterior mean",
+    )
+    handles.extend(mean_line)
+
+    return (handles, None)
+
+
+def get_hdi_to_df(
+    x: xr.DataArray,
+    hdi_prob: float = HDI_PROB,
+) -> pd.DataFrame:
+    """Calculate and recover HDI intervals.
 
     Parameters
     ----------
-    panel_data : CausalPanelData
-        Semantic draws and observations from an experiment extractor.
-    panels : tuple of str
-        Ordered facet labels (top, middle, bottom).
-    series_labels : dict
-        Display labels keyed by explicit posterior quantity names.
-    colors : dict
-        Series name to color mapping for rendered layers.
-    kind : {"ribbon", "histogram", "spaghetti"}, optional
-        Posterior rendering mode.
-    ci_prob : float, optional
-        Credible interval probability mass.
-    interval : {"hdi", "eti"}, optional
-        Interval type.
-    num_samples : int, optional
-        Spaghetti paths to sample when ``kind="spaghetti"``.
-    x : str, optional
-        Shared x column name. Defaults to ``"obs_ind"``.
-    shade_fill : str, optional
-        Fill color for causal-impact shading ribbons.
-    figsize : tuple of float, optional
-        plotnine ``figure_size``.
-    zero_linetype : str, optional
-        ``geom_hline`` linetype for zero reference lines.
-    zero_alpha : float, optional
-        Alpha for zero reference lines.
-    post_index : pandas.Index, optional
-        Post-period index for outcome shading and singleton point-ranges.
-    singleton_color : str, optional
-        Color for singleton post-period point-ranges.
-    shade_outcome : bool, optional
-        Whether to shade the top-panel counterfactual gap.
+    x : xr.DataArray
+        Xarray data array.
+    hdi_prob : float, optional
+        The size of the HDI. Defaults to
+        :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the HDI intervals with 'lower' and 'higher'
+        columns.
     """
-    validate_posterior_plot_options(kind, ci_kind=interval, num_samples=num_samples)
+    hdi_result = az.hdi(x, hdi_prob=hdi_prob)
 
-    panel_titles: tuple[str, str, str] = (panels[0], panels[1], panels[2])
-    panel_draws = _causal_panel_draws(
-        panel_data,
-        panel_titles=panel_titles,
-        series_labels=series_labels,
-    )
-    grouping = ["panel", "series", x]
-    intervals, posterior_layers = posterior_kind_layers(
-        panel_draws,
-        kind,
-        x=x,
-        group_by=grouping,
-        ci_prob=ci_prob,
-        interval=interval,
-        num_samples=num_samples,
-        colors=colors,
-    )
-    obs = _observations_for_plot(panel_data.observations, x=x, panel=panels[0])
-    effect_area = _derive_effect_area(
-        intervals,
-        panel_data.observations,
-        panel_titles=panel_titles,
-        series_labels=series_labels,
-        shade_outcome=shade_outcome,
-        x=x,
-        post_index=post_index,
-    )
-    singleton_intervals = _derive_singleton_intervals(
-        intervals,
-        panel_titles=panel_titles,
-        series_labels=series_labels,
-        post_index=post_index,
-    )
-    if not singleton_intervals.empty:
-        singleton_intervals["panel"] = pd.Categorical(
-            singleton_intervals["panel"], categories=panels, ordered=True
-        )
+    # Get the data variable name (typically 'mu' or 'x')
+    # We select only the data variable column to exclude coordinates like 'treated_units'
+    data_var = list(hdi_result.data_vars)[0]
 
-    frames = [intervals, obs]
-    if effect_area is not None:
-        frames.append(effect_area)
-    _categorize_panels(frames, panels)
+    # Convert to DataFrame, select only the data variable column, then unstack
+    # This prevents coordinate values (like 'treated_agg') from appearing as columns
+    hdi_df = hdi_result[data_var].to_dataframe()[[data_var]].unstack(level="hdi")
 
-    mid, bot = panels[1], panels[2]
-    zero_df = pd.DataFrame({"yintercept": [0.0, 0.0], "panel": [mid, bot]})
-    _categorize_panels([zero_df], panels)
+    # Remove the top level of column MultiIndex to get just 'lower' and 'higher'
+    hdi_df.columns = hdi_df.columns.droplevel(0)
 
-    p = p9.ggplot()
-    if effect_area is not None:
-        p = p + p9.geom_ribbon(
-            effect_area,
-            p9.aes(x, ymin="y1", ymax="y2"),
-            fill=shade_fill,
-            alpha=0.25,
-        )
-    for layer in posterior_layers:
-        p += layer
-    hline_kwargs: dict[str, Any] = {"color": "black", "alpha": zero_alpha}
-    if zero_linetype is not None:
-        hline_kwargs["linetype"] = zero_linetype
-    scales = [p9.scale_color_manual(values=colors, name="")]
-    if kind != "histogram":
-        scales.append(p9.scale_fill_manual(values=colors, name=""))
-    plot_theme: dict[str, Any] = {
-        "figure_size": figsize,
-        "panel_spacing_y": 0.06,
-        "plot_margin_bottom": 0.08,
-    }
-    p = (
-        p
-        + p9.geom_point(obs, p9.aes(x, "y", color="series"), size=1)
-        + p9.geom_hline(zero_df, p9.aes(yintercept="yintercept"), **hline_kwargs)
-        + p9.facet_wrap("panel", ncol=1, scales="free_y", as_table=False)
-        + scales[0]
-        + (scales[1] if len(scales) > 1 else p9.guides())
-        + p9.labs(x="", y="")
-        + p9.theme(**plot_theme)
-    )
-    if kind == "histogram":
-        p = p + HISTOGRAM_PANEL_THEME
-    if not singleton_intervals.empty:
-        p += p9.geom_pointrange(
-            singleton_intervals,
-            p9.aes(x, "mu", ymin="mu_lower", ymax="mu_upper"),
-            color=singleton_color,
-            size=0.5,
-            show_legend=False,
-        )
-    return p
+    return hdi_df

@@ -16,6 +16,8 @@ Patsy stateful transforms for Piecewise Interrupted Time Series analysis.
 
 This module provides `step` and `ramp` transforms for use in patsy formulas,
 enabling flexible specification of level and slope changes at intervention points.
+It also provides the internal `elapsed` transform used to represent bare datetime
+predictors as continuous elapsed days; use ``C(date)`` for categorical date effects.
 
 Examples
 --------
@@ -282,8 +284,57 @@ class RampTransform:
             return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
 
 
+class ElapsedDaysTransform:
+    """Stateful transform that represents datetimes as days since the fitted origin."""
+
+    def __init__(self) -> None:
+        self._origin: pd.Timestamp | None = None
+
+    def memorize_chunk(self, x: Any) -> None:
+        """Store the earliest datetime encountered during Patsy's fitting pass.
+
+        Parameters
+        ----------
+        x : array-like
+            Datetime values from a Patsy fitting chunk.
+        """
+        x_dt = pd.to_datetime(x)
+        x_min = pd.Timestamp(x_dt.min())
+        if self._origin is None:
+            self._origin = x_min
+        else:
+            self._origin = min(self._origin, x_min)
+
+    def memorize_finish(self) -> None:
+        """Called after all chunks processed."""
+        pass
+
+    def transform(self, x: Any) -> np.ndarray:
+        """Return elapsed days from the fitted origin.
+
+        Parameters
+        ----------
+        x : array-like
+            Datetime values to encode.
+        """
+        if self._origin is None:
+            raise RuntimeError("elapsed() was used before its origin was initialized.")
+        x_dt = pd.to_datetime(x)
+        if isinstance(x_dt, pd.DatetimeIndex):
+            return np.asarray((x_dt - self._origin).total_seconds() / (24 * 3600))
+        return np.asarray((x_dt - self._origin).dt.total_seconds() / (24 * 3600))
+
+
 # Create callable stateful transforms for use in formulas
 step = patsy.stateful_transform(StepTransform)  # type: ignore[attr-defined]
 ramp = patsy.stateful_transform(RampTransform)  # type: ignore[attr-defined]
+elapsed = patsy.stateful_transform(ElapsedDaysTransform)  # type: ignore[attr-defined]
 
-__all__ = ["step", "ramp", "StepTransform", "RampTransform"]
+__all__ = [
+    "step",
+    "ramp",
+    "elapsed",
+    "StepTransform",
+    "RampTransform",
+    "ElapsedDaysTransform",
+]
