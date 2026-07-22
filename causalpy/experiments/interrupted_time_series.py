@@ -31,7 +31,9 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
+    extract_r2_score,
     get_hdi_to_df,
+    has_posterior_draws,
     plot_posterior_over_x,
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
@@ -648,7 +650,7 @@ class InterruptedTimeSeries(BaseExperiment):
             zorder=3,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -661,13 +663,18 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         Plot the results.
 
+        Consumes the canonical prediction container from any backend.
+        Uncertainty bands are drawn only when the container carries posterior
+        draws; point-estimate backends (singleton ``chain``/``draw``) get bare
+        lines.
+
         Parameters
         ----------
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use ``None``
             to return raw numbers.
-        hdi_prob : float, optional
-            Probability mass of the highest density interval drawn around the
+        ci_prob : float, optional
+            Probability mass of the credible interval drawn around the
             posterior predictive, causal impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
@@ -675,6 +682,7 @@ class InterruptedTimeSeries(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         counterfactual_label = "Counterfactual"
+        with_uncertainty = has_posterior_draws(self.pre_pred)
         single_post_obs = len(self.datapost) <= 1
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
@@ -683,149 +691,139 @@ class InterruptedTimeSeries(BaseExperiment):
             "num_samples": num_samples,
         }
 
+        pre_pred = self.pre_pred.isel(treated_units=0)
+        post_pred = self.post_pred.isel(treated_units=0)
+        pre_y = self.pre_design["y"].isel(treated_units=0)
+        post_y = self.post_design["y"].isel(treated_units=0)
+
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
-        # pre-intervention period
-        pre_mu = self.pre_pred
-        pre_mu_plot = (
-            pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
-        )
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapre.index,
-            pre_mu_plot,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
-
-        (h,) = ax[0].plot(
-            self.datapre.index,
-            self.pre_design["y"].isel(treated_units=0),
-            "k.",
-            label="Observations",
-        )
-        handles.append(h)
-        labels.append("Observations")
-
-        # post intervention period
-        post_mu = self.post_pred
-        post_mu_plot = (
-            post_mu.isel(treated_units=0)
-            if "treated_units" in post_mu.dims
-            else post_mu
-        )
-        h_line, h_patch = plot_posterior_over_x(
-            self.datapost.index,
-            post_mu_plot,
-            ax=ax[0],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        if single_post_obs:
-            # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
-            # single post-period datum; overlay an explicit median + HDI
-            # errorbar so the counterfactual is still visible. Use the
-            # errorbar artist itself as the legend handle so the legend
-            # matches what is actually drawn.
-            errbar = self._draw_singleton_hdi_marker(
-                ax[0], self.datapost.index, post_mu, color="C1"
+        handles: list[Any] = []
+        labels: list[str] = []
+        if with_uncertainty:
+            # pre-intervention period
+            h_line, h_patch = plot_posterior_over_x(
+                self.datapre.index,
+                pre_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
             )
-            handles.append(errbar)
-        else:
             handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
+            labels.append("Pre-intervention period")
 
-        ax[0].plot(
-            self.datapost.index,
-            self.post_design["y"].isel(treated_units=0),
-            "k.",
-            zorder=3,
-        )
+            (h,) = ax[0].plot(
+                self.datapre.index,
+                pre_y,
+                "k.",
+                label="Observations",
+            )
+            handles.append(h)
+            labels.append("Observations")
+
+            # post intervention period
+            h_line, h_patch = plot_posterior_over_x(
+                self.datapost.index,
+                post_pred,
+                ax=ax[0],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            if single_post_obs:
+                # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
+                # single post-period datum; overlay an explicit median + HDI
+                # errorbar so the counterfactual is still visible. Use the
+                # errorbar artist itself as the legend handle so the legend
+                # matches what is actually drawn.
+                errbar = self._draw_singleton_hdi_marker(
+                    ax[0], self.datapost.index, self.post_pred, color="C1"
+                )
+                handles.append(errbar)
+            else:
+                handles.append((h_line, h_patch))
+            labels.append(counterfactual_label)
+
+            ax[0].plot(self.datapost.index, post_y, "k.", zorder=3)
+        else:
+            ax[0].plot(self.datapre.index, pre_y, "k.")
+            ax[0].plot(
+                self.datapre.index,
+                pre_pred.mean(("chain", "draw")),
+                c="k",
+                label="model fit",
+            )
+            ax[0].plot(self.datapost.index, post_y, "k.")
+            ax[0].plot(
+                self.datapost.index,
+                post_pred.mean(("chain", "draw")),
+                label=counterfactual_label,
+                ls=":",
+                c="k",
+            )
+
         # Shaded causal effect (only meaningful when there are >=2 post-period
         # points; with a single datum the fill_between collapses to nothing,
         # so we omit the legend entry to avoid misleading the reader).
-        post_pred_mu = self.post_pred
-        if "treated_units" in post_pred_mu.dims:
-            post_pred_mu = post_pred_mu.isel(treated_units=0)
-        post_pred_mu = post_pred_mu.mean(("chain", "draw"))
         h = ax[0].fill_between(
             self.datapost.index,
-            y1=post_pred_mu,
-            y2=self.post_design["y"].isel(treated_units=0),
+            y1=post_pred.mean(("chain", "draw")),
+            y2=post_y,
             color="C0",
             alpha=0.25,
+            label="Causal impact",
         )
-        if not single_post_obs:
+        if with_uncertainty and not single_post_obs:
             handles.append(h)
             labels.append("Causal impact")
 
-        # Title with R^2, supporting both unit_0_r2 and r2 keys
-        r2_val = None
-        r2_std_val = None
-        try:
-            if isinstance(self.score, pd.Series):
-                if "unit_0_r2" in self.score.index:
-                    r2_val = self.score["unit_0_r2"]
-                    r2_std_val = self.score.get("unit_0_r2_std", None)
-                elif "r2" in self.score.index:
-                    r2_val = self.score["r2"]
-                    r2_std_val = self.score.get("r2_std", None)
-        except Exception:
-            pass
-        title_str = "Pre-intervention Bayesian $R^2$"
-        if r2_val is not None:
-            title_str += f": {round_num(r2_val, round_to)}"
-            if r2_std_val is not None:
-                title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
+        # Title with R^2; scores carrying a dispersion entry render as Bayesian
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        assert r2_val is not None  # both backends' score containers carry R^2
+        if r2_std_val is not None:
+            title_str = (
+                f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, round_to)}"
+                f"\n(std = {round_num(r2_std_val, round_to)})"
+            )
+        else:
+            title_str = (
+                f"$R^2$ on pre-intervention data = {round_num(r2_val, round_to)}"
+            )
         ax[0].set(title=title_str)
 
         # MIDDLE PLOT -----------------------------------------------
-        pre_impact_plot = (
-            self.pre_impact.isel(treated_units=0)
-            if hasattr(self.pre_impact, "dims")
-            and "treated_units" in self.pre_impact.dims
-            else self.pre_impact
-        )
-        plot_posterior_over_x(
-            self.datapre.index,
-            pre_impact_plot,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        post_impact_plot = (
-            self.post_impact.isel(treated_units=0)
-            if hasattr(self.post_impact, "dims")
-            and "treated_units" in self.post_impact.dims
-            else self.post_impact
-        )
-        plot_posterior_over_x(
-            self.datapost.index,
-            post_impact_plot,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        if single_post_obs:
-            self._draw_singleton_hdi_marker(
-                ax[1], self.datapost.index, self.post_impact, color="C1"
+        if with_uncertainty:
+            plot_posterior_over_x(
+                self.datapre.index,
+                self.pre_impact,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C0"},
+            )
+            plot_posterior_over_x(
+                self.datapost.index,
+                self.post_impact,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            if single_post_obs:
+                self._draw_singleton_hdi_marker(
+                    ax[1], self.datapost.index, self.post_impact, color="C1"
+                )
+        else:
+            ax[1].plot(
+                self.datapre.index, self.pre_impact.mean(("chain", "draw")), "k."
+            )
+            ax[1].plot(
+                self.datapost.index,
+                self.post_impact.mean(("chain", "draw")),
+                "k.",
+                label=counterfactual_label,
             )
         ax[1].axhline(y=0, c="k")
-        post_impact_mean = (
-            self.post_impact.mean(["chain", "draw"])
-            if hasattr(self.post_impact, "mean")
-            else self.post_impact
-        )
-        if (
-            hasattr(post_impact_mean, "dims")
-            and "treated_units" in post_impact_mean.dims
-        ):
-            post_impact_mean = post_impact_mean.isel(treated_units=0)
         ax[1].fill_between(
             self.datapost.index,
-            y1=post_impact_mean,
+            y1=self.post_impact.mean(("chain", "draw")),
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -833,25 +831,26 @@ class InterruptedTimeSeries(BaseExperiment):
         ax[1].set(title="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        post_cum_plot = (
-            self.post_impact_cumulative.isel(treated_units=0)
-            if hasattr(self.post_impact_cumulative, "dims")
-            and "treated_units" in self.post_impact_cumulative.dims
-            else self.post_impact_cumulative
-        )
-        plot_posterior_over_x(
-            self.datapost.index,
-            post_cum_plot,
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        if single_post_obs:
-            self._draw_singleton_hdi_marker(
-                ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+        if with_uncertainty:
+            plot_posterior_over_x(
+                self.datapost.index,
+                self.post_impact_cumulative,
+                ax=ax[2],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            if single_post_obs:
+                self._draw_singleton_hdi_marker(
+                    ax[2], self.datapost.index, self.post_impact_cumulative, color="C1"
+                )
+        else:
+            ax[2].plot(
+                self.datapost.index,
+                self.post_impact_cumulative.mean(("chain", "draw")),
+                c="k",
             )
         ax[2].axhline(y=0, c="k")
+        ax[2].set(title="Cumulative Causal Impact")
 
         # Intervention lines. Use a thin dashed black style and a zorder just
         # below the data so the treatment marker reads as a neutral
@@ -878,11 +877,15 @@ class InterruptedTimeSeries(BaseExperiment):
                     label="Treatment end" if i == 0 else None,
                 )
 
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
+        if with_uncertainty:
+            ax[0].legend(
+                handles=(h_tuple for h_tuple in handles),
+                labels=labels,
+                fontsize=LEGEND_FONT_SIZE,
+            )
+        else:
+            # Collect labelled artists (including the treatment lines)
+            ax[0].legend(fontsize=LEGEND_FONT_SIZE)
 
         # Apply intelligent date formatting if data has datetime index
         if isinstance(self.datapre.index, pd.DatetimeIndex):
@@ -895,232 +898,80 @@ class InterruptedTimeSeries(BaseExperiment):
 
         return fig, ax
 
-    def _ols_plot(
-        self,
-        round_to: int | None = 2,
-        figsize: tuple[float, float] = (7, 8),
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results
-
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param figsize:
-            Width and height of the figure in inches. Defaults to ``(7, 8)``.
-        """
-        counterfactual_label = "Counterfactual"
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
-
-        ax[0].plot(self.datapre.index, self.pre_design["y"], "k.")
-        ax[0].plot(
-            self.datapre.index,
-            np.squeeze(self.pre_pred),
-            c="k",
-            label="model fit",
-        )
-
-        ax[0].plot(self.datapost.index, self.post_design["y"], "k.")
-        ax[0].plot(
-            self.datapost.index,
-            np.squeeze(self.post_pred),
-            label=counterfactual_label,
-            ls=":",
-            c="k",
-        )
-        # Shaded causal effect
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_pred),
-            y2=np.squeeze(self.post_design["y"]),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        ax[0].set(
-            title=f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to)}"
-        )
-
-        ax[1].plot(self.datapre.index, np.squeeze(self.pre_impact), "k.")
-        ax[1].plot(
-            self.datapost.index,
-            np.squeeze(self.post_impact),
-            "k.",
-            label=counterfactual_label,
-        )
-        ax[1].axhline(y=0, c="k")
-        # Shaded causal effect
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_impact),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(self.datapost.index, np.squeeze(self.post_impact_cumulative), c="k")
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
-        # Intervention lines. Use a thin dashed black style and a zorder just
-        # below the data so the treatment marker reads as a neutral
-        # annotation rather than data, and never occludes data points.
-        for i in [0, 1, 2]:
-            ax[i].axvline(
-                x=self.treatment_time,
-                ls="--",
-                lw=1.5,
-                color="k",
-                zorder=1.5,
-                label="Treatment start" if i == 0 else None,
-            )
-            if self.treatment_end_time is not None:
-                ax[i].axvline(
-                    x=self.treatment_end_time,
-                    ls=":",
-                    lw=1.5,
-                    color="k",
-                    zorder=1.5,
-                    label="Treatment end" if i == 0 else None,
-                )
-
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return (fig, ax)
-
-    def get_plot_data_bayesian(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
+    def get_plot_data(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
+
+        HDI columns are included only when the prediction container carries
+        posterior draws (point-estimate backends return just ``prediction``
+        and ``impact``).
 
         Parameters
         ----------
         hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
             Probability mass of the highest density interval. Defaults to the
             project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+            Ignored when the prediction container has no posterior draws.
         """
-        if self._model_backend.is_bayesian:
-            hdi_pct = int(round(hdi_prob * 100))
+        with_uncertainty = has_posterior_draws(self.pre_pred)
+        hdi_pct = int(round(hdi_prob * 100))
 
+        pre_data = self.datapre.copy()
+        post_data = self.datapost.copy()
+
+        pre_mu = self.pre_pred.isel(treated_units=0)
+        post_mu = self.post_pred.isel(treated_units=0)
+        pre_data["prediction"] = pre_mu.mean(("chain", "draw")).values
+        post_data["prediction"] = post_mu.mean(("chain", "draw")).values
+
+        if with_uncertainty:
             pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
             pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-
-            pre_data = self.datapre.copy()
-            post_data = self.datapost.copy()
-
-            pre_mu = self.pre_pred
-            post_mu = self.post_pred
-            if "treated_units" in pre_mu.dims:
-                pre_mu = pre_mu.isel(treated_units=0)
-            if "treated_units" in post_mu.dims:
-                post_mu = post_mu.isel(treated_units=0)
-            pre_data["prediction"] = pre_mu.mean(("chain", "draw")).values
-            post_data["prediction"] = post_mu.mean(("chain", "draw")).values
-
             hdi_pre_pred = get_hdi_to_df(self.pre_pred, hdi_prob=hdi_prob)
             hdi_post_pred = get_hdi_to_df(self.post_pred, hdi_prob=hdi_prob)
-            # If treated_units present, select unit_0; otherwise use directly
-            if (
-                isinstance(hdi_pre_pred.index, pd.MultiIndex)
-                and "treated_units" in hdi_pre_pred.index.names
-            ):
-                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
-                    "unit_0", level="treated_units"
-                ).set_index(pre_data.index)
-                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
-                    "unit_0", level="treated_units"
-                ).set_index(post_data.index)
-            else:
-                pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.set_index(
-                    pre_data.index
-                )
-                post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.set_index(
-                    post_data.index
-                )
+            pre_data[[pred_lower_col, pred_upper_col]] = hdi_pre_pred.xs(
+                "unit_0", level="treated_units"
+            ).set_index(pre_data.index)
+            post_data[[pred_lower_col, pred_upper_col]] = hdi_post_pred.xs(
+                "unit_0", level="treated_units"
+            ).set_index(post_data.index)
 
-            pre_impact_mean = (
-                self.pre_impact.mean(dim=["chain", "draw"])
-                if hasattr(self.pre_impact, "mean")
-                else self.pre_impact
-            )
-            post_impact_mean = (
-                self.post_impact.mean(dim=["chain", "draw"])
-                if hasattr(self.post_impact, "mean")
-                else self.post_impact
-            )
-            if (
-                hasattr(pre_impact_mean, "dims")
-                and "treated_units" in pre_impact_mean.dims
-            ):
-                pre_impact_mean = pre_impact_mean.isel(treated_units=0)
-            if (
-                hasattr(post_impact_mean, "dims")
-                and "treated_units" in post_impact_mean.dims
-            ):
-                post_impact_mean = post_impact_mean.isel(treated_units=0)
-            pre_data["impact"] = pre_impact_mean.values
-            post_data["impact"] = post_impact_mean.values
+        pre_data["impact"] = self.pre_impact.mean(dim=["chain", "draw"]).values
+        post_data["impact"] = self.post_impact.mean(dim=["chain", "draw"]).values
 
+        if with_uncertainty:
+            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
             # Compute impact HDIs directly via quantiles over posterior dims to avoid column shape issues
             alpha = 1 - hdi_prob
             lower_q = alpha / 2
             upper_q = 1 - alpha / 2
 
-            pre_lower_da = self.pre_impact.quantile(lower_q, dim=["chain", "draw"])
-            pre_upper_da = self.pre_impact.quantile(upper_q, dim=["chain", "draw"])
-            post_lower_da = self.post_impact.quantile(lower_q, dim=["chain", "draw"])
-            post_upper_da = self.post_impact.quantile(upper_q, dim=["chain", "draw"])
-
-            # If a treated_units dim remains for some models, select unit_0
-            if hasattr(pre_lower_da, "dims") and "treated_units" in pre_lower_da.dims:
-                pre_lower_da = pre_lower_da.sel(treated_units="unit_0")
-                pre_upper_da = pre_upper_da.sel(treated_units="unit_0")
-            if hasattr(post_lower_da, "dims") and "treated_units" in post_lower_da.dims:
-                post_lower_da = post_lower_da.sel(treated_units="unit_0")
-                post_upper_da = post_upper_da.sel(treated_units="unit_0")
-
             pre_data[impact_lower_col] = (
-                pre_lower_da.to_series().reindex(pre_data.index).values
+                self.pre_impact.quantile(lower_q, dim=["chain", "draw"])
+                .to_series()
+                .reindex(pre_data.index)
+                .values
             )
             pre_data[impact_upper_col] = (
-                pre_upper_da.to_series().reindex(pre_data.index).values
+                self.pre_impact.quantile(upper_q, dim=["chain", "draw"])
+                .to_series()
+                .reindex(pre_data.index)
+                .values
             )
             post_data[impact_lower_col] = (
-                post_lower_da.to_series().reindex(post_data.index).values
+                self.post_impact.quantile(lower_q, dim=["chain", "draw"])
+                .to_series()
+                .reindex(post_data.index)
+                .values
             )
             post_data[impact_upper_col] = (
-                post_upper_da.to_series().reindex(post_data.index).values
+                self.post_impact.quantile(upper_q, dim=["chain", "draw"])
+                .to_series()
+                .reindex(post_data.index)
+                .values
             )
 
-            self.plot_data = pd.concat([pre_data, post_data])
-
-            return self.plot_data
-        else:
-            raise ValueError("Unsupported model type")
-
-    def get_plot_data_ols(self) -> pd.DataFrame:
-        """
-        Recover the data of the experiment along with the prediction and causal impact information.
-        """
-        pre_data = self.datapre.copy()
-        post_data = self.datapost.copy()
-        pre_data["prediction"] = np.squeeze(self.pre_pred)
-        post_data["prediction"] = np.squeeze(self.post_pred)
-        pre_data["impact"] = np.squeeze(self.pre_impact)
-        post_data["impact"] = np.squeeze(self.post_impact)
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data

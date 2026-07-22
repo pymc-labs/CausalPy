@@ -806,34 +806,6 @@ def test_plot_trajectories_single_unit(small_panel_data):
     plt.close(fig)
 
 
-def test_get_plot_data_bayesian_raises_on_ols(small_panel_data):
-    """get_plot_data_bayesian() should raise ValueError for non-PyMC models."""
-    result = cp.PanelRegression(
-        data=small_panel_data,
-        formula="y ~ C(unit) + treatment + x1",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    )
-
-    with pytest.raises(ValueError, match="not a PyMC model"):
-        result.get_plot_data_bayesian()
-
-
-def test_get_plot_data_ols_raises_on_pymc(mock_pymc_sample, small_panel_data):
-    """get_plot_data_ols() should raise ValueError for non-OLS models."""
-    result = cp.PanelRegression(
-        data=small_panel_data,
-        formula="y ~ C(unit) + treatment + x1",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
-
-    with pytest.raises(ValueError, match="not an OLS model"):
-        result.get_plot_data_ols()
-
-
 def test_plot_unit_effects_no_fe_labels(small_panel_data):
     """plot_unit_effects() raises when formula has no C(unit) terms."""
     result = cp.PanelRegression(

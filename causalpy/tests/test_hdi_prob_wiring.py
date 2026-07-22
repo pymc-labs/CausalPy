@@ -522,7 +522,7 @@ def test_deprecated_hdi_prob_alias_emits_futurewarning(
 # StaggeredDifferenceInDifferences has different semantics: HDI bounds are
 # computed during effect aggregation (at fit time), not at plot time. The
 # plot reads cached ``att_lower``/``att_upper`` columns. To prevent silent
-# kwarg swallowing, ``_bayesian_plot`` raises a clear ``ValueError`` when the
+# kwarg swallowing, ``_plot`` raises a clear ``ValueError`` when the
 # caller supplies an ``hdi_prob`` that does not match the cached value.
 # ---------------------------------------------------------------------------
 

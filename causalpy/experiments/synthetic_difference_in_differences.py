@@ -668,13 +668,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
@@ -832,13 +833,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             format_date_axes(ax, full_index)
 
         return fig, ax
-
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """OLS not supported for SDiD."""
-        raise NotImplementedError(
-            "OLS models are not supported for "
-            "SyntheticDifferenceInDifferences. Use a Bayesian model."
-        )
 
     def effect_summary(
         self,

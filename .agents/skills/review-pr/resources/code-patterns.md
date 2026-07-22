@@ -7,9 +7,8 @@ Use this resource when reviewing source-code diffs. It collects CausalPy contrac
 All experiment classes in `causalpy/experiments/` inherit from `BaseExperiment`.
 
 - Declare `supports_ols: bool` and `supports_bayes: bool`.
-- If Bayesian is supported, implement `_bayesian_plot()` and `get_plot_data_bayesian()`.
-- If OLS is supported, implement `_ols_plot()` and `get_plot_data_ols()`.
-- Dispatch by model type with `isinstance(self.model, PyMCModel)` and `isinstance(self.model, RegressorMixin)`.
+- Implement a single backend-agnostic `_plot()` (and `get_plot_data()` where applicable) that consumes the canonical prediction container.
+- Key uncertainty rendering on data properties (`has_posterior_draws()` from `causalpy.plot_utils`), not backend identity; any surviving `is_bayesian` branch needs written justification.
 - Keep the data index named `"obs_ind"`.
 - Parse formulas through patsy `dmatrices()`.
 - Use project exceptions from `causalpy.custom_exceptions` for formula, data, and index errors.

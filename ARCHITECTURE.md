@@ -46,7 +46,7 @@ The optional third backend, `PyMCForecastModel` (`causalpy/pymc_forecast_models.
 
 ## Experiment Lifecycle
 
-Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which dispatches to `_bayesian_plot()` or `_ols_plot()`. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
+Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot()`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
 
 ## Experiment Inventory
 
@@ -91,7 +91,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 Copy the closest existing experiment or model and follow the `BaseExperiment` contract:
 
-- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement `_bayesian_plot()` / `_ols_plot()` only for supported backends
+- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement a single backend-agnostic `_plot()` (and `get_plot_data()`) that consumes the canonical prediction container, keying uncertainty rendering on `has_posterior_draws()` rather than backend identity
 - `algorithm()` with the fit/predict/impact flow; `effect_summary()` via helpers in `causalpy.reporting`
 - Public `plot(*, ...)` with a kwarg-only signature that delegates to `_render_plot()` — bare `*args` / `**kwargs` are forbidden on the public surface (enforced by `causalpy/tests/test_public_plot_signatures.py`). For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
 - Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors

@@ -190,7 +190,7 @@ class TestRoundTripAgainstPyMCBackend:
         assert "Model parameters:" in capsys.readouterr().out
         summary = forecast_result.effect_summary()
         assert len(summary.text) > 0
-        plot_df = forecast_result.get_plot_data_bayesian()
+        plot_df = forecast_result.get_plot_data()
         assert {"prediction", "impact"}.issubset(plot_df.columns)
 
     def test_experiment_reports_bayesian_backend(self, forecast_result):
