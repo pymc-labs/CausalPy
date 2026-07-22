@@ -222,6 +222,10 @@ class InterruptedTimeSeries(BaseExperiment):
 
         self.pre_pred = self._model_backend.predict(X=pre_X)
         self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
+        # Impact below relies on exact obs_ind alignment; a mismatch (e.g. a bare
+        # ndarray X getting arange coords) would silently corrupt the subtraction.
+        assert pre_y.obs_ind.equals(self.pre_pred.obs_ind)
+        assert post_y.obs_ind.equals(self.post_pred.obs_ind)
         self.pre_impact = (
             pre_y.isel(treated_units=0) - self.pre_pred.isel(treated_units=0)
         ).transpose(..., "obs_ind")

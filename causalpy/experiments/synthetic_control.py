@@ -307,6 +307,10 @@ class SyntheticControl(BaseExperiment):
 
         # calculate the counterfactual
         self.post_pred = self._model_backend.predict(X=self.post_design["control"])
+        # Impact below relies on exact obs_ind alignment; a mismatch (e.g. a bare
+        # ndarray X getting arange coords) would silently corrupt the subtraction.
+        assert self.pre_design["treated"].obs_ind.equals(self.pre_pred.obs_ind)
+        assert self.post_design["treated"].obs_ind.equals(self.post_pred.obs_ind)
         self.pre_impact = (self.pre_design["treated"] - self.pre_pred).transpose(
             ..., "obs_ind", "treated_units"
         )
