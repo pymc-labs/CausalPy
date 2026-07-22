@@ -63,9 +63,13 @@ def build_coords(
 
 def _extract_mu(prediction: Any) -> xr.DataArray:
     """Pull response-scale ``mu`` out of a Bayesian prediction container."""
-    return prediction.posterior_predictive["mu"].transpose(
+    mu = prediction.posterior_predictive["mu"].transpose(
         "chain", "draw", "obs_ind", "treated_units"
     )
+    # Enforce the canonical container: stray non-dim coords (e.g. the
+    # state-space backend's `observed_state`) would otherwise leak into
+    # downstream impact containers and break coordinate equality checks.
+    return mu.drop_vars([name for name in mu.coords if name not in mu.dims])
 
 
 def _sklearn_array(value: Any) -> np.ndarray:
