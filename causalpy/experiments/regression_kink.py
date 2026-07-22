@@ -229,11 +229,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -343,7 +342,7 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -389,7 +388,7 @@ class RegressionKink(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},

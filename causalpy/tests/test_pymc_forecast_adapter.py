@@ -149,7 +149,7 @@ class TestRoundTripAgainstPyMCBackend:
     def test_output_contract_matches_pymc_backend(self, forecast_result, pymc_result):
         """Draw-level posterior-predictive output mirrors the native backend."""
         for result in (forecast_result, pymc_result):
-            mu = result.post_pred["posterior_predictive"]["mu"]
+            mu = result.post_pred
             assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
             assert list(mu.coords["treated_units"].values) == ["unit_0"]
             pd.testing.assert_index_equal(
@@ -162,20 +162,14 @@ class TestRoundTripAgainstPyMCBackend:
         """Both backends recover the simulated level shift at the draw level."""
         for result in (forecast_result, pymc_result):
             impact = result.post_impact
-            assert set(impact.dims) == {"chain", "draw", "obs_ind", "treated_units"}
+            assert set(impact.dims) == {"chain", "draw", "obs_ind"}
             assert impact.dims[-1] == "obs_ind"
-            mean_impact = float(
-                impact.mean(("chain", "draw")).isel(treated_units=0).mean()
-            )
+            mean_impact = float(impact.mean(("chain", "draw")).mean())
             assert mean_impact == pytest.approx(TRUE_EFFECT, abs=0.5)
         forecast_mean = float(
-            forecast_result.post_impact.mean(("chain", "draw"))
-            .isel(treated_units=0)
-            .mean()
+            forecast_result.post_impact.mean(("chain", "draw")).mean()
         )
-        pymc_mean = float(
-            pymc_result.post_impact.mean(("chain", "draw")).isel(treated_units=0).mean()
-        )
+        pymc_mean = float(pymc_result.post_impact.mean(("chain", "draw")).mean())
         assert forecast_mean == pytest.approx(pymc_mean, abs=0.5)
 
     def test_cumulative_impact(self, forecast_result):
@@ -196,7 +190,7 @@ class TestRoundTripAgainstPyMCBackend:
         assert "Model parameters:" in capsys.readouterr().out
         summary = forecast_result.effect_summary()
         assert len(summary.text) > 0
-        plot_df = forecast_result.get_plot_data_bayesian()
+        plot_df = forecast_result.get_plot_data()
         assert {"prediction", "impact"}.issubset(plot_df.columns)
 
     def test_experiment_reports_bayesian_backend(self, forecast_result):
@@ -207,16 +201,21 @@ class TestRoundTripAgainstPyMCBackend:
     def test_mu_is_noise_free(self, forecast_result):
         """mu carries the upstream noise-free latent (mu/mu_future), so it is
         strictly narrower than the posterior predictive y_hat."""
-        for pred in (forecast_result.pre_pred, forecast_result.post_pred):
-            pp = pred["posterior_predictive"]
-            mu_spread = float(pp["mu"].std(("chain", "draw")).mean())
-            y_hat_spread = float(pp["y_hat"].std(("chain", "draw")).mean())
+        for X, mu, out_of_sample in (
+            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
+            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+        ):
+            full_prediction = forecast_result.model.predict(
+                X, out_of_sample=out_of_sample
+            )
+            y_hat = full_prediction["posterior_predictive"]["y_hat"]
+            mu_spread = float(mu.std(("chain", "draw")).mean())
+            y_hat_spread = float(y_hat.std(("chain", "draw")).mean())
             assert mu_spread < y_hat_spread
         # impact is computed from mu, i.e. excludes observation noise
         impact_spread = float(forecast_result.post_impact.std(("chain", "draw")).mean())
-        post_pp = forecast_result.post_pred["posterior_predictive"]
         assert impact_spread == pytest.approx(
-            float(post_pp["mu"].std(("chain", "draw")).mean()), rel=1e-6
+            float(forecast_result.post_pred.std(("chain", "draw")).mean()), rel=1e-6
         )
 
     def test_predictions_are_draw_coherent(self, forecast_result):
@@ -230,7 +229,7 @@ class TestRoundTripAgainstPyMCBackend:
             (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
             (forecast_result.post_design["X"], forecast_result.post_pred, True),
         ):
-            mu = pred["posterior_predictive"]["mu"]
+            mu = pred
             expected = xr.dot(
                 posterior["beta"],
                 X.rename({"coeffs": "covariate"}),
@@ -263,7 +262,7 @@ def test_covariate_free_future_index_path(its_data):
             random_seed=42,
         ),
     )
-    mu = result.post_pred["posterior_predictive"]["mu"]
+    mu = result.post_pred
     assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
     pd.testing.assert_index_equal(
         pd.Index(mu.coords["obs_ind"].values),
@@ -272,9 +271,7 @@ def test_covariate_free_future_index_path(its_data):
     )
     # A local level frozen at treatment time underestimates the trend, but the
     # level shift must dominate the impact estimate.
-    mean_impact = float(
-        result.post_impact.mean(("chain", "draw")).isel(treated_units=0).mean()
-    )
+    mean_impact = float(result.post_impact.mean(("chain", "draw")).mean())
     assert mean_impact > TRUE_EFFECT / 2
 
 
@@ -356,10 +353,8 @@ def test_three_period_design(its_data):
         model=make_forecast_model(),
         treatment_end_time=df.index[85],
     )
-    assert result.intervention_pred.posterior_predictive["mu"].sizes["obs_ind"] == 15
-    assert (
-        result.post_intervention_pred.posterior_predictive["mu"].sizes["obs_ind"] == 15
-    )
+    assert result.intervention_pred.sizes["obs_ind"] == 15
+    assert result.post_intervention_pred.sizes["obs_ind"] == 15
     summary = result.effect_summary(period="comparison")
     assert "persistence" in summary.text
 

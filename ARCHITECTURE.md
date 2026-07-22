@@ -26,7 +26,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 
 Backend dispatch is centralized in `causalpy/experiments/model_adapter.py`. `BaseExperiment.__init__` calls `make_model_adapter()`, which handles sklearn coercion (`clone`/`deepcopy`, `create_causalpy_compatible_class()`, `fit_intercept=False` warning), default-model instantiation, and `supports_bayes`/`supports_ols`/`supports_pymc_forecast` validation. Each experiment stores `self._model_backend` (private) and keeps `self.model` as the public handle.
 
-Standard regression experiments call `self._model_backend.fit(X, y, coords=build_coords(...))` unconditionally. `build_coords()` assembles the PyMC `coeffs` / `obs_ind` / `treated_units` dict; sklearn backends ignore `coords`. `SklearnModelAdapter` normalizes inputs before delegating to sklearn: xarray `DataArray` values become numpy arrays, and a single-column `treated_units` outcome is squeezed to 1D so call sites do not need per-experiment `.isel(treated_units=0)` branches.
+Standard regression experiments call `self._model_backend.fit(X, y, coords=build_coords(...))` unconditionally. `build_coords()` assembles the PyMC `coeffs` / `obs_ind` / `treated_units` dict; sklearn backends ignore `coords`. `SklearnModelAdapter` normalizes inputs before delegating to sklearn: xarray `DataArray` values become numpy arrays, and a single-column `treated_units` outcome is squeezed to 1D so call sites do not need per-experiment `.isel(treated_units=0)` branches. For estimand calculations, every adapter's `predict_mu()` returns response-scale expected outcomes as an xarray `DataArray` with canonical `("chain", "draw", "obs_ind", "treated_units")` dimensions; sklearn point predictions use singleton chain and draw dimensions. Use `predict()` only when a caller needs the backend's full prediction container, including posterior predictive `y_hat`.
 
 ```python
 from causalpy.experiments.model_adapter import build_coords
@@ -40,13 +40,13 @@ self._model_backend.fit(
 
 Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization.
 
-`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` / `calculate_impact` interface. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
+`PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` interface; the adapter's `predict()` returns response-scale expected outcomes as an `xr.DataArray` with canonical dims `(chain, draw, obs_ind, treated_units)` on every backend (sklearn backends return singleton `chain`/`draw`), and experiments compute impact as plain xarray subtraction `y - predict(X)`. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
 
 The optional third backend, `PyMCForecastModel` (`causalpy/pymc_forecast_models.py`), wraps a `pymc_forecast` forecasting model behind the same protocol and is wired through `PyMCForecastAdapter`. It reports as Bayesian (`is_bayesian` is true for both `"pymc"` and `"pymc-forecast"` adapter kinds), so experiments and checks that branch on Bayesian-vs-OLS treat it like a PyMC backend. Experiments opt in via `supports_pymc_forecast` (currently `InterruptedTimeSeries` only); the dependency ships as the `causalpy[forecast]` extra, pinned to one upstream minor while `pymc-forecast` is 0.x.
 
 ## Experiment Lifecycle
 
-Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which dispatches to `_bayesian_plot()` or `_ols_plot()`. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
+Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot()`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
 
 ## Experiment Inventory
 
@@ -81,7 +81,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
-| **Impact uses mu, not y_hat** | `calculate_impact()` subtracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise). For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
+| **Impact uses mu, not y_hat** | The adapter's `predict()` extracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise); impact is `y - predict(X)`. For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
 | **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
 | **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
@@ -91,7 +91,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 Copy the closest existing experiment or model and follow the `BaseExperiment` contract:
 
-- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement `_bayesian_plot()` / `_ols_plot()` only for supported backends
+- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement a single backend-agnostic `_plot()` (and `get_plot_data()`) that consumes the canonical prediction container, keying uncertainty rendering on `has_posterior_draws()` rather than backend identity
 - `algorithm()` with the fit/predict/impact flow; `effect_summary()` via helpers in `causalpy.reporting`
 - Public `plot(*, ...)` with a kwarg-only signature that delegates to `_render_plot()` — bare `*args` / `**kwargs` are forbidden on the public surface (enforced by `causalpy/tests/test_public_plot_signatures.py`). For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
 - Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors

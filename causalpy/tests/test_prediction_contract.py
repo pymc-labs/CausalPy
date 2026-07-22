@@ -20,6 +20,7 @@ import pymc as pm
 import pytest
 import xarray as xr
 
+from causalpy.experiments.model_adapter import PyMCModelAdapter
 from causalpy.pymc_models import LinearRegression, PyMCModel
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
@@ -101,12 +102,14 @@ def test_linear_regression_mu_matches_outcome_scale_impact(rng, mock_pymc_sample
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 
-    impact = model.calculate_impact(y, pred)
+    adapter_mu = PyMCModelAdapter(model).predict(X, coords=coords)
+    impact = y - adapter_mu
     mu = pred.posterior_predictive["mu"]
-    expected = (y - mu).transpose(..., "obs_ind")
+    expected = y - mu
 
-    xr.testing.assert_allclose(impact, expected)
-    assert impact.dims[-1] == "obs_ind"
+    xr.testing.assert_allclose(
+        impact.transpose(..., "obs_ind"), expected.transpose(..., "obs_ind")
+    )
 
 
 def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
@@ -128,8 +131,7 @@ def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
 
     mu = pred.posterior_predictive["mu"]
     assert float(mu.min()) >= 0.0
-    impact = model.calculate_impact(y, pred)
-    assert impact.dims[-1] == "obs_ind"
+    impact = y - PyMCModelAdapter(model).predict(X, coords=coords)
     # Impact mean should be on the count scale, not the log scale.
     assert abs(float(impact.mean()) - float((y - mu).mean())) < 1e-6
 
@@ -155,8 +157,10 @@ def test_bernoulli_logit_mu_is_probability(rng, mock_pymc_sample):
     mu = pred.posterior_predictive["mu"]
     assert float(mu.min()) >= 0.0
     assert float(mu.max()) <= 1.0
-    impact = model.calculate_impact(y, pred)
-    xr.testing.assert_allclose(impact, (y - mu).transpose(..., "obs_ind"))
+    impact = y - PyMCModelAdapter(model).predict(X, coords=coords)
+    xr.testing.assert_allclose(
+        impact.transpose(..., "obs_ind"), (y - mu).transpose(..., "obs_ind")
+    )
 
 
 def test_link_scale_mu_would_mix_units():
@@ -183,7 +187,7 @@ def test_link_scale_mu_would_mix_units():
     assert abs(float(right_impact.mean())) < 1e-10
 
 
-def test_calculate_impact_uses_mu_not_y_hat(rng, mock_pymc_sample):
+def test_impact_uses_mu_not_y_hat(rng, mock_pymc_sample):
     """Impact excludes observation noise by using ``mu`` rather than ``y_hat``."""
     n_obs = 10
     X = _design_matrix(n_obs, rng)
@@ -200,8 +204,11 @@ def test_calculate_impact_uses_mu_not_y_hat(rng, mock_pymc_sample):
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 
-    impact_from_mu = model.calculate_impact(y, pred)
+    impact_from_mu = y - PyMCModelAdapter(model).predict(X, coords=coords)
     noise_inclusive = y - pred.posterior_predictive["y_hat"]
 
     with pytest.raises(AssertionError):
-        xr.testing.assert_allclose(impact_from_mu, noise_inclusive)
+        xr.testing.assert_allclose(
+            impact_from_mu.transpose(..., "obs_ind"),
+            noise_inclusive.transpose(..., "obs_ind"),
+        )

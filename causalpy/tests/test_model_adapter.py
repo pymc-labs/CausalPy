@@ -19,6 +19,7 @@ import warnings
 
 import numpy as np
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 from causalpy.experiments.model_adapter import (
@@ -125,18 +126,19 @@ def test_sklearn_adapter_fit_predict_score():
         create_causalpy_compatible_class(LinearRegression(fit_intercept=False))
     )
     adapter.fit(X, y)
-    preds = adapter.predict(X)
+    mu = adapter.predict(X)
     score = adapter.score(X, y)
     coeffs = adapter.coefficients()
 
-    assert preds.shape == (20,)
+    assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
+    assert mu.shape == (1, 1, 20, 1)
+    np.testing.assert_allclose(mu.squeeze(), adapter.model.predict(X))
     assert isinstance(score, float)
     assert coeffs.shape == (2,)
 
 
 def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
     rng = np.random.default_rng(0)
-    import xarray as xr
 
     X = xr.DataArray(
         rng.normal(size=(10, 2)),
@@ -156,11 +158,17 @@ def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
     adapter = PyMCModelAdapter(PyMCLinearRegression(sample_kwargs=sample_kwargs))
     adapter.fit(X, y, coords=coords)
     assert adapter.idata is not None
-    preds = adapter.predict(X)
+    mu = adapter.predict(X)
     score = adapter.score(X, y)
     coeffs = adapter.coefficients()
 
-    assert preds is not None
+    assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
+    assert mu.shape == (
+        sample_kwargs["chains"],
+        sample_kwargs["draws"],
+        len(X),
+        1,
+    )
     assert score is not None
     assert np.squeeze(coeffs).shape == (2,)
 
