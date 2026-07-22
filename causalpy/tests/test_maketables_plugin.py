@@ -744,8 +744,8 @@ class TestGetMaketablesAdapter:
 class TestSklearnAdapterUnit:
     def test_coef_table_success(self):
         adapter = SklearnMaketablesAdapter()
-        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
-        stub = _Stub(labels=["a", "b"], model=model)
+        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b"], _model_backend=backend)
         frame = adapter.coef_table(stub)
         assert list(frame.index) == ["a", "b"]
         assert frame["b"].notna().all()
@@ -788,8 +788,8 @@ class TestSklearnAdapterUnit:
 class TestSklearnAdapterCoefMismatch:
     def test_coef_count_mismatch_raises(self):
         adapter = SklearnMaketablesAdapter()
-        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
-        stub = _Stub(labels=["a", "b", "c"], model=model)
+        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b", "c"], _model_backend=backend)
         with pytest.raises(ValueError, match="Coefficient count mismatch"):
             adapter.coef_table(stub)
 

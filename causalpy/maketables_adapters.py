@@ -350,7 +350,9 @@ class SklearnMaketablesAdapter:
             msg = "Experiment has no coefficient labels for maketables export."
             raise ValueError(msg)
 
-        coeffs = np.asarray(experiment.model.get_coeffs(), dtype=float).reshape(-1)
+        coeffs = np.asarray(
+            experiment._model_backend.coefficients(), dtype=float
+        ).reshape(-1)
         if coeffs.shape[0] != len(labels):
             msg = (
                 f"Coefficient count mismatch for maketables export: "
