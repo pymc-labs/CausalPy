@@ -10,6 +10,17 @@ Use this resource when drafting, presenting, or posting review comments.
 - Use HEREDOCs for multiline GitHub comments so markdown renders correctly.
 - Preserve the distinction between the maintainer's voice and agent-authored review text.
 
+## Finding Quality Bar
+
+Be constructively critical and evidence-led. A non-nit finding must name:
+
+1. The concrete input, caller, backend, or state that triggers the problem.
+2. The observed or reasoned failure, including the violated contract when applicable.
+3. Why existing code or tests do not already prevent it.
+4. The smallest clear corrective action and whether it blocks merge.
+
+Do not turn untested possibilities into findings. Probe them first; if the evidence is insufficient, record the uncertainty as residual risk or an open question. Conversely, do not soften a verified defect into a vague “consider” comment.
+
 ## Comment Shapes
 
 Use PR issue-thread comments for:
@@ -34,6 +45,14 @@ Use formal reviews only with explicit approval:
 
 ```markdown
 Thanks for the PR. I have comments grouped by severity below.
+
+## Executive summary
+
+This PR delivers:
+- [Concrete win, with evidence.]
+- [Concrete win, with evidence.]
+
+The review concentrated on [highest-risk behavior] because [failure consequence].
 
 ## Must-fix
 
