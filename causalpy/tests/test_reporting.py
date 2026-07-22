@@ -518,6 +518,127 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_rd_se_uses_discontinuity_contrast(rd_data):
+    """``discontinuity_at_threshold`` is the model's predicted-y jump at the
+    threshold: a linear contrast across several coefficients (here `treated`
+    and `x:treated`, plus a negligible sliver of `x`), not the `x:treated`
+    coefficient alone. Its SE must use the covariance of that whole contrast,
+    ``sqrt(mse * c @ inv(X'X) @ c)`` with ``c`` the above-threshold design row
+    minus the below-threshold design row -- matching the maintainer's review
+    on PR #1028.
+
+    Verified independently via statsmodels' own contrast/delta-method
+    implementation (``OLSResults.t_test``), not by reproducing CausalPy's own
+    formula. CausalPy still divides its residual variance by ``n`` rather
+    than ``(n - p)`` here (tracked separately in #1027), so we compare against
+    a statsmodels fit with that same (currently biased) denominator rather
+    than statsmodels' own unbiased default, isolating this fix from that one.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    formula = "y ~ 1 + x + treated + x:treated"
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula=formula,
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+    stats = result.effect_summary()
+    row = stats.table.loc["discontinuity"]
+
+    import statsmodels.formula.api as smf
+    from patsy import build_design_matrices
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=result.fit_data).fit()
+    assert list(sm_fit.params.index) == result.labels
+
+    (new_x,) = build_design_matrices(
+        [result._x_design_info], result.x_discon, return_type="dataframe"
+    )
+    contrast = new_x.iloc[1].to_numpy() - new_x.iloc[0].to_numpy()
+    n, p = result.design["X"].shape
+
+    # Independent ground truth via statsmodels' contrast test, using the same
+    # (currently biased, SSR/n) denominator convention CausalPy still uses.
+    tt = sm_fit.t_test(contrast)
+    unbiased_contrast_se = float(np.asarray(tt.sd).squeeze())
+    biased_contrast_se = unbiased_contrast_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(biased_contrast_se, rel=1e-6)
+
+    # Regression guard: the old, wrong implementation reported the SE of the
+    # x:treated coefficient alone, which is roughly 3.5x too large here.
+    interaction_col = next(
+        name
+        for name in sm_fit.params.index
+        if "treated" in name.lower() and ":" in name
+    )
+    wrong_single_coeff_se = sm_fit.bse[interaction_col] * np.sqrt((n - p) / n)
+    assert reported_se != pytest.approx(wrong_single_coeff_se, rel=0.5)
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_rd_se_without_interaction_term(rd_data):
+    """A parallel-slopes RD formula with no ``x:treated`` interaction (a
+    common, legitimate specification -- see e.g. ``test_rd_linear_main_effects``
+    in test_integration_skl_examples.py) must not silently fall back to the
+    crude ``std(residuals) / sqrt(n)`` approximation.
+
+    Before this fix, the coefficient search looked only for a label
+    containing both "treated" and ":" -- which never matches when there is no
+    interaction term -- so this exact formula always hit that fallback and
+    reported an SE about 3.4x too small on this fixture.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _point_residuals
+
+    formula = "y ~ 1 + x + treated"
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula=formula,
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+    stats = result.effect_summary()
+    row = stats.table.loc["discontinuity"]
+
+    import statsmodels.formula.api as smf
+    from patsy import build_design_matrices
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=result.fit_data).fit()
+    assert list(sm_fit.params.index) == result.labels
+
+    (new_x,) = build_design_matrices(
+        [result._x_design_info], result.x_discon, return_type="dataframe"
+    )
+    contrast = new_x.iloc[1].to_numpy() - new_x.iloc[0].to_numpy()
+    n, p = result.design["X"].shape
+
+    tt = sm_fit.t_test(contrast)
+    unbiased_contrast_se = float(np.asarray(tt.sd).squeeze())
+    biased_contrast_se = unbiased_contrast_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(biased_contrast_se, rel=1e-6)
+
+    # Regression guard against the old crude fallback, which understated the
+    # SE by roughly 3.4x on this fixture.
+    residuals = _point_residuals(result)
+    old_fallback_se = np.std(residuals) / np.sqrt(n)
+    assert reported_se != pytest.approx(old_fallback_se, rel=0.5)
+
+
+@pytest.mark.integration
 def test_effect_summary_rkink_pymc(mock_pymc_sample):
     """Test effect_summary with Regression Kink (PyMC)."""
     # Generate data for regression kink analysis
@@ -1553,7 +1674,14 @@ def test_compute_statistics_did_ols_missing_interaction_term(
 
 @pytest.mark.integration
 def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
-    """Test _compute_statistics_rd_ols uses fallback when coefficient not found."""
+    """Test _compute_statistics_rd_ols falls back gracefully when the
+    discontinuity contrast is unavailable.
+
+    The SE calculation now reads ``result.x_discon_design`` (the design rows
+    used to build the discontinuity contrast) rather than searching
+    ``result.labels`` by name, so removing that attribute -- not corrupting
+    labels -- is what now triggers the ``AttributeError`` fallback.
+    """
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _compute_statistics_rd_ols
@@ -1566,15 +1694,11 @@ def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
         model=LinearRegression(),
     )
 
-    # Manually corrupt the labels to trigger fallback
-    original_labels = result.labels
-    result.labels = ["Intercept", "x", "some_other_term"]
+    # Remove the contrast design rows to trigger the AttributeError fallback.
+    del result.x_discon_design
 
     # Should not raise error, but use fallback SE calculation
     stats = _compute_statistics_rd_ols(result, alpha=0.05)
-
-    # Restore labels
-    result.labels = original_labels
 
     assert "mean" in stats
     assert "ci_lower" in stats

@@ -1669,26 +1669,26 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     n, p = X_da.shape
     df = n - p
 
-    # Find the treated coefficient index
-    coeff_idx = None
-    for i, label in enumerate(result.labels):
-        if "treated" in label.lower() and ":" in label:
-            coeff_idx = i
-            break
-
-    if coeff_idx is None:
+    # discontinuity_at_threshold is not a single coefficient: it is the
+    # difference between the model's predictions just above and just below
+    # the threshold (see RegressionDiscontinuity.algorithm()), i.e. a linear
+    # contrast c @ beta where c is that pair of design rows subtracted. Its
+    # standard error must use the covariance of that same contrast,
+    # sqrt(mse * c @ inv(X'X) @ c), not the variance of any single named
+    # coefficient (e.g. picking out "treated" or "x:treated" alone silently
+    # drops the other coefficients' contributions and their covariances).
+    X = X_da
+    try:
+        if hasattr(X, "values"):
+            X = X.values
+        elif hasattr(X, "data"):
+            X = X.data
+        X = np.asarray(X)
+        XtX_inv = np.linalg.inv(X.T @ X)
+        c = result.x_discon_design[1] - result.x_discon_design[0]
+        se = np.sqrt(mse * c @ XtX_inv @ c)
+    except (np.linalg.LinAlgError, AttributeError):
         se = np.std(residuals) / np.sqrt(n)
-    else:
-        X = X_da
-        try:
-            if hasattr(X, "values"):
-                X = X.values
-            elif hasattr(X, "data"):
-                X = X.data
-            XtX_inv = np.linalg.inv(X.T @ X)
-            se = np.sqrt(mse * XtX_inv[coeff_idx, coeff_idx])
-        except (np.linalg.LinAlgError, AttributeError):
-            se = np.std(residuals) / np.sqrt(n)
 
     # t-critical value
     t_critical = t.ppf(1 - alpha / 2, df=df)
