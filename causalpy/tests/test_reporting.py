@@ -466,6 +466,58 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
+    """Regression-pin for RD OLS ``effect_summary()`` intervals.
+
+    The pre-#1049 ``_compute_statistics_rd_ols`` subtracted a bare ``(n,)``
+    ``y_pred`` array from the ``(n, 1)`` y DataArray, broadcasting to an
+    ``(n, n)`` residual matrix (every observation's y minus every *other*
+    observation's prediction) and inflating the MSE ~9x on this dataset, so
+    the reported standard errors were ~3x too wide. ``_point_residuals``
+    fixed that; this test pins the corrected residual shape and SE against
+    an independent statsmodels fit so they cannot silently move again.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _point_residuals
+
+    formula = "y ~ 1 + x + treated + x:treated"
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula=formula,
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    n, p = result.design["X"].shape
+    residuals = _point_residuals(result)
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["discontinuity"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=result.fit_data).fit()
+    interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
+    unbiased_se = sm_fit.bse[interaction_col]
+    # CausalPy divides the residual sum of squares by n rather than (n - p)
+    # (same convention as the DiD OLS path, tracked separately), so the
+    # correctly-shaped residuals give an SE smaller than the unbiased
+    # statsmodels value by sqrt((n - p) / n), not an exact match.
+    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
+    # Guard against regressing to the (n, n) broadcast bug: that variant
+    # inflated the SE by roughly 3x on this dataset.
+    assert reported_se < unbiased_se * 2
+
+
+@pytest.mark.integration
 def test_effect_summary_rkink_pymc(mock_pymc_sample):
     """Test effect_summary with Regression Kink (PyMC)."""
     # Generate data for regression kink analysis

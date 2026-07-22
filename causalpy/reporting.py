@@ -1492,10 +1492,12 @@ def _compute_statistics_ols(
 def _point_residuals(result) -> np.ndarray:
     """In-sample point residuals via the canonical prediction container.
 
-    Uses the model adapter's canonical ``predict`` output (a point estimate
-    is the first — and for point backends only — draw), so the t-based
-    point-summary path works for any backend, including a degenerate
-    single-draw Bayesian run.
+    Uses the model adapter's canonical ``predict`` output collapsed over
+    ``chain``/``draw``, so the t-based point-summary path works for any
+    backend. This path is only reached for singleton containers
+    (``chain * draw == 1``), where the mean is exactly the single point
+    estimate; taking the mean (rather than the first draw) keeps the helper
+    well-defined even if a many-draw container ever slips through.
 
     ``y`` may have shape ``(n, 1)`` with dims ``(obs_ind, treated_units)``
     while the fitted values are conceptually ``(n,)``; both are flattened to
@@ -1505,7 +1507,7 @@ def _point_residuals(result) -> np.ndarray:
     """
     y = np.asarray(result.design["y"]).reshape(-1)
     pred = result._model_backend.predict(X=np.asarray(result.design["X"]))
-    y_fitted = np.asarray(pred.isel(chain=0, draw=0)).reshape(-1)
+    y_fitted = np.asarray(pred.mean(dim=["chain", "draw"])).reshape(-1)
     return y - y_fitted
 
 
