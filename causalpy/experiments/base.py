@@ -27,11 +27,13 @@ import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotnine as p9
 import xarray as xr
 from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.plot_utils import PlotSpec, as_axes_result, panel_axes
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -41,9 +43,8 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
     """Mutate an existing Legend in place without recreating it.
 
     This preserves custom handles (e.g. ``(Line2D, PolyCollection)`` tuples
-    built by :func:`~causalpy.plot_utils.plot_posterior_over_x` with
-    ``kind="ribbon"``) that would be lost if the legend were rebuilt with
-    ``ax.legend()``.
+    for ribbon mean+band legends) that would be lost if the legend were
+    rebuilt with ``ax.legend()``.
 
     Supported keys: ``loc``, ``bbox_to_anchor``, ``bbox_transform`` (only
     with ``bbox_to_anchor``), ``fontsize``, ``frameon``, ``title``.
@@ -79,6 +80,10 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
         # numeric codes since _set_loc may not accept strings.
         if hasattr(legend, "set_loc"):
             legend.set_loc(loc)
+        elif hasattr(legend, "loc") and not hasattr(legend, "get_texts"):
+            from matplotlib.legend import Legend
+
+            legend.loc = Legend.codes.get(loc, loc) if isinstance(loc, str) else loc
         else:
             if isinstance(loc, str):  # pragma: no cover
                 loc = legend.codes.get(loc, loc)
@@ -88,12 +93,51 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
             kwargs["bbox_to_anchor"], kwargs.get("bbox_transform")
         )
     if "fontsize" in kwargs:
-        for text in legend.get_texts():
+        for text in _legend_texts(legend):
             text.set_fontsize(kwargs["fontsize"])
     if "frameon" in kwargs:
-        legend.set_frame_on(kwargs["frameon"])
+        if hasattr(legend, "set_frame_on"):
+            legend.set_frame_on(kwargs["frameon"])
+        else:
+            legend.patch.set_visible(kwargs["frameon"])
     if "title" in kwargs:
-        legend.set_title(kwargs["title"])
+        if hasattr(legend, "set_title"):
+            legend.set_title(kwargs["title"])
+        else:
+            texts = _legend_texts(legend)
+            if texts:
+                texts[0].set_text(kwargs["title"])
+
+
+def _legend_texts(legend: Any) -> list[Any]:
+    """Return text artists from Matplotlib or Plotnine legends."""
+    if hasattr(legend, "get_texts"):
+        return list(legend.get_texts())
+    texts: list[Any] = []
+
+    def collect(artist: Any) -> None:
+        if (
+            hasattr(artist, "get_text")
+            and hasattr(artist, "set_fontsize")
+            and artist.get_text()
+        ):
+            texts.append(artist)
+        for child in artist.get_children():
+            collect(child)
+
+    collect(legend)
+    return texts
+
+
+def _patch_plotnine_gridspec_for_matplotlib(fig: plt.Figure) -> None:
+    """Keep Matplotlib's ``tight_layout`` compatible with Plotnine figures."""
+    for axis in fig.axes:
+        subplotspec = axis.get_subplotspec()
+        if subplotspec is None:
+            continue
+        gridspec = subplotspec.get_gridspec()
+        if not hasattr(gridspec, "locally_modified_subplot_params"):
+            type(gridspec).locally_modified_subplot_params = lambda _self: False
 
 
 class BaseExperiment(ABC):
@@ -319,10 +363,14 @@ class BaseExperiment(ABC):
 
         1. Applies the ``arviz-darkgrid`` style for the duration of the
            draw call.
-        2. Calls the subclass's backend-agnostic :meth:`_plot`.
-        3. Mutates the resulting legend(s) in place when *legend_kwargs*
+        2. Calls the subclass's backend-agnostic :meth:`_plot`, which may
+           return a declarative :class:`~causalpy.plot_utils.PlotSpec`, a
+           bare :class:`plotnine.ggplot`, or a legacy ``(fig, ax)`` tuple.
+        3. Renders declarative results and normalizes everything to the
+           stable ``(Figure, Axes)`` public contract.
+        4. Mutates the resulting legend(s) in place when *legend_kwargs*
            is supplied, preserving custom handles built by the subclass.
-        4. Optionally calls :func:`matplotlib.pyplot.show`.
+        5. Optionally calls :func:`matplotlib.pyplot.show`.
 
         ``BaseExperiment`` deliberately does **not** define a public
         ``plot()`` method: that would inherit a generic
@@ -338,32 +386,21 @@ class BaseExperiment(ABC):
         legend_kwargs : dict, optional
             Keyword arguments to adjust legend placement and styling. The
             existing legend is modified **in place** so that custom
-            handles (e.g. ``(Line2D, PolyCollection)`` tuples built by
-            :func:`~causalpy.plot_utils.plot_posterior_over_x` with
-            ``kind="ribbon"``) are preserved.
+            matplotlib handles are preserved.
             Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
             ``frameon``, ``title``. ``bbox_transform`` is accepted
             alongside ``bbox_to_anchor``.
         **draw_kwargs
             Subclass-specific drawing parameters forwarded verbatim to
             ``_plot``. May include ``kind``, ``ci_kind``, ``ci_prob``, and
-            ``num_samples`` for
-            :func:`~causalpy.plot_utils.plot_posterior_over_x`.
+            ``num_samples`` for posterior uncertainty rendering.
 
         Notes
         -----
-        **Legend handling and ``plot_posterior_over_x`` return types:** :func:`~causalpy.plot_utils.plot_posterior_over_x`
-        returns ``(Line2D, PolyCollection)`` for ``kind="ribbon"`` but
-        ``(list[Line2D], None)`` for ``kind="histogram"`` or ``"spaghetti"``.
-        Subclass ``_plot`` implementations that assemble
-        matplotlib legends from those return values should only pack
-        ``(line, patch)`` tuples when calling ``plot_posterior_over_x`` with ``kind="ribbon"``
-        (the default). Many current experiment plots always use the ribbon
-        default and never forward ``kind``; if a subclass forwards non-ribbon
-        kinds, it must build legend handles accordingly. The base class applies
-        ``legend_kwargs`` by mutating an existing legend in place, which preserves
-        whatever handle objects the subclass attached (including tuple handles
-        used for ribbon mean+band).
+        ``legend_kwargs`` mutates an existing legend in place, which
+        preserves whatever handle objects the subclass attached (including
+        tuple handles used for ribbon mean+band on hybrid ``(fig, ax)``
+        plots).
 
         Examples
         --------
@@ -374,13 +411,35 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
+        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]
         with plt.style.context(az.style.library["arviz-darkgrid"]):
-            fig, ax = self._plot(**draw_kwargs)
+            result = self._plot(**draw_kwargs)
+
+        return self._finalize_plot(result, show=show, legend_kwargs=legend_kwargs)
+
+    def _finalize_plot(
+        self,
+        result: p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray],
+        *,
+        show: bool,
+        legend_kwargs: dict[str, Any] | None,
+    ) -> tuple[plt.Figure, plt.Axes | np.ndarray]:
+        """Draw a ggplot, PlotSpec, or legacy matplotlib return for public APIs."""
+        declarative = isinstance(result, (PlotSpec, p9.ggplot))
+        if isinstance(result, PlotSpec):
+            fig = result.plot.draw(show=False)
+            axes = panel_axes(fig, result.n_panels)
+            if result.overlay is not None:
+                result.overlay(fig, axes)
+            ax = as_axes_result(axes)
+        elif isinstance(result, p9.ggplot):
+            fig = result.draw(show=False)
+            ax = as_axes_result(panel_axes(fig))
+        else:
+            fig, ax = result
 
         # Apply legend customization if requested.  We mutate the existing
-        # Legend object in place so that custom handles — especially the
-        # (Line2D, PolyCollection) tuples built by plot_posterior_over_x with
-        # kind="ribbon" — are preserved
+        # Legend object in place so that custom handles are preserved
         # exactly as the subclass created them.
         if legend_kwargs is not None:
             # Normalise ax to a flat list so we can iterate uniformly.
@@ -390,29 +449,50 @@ class BaseExperiment(ABC):
                 axes = ax
             else:
                 axes = [ax]
+            legends = list(fig.legends)
+            legends.extend(
+                artist
+                for artist in fig.artists
+                if hasattr(artist, "set_bbox_to_anchor")
+                and hasattr(artist, "loc")
+                and not hasattr(artist, "get_texts")
+            )
             for a in axes:
                 legend = a.get_legend()
                 if legend is not None:
-                    _apply_legend_kwargs(legend, legend_kwargs)
+                    legends.append(legend)
+            for legend in legends:
+                _apply_legend_kwargs(legend, legend_kwargs)
             # Recompute layout when the legend is placed outside the axes
             # so it is not clipped (some subclass plots already call
             # tight_layout before we get here).
             if "bbox_to_anchor" in legend_kwargs:
                 fig.tight_layout()
 
+        if declarative:
+            # Plotnine closes and unregisters figures rendered with show=False.
+            # Re-register it so both plt.show() and manual display still work.
+            _patch_plotnine_gridspec_for_matplotlib(fig)
+            plt.figure(fig)
+
         if show:
             plt.show()
 
         return fig, ax
 
-    def _plot(self, **kwargs: Any) -> tuple:
+    def _plot(
+        self, **kwargs: Any
+    ) -> p9.ggplot | PlotSpec | tuple[plt.Figure, plt.Axes | np.ndarray]:
         """Draw the experiment figure; called by :meth:`_render_plot`.
 
         Subclasses implement a single backend-agnostic ``_plot`` that consumes
         the canonical prediction container. Uncertainty rendering should key
         on data properties (e.g.
         :func:`~causalpy.plot_utils.has_posterior_draws`), not backend
-        identity.
+        identity. Implementations may return a declarative
+        :class:`~causalpy.plot_utils.PlotSpec`, a bare
+        :class:`plotnine.ggplot`, or a legacy ``(fig, ax)`` tuple;
+        :meth:`_render_plot` normalizes all three to ``(Figure, Axes)``.
         """
         raise NotImplementedError("_plot method not yet implemented")
 
