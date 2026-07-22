@@ -16,19 +16,23 @@
 import re
 from typing import Any, Literal
 
-import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.gridspec import GridSpec
+import plotnine as p9
+import polars as pl
 from patsy import ModelDesc
-from scipy import stats
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.plot_utils import (
+    PlotSpec,
+    dataarray_draws,
+    summarize_draws,
+)
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
@@ -524,7 +528,7 @@ class PanelRegression(BaseExperiment):
         ----------
         hdi_prob : float
             Probability mass of the highest density interval drawn around
-            each posterior coefficient via :func:`arviz.plot_forest`. Must
+            each posterior coefficient. Must
             be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         show : bool
@@ -549,32 +553,31 @@ class PanelRegression(BaseExperiment):
             hdi_prob=hdi_prob,
         )
 
-    def _plot(
-        self, hdi_prob: float = HDI_PROB, **kwargs: Any
-    ) -> tuple[plt.Figure, plt.Axes]:
+    def _plot(self, hdi_prob: float = HDI_PROB, **kwargs: Any) -> PlotSpec:
         """Create coefficient plot.
 
-        Bayesian models render a forest plot with HDI intervals; point-estimate
-        models render a bar plot of coefficient values.
+        Models carrying posterior draws render a forest plot with HDI
+        intervals; point-estimate models render a bar plot of coefficient
+        values.
 
         Parameters
         ----------
         hdi_prob : float, optional
             Probability mass of the highest density interval drawn around each
-            posterior coefficient via :func:`arviz.plot_forest`. Must be in
-            ``(0, 1]``. Ignored for point-estimate models. Defaults to
+            posterior coefficient. Must be in ``(0, 1]``. Ignored for
+            point-estimate models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
+        :class:`~causalpy.plot_utils.PlotSpec`
+            Declarative coefficient plot for the base ``plot()`` draw path.
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob)
 
     def _plot_coefficients_internal(
         self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> PlotSpec:
         """Internal method to create coefficient plot.
 
         Parameters
@@ -591,34 +594,71 @@ class PanelRegression(BaseExperiment):
             raise ValueError("hdi_prob must be between 0 and 1")
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
+        fig_height = max(4, len(coeff_names) * 0.5)
+        figsize = (10, fig_height)
 
         if self._model_backend.is_bayesian:
-            # Bayesian: use az.plot_forest directly
-            axes = az.plot_forest(
-                self.model.idata,
-                var_names=["beta"],
-                coords={"coeffs": coeff_names},
-                combined=True,
-                hdi_prob=hdi_prob,
+            beta = self.model.idata.posterior["beta"].sel(coeffs=coeff_names)  # type: ignore[union-attr]
+            if "treated_units" in beta.dims:
+                beta = beta.squeeze("treated_units", drop=True)
+            tidy = summarize_draws(
+                dataarray_draws(beta, var_name="beta"),
+                group_by="coeffs",
+                ci_prob=hdi_prob,
+                var_name="beta",
+            ).rename(
+                columns={
+                    "beta": "mean",
+                    "beta_lower": "lower",
+                    "beta_upper": "higher",
+                }
             )
-            ax = axes.ravel()[0]
-            fig = ax.figure
-            ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
+            tidy["coeffs"] = pd.Categorical(
+                tidy["coeffs"], categories=coeff_names, ordered=True
+            )
+            title = f"Model Coefficients with {hdi_prob:.0%} HDI"
+            p = (
+                p9.ggplot(tidy, p9.aes(x="mean", y="coeffs"))
+                + p9.geom_errorbarh(
+                    p9.aes(xmin="lower", xmax="higher"), height=0.2, size=0.6
+                )
+                + p9.geom_point(size=2)
+                + p9.geom_vline(
+                    xintercept=0, color="black", linetype="dashed", alpha=0.8
+                )
+                + p9.labs(x="Coefficient Value", y="")
+                + p9.theme(figure_size=figsize)
+            )
+            return PlotSpec(
+                p,
+                overlay=lambda _fig, axes: axes[0].set_title(title),
+                n_panels=1,
+            )
         else:
-            # OLS: point estimates
-            fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
             coef_indices = [self.labels.index(c) for c in coeff_names]
             coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
-            y_pos = np.arange(len(coeff_names))
-            ax.barh(y_pos, coefs)
-            ax.set_yticks(y_pos)
-            ax.set_yticklabels(coeff_names)
-            ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8)
-            ax.set_xlabel("Coefficient Value")
-            ax.set_title("Model Coefficients")
-
-        plt.tight_layout()
-        return fig, ax
+            tidy = pd.DataFrame({"coeffs": coeff_names, "coef": coefs})
+            tidy["coeffs"] = pd.Categorical(
+                tidy["coeffs"], categories=coeff_names, ordered=True
+            )
+            title = "Model Coefficients"
+            p = (
+                p9.ggplot(tidy, p9.aes(x="coeffs", y="coef"))
+                + p9.geom_col(fill="#1f77b4")
+                + p9.geom_hline(
+                    yintercept=0, color="black", linetype="dashed", alpha=0.8
+                )
+                + p9.coord_flip()
+                + p9.labs(title="", x="Coefficient Value", y="")
+                + p9.theme(figure_size=figsize)
+            )
+            return PlotSpec(
+                p,
+                overlay=lambda _fig, axes: axes[0].set(
+                    title=title, xlabel="Coefficient Value"
+                ),
+                n_panels=1,
+            )
 
     def get_plot_data(self, **kwargs: Any) -> pd.DataFrame:
         """Get plot data with fitted values.
@@ -688,7 +728,10 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
+        result = self._plot_coefficients_internal(
+            var_names=var_names, hdi_prob=hdi_prob
+        )
+        return self._finalize_plot(result, show=False, legend_kwargs=None)
 
     def plot_unit_effects(
         self, highlight: list[str] | None = None, label_extreme: int = 0
@@ -727,43 +770,37 @@ class PanelRegression(BaseExperiment):
         if not unit_fe_names:
             raise ValueError("No unit fixed effects found in model coefficients")
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
         if self._model_backend.is_bayesian:
-            # Bayesian: get posterior means
             beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-
-            # Get mean and std for each unit FE
-            fe_means = []
-            for idx in unit_fe_indices:
-                fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
-                    .mean(dim=["chain", "draw"])
-                    .squeeze("treated_units", drop=True)
-                    .item()
-                )
-
-            ax.hist(
-                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
-            )
-            ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
-
+            fe_means = [
+                beta.sel(coeffs=self.labels[idx])
+                .mean(dim=["chain", "draw"])
+                .squeeze("treated_units", drop=True)
+                .item()
+                for idx in unit_fe_indices
+            ]
+            x_label = "Unit Fixed Effect (Posterior Mean)"
+            values = fe_means
         else:
-            # OLS: get point estimates
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
             coefs = self.model.get_coeffs()  # type: ignore[union-attr]
-            fe_values = [coefs[idx] for idx in unit_fe_indices]
+            values = [coefs[idx] for idx in unit_fe_indices]
+            x_label = "Unit Fixed Effect"
 
-            ax.hist(
-                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
-            )
-            ax.set_xlabel("Unit Fixed Effect")
-
-        ax.set_ylabel("Count")
-        ax.set_title(f"Distribution of Unit Fixed Effects (N={self.n_units})")
-        plt.tight_layout()
-
+        n_bins = min(30, max(1, len(values) // 2))
+        tidy = pd.DataFrame({"value": values})
+        title = f"Distribution of Unit Fixed Effects (N={self.n_units})"
+        p = (
+            p9.ggplot(tidy, p9.aes(x="value"))
+            + p9.geom_histogram(bins=n_bins, fill="#1f77b4", color="black", alpha=0.7)
+            + p9.labs(x=x_label, y="Count", title="")
+            + p9.theme(figure_size=(10, 6))
+        )
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
+        ax.set_title(title)
         return fig, ax
 
     def plot_trajectories(
@@ -842,6 +879,19 @@ class PanelRegression(BaseExperiment):
                 interval_source = posterior_predictive["y_hat"]
             else:
                 interval_source = mu
+            mu_draws = dataarray_draws(mu, var_name="value")
+            mean_by_obs = (
+                mu_draws.group_by("obs_ind")
+                .agg(pl.col("value").mean())
+                .to_pandas()
+                .set_index("obs_ind")
+            )
+            interval_by_obs = summarize_draws(
+                dataarray_draws(interval_source, var_name="value"),
+                group_by="obs_ind",
+                ci_prob=hdi_prob,
+                var_name="value",
+            ).set_index("obs_ind")
 
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
@@ -871,95 +921,122 @@ class PanelRegression(BaseExperiment):
                 ].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()
 
-        # Create only the subplots we need
+        # Build tidy frames for a faceted plotnine base.
         n_units_plot = len(selected_units)
         ncols = min(3, n_units_plot)
         nrows = (n_units_plot + ncols - 1) // ncols
+        figsize = (5 * ncols, 3 * nrows)
 
-        fig = plt.figure(figsize=(5 * ncols, 3 * nrows))
-        gs = GridSpec(nrows, ncols, figure=fig)
-        axes = [
-            fig.add_subplot(gs[idx // ncols, idx % ncols])
-            for idx in range(n_units_plot)
-        ]
+        obs_rows: list[dict[str, Any]] = []
+        fit_rows: list[dict[str, Any]] = []
+        ribbon_rows: list[dict[str, Any]] = []
 
-        # Plot each unit
-        for idx, unit in enumerate(selected_units):
-            ax = axes[idx]
-
-            # Get indices for this unit in original data order
+        for unit in selected_units:
+            unit_label = f"Unit: {unit}"
             unit_mask = self.data[self.unit_fe_variable] == unit
             unit_obs_indices = np.where(unit_mask)[0]
-
-            # Get time values and compute sort order
-            time_vals = self.data.loc[unit_mask, self.time_fe_variable].values
+            time_vals = np.asarray(
+                self.data.loc[unit_mask, self.time_fe_variable].values
+            )
             sort_order = np.argsort(time_vals)
             sorted_time_vals = time_vals[sort_order]
             sorted_obs_indices = unit_obs_indices[sort_order]
-
-            # Get actual y values (sorted by time)
             y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
 
-            # Plot actual
-            ax.plot(
-                sorted_time_vals,
-                y_actual,
-                "o-",
-                label="Actual",
-                alpha=0.7,
-            )
+            for t, y in zip(sorted_time_vals, y_actual, strict=True):
+                obs_rows.append(
+                    {"unit_label": unit_label, "time": t, "y": y, "series": "Actual"}
+                )
 
             if is_bayesian:
-                # Get posterior mu for this unit's observations in sorted order
-                # Squeeze out treated_units dimension
-                unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
-                if "treated_units" in unit_mu.dims:
-                    unit_mu = unit_mu.squeeze("treated_units", drop=True)
-                unit_interval = interval_source.isel(
-                    obs_ind=sorted_obs_indices.tolist()
-                )
-                if "treated_units" in unit_interval.dims:
-                    unit_interval = unit_interval.squeeze("treated_units", drop=True)
-
-                # Plot fitted mean
-                ax.plot(
+                obs_labels = np.asarray(mu.coords["obs_ind"])[sorted_obs_indices]
+                fit_mean = mean_by_obs.loc[obs_labels, "value"].to_numpy()
+                interval = interval_by_obs.loc[obs_labels]
+                for t, y, ymin, ymax in zip(
                     sorted_time_vals,
-                    unit_mu.mean(dim=["chain", "draw"]).values,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
-
-                # Plot HDI using az.plot_hdi
-                az.plot_hdi(
-                    sorted_time_vals,
-                    unit_interval,
-                    hdi_prob=hdi_prob,
-                    ax=ax,
-                    smooth=False,
-                    fill_kwargs={"alpha": 0.2},
-                )
+                    fit_mean,
+                    interval["value_lower"],
+                    interval["value_upper"],
+                    strict=True,
+                ):
+                    fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
+                    ribbon_rows.append(
+                        {
+                            "unit_label": unit_label,
+                            "time": t,
+                            "ymin": ymin,
+                            "ymax": ymax,
+                        }
+                    )
             else:
-                # OLS: get fitted values for this unit
                 y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
                     sorted_obs_indices
                 ]  # type: ignore[union-attr]
-                ax.plot(
-                    sorted_time_vals,
-                    y_fitted,
-                    "s--",
-                    label="Fitted",
-                    alpha=0.7,
-                )
+                for t, y in zip(sorted_time_vals, y_fitted, strict=True):
+                    fit_rows.append({"unit_label": unit_label, "time": t, "y": y})
 
+        unit_labels = [f"Unit: {u}" for u in selected_units]
+        obs_df = pd.DataFrame(obs_rows)
+        fit_df = pd.DataFrame(fit_rows)
+        obs_df["unit_label"] = pd.Categorical(
+            obs_df["unit_label"], categories=unit_labels, ordered=True
+        )
+        fit_df["unit_label"] = pd.Categorical(
+            fit_df["unit_label"], categories=unit_labels, ordered=True
+        )
+
+        p = p9.ggplot()
+        if is_bayesian and ribbon_rows:
+            ribbon_df = pd.DataFrame(ribbon_rows)
+            ribbon_df["unit_label"] = pd.Categorical(
+                ribbon_df["unit_label"], categories=unit_labels, ordered=True
+            )
+            p = p + p9.geom_ribbon(
+                ribbon_df,
+                p9.aes("time", ymin="ymin", ymax="ymax"),
+                fill="#1f77b4",
+                alpha=0.2,
+                inherit_aes=False,
+            )
+        p = (
+            p
+            + p9.geom_line(
+                fit_df,
+                p9.aes("time", "y"),
+                color="#ff7f0e",
+                linetype="dashed",
+                alpha=0.7,
+            )
+            + p9.geom_point(obs_df, p9.aes("time", "y"), color="black", alpha=0.7)
+            + p9.geom_line(obs_df, p9.aes("time", "y"), color="black", alpha=0.7)
+            + p9.facet_wrap("unit_label", ncol=ncols, scales="free_y")
+            + p9.guides(color="none")
+            + p9.labs(x="", y="")
+            + p9.theme(
+                strip_text=p9.element_blank(),
+                strip_background=p9.element_blank(),
+                figure_size=figsize,
+            )
+        )
+
+        fig = p.draw()
+        axes = np.asarray(
+            [a for a in fig.axes if a.get_subplotspec() is not None][:n_units_plot]
+        )
+        for ax, unit in zip(axes, selected_units, strict=True):
             ax.set_title(f"Unit: {unit}", fontsize=10)
             ax.set_xlabel(self.time_fe_variable)
             ax.set_ylabel(self.outcome_variable_name)
-            if idx == 0:
-                ax.legend(fontsize=8)
-
-        plt.tight_layout()
-        return fig, np.array(axes)
+        if len(axes) > 0:
+            axes[0].legend(
+                handles=[
+                    plt.Line2D([0], [0], color="black", marker="o", linestyle="-"),
+                    plt.Line2D([0], [0], color="#ff7f0e", marker="s", linestyle="--"),
+                ],
+                labels=["Actual", "Fitted"],
+                fontsize=8,
+            )
+        return fig, axes
 
     def plot_residuals(
         self,
@@ -985,29 +1062,41 @@ class PanelRegression(BaseExperiment):
 
         # Calculate residuals
         residuals = plot_data["y_actual"] - plot_data["y_fitted"]
-
-        fig, ax = plt.subplots(figsize=(10, 6))
+        tidy = pd.DataFrame({"residual": residuals, "fitted": plot_data["y_fitted"]})
 
         if kind == "scatter":
-            ax.scatter(plot_data["y_fitted"], residuals, alpha=0.5)
-            ax.axhline(y=0, color="r", linestyle="--")
-            ax.set_xlabel("Fitted Values")
-            ax.set_ylabel("Residuals")
-            ax.set_title("Residuals vs Fitted Values")
-
+            p = (
+                p9.ggplot(tidy, p9.aes("fitted", "residual"))
+                + p9.geom_point(alpha=0.5)
+                + p9.geom_hline(yintercept=0, color="red", linetype="dashed")
+                + p9.labs(
+                    x="Fitted Values",
+                    y="Residuals",
+                    title="Residuals vs Fitted Values",
+                )
+                + p9.theme(figure_size=(10, 6))
+            )
         elif kind == "histogram":
-            ax.hist(residuals, bins=50, edgecolor="black")
-            ax.set_xlabel("Residuals")
-            ax.set_ylabel("Count")
-            ax.set_title("Distribution of Residuals")
-
+            p = (
+                p9.ggplot(tidy, p9.aes(x="residual"))
+                + p9.geom_histogram(bins=50, fill="#1f77b4", color="black", alpha=0.7)
+                + p9.labs(x="Residuals", y="Count", title="Distribution of Residuals")
+                + p9.theme(figure_size=(10, 6))
+            )
         elif kind == "qq":
-            stats.probplot(residuals, dist="norm", plot=ax)
-            # Update colors to match the rest of the plots
-            ax.get_lines()[0].set_markerfacecolor("C0")
-            ax.get_lines()[0].set_markeredgecolor("C0")
-            ax.get_lines()[1].set_color("C1")
-            ax.set_title("Q-Q Plot")
+            p = (
+                p9.ggplot(tidy, p9.aes(sample="residual"))
+                + p9.geom_qq(color="#1f77b4")
+                + p9.geom_qq_line(color="#ff7f0e")
+                + p9.labs(
+                    title="Q-Q Plot", x="Theoretical Quantiles", y="Sample Quantiles"
+                )
+                + p9.theme(figure_size=(10, 6))
+            )
+        else:
+            raise ValueError("kind must be 'scatter', 'histogram', or 'qq'")
 
-        plt.tight_layout()
+        fig = p.draw()
+        axes = [a for a in fig.axes if a.get_subplotspec() is not None]
+        ax = axes[0]
         return fig, ax
