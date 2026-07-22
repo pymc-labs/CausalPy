@@ -29,11 +29,11 @@ from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
 
 # Re-exported for existing importers; the canonical home is causalpy.utils so
 # non-plotting modules (e.g. reporting) can use it without importing plotting.
 from causalpy.utils import has_posterior_draws as has_posterior_draws
+from causalpy.utils import round_num
 
 
 def extract_r2_score(
@@ -53,6 +53,12 @@ def extract_r2_score(
         Index of the treated unit whose score to extract. Defaults to 0.
     """
     key = f"unit_{unit_index}_r2"
+    if key not in score.index:
+        raise ValueError(
+            f"Score container is missing required {key!r}; "
+            "expected one unit_{i}_r2 entry per treated unit, "
+            f"got {list(score.index)}."
+        )
     std = score.get(f"{key}_std")
     return float(score[key]), None if std is None else float(std)
 

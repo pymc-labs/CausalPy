@@ -462,7 +462,11 @@ class SklearnModelAdapter(ModelAdapter):
             Observed outcomes.
         **kwargs
             Additional keyword arguments forwarded to
-            :func:`sklearn.metrics.r2_score`.
+            :func:`sklearn.metrics.r2_score`, such as ``sample_weight``.
+            These are not forwarded to the underlying estimator's
+            ``score`` method. ``multioutput`` is fixed to
+            ``"raw_values"`` so each treated unit receives its own
+            ``unit_{i}_r2`` entry.
 
         Returns
         -------
@@ -470,6 +474,11 @@ class SklearnModelAdapter(ModelAdapter):
             One ``unit_{i}_r2`` entry per output. Point estimates carry no
             dispersion entries.
         """
+        if "multioutput" in kwargs:
+            raise ValueError(
+                "Cannot pass multioutput to SklearnModelAdapter.score(); "
+                'the canonical contract requires multioutput="raw_values".'
+            )
         scores = np.atleast_1d(
             r2_score(
                 _sklearn_y(y),

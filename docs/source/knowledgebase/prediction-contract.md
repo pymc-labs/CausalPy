@@ -37,6 +37,8 @@ For multi-output sklearn models, CausalPy computes one :math:`R^2` per output in
 
 This is a user-visible change for sklearn experiments: ``experiment.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.score["unit_0_r2"]``.
 
+For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
+
 ## Public name and compatibility
 
 The public posterior predictive name remains ``mu`` for backward compatibility. The contract is **semantic**, not lexical: ``mu`` must denote the conditional expected outcome in observed units. A future explicit name such as ``expected_outcome`` may be added in a minor release once all built-in backends are audited; until then, custom model authors should treat ``mu`` as that quantity.
