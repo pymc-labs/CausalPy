@@ -60,7 +60,7 @@ def test_sklearn_adapter_2d_y_matches_1d_slice():
     adapter_2d.fit(X, y_2d)
 
     assert np.allclose(adapter_1d.coefficients(), adapter_2d.coefficients())
-    assert adapter_1d.score(X, y_1d) == adapter_2d.score(X, y_2d)
+    assert adapter_1d.score(X, y_1d).equals(adapter_2d.score(X, y_2d))
     assert np.allclose(adapter_1d.predict(X).values, adapter_2d.predict(X).values)
 
 
@@ -91,7 +91,7 @@ def test_sklearn_adapter_xarray_inputs_match_numpy():
     adapter_xr.fit(X_xr, y_xr)
 
     assert np.allclose(adapter_np.coefficients(), adapter_xr.coefficients())
-    assert adapter_np.score(X_np, y_np) == adapter_xr.score(X_xr, y_xr)
+    assert adapter_np.score(X_np, y_np).equals(adapter_xr.score(X_xr, y_xr))
     assert np.allclose(adapter_np.predict(X_np).values, adapter_xr.predict(X_xr).values)
     mu = adapter_xr.predict(X_xr)
     assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")

@@ -28,14 +28,14 @@ from causalpy.date_utils import _combine_datetime_indices, format_date_axes
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
-    extract_r2_score,
+    format_r2_score,
     get_hdi_to_df,
     has_posterior_draws,
     plot_posterior_over_x,
 )
 from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import check_convex_hull_violation, round_num
+from causalpy.utils import check_convex_hull_violation
 
 from .base import BaseExperiment
 
@@ -809,17 +809,12 @@ class SyntheticControl(BaseExperiment):
 
     def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
         """Generate appropriate score title for the specified treated unit"""
-        r_to = round_to if round_to is not None else 2
-        r2_val, r2_std_val = extract_r2_score(
-            self.score, unit_index=self.treated_units.index(treated_unit)
+        return format_r2_score(
+            self.score,
+            unit_index=self.treated_units.index(treated_unit),
+            round_to=round_to,
+            context="on pre-intervention data",
         )
-        assert r2_val is not None  # both backends' score containers carry R^2
-        if r2_std_val is not None:
-            return (
-                f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, r_to)} "
-                f"(std = {round_num(r2_std_val, r_to)})"
-            )
-        return f"$R^2$ on pre-intervention data = {round_num(r2_val, r_to)}"
 
     def effect_summary(
         self,

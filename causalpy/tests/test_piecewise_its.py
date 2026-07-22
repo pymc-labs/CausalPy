@@ -399,7 +399,7 @@ def test_piecewise_its_ols_single_interruption():
     )
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.9  # Should fit well with low noise
+    assert result.score["unit_0_r2"] > 0.9  # Should fit well with low noise
     assert len(result.labels) == 4  # Intercept, time, step, ramp
 
 
@@ -1304,7 +1304,7 @@ def test_piecewise_its_ols_various_effects(level_change, slope_change):
     result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.5  # Should have reasonable fit
+    assert result.score["unit_0_r2"] > 0.5  # Should have reasonable fit
 
 
 @pytest.mark.parametrize(
@@ -1397,9 +1397,8 @@ def test_piecewise_its_score_attribute_ols():
         model=LinearRegression(),
     )
 
-    # Score should be a float for OLS
-    assert isinstance(result.score, float)
-    assert 0 <= result.score <= 1
+    assert list(result.score.index) == ["unit_0_r2"]
+    assert 0 <= result.score["unit_0_r2"] <= 1
 
 
 def test_piecewise_its_ols_model_without_fit_intercept():
