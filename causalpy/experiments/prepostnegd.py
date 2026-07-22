@@ -161,7 +161,6 @@ class PrePostNEGD(BaseExperiment):
             coords=build_coords(self.labels, X.shape[0]),
         )
 
-        idata = self._model_backend.require_idata()
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data
