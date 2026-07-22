@@ -84,6 +84,13 @@ groups:
         cards:
           - title: Piecewise Interrupted Time Series (Segmented Regression)
             notebook: piecewise-interrupted-time-series-pymc
+      - title: Hierarchical Interrupted Time Series
+        intro: |
+          Hierarchical ITS extends the design to multi-unit panels where each unit (e.g. a product) has its own treatment time, such as a staggered launch. Per-unit intercepts, trends, and lift are partially pooled toward shared population-level hyperparameters.
+        cards:
+          - title: Hierarchical ITS for staggered launches (event-study)
+            notebook: hierarchical_its_launch
+
 
   - title: Cross-sectional methods
     intro: |
