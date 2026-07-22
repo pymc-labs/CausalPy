@@ -469,11 +469,13 @@ class RegressionDiscontinuity(BaseExperiment):
 
         # create strings to compose title
         r2_val, r2_std_val = extract_r2_score(self.score)
-        assert r2_val is not None
         if with_uncertainty:
-            assert r2_std_val is not None
-            title_info = f"{round_num(r2_val, round_to)} (std = {round_num(r2_std_val, round_to)})"
-            r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+            if r2_val is not None and r2_std_val is not None:
+                title_info = f"{round_num(r2_val, round_to)} (std = {round_num(r2_std_val, round_to)})"
+                r2 = f"Bayesian $R^2$ on fit data = {title_info}"
+            else:
+                # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+                r2 = "Bayesian fit on data"
             percentiles = self.discontinuity_at_threshold.quantile(
                 [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
             ).values
@@ -486,6 +488,7 @@ class RegressionDiscontinuity(BaseExperiment):
             """
             ax.set(title=r2 + "\n" + discon + ci)
         else:
+            assert r2_val is not None
             r2 = f"$R^2$ on fit data = {round_num(r2_val, round_to)}"
             discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
             ax.set(title=r2 + "\n" + discon)

@@ -17,11 +17,13 @@ import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices, dmatrix
 
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.tests.conftest import setup_regression_kink_data
+from causalpy.tests.test_glm import FixedMuRegression, _expected_log_link_att
 
 from sklearn.linear_model import LinearRegression
 
@@ -286,21 +288,46 @@ def test_did_ols_matches_only_exact_interaction(did_data):
     )
 
 
-def test_did_bayesian_matches_only_exact_interaction(mock_pymc_sample, did_data):
-    """Bayesian lookup must not confuse a similarly named main effect."""
+def test_did_bayesian_matches_only_exact_interaction(did_data):
+    """Bayesian g-computation must zero only the treatment interaction column."""
     df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
-    df["g_post"] = np.arange(len(df))
+    df["g_post"] = np.arange(len(df), dtype=float)
 
+    design = dmatrix(
+        "1 + post*g + g_post",
+        df,
+        return_type="dataframe",
+    )
+    labels = list(design.design_info.column_names)
+    weights = {
+        labels.index("post[T.True]:g"): np.log(2.0),
+        labels.index("g_post"): 0.6,
+    }
+    model = FixedMuRegression(weights, link="log")
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + post*g + g_post",
         time_variable_name="t",
         group_variable_name="g",
         post_treatment_variable_name="post",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        model=model,
     )
 
-    assert result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
+    treated_post = df.query("g == 1 and post")
+    (x_factual,) = build_design_matrices(
+        [result._x_design_info],
+        treated_post.drop(columns=["y"]),
+        return_type="dataframe",
+    )
+    x_counter = x_factual.copy()
+    for i, label in enumerate(result.labels):
+        if result._is_treatment_interaction(label):
+            x_counter.iloc[:, i] = 0
+    expected = _expected_log_link_att(
+        np.asarray(x_factual), np.asarray(x_counter), weights
+    )
+    assert float(result.causal_impact.mean()) == pytest.approx(expected)
+    assert "coeffs" not in result.causal_impact.dims
 
 
 def test_did_validation_post_treatment_data():

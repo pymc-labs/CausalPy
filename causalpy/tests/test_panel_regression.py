@@ -22,6 +22,7 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.pymc_models import GeneralizedLinearRegression
 
 # Minimal sample kwargs for fast tests
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
@@ -114,6 +115,45 @@ def test_panel_regression_pymc_dummies(mock_pymc_sample, small_panel_data):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     plt.close(fig)
+
+
+def test_panel_regression_rejects_poisson_demeaned(small_panel_data):
+    """Non-Gaussian GLRs cannot use the demeaned fixed-effects transformation."""
+    with pytest.raises(ValueError, match="fe_method='demeaned' is not supported"):
+        cp.PanelRegression(
+            data=small_panel_data,
+            formula="y ~ treatment + x1",
+            unit_fe_variable="unit",
+            fe_method="demeaned",
+            model=GeneralizedLinearRegression(
+                family="poisson",
+                sample_kwargs=sample_kwargs,
+            ),
+        )
+
+
+@pytest.mark.integration
+def test_panel_regression_poisson_dummies(mock_pymc_sample, small_panel_data):
+    """Poisson GLR panel models remain valid with dummy fixed effects."""
+    rng = np.random.default_rng(7)
+    count_panel = small_panel_data.copy()
+    # Replace the continuous Gaussian outcome with genuine non-negative counts;
+    # the GLR fit boundary rejects outcomes outside the Poisson support.
+    count_panel["y"] = rng.poisson(
+        np.exp(0.5 + 0.3 * count_panel["treatment"] + 0.1 * count_panel["x1"])
+    )
+    result = cp.PanelRegression(
+        data=count_panel,
+        formula="y ~ treatment + x1 + C(unit)",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=GeneralizedLinearRegression(
+            family="poisson",
+            sample_kwargs=sample_kwargs,
+        ),
+    )
+    assert isinstance(result, cp.PanelRegression)
+    assert result.fe_method == "dummies"
 
 
 @pytest.mark.integration

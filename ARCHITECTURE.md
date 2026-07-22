@@ -65,9 +65,22 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | `InstrumentalVariable` | IV/2SLS | Bayes only | Non-standard `fit()` signature; no unified `plot()` |
 | `PanelRegression` | Panel FE | OLS + Bayes | No `_default_model_class`; model required |
 
+## Estimand Computation and Model Capability
+
+The experiment owns the estimand: the intervention/counterfactual construction, the evaluation population, and the aggregation. The model/backend owns `E[Y | X, params]` on the response scale (the `mu` prediction contract; see `docs/source/knowledgebase/prediction-contract.md`) and the uncertainty representation. "Counterfactual prediction/contrast" is the broad computational primitive; g-computation is the treatment-standardization subset, not a synonym for every prediction-based estimator. Where a backend takes an algebraic shortcut (OLS DiD reads the interaction coefficient), that shortcut must be documented and tested as equivalent to the experiment's estimand under the validated design — the estimand is never defined by backend type.
+
+| Experiment | Counterfactual operation | Required model capability |
+|------------|--------------------------|---------------------------|
+| `InterruptedTimeSeries`, `PiecewiseITS`, `SyntheticControl`, `StaggeredDifferenceInDifferences` | Observed outcome minus counterfactual expectation | Response-scale expected predictions (`mu` for Bayesian; point predictions in `y` units for OLS) |
+| `DifferenceInDifferences`, `PrePostNEGD` | Factual minus counterfactual expected-outcome contrast on treated rows (g-computation) | Same as above. OLS DiD reads the interaction coefficient as a tested algebraic shortcut under the validated additive single-interaction design |
+| `RegressionDiscontinuity`, `RegressionKink` | Local expected-outcome geometry (discontinuity / slope change of `mu` at a threshold) | Response-scale expected predictions at probe points. With a non-identity link the reported effect is in expected-outcome units (e.g. change in slope of expected counts), not a link-scale coefficient |
+| `InstrumentalVariable`, `InversePropensityWeighting`, `SyntheticDifferenceInDifferences` | Specialized, non-portable estimators with custom fit signatures | Dedicated model classes only; generic regression models are not supported |
+| `PanelRegression` | None yet — model fitting and link-scale coefficient inference only, until it has an explicit treatment contrast and target-population API | Regression fit; coefficient reporting |
+
 ## PyMC Models
 
-- `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression
+- `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression (Gaussian/identity specialization of `GeneralizedLinearRegression`)
+- `GeneralizedLinearRegression` — curated GLM families (Poisson, Negative Binomial, Bernoulli) with response-scale `mu` and optional use in the standard regression experiments listed for `LinearRegression`. In `PanelRegression`, non-Gaussian GLR support is coefficient-level only (see matrix above) and requires dummy fixed effects; `fe_method="demeaned"` is Gaussian-only (demeaning is invalid for discrete outcomes).
 - `WeightedSumFitter` / `SoftmaxWeightedSumFitter` — SyntheticControl
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable

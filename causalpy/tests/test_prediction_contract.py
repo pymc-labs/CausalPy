@@ -16,12 +16,11 @@
 from __future__ import annotations
 
 import numpy as np
-import pymc as pm
 import pytest
 import xarray as xr
 
 from causalpy.experiments.model_adapter import PyMCModelAdapter
-from causalpy.pymc_models import LinearRegression, PyMCModel
+from causalpy.pymc_models import GeneralizedLinearRegression, LinearRegression
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -42,48 +41,6 @@ def _design_matrix(n_obs: int, rng: np.random.Generator) -> xr.DataArray:
         dims=["obs_ind", "coeffs"],
         coords={"obs_ind": np.arange(n_obs), "coeffs": ["Intercept", "x1"]},
     )
-
-
-class PoissonLogLinkModel(PyMCModel):
-    """Poisson regression with ``mu = exp(eta)`` on the count scale."""
-
-    def build_model(self, X, y, coords):
-        with self:
-            self.add_coords(coords)
-            X_ = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
-            y_ = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
-            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
-            eta = pm.Deterministic(
-                "eta",
-                pm.math.dot(X_, beta.T),
-                dims=["obs_ind", "treated_units"],
-            )
-            mu = pm.Deterministic(
-                "mu", pm.math.exp(eta), dims=["obs_ind", "treated_units"]
-            )
-            pm.Poisson("y_hat", mu=mu, observed=y_, dims=["obs_ind", "treated_units"])
-
-
-class BernoulliLogitModel(PyMCModel):
-    """Bernoulli regression with ``mu = sigmoid(eta)`` on the probability scale."""
-
-    def build_model(self, X, y, coords):
-        with self:
-            self.add_coords(coords)
-            X_ = pm.Data(name="X", value=X, dims=["obs_ind", "coeffs"])
-            y_ = pm.Data(name="y", value=y, dims=["obs_ind", "treated_units"])
-            beta = pm.Normal("beta", mu=0, sigma=1, dims=["treated_units", "coeffs"])
-            eta = pm.Deterministic(
-                "eta",
-                pm.math.dot(X_, beta.T),
-                dims=["obs_ind", "treated_units"],
-            )
-            mu = pm.Deterministic(
-                "mu",
-                pm.math.sigmoid(eta),
-                dims=["obs_ind", "treated_units"],
-            )
-            pm.Bernoulli("y_hat", p=mu, observed=y_, dims=["obs_ind", "treated_units"])
 
 
 def test_linear_regression_mu_matches_outcome_scale_impact(rng, mock_pymc_sample):
@@ -113,7 +70,7 @@ def test_linear_regression_mu_matches_outcome_scale_impact(rng, mock_pymc_sample
 
 
 def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
-    """Compliant Poisson models expose ``exp(eta)`` as ``mu`` for count-scale impact."""
+    """Built-in Poisson GLR exposes ``exp(eta)`` as ``mu`` for count-scale impact."""
     n_obs = 15
     X = _design_matrix(n_obs, rng)
     rate = np.exp(X.data @ np.array([[0.2, 0.4]]).T)
@@ -125,7 +82,10 @@ def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
     )
     coords = _single_unit_coords(n_obs)
 
-    model = PoissonLogLinkModel(sample_kwargs={**sample_kwargs, "random_seed": 7})
+    model = GeneralizedLinearRegression(
+        family="poisson",
+        sample_kwargs={**sample_kwargs, "random_seed": 7},
+    )
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 
@@ -137,7 +97,7 @@ def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
 
 
 def test_bernoulli_logit_mu_is_probability(rng, mock_pymc_sample):
-    """Compliant Bernoulli models expose ``sigmoid(eta)`` as ``mu``."""
+    """Built-in Bernoulli GLR exposes ``sigmoid(eta)`` as ``mu``."""
     n_obs = 20
     X = _design_matrix(n_obs, rng)
     logits = X.data @ np.array([[-0.5, 1.0]]).T
@@ -150,7 +110,10 @@ def test_bernoulli_logit_mu_is_probability(rng, mock_pymc_sample):
     )
     coords = _single_unit_coords(n_obs)
 
-    model = BernoulliLogitModel(sample_kwargs={**sample_kwargs, "random_seed": 11})
+    model = GeneralizedLinearRegression(
+        family="bernoulli",
+        sample_kwargs={**sample_kwargs, "random_seed": 11},
+    )
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 

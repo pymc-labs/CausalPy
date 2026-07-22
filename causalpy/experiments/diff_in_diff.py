@@ -222,18 +222,22 @@ class DifferenceInDifferences(BaseExperiment):
                 new_x.iloc[:, i] = 0
         self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
 
-        # calculate causal impact
+        # Calculate causal impact. The estimand is owned by the experiment: the
+        # ATT is the treated-post factual-minus-counterfactual expected-outcome
+        # contrast, averaged over treated post-treatment rows. The model/backend
+        # owns E[Y | X, params] on the response scale (the ``mu`` prediction
+        # contract; see docs/source/knowledgebase/prediction-contract.md) and
+        # the uncertainty representation; how the contrast is computed below is
+        # an implementation detail, not a different estimand per backend.
         if self._model_backend.is_bayesian:
-            assert self.model.idata is not None
-            # This is the coefficient on the interaction term
-            coeff_names = self.model.idata.posterior.coords["coeffs"].data
-            for i, label in enumerate(coeff_names):
-                if self._is_treatment_interaction(label):
-                    self.causal_impact = self.model.idata.posterior["beta"].isel(
-                        {"coeffs": i}
-                    )
+            # All Bayesian backends promise response-scale ``mu`` draws, so the
+            # contrast is evaluated directly on ``mu``.
+            self.causal_impact = self._att_from_g_computation()
         elif self._model_backend.is_ols:
-            # This is the coefficient on the interaction term
+            # Algebraic shortcut: under the validated additive design (exactly
+            # one group-by-post interaction, identity link), the interaction
+            # coefficient equals the prediction-based ATT. Equivalence is pinned
+            # by test_ols_did_coefficient_equals_prediction_contrast.
             coef_map = dict(
                 zip(self.labels, self._model_backend.coefficients(), strict=False)
             )
@@ -316,6 +320,34 @@ class DifferenceInDifferences(BaseExperiment):
                 f"(e.g. '{self.group_variable_name}*{self.post_treatment_variable_name}'). "
                 "This interaction term identifies the difference-in-differences causal effect."
             )
+
+    def _att_from_g_computation(self) -> xr.DataArray:
+        """Response-scale ATT from treated-post factual vs counterfactual ``mu``."""
+        treated_post = (
+            self.data.query(f"{self.group_variable_name} == 1")
+            .query(f"{self.post_treatment_variable_name} == True")
+            .drop(self.outcome_variable_name, axis=1)
+        )
+        if treated_post.empty:
+            raise ValueError("No treated post-treatment observations for ATT")
+
+        (x_factual,) = build_design_matrices(
+            [self._x_design_info], treated_post, return_type="dataframe"
+        )
+        x_counter = x_factual.copy()
+        for i, label in enumerate(self.labels):
+            if self._is_treatment_interaction(label):
+                x_counter.iloc[:, i] = 0
+
+        # The adapter returns response-scale ``mu`` draws in the canonical
+        # prediction container; ``var_names`` skips sampling ``y_hat``.
+        mu_factual = self._model_backend.predict(
+            np.asarray(x_factual), var_names=["mu"]
+        )
+        mu_counter = self._model_backend.predict(
+            np.asarray(x_counter), var_names=["mu"]
+        )
+        return (mu_factual - mu_counter).mean(dim="obs_ind")
 
     def _is_treatment_interaction(self, term: str) -> bool:
         """Whether a term is exactly the group/post-treatment interaction."""
@@ -412,6 +444,14 @@ class DifferenceInDifferences(BaseExperiment):
             The figure that was created.
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
+
+        Notes
+        -----
+        The plotted group trajectories use one representative unit's covariate
+        row per time point, while the causal impact reported in the title
+        averages over **all** treated post-treatment rows. When covariates vary
+        across units within a time point, the plotted trajectories are
+        illustrative rather than the exact population underlying the ATT.
         """
         if hdi_prob is not None:
             warnings.warn(

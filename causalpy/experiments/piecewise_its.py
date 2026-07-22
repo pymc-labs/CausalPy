@@ -591,9 +591,12 @@ class PiecewiseITS(BaseExperiment):
 
         # Title with R^2; scores carrying a dispersion entry render as Bayesian
         r2_val, r2_std_val = extract_r2_score(self.score)
-        assert r2_val is not None  # both backends' score containers carry R^2
-        label = "Bayesian $R^2$" if r2_std_val is not None else "$R^2$"
-        title_str = f"Piecewise ITS: {label} = {round_num(r2_val, round_to)}"
+        if r2_val is None:
+            # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+            title_str = "Piecewise ITS: Bayesian fit"
+        else:
+            label = "Bayesian $R^2$" if r2_std_val is not None else "$R^2$"
+            title_str = f"Piecewise ITS: {label} = {round_num(r2_val, round_to)}"
         ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect

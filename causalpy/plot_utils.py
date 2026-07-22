@@ -51,23 +51,26 @@ def has_posterior_draws(Y: xr.DataArray) -> bool:
 
 
 def extract_r2_score(
-    score: pd.Series | float, unit_index: int = 0
+    score: pd.Series | float | None, unit_index: int = 0
 ) -> tuple[float | None, float | None]:
     """Extract ``(r2, r2_std)`` from a backend score container.
 
     Bayesian backends return a :class:`pandas.Series` with
     ``unit_{i}_r2`` / ``unit_{i}_r2_std`` (or plain ``r2`` / ``r2_std``)
-    entries; point-estimate backends return a scalar. ``r2_std`` is ``None``
-    when the container carries no dispersion, so callers can render
-    ``(std = ...)`` only when it exists.
+    entries; point-estimate backends return a scalar. Backends that skip R²
+    scoring (e.g. non-Gaussian GLMs) store ``None``, which yields
+    ``(None, None)``. ``r2_std`` is ``None`` when the container carries no
+    dispersion, so callers can render ``(std = ...)`` only when it exists.
 
     Parameters
     ----------
-    score : pd.Series or float
+    score : pd.Series, float, or None
         Backend score container as stored on ``experiment.score``.
     unit_index : int, optional
         Index of the treated unit whose score to extract. Defaults to 0.
     """
+    if score is None:
+        return None, None
     if isinstance(score, pd.Series):
         key = f"unit_{unit_index}_r2"
         if key not in score.index:

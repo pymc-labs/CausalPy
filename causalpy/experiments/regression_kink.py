@@ -26,7 +26,11 @@ from patsy import ModelDesc, build_design_matrices
 import xarray as xr
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    extract_r2_score,
+    plot_posterior_over_x,
+)
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -44,6 +48,15 @@ from causalpy.custom_exceptions import (
 
 class RegressionKink(BaseExperiment):
     """A class to analyse regression kink designs.
+
+    .. note::
+
+        The reported effect, ``gradient_change``, is the change in the slope of
+        the response-scale expected outcome ``mu`` at the kink point. With a
+        non-identity link (e.g. a Poisson
+        :class:`~causalpy.pymc_models.GeneralizedLinearRegression`), this is a
+        change in the slope of expected counts or probabilities, not a
+        link-scale coefficient.
 
     Parameters
     ----------
@@ -391,8 +404,13 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        if r2_val is not None and r2_std_val is not None:
+            title_info = f"{round_num(r2_val, round_to if round_to is not None else 2)} (std = {round_num(r2_std_val, round_to if round_to is not None else 2)})"
+            r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        else:
+            # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+            r2 = "Bayesian fit on all data"
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values

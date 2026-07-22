@@ -813,7 +813,9 @@ class SyntheticControl(BaseExperiment):
         r2_val, r2_std_val = extract_r2_score(
             self.score, unit_index=self.treated_units.index(treated_unit)
         )
-        assert r2_val is not None  # both backends' score containers carry R^2
+        if r2_val is None:
+            # Models that skip R² scoring (e.g. non-Gaussian GLMs) still plot.
+            return "Pre-intervention Bayesian fit"
         if r2_std_val is not None:
             return (
                 f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, r_to)} "
