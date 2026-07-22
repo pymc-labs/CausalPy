@@ -15,11 +15,13 @@
 
 import re  # noqa: I001
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
+import plotnine as p9
+import polars as pl
 from matplotlib import pyplot as plt
 from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
@@ -30,12 +32,15 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+from causalpy.constants import HDI_PROB
 from causalpy.plot_utils import (
-    _PosteriorPlotStyle,
+    HISTOGRAM_PANEL_THEME,
+    PlotSpec,
+    dataarray_draws,
     extract_r2_score,
     has_posterior_draws,
-    plot_posterior_over_x,
+    label_draws,
+    posterior_kind_layers,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
@@ -47,6 +52,15 @@ from causalpy.utils import (
 )
 
 from .base import BaseExperiment
+
+
+@dataclass(frozen=True)
+class _RDPlotData:
+    """Tidy tables consumed by the declarative RD plot."""
+
+    points: pd.DataFrame
+    draws: pl.DataFrame
+    colors: dict[str, str]
 
 
 class RegressionDiscontinuity(BaseExperiment):
@@ -386,6 +400,33 @@ class RegressionDiscontinuity(BaseExperiment):
             figsize=figsize,
         )
 
+    def _prepare_plot_data(self, *, fit_label: str) -> _RDPlotData:
+        """Prepare observed and posterior tables for plotting."""
+        points = self.data.copy()
+        has_exclusion = len(self.fit_data) < len(self.data)
+        point_label = "fit data" if has_exclusion else "data"
+        points["series"] = (
+            np.where(
+                points.index.isin(self.fit_data.index), "fit data", "excluded data"
+            )
+            if has_exclusion
+            else "data"
+        )
+        newdata = self.x_pred.reset_index(drop=True)
+        newdata["obs_ind"] = range(len(newdata))
+        draws = label_draws(
+            dataarray_draws(self.pred).join(pl.from_pandas(newdata), on="obs_ind"),
+            series=fit_label,
+        )
+        colors = {point_label: "black", fit_label: "#ff7f0e"}
+        if has_exclusion:
+            colors["excluded data"] = "lightgray"
+        return _RDPlotData(
+            points=points,
+            draws=draws,
+            colors=colors,
+        )
+
     def _plot(
         self,
         round_to: int | None = 2,
@@ -395,77 +436,34 @@ class RegressionDiscontinuity(BaseExperiment):
         num_samples: int = 50,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs.
+    ) -> PlotSpec:
+        """Build the RD plot from tidy declarative layers.
 
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
-        ci_prob : float, optional
-            Probability mass of the highest density interval drawn around the
-            posterior predictive band, and the central credible interval
-            reported in the figure title for the discontinuity at threshold.
-            Must be in ``(0, 1]``. Ignored for point-estimate models. Defaults
-            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-        kind : {"ribbon", "histogram", "spaghetti"}, optional
-            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
-        ci_kind : {"hdi", "eti"}, optional
-            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
-        num_samples : int, optional
-            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
+        Consumes the canonical prediction container from any backend.
+        Point-estimate backends (singleton ``chain``/``draw``) collapse the
+        uncertainty layers to a bare model-fit line.
         """
         with_uncertainty = has_posterior_draws(self.pred)
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot data: use two layers only when there are excluded observations
-        has_exclusion = len(self.fit_data) < len(self.data)
-        if has_exclusion:
-            sns.scatterplot(
-                self.data,
-                x=self.running_variable_name,
-                y=self.outcome_variable_name,
-                color="lightgray",
-                ax=ax,
-                label="excluded data",
-            )
-        sns.scatterplot(
-            self.fit_data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="k",
-            ax=ax,
-            label="fit data" if has_exclusion else "data",
+        xcol = self.running_variable_name
+        ycol = self.outcome_variable_name
+        fit_label = "Posterior mean" if with_uncertainty else "model fit"
+        plot_data = self._prepare_plot_data(fit_label=fit_label)
+        colors = {**plot_data.colors, "treatment threshold": "red"}
+        _, posterior_layers = posterior_kind_layers(
+            plot_data.draws,
+            kind,
+            x=xcol,
+            group_by=["series", xcol],
+            ci_prob=ci_prob,
+            interval=ci_kind,
+            num_samples=num_samples,
+            colors=colors,
         )
-
-        # Plot model fit to data
-        if with_uncertainty:
-            style: _PosteriorPlotStyle = {
-                "ci_prob": ci_prob,
-                "kind": kind,
-                "ci_kind": ci_kind,
-                "num_samples": num_samples,
-            }
-            plot_posterior_over_x(
-                self.x_pred[self.running_variable_name],
-                self.pred.isel(treated_units=0),
-                ax=ax,
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-                label="Posterior mean",
-            )
-        else:
-            ax.plot(
-                self.x_pred[self.running_variable_name],
-                self.pred.isel(chain=0, draw=0, treated_units=0),
-                "k",
-                markersize=10,
-                label="model fit",
-            )
+        p = p9.ggplot() + p9.geom_point(
+            plot_data.points, p9.aes(xcol, ycol, color="series"), size=1.5
+        )
+        for layer in posterior_layers:
+            p += layer
 
         # create strings to compose title
         r2_val, r2_std_val = extract_r2_score(self.score)
@@ -481,42 +479,53 @@ class RegressionDiscontinuity(BaseExperiment):
                 rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
                 + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
             )
-            discon = f"""
-            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
-            """
-            ax.set(title=r2 + "\n" + discon + ci)
+            discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)}, "
+            title = r2 + "\n" + discon + ci
         else:
             r2 = f"$R^2$ on fit data = {round_num(r2_val, round_to)}"
             discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
-            ax.set(title=r2 + "\n" + discon)
+            title = r2 + "\n" + discon
 
-        # Treatment threshold line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
+        # Treatment threshold (and optional donut boundaries) as legend-mapped
+        # vertical lines.
+        thr_df = pd.DataFrame(
+            {
+                "xintercept": [self.treatment_threshold],
+                "series": ["treatment threshold"],
+            }
         )
-
-        # Add donut hole boundary lines if donut_hole > 0
+        p = p + p9.geom_vline(
+            thr_df, p9.aes(xintercept="xintercept", color="series"), size=1.5
+        )
         if self.donut_hole > 0:
-            ax.axvline(
-                x=self.treatment_threshold - self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-                label="donut boundary",
+            donut_df = pd.DataFrame(
+                {
+                    "xintercept": [
+                        self.treatment_threshold - self.donut_hole,
+                        self.treatment_threshold + self.donut_hole,
+                    ],
+                    "series": ["donut boundary", "donut boundary"],
+                }
             )
-            ax.axvline(
-                x=self.treatment_threshold + self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
+            p = p + p9.geom_vline(
+                donut_df,
+                p9.aes(xintercept="xintercept", color="series"),
+                linetype="dashed",
+                size=1,
             )
+            colors["donut boundary"] = "orange"
 
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
+        p = (
+            p
+            + p9.scale_color_manual(values=colors, name="")
+            + p9.labs(title=title, x=xcol, y=ycol)
+        )
+        if figsize is not None:
+            p += p9.theme(figure_size=figsize)
+        if kind == "histogram":
+            p = p + HISTOGRAM_PANEL_THEME
+
+        return PlotSpec(p, n_panels=1)
 
     def effect_summary(
         self,
