@@ -776,16 +776,15 @@ class InterruptedTimeSeries(BaseExperiment):
             handles.append(h)
             labels.append("Causal impact")
 
-        # Title with R^2; scores with a dispersion entry render as Bayesian
+        # Title with R^2; scores carrying a dispersion entry render as Bayesian
         r2_val, r2_std_val = extract_r2_score(self.score)
-        if isinstance(self.score, pd.Series):
-            title_str = "Pre-intervention Bayesian $R^2$"
-            if r2_val is not None:
-                title_str += f": {round_num(r2_val, round_to)}"
-                if r2_std_val is not None:
-                    title_str += f"\n(std = {round_num(r2_std_val, round_to)})"
+        assert r2_val is not None  # both backends' score containers carry R^2
+        if r2_std_val is not None:
+            title_str = (
+                f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, round_to)}"
+                f"\n(std = {round_num(r2_std_val, round_to)})"
+            )
         else:
-            assert r2_val is not None  # scalar scores always yield a value
             title_str = (
                 f"$R^2$ on pre-intervention data = {round_num(r2_val, round_to)}"
             )

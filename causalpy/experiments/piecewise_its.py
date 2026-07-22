@@ -589,15 +589,11 @@ class PiecewiseITS(BaseExperiment):
                 linewidth=2,
             )
 
-        # Title with R^2; scores with per-metric entries render as Bayesian
-        r2_val, _ = extract_r2_score(self.score)
-        if isinstance(self.score, pd.Series):
-            title_str = "Piecewise ITS: Bayesian $R^2$"
-            if r2_val is not None:
-                title_str += f" = {round_num(r2_val, round_to)}"
-        else:
-            assert r2_val is not None  # scalar scores always yield a value
-            title_str = f"Piecewise ITS: $R^2$ = {round_num(r2_val, round_to)}"
+        # Title with R^2; scores carrying a dispersion entry render as Bayesian
+        r2_val, r2_std_val = extract_r2_score(self.score)
+        assert r2_val is not None  # both backends' score containers carry R^2
+        label = "Bayesian $R^2$" if r2_std_val is not None else "$R^2$"
+        title_str = f"Piecewise ITS: {label} = {round_num(r2_val, round_to)}"
         ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect
