@@ -248,6 +248,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         6. :meth:`_build_reporting_objects` constructs the xarray objects
            required by the reporting helpers.
         """
+        # Backend-identity check is justified here: capability validation
+        # (trust boundary), not statistical dispatch.
         if self._model_backend.is_ols:
             raise NotImplementedError(
                 "OLS estimation for SyntheticDifferenceInDifferences is not yet "

@@ -411,7 +411,7 @@ class BaseExperiment(ABC):
         Subclasses implement a single backend-agnostic ``_plot`` that consumes
         the canonical prediction container. Uncertainty rendering should key
         on data properties (e.g.
-        :func:`~causalpy.plot_utils.has_posterior_draws`), not backend
+        :func:`~causalpy.utils.has_posterior_draws`), not backend
         identity.
         """
         raise NotImplementedError("_plot method not yet implemented")

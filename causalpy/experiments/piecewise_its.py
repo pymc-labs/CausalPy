@@ -805,7 +805,6 @@ class PiecewiseITS(BaseExperiment):
             self, window_coords, treated_unit=treated_unit
         )
         return _effect_summary_timeseries(
-            self,
             windowed_impact,
             counterfactual,
             window_coords,

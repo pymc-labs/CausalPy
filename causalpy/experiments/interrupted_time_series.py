@@ -392,12 +392,12 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         from causalpy.reporting import _extract_hdi_bounds
 
-        is_pymc = self._model_backend.is_bayesian
+        has_draws = has_posterior_draws(self.intervention_impact)
         time_dim = "obs_ind"
         hdi_prob = 1 - alpha
         prob_persisted: float | None
 
-        if is_pymc:
+        if has_draws:
             # PyMC: Compute statistics for both periods
             intervention_avg = self.intervention_impact.mean(dim=time_dim)
             intervention_mean = _as_scalar(intervention_avg.mean(dim=["chain", "draw"]))
@@ -1044,10 +1044,10 @@ class InterruptedTimeSeries(BaseExperiment):
                 "This method is only available for three-period designs."
             )
 
-        is_pymc = self._model_backend.is_bayesian
+        has_draws = has_posterior_draws(self.intervention_impact)
         time_dim = "obs_ind"
 
-        if is_pymc:
+        if has_draws:
             # PyMC: Compute statistics using xarray operations
             from causalpy.reporting import _extract_hdi_bounds
 
@@ -1133,7 +1133,7 @@ class InterruptedTimeSeries(BaseExperiment):
 
         # Print results
         hdi_pct = int(hdi_prob * 100)
-        ci_label = "HDI" if is_pymc else "CI"
+        ci_label = "HDI" if has_draws else "CI"
         print("=" * 60)
         print("Effect Persistence Analysis")
         print("=" * 60)
@@ -1276,7 +1276,6 @@ class InterruptedTimeSeries(BaseExperiment):
             )
 
         return _effect_summary_timeseries(
-            self,
             windowed_impact,
             counterfactual,
             window_coords,

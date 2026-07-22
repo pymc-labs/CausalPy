@@ -31,23 +31,9 @@ from pandas.api.extensions import ExtensionArray
 from causalpy.constants import HDI_PROB
 from causalpy.utils import _as_scalar
 
-
-def has_posterior_draws(Y: xr.DataArray) -> bool:
-    """Whether *Y* carries genuine posterior uncertainty.
-
-    The canonical prediction container has ``chain`` and ``draw`` dimensions
-    on every backend; point-estimate backends emit singleton dimensions (a
-    point estimate is a posterior with one atom). Plot code should key
-    uncertainty rendering (ribbons, HDI labels, ...) on this data property
-    rather than on backend identity.
-
-    Parameters
-    ----------
-    Y : xr.DataArray
-        A canonical prediction container with ``chain`` and ``draw``
-        dimensions.
-    """
-    return Y.sizes.get("chain", 1) * Y.sizes.get("draw", 1) > 1
+# Re-exported for existing importers; the canonical home is causalpy.utils so
+# non-plotting modules (e.g. reporting) can use it without importing plotting.
+from causalpy.utils import has_posterior_draws as has_posterior_draws
 
 
 def extract_r2_score(

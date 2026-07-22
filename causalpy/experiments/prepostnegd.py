@@ -142,6 +142,8 @@ class PrePostNEGD(BaseExperiment):
         X = self.design["X"]
         y = self.design["y"]
 
+        # Backend-identity checks are justified here: capability validation
+        # (trust boundary), not statistical dispatch.
         if self._model_backend.is_ols:
             raise NotImplementedError("Not implemented for OLS model")
         if not self._model_backend.is_bayesian:

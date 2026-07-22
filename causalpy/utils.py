@@ -49,6 +49,26 @@ def _as_scalar(value: Any) -> float:
     return float(np.asarray(value).reshape(()))
 
 
+def has_posterior_draws(Y: xr.DataArray) -> bool:
+    """Whether *Y* carries genuine posterior uncertainty.
+
+    The canonical prediction container has ``chain`` and ``draw`` dimensions
+    on every backend; point-estimate backends emit singleton dimensions (a
+    point estimate is a posterior with one atom). Downstream code should key
+    statistical dispatch (HDI vs t-interval, ribbons, tail probabilities,
+    ...) on this data property rather than on backend identity, so any
+    backend that emits many draws gets posterior summaries for free and a
+    degenerate single-draw run falls back to point summaries.
+
+    Parameters
+    ----------
+    Y : xr.DataArray
+        A canonical prediction container with ``chain`` and ``draw``
+        dimensions.
+    """
+    return Y.sizes.get("chain", 1) * Y.sizes.get("draw", 1) > 1
+
+
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
     only."""
@@ -431,10 +451,9 @@ def extract_lift_for_mmm(
             f"aggregate must be one of {_VALID_AGGREGATIONS}, got '{aggregate}'"
         )
 
-    from causalpy.pymc_models import PyMCModel
-
-    # Validate that we have a Bayesian model
-    if not isinstance(sc_result.model, PyMCModel):
+    # Key on the container, not backend identity: sigma needs genuine
+    # posterior dispersion, which a degenerate single-draw run also lacks.
+    if not has_posterior_draws(sc_result.post_impact):
         raise ValueError(
             "extract_lift_for_mmm requires a Bayesian (PyMC) model for uncertainty "
             "quantification. OLS models do not provide posterior distributions needed "
