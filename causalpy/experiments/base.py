@@ -227,8 +227,8 @@ class BaseExperiment(ABC):
         raise NotImplementedError("fit method not implemented")
 
     @property
-    def idata(self) -> az.InferenceData:
-        """Return the InferenceData object of the model. Only relevant for PyMC models."""
+    def idata(self) -> az.InferenceData | None:
+        """Return fitted InferenceData when the model backend supports it."""
         return self._model_backend.idata
 
     def print_coefficients(self, round_to: int | None = None) -> None:
@@ -271,11 +271,11 @@ class BaseExperiment(ABC):
         For PyMC-backed experiments, interval columns use the HDI probability set
         by :meth:`set_maketables_options` (or backend defaults if not set).
         """
-        return get_maketables_adapter(self.model).coef_table(self)
+        return get_maketables_adapter(self._model_backend).coef_table(self)
 
     def __maketables_stat__(self, key: str) -> Any:
         """Optional maketables plugin hook for model-level statistics."""
-        return get_maketables_adapter(self.model).stat(self, key)
+        return get_maketables_adapter(self._model_backend).stat(self, key)
 
     @property
     def __maketables_depvar__(self) -> str:
@@ -291,17 +291,17 @@ class BaseExperiment(ABC):
     @property
     def __maketables_vcov_info__(self) -> dict[str, Any]:
         """Optional maketables plugin hook for variance-covariance info."""
-        return get_maketables_adapter(self.model).vcov_info(self)
+        return get_maketables_adapter(self._model_backend).vcov_info(self)
 
     @property
     def __maketables_stat_labels__(self) -> dict[str, str] | None:
         """Optional maketables plugin hook for statistic labels."""
-        return get_maketables_adapter(self.model).stat_labels(self)
+        return get_maketables_adapter(self._model_backend).stat_labels(self)
 
     @property
     def __maketables_default_stat_keys__(self) -> list[str] | None:
         """Optional maketables plugin hook for default statistic rows."""
-        return get_maketables_adapter(self.model).default_stat_keys(self)
+        return get_maketables_adapter(self._model_backend).default_stat_keys(self)
 
     def _render_plot(
         self,

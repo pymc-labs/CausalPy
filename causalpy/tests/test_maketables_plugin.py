@@ -13,6 +13,8 @@
 #   limitations under the License.
 """Tests for optional maketables plugin hooks on experiment objects."""
 
+from typing import cast
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -23,6 +25,11 @@ import causalpy as cp
 from causalpy.data.simulate_data import (
     generate_piecewise_its_data,
     generate_staggered_did_data,
+)
+from causalpy.experiments.model_adapter import (
+    ModelAdapter,
+    PyMCModelAdapter,
+    SklearnModelAdapter,
 )
 from causalpy.maketables_adapters import (
     PyMCMaketablesAdapter,
@@ -717,9 +724,21 @@ class TestGetMaketablesHdiProb:
 
 
 class TestGetMaketablesAdapter:
-    def test_unsupported_model_raises(self):
+    def test_dispatches_on_model_adapter_kind(self):
+        pymc_backend = PyMCModelAdapter(cp.pymc_models.LinearRegression())
+        sklearn_backend = SklearnModelAdapter(
+            cp.create_causalpy_compatible_class(LinearRegression(fit_intercept=False))
+        )
+
+        assert isinstance(get_maketables_adapter(pymc_backend), PyMCMaketablesAdapter)
+        assert isinstance(
+            get_maketables_adapter(sklearn_backend), SklearnMaketablesAdapter
+        )
+
+    def test_unsupported_backend_raises(self):
+        unsupported = _Stub(kind="pymc-forecast")
         with pytest.raises(TypeError, match="Unsupported model backend"):
-            get_maketables_adapter("not_a_model")
+            get_maketables_adapter(cast(ModelAdapter, unsupported))
 
 
 class TestSklearnAdapterUnit:

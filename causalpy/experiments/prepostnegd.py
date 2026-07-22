@@ -153,7 +153,7 @@ class PrePostNEGD(BaseExperiment):
             coords=build_coords(self.labels, X.shape[0]),
         )
 
-        assert self.model.idata is not None
+        idata = self._model_backend.require_idata()
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
         # get the model predictions of the observed data
@@ -184,7 +184,7 @@ class PrePostNEGD(BaseExperiment):
         self.pred_treated = self._model_backend.predict(X=np.asarray(new_x_treated))
 
         # Evaluate causal impact as equal to the treatment effect
-        self.causal_impact = self.model.idata.posterior["beta"].sel(
+        self.causal_impact = idata.posterior["beta"].sel(
             {"coeffs": self._get_treatment_effect_coeff()}
         )
 

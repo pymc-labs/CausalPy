@@ -260,8 +260,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
         self._model_backend.fit(X=X, y=y, coords=coords)
-        if self.model.idata is None:
-            raise AttributeError("Model fitting failed to produce idata")
 
         omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors()
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
@@ -360,9 +358,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         n_draws : int
             Number of draws per chain.
         """
-        if self.model.idata is None:
-            raise RuntimeError("Model has not been fit")
-        posterior = self.model.idata.posterior
+        posterior = self._model_backend.require_idata().posterior
         omega = posterior["omega"].to_numpy()
         lam = posterior["lam"].to_numpy()
         omega0 = posterior["omega0"].to_numpy()

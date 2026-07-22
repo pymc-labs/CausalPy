@@ -308,11 +308,10 @@ class PlaceboInTime:
                 f"attribute. PlaceboInTime requires experiments with an "
                 f"explicit treatment time."
             )
-        # Validate against the backend capability, not a concrete model
-        # class: any Bayesian backend (PyMCModel or PyMCForecastModel)
+        # Any InferenceData-capable backend (PyMCModel or PyMCForecastModel)
         # yields the draw-level post_impact this check consumes.
         backend = getattr(experiment, "_model_backend", None)
-        if backend is None or not backend.is_bayesian:
+        if backend is None or not backend.supports_idata:
             raise TypeError(
                 f"PlaceboInTime requires a Bayesian model backend for "
                 f"posterior extraction, but got "

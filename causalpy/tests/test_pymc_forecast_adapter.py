@@ -317,6 +317,7 @@ def test_adapter_resolution_and_gating():
     assert isinstance(adapter, PyMCForecastAdapter)
     assert adapter.is_bayesian
     assert not adapter.is_ols
+    assert adapter.supports_idata
     assert adapter.model is model
     with pytest.raises(ValueError, match="pymc-forecast models not supported"):
         make_model_adapter(
@@ -336,8 +337,10 @@ def test_unfit_adapter_has_no_idata_or_coefficients():
         supports_ols=True,
         supports_pymc_forecast=True,
     )
+    assert adapter.supports_idata
+    assert adapter.idata is None
     with pytest.raises(RuntimeError, match="has not been fit"):
-        _ = adapter.idata
+        adapter.require_idata()
     with pytest.raises(NotImplementedError, match="design-matrix coefficients"):
         adapter.coefficients()
 
