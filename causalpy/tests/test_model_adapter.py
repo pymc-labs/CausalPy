@@ -145,7 +145,8 @@ def test_sklearn_adapter_fit_predict_score():
     assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
     assert mu.shape == (1, 1, 20, 1)
     np.testing.assert_allclose(mu.squeeze(), adapter.model.predict(X))
-    assert isinstance(score, float)
+    assert list(score.index) == ["unit_0_r2"]
+    assert score["unit_0_r2"] > 0.9
     assert coeffs.shape == (2,)
 
 
@@ -182,7 +183,7 @@ def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
         len(X),
         1,
     )
-    assert score is not None
+    assert list(score.index) == ["unit_0_r2", "unit_0_r2_std"]
     assert np.squeeze(coeffs).shape == (2,)
 
 

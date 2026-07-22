@@ -31,7 +31,7 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
-    extract_r2_score,
+    format_r2_score,
     get_hdi_to_df,
     has_posterior_draws,
     plot_posterior_over_x,
@@ -39,7 +39,7 @@ from causalpy.plot_utils import (
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.utils import _as_scalar, round_num
+from causalpy.utils import _as_scalar
 
 from .base import BaseExperiment
 
@@ -776,19 +776,13 @@ class InterruptedTimeSeries(BaseExperiment):
             handles.append(h)
             labels.append("Causal impact")
 
-        # Title with R^2; scores carrying a dispersion entry render as Bayesian
-        r2_val, r2_std_val = extract_r2_score(self.score)
-        assert r2_val is not None  # both backends' score containers carry R^2
-        if r2_std_val is not None:
-            title_str = (
-                f"Pre-intervention Bayesian $R^2$: {round_num(r2_val, round_to)}"
-                f"\n(std = {round_num(r2_std_val, round_to)})"
+        ax[0].set(
+            title=format_r2_score(
+                self.score,
+                round_to=round_to,
+                context="on pre-intervention data",
             )
-        else:
-            title_str = (
-                f"$R^2$ on pre-intervention data = {round_num(r2_val, round_to)}"
-            )
-        ax[0].set(title=title_str)
+        )
 
         # MIDDLE PLOT -----------------------------------------------
         if with_uncertainty:

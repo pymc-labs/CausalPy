@@ -29,6 +29,16 @@ Every Bayesian backend that participates in impact calculation must expose outco
 
 sklearn backends compute impact as ``y_true - y_pred`` with the same outcome-scale requirement.
 
+## Score container
+
+Every model adapter returns scores in one canonical ``pandas.Series``. Each treated unit has a required ``unit_{i}_r2`` entry in treated-unit order. Bayesian backends additionally provide ``unit_{i}_r2_std`` when posterior draws supply dispersion; point-estimate backends omit the standard-deviation entry rather than inventing uncertainty.
+
+For multi-output sklearn models, CausalPy computes one :math:`R^2` per output instead of exposing sklearn's default uniform average. The shared container does not make the statistics identical: PyMC reports Bayesian :math:`R^2` and its posterior dispersion, while sklearn reports classical point-estimate :math:`R^2`. It only guarantees that consumers can locate each unit's score without knowing which backend produced it.
+
+This is a user-visible change for sklearn experiments: ``experiment.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.score["unit_0_r2"]``.
+
+For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
+
 ## Public name and compatibility
 
 The public posterior predictive name remains ``mu`` for backward compatibility. The contract is **semantic**, not lexical: ``mu`` must denote the conditional expected outcome in observed units. A future explicit name such as ``expected_outcome`` may be added in a minor release once all built-in backends are audited; until then, custom model authors should treat ``mu`` as that quantity.

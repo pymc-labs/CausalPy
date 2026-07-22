@@ -26,7 +26,11 @@ from patsy import ModelDesc, build_design_matrices
 import xarray as xr
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    format_r2_score,
+    plot_posterior_over_x,
+)
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -397,8 +401,7 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        r2 = format_r2_score(self.score, round_to=round_to, context="on all data")
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values

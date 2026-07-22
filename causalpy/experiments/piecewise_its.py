@@ -32,14 +32,13 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
-    extract_r2_score,
+    format_r2_score,
     has_posterior_draws,
     plot_posterior_over_x,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.transforms import ramp, step  # noqa: F401
-from causalpy.utils import round_num
 
 from .base import BaseExperiment
 
@@ -590,12 +589,10 @@ class PiecewiseITS(BaseExperiment):
                 linewidth=2,
             )
 
-        # Title with R^2; scores carrying a dispersion entry render as Bayesian
-        r2_val, r2_std_val = extract_r2_score(self.score)
-        assert r2_val is not None  # both backends' score containers carry R^2
-        label = "Bayesian $R^2$" if r2_std_val is not None else "$R^2$"
-        title_str = f"Piecewise ITS: {label} = {round_num(r2_val, round_to)}"
-        ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
+        ax[0].set(
+            title=f"Piecewise ITS: {format_r2_score(self.score, round_to=round_to)}",
+            ylabel=self.outcome_variable_name,
+        )
 
         # MIDDLE PLOT: Causal Effect
         if with_uncertainty:

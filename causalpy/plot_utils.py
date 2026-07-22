@@ -29,40 +29,66 @@ from matplotlib.lines import Line2D
 from pandas.api.extensions import ExtensionArray
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import _as_scalar
 
 # Re-exported for existing importers; the canonical home is causalpy.utils so
 # non-plotting modules (e.g. reporting) can use it without importing plotting.
 from causalpy.utils import has_posterior_draws as has_posterior_draws
+from causalpy.utils import round_num
 
 
 def extract_r2_score(
-    score: pd.Series | float, unit_index: int = 0
-) -> tuple[float | None, float | None]:
-    """Extract ``(r2, r2_std)`` from a backend score container.
+    score: pd.Series, unit_index: int = 0
+) -> tuple[float, float | None]:
+    """Extract ``(r2, r2_std)`` from the canonical score container.
 
-    Bayesian backends return a :class:`pandas.Series` with
-    ``unit_{i}_r2`` / ``unit_{i}_r2_std`` (or plain ``r2`` / ``r2_std``)
-    entries; point-estimate backends return a scalar. ``r2_std`` is ``None``
-    when the container carries no dispersion, so callers can render
-    ``(std = ...)`` only when it exists.
+    Every backend returns a :class:`pandas.Series` with ``unit_{i}_r2``
+    entries. ``r2_std`` is ``None`` when the container carries no posterior
+    dispersion.
 
     Parameters
     ----------
-    score : pd.Series or float
-        Backend score container as stored on ``experiment.score``.
+    score : pd.Series
+        Canonical score container as stored on ``experiment.score``.
     unit_index : int, optional
         Index of the treated unit whose score to extract. Defaults to 0.
     """
-    if isinstance(score, pd.Series):
-        key = f"unit_{unit_index}_r2"
-        if key not in score.index:
-            key = "r2"
-        if key not in score.index:
-            return None, None
-        std = score.get(f"{key}_std")
-        return float(score[key]), None if std is None else float(std)
-    return float(_as_scalar(score)), None
+    key = f"unit_{unit_index}_r2"
+    if key not in score.index:
+        raise ValueError(
+            f"Score container is missing required {key!r}; "
+            "expected one unit_{i}_r2 entry per treated unit, "
+            f"got {list(score.index)}."
+        )
+    std = score.get(f"{key}_std")
+    return float(score[key]), None if std is None else float(std)
+
+
+def format_r2_score(
+    score: pd.Series,
+    *,
+    unit_index: int = 0,
+    round_to: int | None = 2,
+    context: str = "",
+) -> str:
+    """Format a canonical score for an experiment plot title.
+
+    Parameters
+    ----------
+    score : pd.Series
+        Canonical score container.
+    unit_index : int, default 0
+        Index of the treated unit whose score to format.
+    round_to : int, optional
+        Number of significant figures. Defaults to 2.
+    context : str, default ""
+        Text appended to the :math:`R^2` label, such as ``"on fit data"``.
+    """
+    r2, r2_std = extract_r2_score(score, unit_index)
+    label = "Bayesian $R^2$" if r2_std is not None else "$R^2$"
+    title = f"{label}{f' {context}' if context else ''} = {round_num(r2, round_to)}"
+    if r2_std is not None:
+        title += f" (std = {round_num(r2_std, round_to)})"
+    return title
 
 
 class _PosteriorPlotStyle(TypedDict):

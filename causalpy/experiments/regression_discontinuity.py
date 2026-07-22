@@ -33,7 +33,7 @@ from causalpy.custom_exceptions import (
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
-    extract_r2_score,
+    format_r2_score,
     has_posterior_draws,
     plot_posterior_over_x,
 )
@@ -474,12 +474,8 @@ class RegressionDiscontinuity(BaseExperiment):
             )
 
         # create strings to compose title
-        r2_val, r2_std_val = extract_r2_score(self.score)
-        assert r2_val is not None
+        r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
         if with_uncertainty:
-            assert r2_std_val is not None
-            title_info = f"{round_num(r2_val, round_to)} (std = {round_num(r2_std_val, round_to)})"
-            r2 = f"Bayesian $R^2$ on fit data = {title_info}"
             percentiles = self.discontinuity_at_threshold.quantile(
                 [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
             ).values
@@ -492,7 +488,6 @@ class RegressionDiscontinuity(BaseExperiment):
             """
             ax.set(title=r2 + "\n" + discon + ci)
         else:
-            r2 = f"$R^2$ on fit data = {round_num(r2_val, round_to)}"
             discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
             ax.set(title=r2 + "\n" + discon)
 

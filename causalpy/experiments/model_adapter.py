@@ -22,8 +22,10 @@ from typing import Any, Literal
 
 import arviz as az
 import numpy as np
+import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin, clone
+from sklearn.metrics import r2_score
 
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
@@ -188,8 +190,12 @@ class ModelAdapter(ABC):
         """
 
     @abstractmethod
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions against observed outcomes.
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+        """Return per-unit :math:`R^2` scores in the canonical container.
+
+        Every backend returns a :class:`pandas.Series` with one
+        ``unit_{i}_r2`` entry per treated unit. Backends with posterior
+        dispersion also include ``unit_{i}_r2_std`` entries.
 
         Parameters
         ----------
@@ -199,6 +205,12 @@ class ModelAdapter(ABC):
             Observed outcomes.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        pd.Series
+            Per-treated-unit :math:`R^2` values and optional posterior
+            standard deviations.
         """
 
     @abstractmethod
@@ -294,7 +306,7 @@ class PyMCModelAdapter(ModelAdapter):
             self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
         """Score predictions from the PyMC model.
 
         Parameters
@@ -439,8 +451,8 @@ class SklearnModelAdapter(ModelAdapter):
             },
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions from the sklearn model.
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+        """Return per-output :math:`R^2` scores from the sklearn model.
 
         Parameters
         ----------
@@ -449,9 +461,35 @@ class SklearnModelAdapter(ModelAdapter):
         y : array-like
             Observed outcomes.
         **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+            Additional keyword arguments forwarded to
+            :func:`sklearn.metrics.r2_score`, such as ``sample_weight``.
+            These are not forwarded to the underlying estimator's
+            ``score`` method. ``multioutput`` is fixed to
+            ``"raw_values"`` so each treated unit receives its own
+            ``unit_{i}_r2`` entry.
+
+        Returns
+        -------
+        pd.Series
+            One ``unit_{i}_r2`` entry per output. Point estimates carry no
+            dispersion entries.
         """
-        return self._model.score(X=_sklearn_array(X), y=_sklearn_y(y), **kwargs)
+        if "multioutput" in kwargs:
+            raise ValueError(
+                "Cannot pass multioutput to SklearnModelAdapter.score(); "
+                'the canonical contract requires multioutput="raw_values".'
+            )
+        scores = np.atleast_1d(
+            r2_score(
+                _sklearn_y(y),
+                self._model.predict(X=_sklearn_array(X)),
+                multioutput="raw_values",
+                **kwargs,
+            )
+        )
+        return pd.Series(
+            {f"unit_{i}_r2": float(score) for i, score in enumerate(scores)}
+        )
 
     def coefficients(self) -> np.ndarray:
         """Return fitted sklearn coefficients."""
@@ -553,7 +591,7 @@ class PyMCForecastAdapter(ModelAdapter):
             self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
         """Score in-sample predictions with the Bayesian :math:`R^2`.
 
         Parameters
