@@ -65,11 +65,9 @@ class SyntheticControl(BaseExperiment):
 
     Notes
     -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
+    **Estimate extraction**
+
+    The model learns control-unit weights from pre-intervention outcomes and applies them to post-intervention controls to construct a synthetic untreated trajectory. Pointwise impact is the observed treated outcome minus this synthetic counterfactual, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its weighted point prediction.
 
     Examples
     --------

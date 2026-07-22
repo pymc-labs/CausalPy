@@ -86,14 +86,15 @@ class PiecewiseITS(BaseExperiment):
     labels : list[str]
         Names of all coefficients in the design matrix.
     effect : xr.DataArray or np.ndarray
-        Pointwise causal effect (observed - counterfactual).
+        Pointwise causal effect (fitted expectation - counterfactual expectation).
     cumulative_effect : xr.DataArray or np.ndarray
         Cumulative causal effect over time.
 
     Notes
     -----
-    The counterfactual is computed by setting all step/ramp terms to zero,
-    representing what would have happened without the interventions.
+    **Estimate extraction**
+
+    One model is fitted to the full time series. The no-intervention counterfactual is predicted after setting every ``step()`` and ``ramp()`` design-matrix column to zero, and the pointwise effect is the fitted conditional expectation minus that counterfactual expectation. Bayesian backends contrast posterior ``mu`` values, OLS contrasts point predictions, and the cumulative effect is the running sum.
 
     The `step` and `ramp` transforms are patsy stateful transforms that handle
     both numeric and datetime time columns. For datetime, thresholds can be

@@ -98,6 +98,12 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
+    **Estimate extraction**
+
+    The Borusyak-Jaravel-Spiess imputation estimator fits the untreated outcome model using only observations that are not yet treated or never treated. It predicts each treated observation's untreated potential outcome, subtracts that prediction from the observed outcome, and averages the resulting one-sided contrasts into group-time and event-time ATTs. Bayesian aggregation retains posterior uncertainty in ``mu``; OLS aggregation uses point predictions and standard-error approximations.
+
+    Like Interrupted Time Series, this fit-predict-subtract procedure is a reduced-form estimator. The corresponding structural contrast is a saturated regression as in Wooldridge's extended two-way fixed effects (ETWFE) framework, which CausalPy does not currently implement.
+
     This estimator requires the following identifying assumptions:
 
     1. **Absorbing treatment**: Once a unit receives treatment, it must remain

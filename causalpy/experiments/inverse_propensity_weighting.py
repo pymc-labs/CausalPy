@@ -53,6 +53,12 @@ class InversePropensityWeighting(BaseExperiment):
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
+    Notes
+    -----
+    **Estimate extraction**
+
+    Fitting produces posterior propensity-score draws. ``get_ate()`` post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast inverse-probability-weighted mean outcomes for the treated and control potential outcomes, ``"overlap"`` contrasts overlap-weighted means for the overlap population, and ``"doubly_robust"`` augments inverse-probability weighting with separate OLS outcome regressions before averaging over all observations.
+
     Examples
     --------
     >>> import causalpy as cp
