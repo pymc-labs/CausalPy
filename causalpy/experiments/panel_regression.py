@@ -603,7 +603,7 @@ class PanelRegression(BaseExperiment):
         if self._model_backend.is_bayesian:
             # Bayesian: use az.plot_forest directly
             axes = az.plot_forest(
-                self.model.idata,
+                self._model_backend.require_idata(),
                 var_names=["beta"],
                 coords={"coeffs": coeff_names},
                 combined=True,
@@ -653,7 +653,7 @@ class PanelRegression(BaseExperiment):
         # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
         # path: store canonical in-sample predictions at fit time.
         if self._model_backend.is_bayesian:
-            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
+            mu = self._model_backend.require_idata().posterior["mu"]
             columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
             columns["y_fitted_lower"] = mu.quantile(
                 0.025, dim=["chain", "draw"]
@@ -741,7 +741,7 @@ class PanelRegression(BaseExperiment):
         # backend-native storage (idata vs get_coeffs); no canonical container.
         if self._model_backend.is_bayesian:
             # Bayesian: get posterior means
-            beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
+            beta = self._model_backend.require_idata().posterior["beta"]
             unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
 
             # Get mean and std for each unit FE
@@ -839,12 +839,13 @@ class PanelRegression(BaseExperiment):
 
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
-            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
+            idata = self._model_backend.require_idata()
+            mu = idata.posterior["mu"]
             if interval_type == "predictive":
                 posterior_predictive = getattr(
-                    self.model.idata,
+                    idata,
                     "posterior_predictive",
-                    None,  # type: ignore[union-attr]
+                    None,
                 )
                 if posterior_predictive is None or "y_hat" not in posterior_predictive:
                     raise ValueError(

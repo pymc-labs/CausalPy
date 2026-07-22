@@ -233,14 +233,12 @@ class DifferenceInDifferences(BaseExperiment):
         # extracting the treatment coefficient from backend-native storage
         # (full posterior of `beta` from idata vs point coefficients).
         if self._model_backend.is_bayesian:
-            assert self.model.idata is not None
+            idata = self._model_backend.require_idata()
             # This is the coefficient on the interaction term
-            coeff_names = self.model.idata.posterior.coords["coeffs"].data
+            coeff_names = idata.posterior.coords["coeffs"].data
             for i, label in enumerate(coeff_names):
                 if self._is_treatment_interaction(label):
-                    self.causal_impact = self.model.idata.posterior["beta"].isel(
-                        {"coeffs": i}
-                    )
+                    self.causal_impact = idata.posterior["beta"].isel({"coeffs": i})
         elif self._model_backend.is_ols:
             # This is the coefficient on the interaction term
             coef_map = dict(

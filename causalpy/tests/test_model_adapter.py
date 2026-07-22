@@ -43,6 +43,7 @@ def test_make_model_adapter_default_pymc():
     assert isinstance(adapter, PyMCModelAdapter)
     assert adapter.is_bayesian
     assert not adapter.is_ols
+    assert adapter.supports_idata
     assert adapter.kind == "pymc"
 
 
@@ -74,6 +75,7 @@ def test_make_model_adapter_sklearn_coercion_and_fit_intercept_warning():
     assert adapter.model.fit_intercept is False
     assert adapter.is_ols
     assert not adapter.is_bayesian
+    assert not adapter.supports_idata
     assert any("fit_intercept" in str(w.message) for w in caught)
 
 
@@ -107,15 +109,25 @@ def test_make_model_adapter_no_model_no_default_raises():
         )
 
 
-def test_sklearn_adapter_idata_raises():
+def test_sklearn_adapter_has_explicit_idata_capability():
     adapter = make_model_adapter(
         LinearRegression(fit_intercept=False),
         default_model_class=None,
         supports_bayes=True,
         supports_ols=True,
     )
-    with pytest.raises(AttributeError, match="OLS models do not have idata"):
-        _ = adapter.idata
+    assert not adapter.supports_idata
+    assert adapter.idata is None
+    with pytest.raises(TypeError, match="does not support InferenceData"):
+        adapter.require_idata()
+
+
+def test_unfit_pymc_adapter_requires_fitted_idata():
+    adapter = PyMCModelAdapter(PyMCLinearRegression())
+    assert adapter.supports_idata
+    assert adapter.idata is None
+    with pytest.raises(RuntimeError, match="has not been fit"):
+        adapter.require_idata()
 
 
 def test_sklearn_adapter_fit_predict_score():
@@ -158,6 +170,7 @@ def test_pymc_adapter_fit_predict_score(mock_pymc_sample):
     adapter = PyMCModelAdapter(PyMCLinearRegression(sample_kwargs=sample_kwargs))
     adapter.fit(X, y, coords=coords)
     assert adapter.idata is not None
+    assert adapter.require_idata() is adapter.idata
     mu = adapter.predict(X)
     score = adapter.score(X, y)
     coeffs = adapter.coefficients()
@@ -203,3 +216,4 @@ def test_base_experiment_exposes_model_backend(did_data):
     )
     assert result._model_backend.is_ols
     assert result.model is result._model_backend.model
+    assert result.idata is None

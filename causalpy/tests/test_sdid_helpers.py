@@ -53,6 +53,11 @@ class _StubModelAdapter:
     def fit(self, X: Any, y: Any, *, coords: Any | None = None) -> Any:
         return self.model.fit(X=X, y=y, coords=coords)
 
+    def require_idata(self) -> az.InferenceData:
+        if self.model.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return self.model.idata
+
 
 def _make_experiment_stub(
     *,
@@ -363,7 +368,7 @@ class TestErrorBranches:
             treatment_time=toy_panel.treatment_time,
             model=_NoIdataModel(),
         )
-        with pytest.raises(AttributeError, match="failed to produce idata"):
+        with pytest.raises(RuntimeError, match="Model has not been fit"):
             stub.algorithm()
 
 

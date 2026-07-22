@@ -117,9 +117,23 @@ class ModelAdapter(ABC):
         return self.kind == "sklearn"
 
     @property
+    def supports_idata(self) -> bool:
+        """Whether the backend can expose ArviZ ``InferenceData``."""
+        return self.kind in ("pymc", "pymc-forecast")
+
+    @property
     @abstractmethod
-    def idata(self) -> az.InferenceData:
-        """Return InferenceData for Bayesian models."""
+    def idata(self) -> az.InferenceData | None:
+        """Return ``InferenceData`` when supported and fitted, otherwise ``None``."""
+
+    def require_idata(self) -> az.InferenceData:
+        """Return fitted ``InferenceData`` or raise an explicit capability error."""
+        if not self.supports_idata:
+            raise TypeError(f"{type(self).__name__} does not support InferenceData.")
+        idata = self.idata
+        if idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return idata
 
     @abstractmethod
     def fit(
@@ -229,7 +243,7 @@ class PyMCModelAdapter(ModelAdapter):
         return "pymc"
 
     @property
-    def idata(self) -> az.InferenceData:
+    def idata(self) -> az.InferenceData | None:
         """Return the model's InferenceData object."""
         return self._model.idata
 
@@ -296,9 +310,7 @@ class PyMCModelAdapter(ModelAdapter):
 
     def coefficients(self) -> np.ndarray:
         """Return posterior mean coefficients."""
-        if self._model.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
-        beta = self._model.idata.posterior["beta"]
+        beta = self.require_idata().posterior["beta"]
         return beta.mean(dim=["chain", "draw"]).values
 
     def print_coefficients(
@@ -340,9 +352,9 @@ class SklearnModelAdapter(ModelAdapter):
         return "sklearn"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """OLS models do not expose InferenceData."""
-        raise AttributeError("OLS models do not have idata.")
+    def idata(self) -> None:
+        """Return ``None`` because sklearn models have no ``InferenceData``."""
+        return None
 
     def fit(
         self,
@@ -488,10 +500,8 @@ class PyMCForecastAdapter(ModelAdapter):
         return "pymc-forecast"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """Return the model's InferenceData (posterior draws)."""
-        if self._model.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
+    def idata(self) -> az.InferenceData | None:
+        """Return the model's InferenceData when fitted."""
         return self._model.idata
 
     def fit(
