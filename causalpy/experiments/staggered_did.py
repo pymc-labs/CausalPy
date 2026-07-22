@@ -472,17 +472,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             },
         )
         self.y_pred = self._model_backend.predict(X=X_full_xr)
-
-        if self._model_backend.is_bayesian:
-            y_hat0_mean = (
-                self.y_pred["posterior_predictive"]
-                .mu.mean(dim=["chain", "draw"])
-                .isel(treated_units=0)
-                .values
-            )
-            self.data["y_hat0"] = y_hat0_mean
-        else:
-            self.data["y_hat0"] = np.squeeze(self.y_pred)
+        self.data["y_hat0"] = (
+            self.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        )
 
     def _compute_treatment_effects(self) -> None:
         """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
@@ -551,7 +543,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()
@@ -1306,7 +1298,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
         y_observed = self._observed_outcome.to_numpy()
         tau_draws_all = y_observed - mu_draws.values
 
@@ -1517,7 +1509,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred["posterior_predictive"].mu.isel(treated_units=0)
+        mu_draws = self.y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()

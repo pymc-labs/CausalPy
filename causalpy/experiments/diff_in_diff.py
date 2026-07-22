@@ -16,7 +16,6 @@
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -469,15 +468,8 @@ class DifferenceInDifferences(BaseExperiment):
             `y_pred_counterfactual`
             """
             # Calculate y values to plot the arrow between
-            y_pred_treatment = (
-                results.y_pred_treatment["posterior_predictive"]
-                .mu.isel({"obs_ind": 1})
-                .mean()
-                .data
-            )
-            y_pred_counterfactual = (
-                results.y_pred_counterfactual["posterior_predictive"].mu.mean().data
-            )
+            y_pred_treatment = results.y_pred_treatment.isel(obs_ind=1).mean().data
+            y_pred_counterfactual = results.y_pred_counterfactual.mean().data
             y_pred_treatment_scalar = _as_scalar(y_pred_treatment)
             y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual)
             # Calculate the x position to plot at
@@ -533,7 +525,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_posterior_over_x(
             time_points,
-            self.y_pred_control["posterior_predictive"].mu.isel(treated_units=0),
+            self.y_pred_control.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C0"},
@@ -546,7 +538,7 @@ class DifferenceInDifferences(BaseExperiment):
         time_points = self.x_pred_control[self.time_variable_name].values
         h_line, h_patch = plot_posterior_over_x(
             time_points,
-            self.y_pred_treatment["posterior_predictive"].mu.isel(treated_units=0),
+            self.y_pred_treatment.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -559,20 +551,11 @@ class DifferenceInDifferences(BaseExperiment):
         # had occurred.
         time_points = self.x_pred_counterfactual[self.time_variable_name].values
         if len(time_points) == 1:
-            y_pred_cf = az.extract(
-                self.y_pred_counterfactual,
-                group="posterior_predictive",
-                var_names="mu",
-            )
-            # Select single unit data for plotting
-            y_pred_cf_single = y_pred_cf.isel(treated_units=0)
-            violin_data = (
-                y_pred_cf_single.values
-                if hasattr(y_pred_cf_single, "values")
-                else y_pred_cf_single
-            )
+            violin_data = np.asarray(
+                self.y_pred_counterfactual.isel(treated_units=0)
+            ).reshape(-1)
             parts = ax.violinplot(
-                violin_data.T,
+                [violin_data],
                 positions=self.x_pred_counterfactual[self.time_variable_name].values,
                 showmeans=False,
                 showmedians=False,
@@ -585,9 +568,7 @@ class DifferenceInDifferences(BaseExperiment):
         else:
             h_line, h_patch = plot_posterior_over_x(
                 time_points,
-                self.y_pred_counterfactual.posterior_predictive.mu.isel(
-                    treated_units=0
-                ),
+                self.y_pred_counterfactual.isel(treated_units=0),
                 ax=ax,
                 **style,
                 plot_hdi_kwargs={"color": "C2"},
@@ -643,7 +624,7 @@ class DifferenceInDifferences(BaseExperiment):
         # Plot model fit to control group
         ax.plot(
             self.x_pred_control[self.time_variable_name],
-            self.y_pred_control,
+            np.squeeze(self.y_pred_control),
             "o",
             c="C0",
             markersize=10,
@@ -652,7 +633,7 @@ class DifferenceInDifferences(BaseExperiment):
         # Plot model fit to treatment group
         ax.plot(
             self.x_pred_treatment[self.time_variable_name],
-            self.y_pred_treatment,
+            np.squeeze(self.y_pred_treatment),
             "o",
             c="C1",
             markersize=10,
@@ -662,13 +643,13 @@ class DifferenceInDifferences(BaseExperiment):
         # had occurred.
         ax.plot(
             self.x_pred_counterfactual[self.time_variable_name],
-            self.y_pred_counterfactual,
+            np.squeeze(self.y_pred_counterfactual),
             "go",
             markersize=10,
             label="counterfactual",
         )
         y_pred_counterfactual_scalar = _as_scalar(self.y_pred_counterfactual)
-        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment[1])
+        y_pred_treatment_post_scalar = _as_scalar(self.y_pred_treatment.isel(obs_ind=1))
         # arrow to label the causal impact
         ax.annotate(
             "",

@@ -349,34 +349,11 @@ class PiecewiseITS(BaseExperiment):
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
 
-        # Compute counterfactual predictions
-        if self._model_backend.is_bayesian:
-            self.y_counterfactual = self._model_backend.predict(X=X_cf)
-
-            # Extract mu for fitted and counterfactual
-            y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-
-            # Handle treated_units dimension if present
-            if "treated_units" in y_pred_mu.dims:
-                y_pred_mu = y_pred_mu.isel(treated_units=0)
-            if "treated_units" in y_cf_mu.dims:
-                y_cf_mu = y_cf_mu.isel(treated_units=0)
-
-            # Compute effect as fitted - counterfactual
-            self.effect = y_pred_mu - y_cf_mu
-
-            # Cumulative effect
-            self.cumulative_effect = self.effect.cumsum(dim="obs_ind")
-
-        elif self._model_backend.is_ols:
-            self.y_counterfactual = self._model_backend.predict(X=X_cf)
-
-            # Compute effect
-            self.effect = np.squeeze(self.y_pred) - np.squeeze(self.y_counterfactual)
-
-            # Cumulative effect
-            self.cumulative_effect = np.cumsum(self.effect)
+        self.y_counterfactual = self._model_backend.predict(X=X_cf)
+        self.effect = self.y_pred.isel(treated_units=0) - self.y_counterfactual.isel(
+            treated_units=0
+        )
+        self.cumulative_effect = self.effect.cumsum(dim="obs_ind")
 
         # Create compatibility attributes for effect_summary() from BaseExperiment
         # These represent the post-intervention portion (after the first interruption)
@@ -412,36 +389,12 @@ class PiecewiseITS(BaseExperiment):
         # Get indices for post-intervention period
         post_indices = np.where(np.asarray(post_mask))[0]
 
-        # Create post_impact - the effects after the first interruption
-        if self._model_backend.is_bayesian:
-            # For PyMC models, effect is an xarray.DataArray
-            # Select using obs_ind coordinate
-            self.post_impact = self.effect.isel(obs_ind=post_indices)
-
-            # Create post_pred - counterfactual predictions for post-intervention
-            # This needs to be an InferenceData-like object for extract_counterfactual
-            y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-            if "treated_units" in y_cf_mu.dims:
-                y_cf_mu = y_cf_mu.isel(treated_units=0)
-            post_cf_mu = y_cf_mu.isel(obs_ind=post_indices)
-
-            # Update the coordinates to match datapost.index
-            post_cf_mu = post_cf_mu.assign_coords(obs_ind=self.datapost.index)
-
-            # Create an InferenceData-like dict structure
-            self.post_pred = {
-                "posterior_predictive": {"mu": post_cf_mu},
-            }
-
-            # Update post_impact coordinates to match datapost.index
-            self.post_impact = self.post_impact.assign_coords(
-                obs_ind=self.datapost.index
-            )
-
-        elif self._model_backend.is_ols:
-            # For OLS models, effect and counterfactual are numpy arrays
-            self.post_impact = self.effect[post_indices]
-            self.post_pred = np.squeeze(self.y_counterfactual)[post_indices]
+        self.post_impact = self.effect.isel(obs_ind=post_indices).assign_coords(
+            obs_ind=self.datapost.index
+        )
+        self.post_pred = self.y_counterfactual.isel(obs_ind=post_indices).assign_coords(
+            obs_ind=self.datapost.index
+        )
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
@@ -587,9 +540,7 @@ class PiecewiseITS(BaseExperiment):
         )
 
         # Fitted values (mu)
-        y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-        if "treated_units" in y_pred_mu.dims:
-            y_pred_mu = y_pred_mu.isel(treated_units=0)
+        y_pred_mu = self.y_pred.isel(treated_units=0)
         h_line_fit, h_patch_fit = plot_posterior_over_x(
             time_values,
             y_pred_mu,
@@ -599,9 +550,7 @@ class PiecewiseITS(BaseExperiment):
         )
 
         # Counterfactual
-        y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-        if "treated_units" in y_cf_mu.dims:
-            y_cf_mu = y_cf_mu.isel(treated_units=0)
+        y_cf_mu = self.y_counterfactual.isel(treated_units=0)
         h_line_cf, h_patch_cf = plot_posterior_over_x(
             time_values,
             y_cf_mu,
@@ -705,10 +654,12 @@ class PiecewiseITS(BaseExperiment):
 
         # TOP PLOT: Observed, Fitted, and Counterfactual
         ax[0].plot(time_values, self.design["y"].values, "k.", label="Observations")
-        ax[0].plot(time_values, self.y_pred, "C0-", label="Fitted", linewidth=2)
+        ax[0].plot(
+            time_values, np.squeeze(self.y_pred), "C0-", label="Fitted", linewidth=2
+        )
         ax[0].plot(
             time_values,
-            self.y_counterfactual,
+            np.squeeze(self.y_counterfactual),
             "C1--",
             label="Counterfactual",
             linewidth=2,
@@ -720,13 +671,15 @@ class PiecewiseITS(BaseExperiment):
         ax[0].set(title=title_str, ylabel=self.outcome_variable_name)
 
         # MIDDLE PLOT: Causal Effect
-        ax[1].plot(time_values, self.effect, "C2-", linewidth=2)
-        ax[1].fill_between(time_values, y1=self.effect, alpha=0.25, color="C2")
+        ax[1].plot(time_values, np.squeeze(self.effect), "C2-", linewidth=2)
+        ax[1].fill_between(
+            time_values, y1=np.squeeze(self.effect), alpha=0.25, color="C2"
+        )
         ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
         ax[1].set(title="Causal Effect", ylabel="Effect")
 
         # BOTTOM PLOT: Cumulative Effect
-        ax[2].plot(time_values, self.cumulative_effect, "C3-", linewidth=2)
+        ax[2].plot(time_values, np.squeeze(self.cumulative_effect), "C3-", linewidth=2)
         ax[2].axhline(y=0, c="k", linestyle="--", alpha=0.5)
         ax[2].set(title="Cumulative Causal Effect", ylabel="Cumulative Effect")
 
@@ -768,13 +721,9 @@ class PiecewiseITS(BaseExperiment):
         time_values = self.data[self.time_col].values
 
         # Extract predictions
-        y_pred_mu = self.y_pred["posterior_predictive"]["mu"]
-        if "treated_units" in y_pred_mu.dims:
-            y_pred_mu = y_pred_mu.isel(treated_units=0)
+        y_pred_mu = self.y_pred.isel(treated_units=0)
 
-        y_cf_mu = self.y_counterfactual["posterior_predictive"]["mu"]
-        if "treated_units" in y_cf_mu.dims:
-            y_cf_mu = y_cf_mu.isel(treated_units=0)
+        y_cf_mu = self.y_counterfactual.isel(treated_units=0)
 
         # Helper to extract HDI bounds from az.hdi() result (which returns a Dataset)
         def _get_hdi_bounds(
@@ -846,8 +795,8 @@ class PiecewiseITS(BaseExperiment):
                 self.outcome_variable_name: self.design["y"].values.flatten(),
                 "fitted": np.squeeze(self.y_pred),
                 "counterfactual": np.squeeze(self.y_counterfactual),
-                "effect": self.effect,
-                "cumulative_effect": self.cumulative_effect,
+                "effect": np.squeeze(self.effect),
+                "cumulative_effect": np.squeeze(self.cumulative_effect),
             }
         )
 
@@ -894,14 +843,9 @@ class PiecewiseITS(BaseExperiment):
             Reserved for forward-compatibility.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
 
         if period is not None:
@@ -916,71 +860,16 @@ class PiecewiseITS(BaseExperiment):
         counterfactual = _extract_counterfactual(
             self, window_coords, treated_unit=treated_unit
         )
-
-        if self._model_backend.is_bayesian:
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            time_dim = "obs_ind"
-            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = _as_scalar(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="piecewise_its",
-            )
-        else:
-            impact_array = np.asarray(windowed_impact)
-            counterfactual_array = np.asarray(counterfactual)
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="piecewise_its",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="piecewise_its",
+        )

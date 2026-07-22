@@ -222,21 +222,17 @@ class InterruptedTimeSeries(BaseExperiment):
 
         self.pre_pred = self._model_backend.predict(X=pre_X)
         self.post_pred = self._model_backend.predict(X=post_X, out_of_sample=True)
-
-        if self._model_backend.is_bayesian:
-            self.pre_impact = self.model.calculate_impact(pre_y, self.pre_pred)
-            self.post_impact = self.model.calculate_impact(post_y, self.post_pred)
-        else:
-            self.pre_impact = self.model.calculate_impact(
-                pre_y.isel(treated_units=0), self.pre_pred
-            )
-            self.post_impact = self.model.calculate_impact(
-                post_y.isel(treated_units=0), self.post_pred
-            )
-
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
-        )
+        # Impact below relies on exact obs_ind alignment; a mismatch (e.g. a bare
+        # ndarray X getting arange coords) would silently corrupt the subtraction.
+        assert pre_y.obs_ind.equals(self.pre_pred.obs_ind)
+        assert post_y.obs_ind.equals(self.post_pred.obs_ind)
+        self.pre_impact = (
+            pre_y.isel(treated_units=0) - self.pre_pred.isel(treated_units=0)
+        ).transpose(..., "obs_ind")
+        self.post_impact = (
+            post_y.isel(treated_units=0) - self.post_pred.isel(treated_units=0)
+        ).transpose(..., "obs_ind")
+        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
         # Split post period into intervention and post-intervention if treatment_end_time is provided
         if self.treatment_end_time is not None:
@@ -346,86 +342,23 @@ class InterruptedTimeSeries(BaseExperiment):
         self.data_intervention = self.datapost[during_mask]
         self.data_post_intervention = self.datapost[post_mask]
 
-        # Split predictions and impacts
-        # Handle both PyMC (xarray) and OLS (numpy) cases
-        is_pymc = self._model_backend.is_bayesian
+        intervention_coords = self.data_intervention.index
+        post_intervention_coords = self.data_post_intervention.index
+        self.intervention_pred = self.post_pred.sel(obs_ind=intervention_coords)
+        self.post_intervention_pred = self.post_pred.sel(
+            obs_ind=post_intervention_coords
+        )
 
-        if is_pymc:
-            # PyMC: use xarray selection
-            # Dimension is always "obs_ind" in CausalPy
-            time_dim = "obs_ind"
-
-            # Get indices for selection
-            intervention_coords = self.data_intervention.index
-            post_intervention_coords = self.data_post_intervention.index
-
-            # 3. Split post_pred into intervention_pred and post_intervention_pred
-            # These are slices of post_pred, not new computations
-            # For PyMC models, post_pred is guaranteed to be az.InferenceData
-            # (regular PyMC models return it directly, BSTS-like models are wrapped in __init__)
-            intervention_pred_dataset = self.post_pred.posterior_predictive.sel(
-                {time_dim: intervention_coords}
-            )
-            post_intervention_pred_dataset = self.post_pred.posterior_predictive.sel(
-                {time_dim: post_intervention_coords}
-            )
-
-            # Create new InferenceData objects with the sliced posterior_predictive
-            # This maintains the same structure as post_pred
-            self.intervention_pred = az.InferenceData(
-                posterior_predictive=intervention_pred_dataset
-            )
-            self.post_intervention_pred = az.InferenceData(
-                posterior_predictive=post_intervention_pred_dataset
-            )
-
-            # 4. Split post_impact into intervention_impact and post_intervention_impact
-            # Similarly, these are slices of the existing post_impact calculation
-            if "treated_units" in self.post_impact.dims:
-                post_impact_sel = self.post_impact.isel(treated_units=0)
-            else:
-                post_impact_sel = self.post_impact
-            self.intervention_impact = post_impact_sel.sel(
-                {time_dim: intervention_coords}
-            )
-            self.post_intervention_impact = post_impact_sel.sel(
-                {time_dim: post_intervention_coords}
-            )
-
-            # 5. Calculate cumulative impacts for each period using the sliced impacts
-            self.intervention_impact_cumulative = (
-                self.model.calculate_cumulative_impact(self.intervention_impact)
-            )
-            self.post_intervention_impact_cumulative = (
-                self.model.calculate_cumulative_impact(self.post_intervention_impact)
-            )
-        else:
-            # OLS: use numpy array indexing with position-based selection
-            # For OLS models, post_pred is guaranteed to be numpy array
-            intervention_indices = [
-                self.datapost.index.get_loc(coord)
-                for coord in self.data_intervention.index
-            ]
-            post_intervention_indices = [
-                self.datapost.index.get_loc(coord)
-                for coord in self.data_post_intervention.index
-            ]
-
-            # 3. Split post_pred (numpy array for OLS) - slices of post_pred
-            self.intervention_pred = self.post_pred[intervention_indices]
-            self.post_intervention_pred = self.post_pred[post_intervention_indices]
-
-            # 4. Split post_impact (numpy array for OLS) - slices of post_impact
-            self.intervention_impact = self.post_impact[intervention_indices]
-            self.post_intervention_impact = self.post_impact[post_intervention_indices]
-
-            # 5. Calculate cumulative impacts for each period using the sliced impacts
-            self.intervention_impact_cumulative = (
-                self.model.calculate_cumulative_impact(self.intervention_impact)
-            )
-            self.post_intervention_impact_cumulative = (
-                self.model.calculate_cumulative_impact(self.post_intervention_impact)
-            )
+        self.intervention_impact = self.post_impact.sel(obs_ind=intervention_coords)
+        self.post_intervention_impact = self.post_impact.sel(
+            obs_ind=post_intervention_coords
+        )
+        self.intervention_impact_cumulative = self.intervention_impact.cumsum(
+            dim="obs_ind"
+        )
+        self.post_intervention_impact_cumulative = self.post_intervention_impact.cumsum(
+            dim="obs_ind"
+        )
 
     def _comparison_period_summary(
         self,
@@ -511,20 +444,16 @@ class InterruptedTimeSeries(BaseExperiment):
             from causalpy.reporting import _compute_statistics_ols
 
             intervention_stats = _compute_statistics_ols(
-                self.intervention_impact.values
-                if hasattr(self.intervention_impact, "values")
-                else np.asarray(self.intervention_impact),
-                self.intervention_pred,
+                np.asarray(self.intervention_impact).ravel(),
+                np.asarray(self.intervention_pred).ravel(),
                 alpha=alpha,
                 cumulative=False,
                 relative=False,
             )
 
             post_stats = _compute_statistics_ols(
-                self.post_intervention_impact.values
-                if hasattr(self.post_intervention_impact, "values")
-                else np.asarray(self.post_intervention_impact),
-                self.post_intervention_pred,
+                np.asarray(self.post_intervention_impact).ravel(),
+                np.asarray(self.post_intervention_pred).ravel(),
                 alpha=alpha,
                 cumulative=False,
                 relative=False,
@@ -757,7 +686,7 @@ class InterruptedTimeSeries(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
         # TOP PLOT --------------------------------------------------
         # pre-intervention period
-        pre_mu = self.pre_pred["posterior_predictive"].mu
+        pre_mu = self.pre_pred
         pre_mu_plot = (
             pre_mu.isel(treated_units=0) if "treated_units" in pre_mu.dims else pre_mu
         )
@@ -781,7 +710,7 @@ class InterruptedTimeSeries(BaseExperiment):
         labels.append("Observations")
 
         # post intervention period
-        post_mu = self.post_pred["posterior_predictive"].mu
+        post_mu = self.post_pred
         post_mu_plot = (
             post_mu.isel(treated_units=0)
             if "treated_units" in post_mu.dims
@@ -817,12 +746,10 @@ class InterruptedTimeSeries(BaseExperiment):
         # Shaded causal effect (only meaningful when there are >=2 post-period
         # points; with a single datum the fill_between collapses to nothing,
         # so we omit the legend entry to avoid misleading the reader).
-        post_pred_mu = az.extract(
-            self.post_pred, group="posterior_predictive", var_names="mu"
-        )
+        post_pred_mu = self.post_pred
         if "treated_units" in post_pred_mu.dims:
             post_pred_mu = post_pred_mu.isel(treated_units=0)
-        post_pred_mu = post_pred_mu.mean("sample")
+        post_pred_mu = post_pred_mu.mean(("chain", "draw"))
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred_mu,
@@ -987,12 +914,17 @@ class InterruptedTimeSeries(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
         ax[0].plot(self.datapre.index, self.pre_design["y"], "k.")
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
+        ax[0].plot(
+            self.datapre.index,
+            np.squeeze(self.pre_pred),
+            c="k",
+            label="model fit",
+        )
 
         ax[0].plot(self.datapost.index, self.post_design["y"], "k.")
         ax[0].plot(
             self.datapost.index,
-            self.post_pred,
+            np.squeeze(self.post_pred),
             label=counterfactual_label,
             ls=":",
             c="k",
@@ -1011,10 +943,10 @@ class InterruptedTimeSeries(BaseExperiment):
             title=f"$R^2$ on pre-intervention data = {round_num(_as_scalar(self.score), round_to)}"
         )
 
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
+        ax[1].plot(self.datapre.index, np.squeeze(self.pre_impact), "k.")
         ax[1].plot(
             self.datapost.index,
-            self.post_impact,
+            np.squeeze(self.post_impact),
             "k.",
             label=counterfactual_label,
         )
@@ -1029,7 +961,7 @@ class InterruptedTimeSeries(BaseExperiment):
         )
         ax[1].set(title="Causal Impact")
 
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
+        ax[2].plot(self.datapost.index, np.squeeze(self.post_impact_cumulative), c="k")
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
 
@@ -1089,25 +1021,17 @@ class InterruptedTimeSeries(BaseExperiment):
             pre_data = self.datapre.copy()
             post_data = self.datapost.copy()
 
-            pre_mu = az.extract(
-                self.pre_pred, group="posterior_predictive", var_names="mu"
-            )
-            post_mu = az.extract(
-                self.post_pred, group="posterior_predictive", var_names="mu"
-            )
+            pre_mu = self.pre_pred
+            post_mu = self.post_pred
             if "treated_units" in pre_mu.dims:
                 pre_mu = pre_mu.isel(treated_units=0)
             if "treated_units" in post_mu.dims:
                 post_mu = post_mu.isel(treated_units=0)
-            pre_data["prediction"] = pre_mu.mean("sample").values
-            post_data["prediction"] = post_mu.mean("sample").values
+            pre_data["prediction"] = pre_mu.mean(("chain", "draw")).values
+            post_data["prediction"] = post_mu.mean(("chain", "draw")).values
 
-            hdi_pre_pred = get_hdi_to_df(
-                self.pre_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
-            hdi_post_pred = get_hdi_to_df(
-                self.post_pred["posterior_predictive"].mu, hdi_prob=hdi_prob
-            )
+            hdi_pre_pred = get_hdi_to_df(self.pre_pred, hdi_prob=hdi_prob)
+            hdi_post_pred = get_hdi_to_df(self.post_pred, hdi_prob=hdi_prob)
             # If treated_units present, select unit_0; otherwise use directly
             if (
                 isinstance(hdi_pre_pred.index, pd.MultiIndex)
@@ -1193,10 +1117,10 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         pre_data = self.datapre.copy()
         post_data = self.datapost.copy()
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
+        pre_data["prediction"] = np.squeeze(self.pre_pred)
+        post_data["prediction"] = np.squeeze(self.post_pred)
+        pre_data["impact"] = np.squeeze(self.pre_impact)
+        post_data["impact"] = np.squeeze(self.post_impact)
         self.plot_data = pd.concat([pre_data, post_data])
 
         return self.plot_data
@@ -1319,16 +1243,10 @@ class InterruptedTimeSeries(BaseExperiment):
             # OLS: Compute statistics using numpy operations
             from causalpy.reporting import _compute_statistics_ols
 
-            # Get counterfactual predictions for each period
-            intervention_counterfactual = self.intervention_pred
-            post_counterfactual = self.post_intervention_pred
-
             # Compute statistics for intervention period
             intervention_stats = _compute_statistics_ols(
-                self.intervention_impact.values
-                if hasattr(self.intervention_impact, "values")
-                else np.asarray(self.intervention_impact),
-                intervention_counterfactual,
+                np.asarray(self.intervention_impact).ravel(),
+                np.asarray(self.intervention_pred).ravel(),
                 alpha=1 - hdi_prob,
                 cumulative=True,
                 relative=False,
@@ -1336,10 +1254,8 @@ class InterruptedTimeSeries(BaseExperiment):
 
             # Compute statistics for post-intervention period
             post_stats = _compute_statistics_ols(
-                self.post_intervention_impact.values
-                if hasattr(self.post_intervention_impact, "values")
-                else np.asarray(self.post_intervention_impact),
-                post_counterfactual,
+                np.asarray(self.post_intervention_impact).ravel(),
+                np.asarray(self.post_intervention_pred).ravel(),
                 alpha=1 - hdi_prob,
                 cumulative=True,
                 relative=False,
@@ -1442,17 +1358,10 @@ class InterruptedTimeSeries(BaseExperiment):
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
         from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
+            _effect_summary_timeseries,
             _extract_counterfactual,
             _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
         )
-
-        is_pymc = self._model_backend.is_bayesian
 
         # Handle period parameter for three-period designs
         if period is not None:
@@ -1515,82 +1424,16 @@ class InterruptedTimeSeries(BaseExperiment):
                 self, window_coords, treated_unit=treated_unit
             )
 
-        if is_pymc:
-            # PyMC model: use posterior draws
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            # Compute observed/counterfactual averages for prose
-            time_dim = "obs_ind"
-            cf_avg = _as_scalar(counterfactual.mean(dim=[time_dim, "chain", "draw"]))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = _as_scalar(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"])
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="its",
-            )
-        else:
-            # OLS model: use point estimates and CIs
-            if hasattr(windowed_impact, "values"):
-                impact_array = windowed_impact.values
-            else:
-                impact_array = np.asarray(windowed_impact)
-            if hasattr(counterfactual, "values"):
-                counterfactual_array = counterfactual.values
-            else:
-                counterfactual_array = np.asarray(counterfactual)
-
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="its",
-            )
-
-        return EffectSummary(table=table, text=text)
+        return _effect_summary_timeseries(
+            self,
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type="its",
+        )

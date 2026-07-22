@@ -1,6 +1,6 @@
 # Prediction contract for causal impact
 
-CausalPy calculates Bayesian causal impact as the difference between observed outcomes and a counterfactual **expected outcome** in observed outcome units. Experiments call :meth:`~causalpy.pymc_models.PyMCModel.calculate_impact`, which subtracts ``posterior_predictive["mu"]`` from the observed ``y``. That subtraction only has a causal interpretation when ``mu`` is the conditional expectation :math:`E[Y \mid \text{parameters}, \text{covariates}]` on the **response scale**, excluding observation-level noise.
+CausalPy calculates Bayesian causal impact as the difference between observed outcomes and a counterfactual **expected outcome** in observed outcome units. Experiments call the model adapter's ``predict()``, which extracts ``posterior_predictive["mu"]``, and subtract that from the observed ``y``. That subtraction only has a causal interpretation when ``mu`` is the conditional expectation :math:`E[Y \mid \text{parameters}, \text{covariates}]` on the **response scale**, excluding observation-level noise.
 
 Gaussian models with an identity link make the linear predictor, conditional expectation, and outcome scale look interchangeable. For generalized linear models they are not. With a Poisson log link, the linear predictor :math:`\eta` is on the log-rate scale while counts live on the outcome scale; CausalPy needs :math:`\exp(\eta) = E[Y \mid \cdot]` in ``mu``, not :math:`\eta` itself. The same principle applies to Bernoulli/logit models, where ``mu`` must be a probability in :math:`(0, 1)`.
 
@@ -38,7 +38,7 @@ The public posterior predictive name remains ``mu`` for backward compatibility. 
 1. Compute the linear predictor or latent state on the link scale if needed, but do not expose it as ``mu`` unless the outcome scale is the identity link.
 2. Apply the inverse link draw by draw and register the result as a ``Deterministic`` named ``mu`` with dims ``["obs_ind", "treated_units"]``.
 3. Keep ``y_hat`` as the likelihood / posterior predictive of the observed variable (including sampling noise where applicable).
-4. Ensure ``predict()`` returns both ``mu`` and ``y_hat`` in ``posterior_predictive`` so :meth:`~causalpy.pymc_models.PyMCModel.calculate_impact` and :meth:`~causalpy.pymc_models.PyMCModel.score` behave consistently.
+4. Ensure ``predict()`` returns both ``mu`` and ``y_hat`` in ``posterior_predictive`` so the model adapter's ``predict()`` and :meth:`~causalpy.pymc_models.PyMCModel.score` behave consistently.
 
 Fast regression tests in ``causalpy/tests/test_prediction_contract.py`` encode this contract for identity-link Gaussian, Poisson log-link, and Bernoulli logit models.
 

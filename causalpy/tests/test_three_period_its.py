@@ -23,6 +23,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -145,13 +146,8 @@ def test_three_period_pymc_datetime_index(datetime_data, mock_pymc_sample):
     assert isinstance(result.data_intervention, pd.DataFrame)
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
-    # Check PyMC-specific types
-    import arviz as az
-    import xarray as xr
-
-    assert isinstance(result.intervention_pred, az.InferenceData)
-    assert isinstance(result.post_intervention_pred, az.InferenceData)
-    # For PyMC models, post_impact is always xarray DataArray
+    assert isinstance(result.intervention_pred, xr.DataArray)
+    assert isinstance(result.post_intervention_pred, xr.DataArray)
     assert isinstance(result.intervention_impact, xr.DataArray)
     assert isinstance(result.post_intervention_impact, xr.DataArray)
 
@@ -188,13 +184,8 @@ def test_three_period_pymc_integer_index(integer_data, mock_pymc_sample):
     assert isinstance(result.data_intervention, pd.DataFrame)
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
-    # Check PyMC-specific types
-    import arviz as az
-    import xarray as xr
-
-    assert isinstance(result.intervention_pred, az.InferenceData)
-    assert isinstance(result.post_intervention_pred, az.InferenceData)
-    # For PyMC models, post_impact is always xarray DataArray
+    assert isinstance(result.intervention_pred, xr.DataArray)
+    assert isinstance(result.post_intervention_pred, xr.DataArray)
     assert isinstance(result.intervention_impact, xr.DataArray)
     assert isinstance(result.post_intervention_impact, xr.DataArray)
 
@@ -231,12 +222,10 @@ def test_three_period_sklearn_datetime_index(datetime_data):
     assert isinstance(result.data_intervention, pd.DataFrame)
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
-    # Check sklearn-specific types
-    assert isinstance(result.intervention_pred, np.ndarray)
-    assert isinstance(result.post_intervention_pred, np.ndarray)
-    # For sklearn models, post_impact is also xarray DataArray (for consistency)
-    import xarray as xr
-
+    assert isinstance(result.intervention_pred, xr.DataArray)
+    assert isinstance(result.post_intervention_pred, xr.DataArray)
+    assert result.intervention_pred.sizes["chain"] == 1
+    assert result.intervention_pred.sizes["draw"] == 1
     assert isinstance(result.intervention_impact, xr.DataArray)
     assert isinstance(result.post_intervention_impact, xr.DataArray)
 
@@ -273,12 +262,10 @@ def test_three_period_sklearn_integer_index(integer_data):
     assert isinstance(result.data_intervention, pd.DataFrame)
     assert isinstance(result.data_post_intervention, pd.DataFrame)
 
-    # Check sklearn-specific types
-    assert isinstance(result.intervention_pred, np.ndarray)
-    assert isinstance(result.post_intervention_pred, np.ndarray)
-    # For sklearn models, post_impact is also xarray DataArray (for consistency)
-    import xarray as xr
-
+    assert isinstance(result.intervention_pred, xr.DataArray)
+    assert isinstance(result.post_intervention_pred, xr.DataArray)
+    assert result.intervention_pred.sizes["chain"] == 1
+    assert result.intervention_pred.sizes["draw"] == 1
     assert isinstance(result.intervention_impact, xr.DataArray)
     assert isinstance(result.post_intervention_impact, xr.DataArray)
 
@@ -832,12 +819,8 @@ def test_intervention_pred_is_slice_of_post_pred(datetime_data, mock_pymc_sample
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    # For PyMC models, check that intervention_pred is InferenceData
-    assert hasattr(result.intervention_pred, "posterior_predictive")
-
-    # Extract mu from both
-    intervention_mu = result.intervention_pred.posterior_predictive["mu"]
-    post_mu = result.post_pred.posterior_predictive["mu"]
+    intervention_mu = result.intervention_pred
+    post_mu = result.post_pred
 
     # Check that intervention_mu is a subset of post_mu
     intervention_coords = result.data_intervention.index

@@ -401,34 +401,6 @@ class PyMCForecastModel:
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         return pd.Series(scores)
 
-    def calculate_impact(
-        self, y_true: xr.DataArray, y_pred: az.InferenceData
-    ) -> xr.DataArray:
-        """Causal impact as observed minus counterfactual, at the draw level.
-
-        Parameters
-        ----------
-        y_true : xr.DataArray
-            Observed outcomes with dims ``["obs_ind", "treated_units"]``.
-        y_pred : az.InferenceData
-            Counterfactual prediction from :meth:`predict`.
-        """
-        y_hat = y_pred["posterior_predictive"]["mu"]
-        y_hat = y_hat.assign_coords(obs_ind=y_true["obs_ind"])
-        impact = y_true - y_hat
-        return impact.transpose(..., "obs_ind")
-
-    def calculate_cumulative_impact(self, impact: xr.DataArray) -> xr.DataArray:
-        """Cumulative sum of pointwise causal impact along ``obs_ind``.
-
-        Parameters
-        ----------
-        impact : xr.DataArray
-            Pointwise causal impact, typically the output of
-            :meth:`calculate_impact`.
-        """
-        return impact.cumsum(dim="obs_ind")
-
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:
