@@ -1538,18 +1538,28 @@ def _compute_statistics_did_ols(
     n, p = X_da.shape
     df = n - p
 
-    # Find the interaction term coefficient index
-    interaction_term = (
-        f"{result.group_variable_name}:{result.post_treatment_variable_name}"
-    )
+    # Find the interaction term coefficient index. Match both variable names
+    # as independent substrings rather than a single concatenated string
+    # ("group:post_treatment"): patsy names the interaction column with
+    # whichever variable is written first in the formula, so a formula
+    # written as "post_treatment*group" produces a label like
+    # "post_treatment[T.True]:group", which the concatenated-string check
+    # would silently fail to match (mirrors the fix already applied to the
+    # OLS causal_impact lookup in DifferenceInDifferences.algorithm()).
     coeff_idx = None
     for i, label in enumerate(result.labels):
-        if interaction_term in label:
+        if (
+            result.group_variable_name in label
+            and result.post_treatment_variable_name in label
+        ):
             coeff_idx = i
             break
 
     if coeff_idx is None:
-        raise ValueError(f"Could not find interaction term {interaction_term} in model")
+        raise ValueError(
+            f"Could not find interaction term between '{result.group_variable_name}' "
+            f"and '{result.post_treatment_variable_name}' in model"
+        )
 
     X = X_da
     try:
