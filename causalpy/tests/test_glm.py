@@ -728,6 +728,31 @@ def test_poisson_rk_plot_without_score(mock_pymc_sample, rng):
     assert "Bayesian fit on all data" in ax.get_title()
 
 
+def test_poisson_its_plot_without_score(mock_pymc_sample, rng):
+    """Interrupted time series plots cleanly when ``score()`` is skipped."""
+    dates = pd.date_range(start="2020-01-01", periods=40, freq="W")
+    df = pd.DataFrame({"t": np.arange(40) / 40.0}, index=dates)
+    df["y"] = rng.poisson(np.clip(np.exp(0.2 + 0.5 * df["t"]), 0.1, 15.0))
+    result = cp.InterruptedTimeSeries(
+        df,
+        pd.to_datetime("2020-07-01"),
+        formula="y ~ 1 + t",
+        model=_poisson_glr(random_seed=31),
+    )
+    assert result.score is None
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert "Pre-intervention Bayesian fit" in ax[0].get_title()
+
+
+def test_sc_score_title_without_score():
+    """Synthetic control score title falls back when ``score()`` is skipped."""
+    experiment = object.__new__(cp.SyntheticControl)
+    experiment.score = None
+    experiment.treated_units = ["actual"]
+    assert experiment._get_score_title("actual") == "Pre-intervention Bayesian fit"
+
+
 def test_poisson_piecewise_its_smoke(mock_pymc_sample, rng):
     """Piecewise ITS runs with Poisson GLR and active interruption terms."""
     df, _ = generate_piecewise_its_data(
