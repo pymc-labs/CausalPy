@@ -474,8 +474,12 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
     ``(n, n)`` residual matrix (every observation's y minus every *other*
     observation's prediction) and inflating the MSE ~9x on this dataset, so
     the reported standard errors were ~3x too wide. ``_point_residuals``
-    fixed that; this test pins the corrected residual shape and SE against
-    an independent statsmodels fit so they cannot silently move again.
+    fixed that. Separately, the residual variance was estimated as SSR/n
+    (biased) rather than SSR/(n-p) (unbiased), inconsistent with the
+    ``df = n - p`` already used for the t-distribution critical value. With
+    both bugs fixed, this test pins the corrected residual shape and SE
+    against an independent statsmodels fit almost exactly, not just up to
+    some remaining conversion factor.
     """
     from sklearn.linear_model import LinearRegression
 
@@ -502,19 +506,24 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
     sm_fit = smf.ols(formula, data=result.fit_data).fit()
     interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
     unbiased_se = sm_fit.bse[interaction_col]
-    # CausalPy divides the residual sum of squares by n rather than (n - p)
-    # (same convention as the DiD OLS path, tracked separately), so the
-    # correctly-shaped residuals give an SE smaller than the unbiased
-    # statsmodels value by sqrt((n - p) / n), not an exact match.
-    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
 
     t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
     reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
 
-    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
-    # Guard against regressing to the (n, n) broadcast bug: that variant
-    # inflated the SE by roughly 3x on this dataset.
-    assert reported_se < unbiased_se * 2
+    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
+    # Guard against regressing to either the (n, n) broadcast bug (~3x
+    # inflation) or the biased SSR/n denominator understatement.
+    biased_mse = np.mean(residuals**2)
+    XtX_inv = np.linalg.inv(
+        np.asarray(result.design["X"]).T @ np.asarray(result.design["X"])
+    )
+    coeff_idx = next(
+        i
+        for i, label in enumerate(result.labels)
+        if "treated" in label.lower() and ":" in label
+    )
+    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
+    assert reported_se != pytest.approx(biased_se, rel=1e-3)
 
 
 @pytest.mark.integration
