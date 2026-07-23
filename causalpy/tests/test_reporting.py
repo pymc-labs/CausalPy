@@ -1684,6 +1684,54 @@ def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
     assert "p_value" in stats
 
 
+@pytest.mark.integration
+def test_compute_statistics_rd_ols_design_with_data_attribute_only(rd_data):
+    """``_compute_statistics_rd_ols`` must extract the raw array from design
+    matrices that expose only a ``.data`` attribute (no ``.values``), not
+    just the ``xarray``/``pandas``-style objects normally returned by
+    ``result.design["X"]``. Wrap the real design matrix in such a minimal
+    stand-in and check the SE matches the un-wrapped computation exactly,
+    so this isn't just checking that *a* number came out.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _compute_statistics_rd_ols
+
+    class _DataOnly:
+        """Minimal array-like exposing `.data`/`.shape` but not `.values`."""
+
+        def __init__(self, array):
+            self._array = np.asarray(array)
+            self.shape = self._array.shape
+
+        @property
+        def data(self):
+            return self._array
+
+        def __array__(self, dtype=None):
+            return self._array
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    baseline_stats = _compute_statistics_rd_ols(result, alpha=0.05)
+
+    original_design = result.design
+    result.design = {
+        "X": _DataOnly(original_design["X"]),
+        "y": original_design["y"],
+    }
+
+    wrapped_stats = _compute_statistics_rd_ols(result, alpha=0.05)
+
+    assert wrapped_stats["ci_lower"] == pytest.approx(baseline_stats["ci_lower"])
+    assert wrapped_stats["ci_upper"] == pytest.approx(baseline_stats["ci_upper"])
+
+
 # ==============================================================================
 # Tests for edge cases and data handling
 # ==============================================================================
