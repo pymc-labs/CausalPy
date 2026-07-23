@@ -514,7 +514,9 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
     # Guard against regressing to either the (n, n) broadcast bug (~3x
     # inflation) or the biased SSR/n denominator understatement.
     biased_mse = np.mean(residuals**2)
-    XtX_inv = np.linalg.inv(np.asarray(result.design["X"]).T @ np.asarray(result.design["X"]))
+    XtX_inv = np.linalg.inv(
+        np.asarray(result.design["X"]).T @ np.asarray(result.design["X"])
+    )
     coeff_idx = next(
         i
         for i, label in enumerate(result.labels)
