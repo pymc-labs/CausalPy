@@ -233,6 +233,12 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+        # Store the raw design rows used to build the discontinuity contrast
+        # (row 0 = just below the threshold, row 1 = just above) so that
+        # reporting code can compute the standard error of
+        # discontinuity_at_threshold via the same linear contrast
+        # (row 1 - row 0) rather than re-deriving it from coefficient names.
+        self.x_discon_design = np.asarray(new_x)
         self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
         self.discontinuity_at_threshold = self.pred_discon.isel(
             obs_ind=1, treated_units=0
