@@ -185,3 +185,22 @@ def banks_data():
     df_long["post_treatment"] = df_long.year >= treatment_time
     df_long = df_long.replace({"district": {"Sixth District": 1, "Eighth District": 0}})
     return df_long, treatment_time
+
+
+@pytest.fixture
+def mixed_effect_model_data() -> pd.DataFrame:
+
+    n = 200
+    rng = np.random.default_rng(42)
+
+    return pd.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "post": rng.choice([0, 1], size=n),
+            "treated": rng.choice([0, 1], size=n),
+            "size": rng.integers(20, 60, size=n),
+            "store_id": rng.choice(["c1", "c2", "c3", "c4", "c5"], size=n),
+        }
+    )
