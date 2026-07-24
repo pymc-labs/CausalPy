@@ -19,14 +19,13 @@ description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["causal inference", "statistics", "econometrics", "pymc", "bayesian"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -40,7 +39,7 @@ classifiers = [
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
-    "arviz>=0.14.0,<1.0",
+    "arviz>=1.1,<2",
     "graphviz",
     "ipython!=8.7.0",
     "jinja2",
@@ -48,8 +47,11 @@ dependencies = [
     "numpy",
     "pandas",
     "patsy",
-    "pymc>=5.15.1,<6",
-    "pytensor>=2.38.1,<3",
+    # Floors per the PyMC 6 migration (#1039). Deliberately NOT pymc>=6.1
+    # (pymc-marketing v1.0.0 caps pymc<6.1.0, which would make the docs env
+    # unsolvable) and NOT pytensor>=3.2 (pymc 6.1.0 caps pytensor<3.2).
+    "pymc>=6.0.1,<7",
+    "pytensor>=3,<4",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
