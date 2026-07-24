@@ -49,6 +49,16 @@ def _as_scalar(value: Any) -> float:
     return float(np.asarray(value).reshape(()))
 
 
+def _bayesian_r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> pd.Series:
+    """Compute Bayesian R-squared across posterior predictive draws."""
+    var_y_est = np.var(y_pred, axis=1, ddof=0)
+    var_e = np.var(y_true - y_pred, axis=1, ddof=0)
+    r2_samples = var_y_est / (var_y_est + var_e)
+    return pd.Series(
+        [r2_samples.mean(), r2_samples.std(ddof=0)], index=["r2", "r2_std"]
+    )
+
+
 def _is_variable_dummy_coded(series: pd.Series) -> bool:
     """Check if a data in the provided Series is dummy coded. It should be 0 or 1
     only."""
