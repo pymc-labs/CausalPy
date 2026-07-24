@@ -243,6 +243,7 @@ html_static_path = ["_static"]
 html_css_files = ["custom.css", "gallery.css"]
 html_extra_path = ["robots.txt"]
 html_favicon = "_static/favicon_logo.png"
+html_title = "CausalPy — Open-Source Bayesian Causal Inference for Python"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
