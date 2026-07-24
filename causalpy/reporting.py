@@ -26,12 +26,12 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 from dataclasses import dataclass
 from typing import Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.stats import t
 
+from causalpy._arviz_compat import _normalize_hdi_result, hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.utils import _as_scalar
 
@@ -62,30 +62,17 @@ class EffectSummary:
 def _extract_hdi_bounds(
     hdi_result: xr.Dataset | xr.DataArray, hdi_prob: float = 0.95
 ) -> tuple[float, float]:
-    """Extract HDI lower and upper bounds from arviz.hdi result.
+    """Extract HDI lower and upper bounds from a normalized or legacy HDI result.
 
-    Handles both Dataset (when arviz returns Dataset) and DataArray formats.
-
-    Parameters
-    ----------
-    hdi_result : xr.Dataset or xr.DataArray
-        Result from arviz.hdi()
-    hdi_prob : float
-        HDI probability (not used in extraction but kept for signature consistency)
-
-    Returns
-    -------
-    tuple[float, float]
-        Lower and upper HDI bounds
+    Kept for backward-compatible imports/tests. Prefer
+    :func:`causalpy._arviz_compat.hdi_bounds` for new call sites that still have
+    raw posterior draws.
     """
-    if isinstance(hdi_result, xr.Dataset):
-        hdi_data = list(hdi_result.data_vars.values())[0]
-        lower = _as_scalar(hdi_data.sel(hdi="lower"))
-        upper = _as_scalar(hdi_data.sel(hdi="higher"))
-    else:
-        lower = _as_scalar(hdi_result.sel(hdi="lower"))
-        upper = _as_scalar(hdi_result.sel(hdi="higher"))
-    return lower, upper
+    _ = hdi_prob
+    normalized = _normalize_hdi_result(hdi_result)
+    return _as_scalar(normalized.sel(hdi="lower")), _as_scalar(
+        normalized.sel(hdi="higher")
+    )
 
 
 def _compute_tail_probabilities(
@@ -200,8 +187,7 @@ def _compute_statistics_scalar(
     }
 
     # HDI using helper
-    hdi_result = az.hdi(effect, hdi_prob=hdi_prob)
-    stats["hdi_lower"], stats["hdi_upper"] = _extract_hdi_bounds(hdi_result)
+    stats["hdi_lower"], stats["hdi_upper"] = hdi_bounds(effect, prob=hdi_prob)
 
     # Tail probabilities using helper
     stats.update(_compute_tail_probabilities(effect, direction))
@@ -759,17 +745,9 @@ def _compute_statistics(
     }
 
     # HDI for average
-    hdi_avg = az.hdi(avg_effect, hdi_prob=hdi_prob)
-    # Extract lower and upper bounds from HDI Dataset
-    # Handle both Dataset and DataArray returns
-    if isinstance(hdi_avg, xr.Dataset):
-        hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = _as_scalar(hdi_data.sel(hdi="lower"))
-        stats["avg"]["hdi_upper"] = _as_scalar(hdi_data.sel(hdi="higher"))
-    else:
-        # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = _as_scalar(hdi_avg.sel(hdi="lower"))
-        stats["avg"]["hdi_upper"] = _as_scalar(hdi_avg.sel(hdi="higher"))
+    stats["avg"]["hdi_lower"], stats["avg"]["hdi_upper"] = hdi_bounds(
+        avg_effect, prob=hdi_prob
+    )
 
     # Tail probabilities for average
     if direction == "increase":
@@ -805,14 +783,9 @@ def _compute_statistics(
         }
 
         # HDI for cumulative
-        hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
-        if isinstance(hdi_cum, xr.Dataset):
-            hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum_data.sel(hdi="lower"))
-            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum_data.sel(hdi="higher"))
-        else:
-            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum.sel(hdi="lower"))
-            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum.sel(hdi="higher"))
+        stats["cum"]["hdi_lower"], stats["cum"]["hdi_upper"] = hdi_bounds(
+            cum_final, prob=hdi_prob
+        )
 
         # Tail probabilities for cumulative
         if direction == "increase":
@@ -845,22 +818,10 @@ def _compute_statistics(
 
         stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
 
-        hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
-        if isinstance(hdi_rel_avg, xr.Dataset):
-            hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = _as_scalar(
-                hdi_rel_avg_data.sel(hdi="lower")
-            )
-            stats["avg"]["relative_hdi_upper"] = _as_scalar(
-                hdi_rel_avg_data.sel(hdi="higher")
-            )
-        else:
-            stats["avg"]["relative_hdi_lower"] = _as_scalar(
-                hdi_rel_avg.sel(hdi="lower")
-            )
-            stats["avg"]["relative_hdi_upper"] = _as_scalar(
-                hdi_rel_avg.sel(hdi="higher")
-            )
+        (
+            stats["avg"]["relative_hdi_lower"],
+            stats["avg"]["relative_hdi_upper"],
+        ) = hdi_bounds(rel_avg, prob=hdi_prob)
 
         if cumulative:
             # Relative cumulative: (cumulative effect / cumulative counterfactual) * 100
@@ -873,22 +834,10 @@ def _compute_statistics(
                 rel_cum.mean(dim=["chain", "draw"])
             )
 
-            hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
-            if isinstance(hdi_rel_cum, xr.Dataset):
-                hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = _as_scalar(
-                    hdi_rel_cum_data.sel(hdi="lower")
-                )
-                stats["cum"]["relative_hdi_upper"] = _as_scalar(
-                    hdi_rel_cum_data.sel(hdi="higher")
-                )
-            else:
-                stats["cum"]["relative_hdi_lower"] = _as_scalar(
-                    hdi_rel_cum.sel(hdi="lower")
-                )
-                stats["cum"]["relative_hdi_upper"] = _as_scalar(
-                    hdi_rel_cum.sel(hdi="higher")
-                )
+            (
+                stats["cum"]["relative_hdi_lower"],
+                stats["cum"]["relative_hdi_upper"],
+            ) = hdi_bounds(rel_cum, prob=hdi_prob)
 
     return stats
 

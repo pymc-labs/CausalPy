@@ -22,12 +22,12 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin
 
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import PyMCModel
 
@@ -157,23 +157,6 @@ def _canonical_frame(
     return frame
 
 
-def _extract_hdi_bounds(
-    hdi_result: xr.Dataset | xr.DataArray, var_name: str | None = None
-) -> tuple[float, float]:
-    """Extract lower/higher values from an ArviZ HDI result."""
-    if isinstance(hdi_result, xr.Dataset):
-        if var_name is not None and var_name in hdi_result.data_vars:
-            hdi_data = hdi_result[var_name]
-        else:
-            hdi_data = list(hdi_result.data_vars.values())[0]
-    else:
-        hdi_data = hdi_result
-
-    lower = float(hdi_data.sel(hdi="lower").values)
-    upper = float(hdi_data.sel(hdi="higher").values)
-    return lower, upper
-
-
 def _get_maketables_hdi_prob(experiment: Any) -> float:
     """Resolve HDI probability for maketables export.
 
@@ -271,8 +254,7 @@ class PyMCMaketablesAdapter:
         ci95l = np.empty(len(labels), dtype=float)
         ci95u = np.empty(len(labels), dtype=float)
         for i, coeff_name in enumerate(labels):
-            coeff_hdi = az.hdi(coef_draws.sel(coeffs=coeff_name), hdi_prob=hdi_prob)
-            lower, upper = _extract_hdi_bounds(coeff_hdi)
+            lower, upper = hdi_bounds(coef_draws.sel(coeffs=coeff_name), prob=hdi_prob)
             ci95l[i] = lower
             ci95u[i] = upper
 

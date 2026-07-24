@@ -1124,18 +1124,20 @@ def test_compute_statistics_with_singleton_treated_unit_dim():
 
 
 def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
-    """Exercise _compute_statistics branches where az.hdi returns a DataArray."""
+    """Exercise _compute_statistics when HDI helper returns a DataArray."""
     import xarray as xr
 
     from causalpy import reporting as reporting_mod
 
-    def fake_hdi(_obj, hdi_prob=0.95):
-        _ = hdi_prob
+    def fake_hdi(_obj, prob=0.94, **kwargs):
+        _ = prob, kwargs
         return xr.DataArray(
-            [0.1, 0.9], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+            [0.1, 0.9],
+            dims=["ci_bound"],
+            coords={"ci_bound": ["lower", "upper"]},
         )
 
-    monkeypatch.setattr(reporting_mod.az, "hdi", fake_hdi)
+    monkeypatch.setattr("causalpy._arviz_compat.az.hdi", fake_hdi)
 
     impact = xr.DataArray(
         np.random.normal(1.0, 0.1, (2, 20, 4)),

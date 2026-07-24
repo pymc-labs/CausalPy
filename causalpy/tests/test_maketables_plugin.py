@@ -20,6 +20,7 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.data.simulate_data import (
     generate_piecewise_its_data,
     generate_staggered_did_data,
@@ -28,12 +29,12 @@ from causalpy.maketables_adapters import (
     PyMCMaketablesAdapter,
     SklearnMaketablesAdapter,
     _canonical_frame,
-    _extract_hdi_bounds,
     _get_maketables_hdi_prob,
     _safe_observation_count,
     _safe_r2_value,
     get_maketables_adapter,
 )
+from causalpy.reporting import _extract_hdi_bounds
 
 sample_kwargs = {
     "chains": 2,
@@ -187,8 +188,7 @@ def test_maketables_hdi_prob_user_control(mock_pymc_sample):
         .isel(treated_units=0)
         .sel(coeffs=first_label)
     )
-    hdi = az.hdi(draws, hdi_prob=0.8)
-    expected_lower, expected_upper = _extract_hdi_bounds(hdi)
+    expected_lower, expected_upper = hdi_bounds(draws, prob=0.8)
 
     assert table.loc[first_label, "ci95l"] == pytest.approx(expected_lower)
     assert table.loc[first_label, "ci95u"] == pytest.approx(expected_upper)
@@ -655,12 +655,13 @@ class TestExtractHdiBoundsDataArray:
         assert lo == pytest.approx(1.0)
         assert hi == pytest.approx(3.0)
 
-    def test_dataset_with_explicit_var(self):
+    def test_dataset_with_explicit_var_selected(self):
         import xarray as xr
 
         da = xr.DataArray([1.5, 2.5], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
         ds = xr.Dataset({"my_var": da, "other_var": da * 2})
-        lo, hi = _extract_hdi_bounds(ds, var_name="my_var")
+        # Callers select the variable before extraction (var_name helper removed).
+        lo, hi = _extract_hdi_bounds(ds["my_var"])
         assert lo == pytest.approx(1.5)
         assert hi == pytest.approx(2.5)
 
@@ -673,12 +674,17 @@ class TestExtractHdiBoundsDataArray:
         assert lo == pytest.approx(2.0)
         assert hi == pytest.approx(4.0)
 
-    def test_dataset_with_missing_var_name_uses_first(self):
+    def test_multivar_dataset_uses_first_data_var(self):
         import xarray as xr
 
-        da = xr.DataArray([0.5, 1.5], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
-        ds = xr.Dataset({"actual": da})
-        lo, hi = _extract_hdi_bounds(ds, var_name="nonexistent")
+        first = xr.DataArray(
+            [0.5, 1.5], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+        )
+        second = xr.DataArray(
+            [9.0, 10.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+        )
+        ds = xr.Dataset({"actual": first, "other": second})
+        lo, hi = _extract_hdi_bounds(ds)
         assert lo == pytest.approx(0.5)
         assert hi == pytest.approx(1.5)
 

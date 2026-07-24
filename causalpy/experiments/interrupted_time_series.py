@@ -24,6 +24,7 @@ from matplotlib import pyplot as plt
 from patsy import build_design_matrices
 from sklearn.base import RegressorMixin
 
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
@@ -455,8 +456,6 @@ class InterruptedTimeSeries(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        from causalpy.reporting import _extract_hdi_bounds
-
         is_pymc = self._model_backend.is_bayesian
         time_dim = "obs_ind"
         hdi_prob = 1 - alpha
@@ -466,15 +465,13 @@ class InterruptedTimeSeries(BaseExperiment):
             # PyMC: Compute statistics for both periods
             intervention_avg = self.intervention_impact.mean(dim=time_dim)
             intervention_mean = _as_scalar(intervention_avg.mean(dim=["chain", "draw"]))
-            intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
-            intervention_lower, intervention_upper = _extract_hdi_bounds(
-                intervention_hdi, hdi_prob
+            intervention_lower, intervention_upper = hdi_bounds(
+                intervention_avg, prob=hdi_prob
             )
 
             post_avg = self.post_intervention_impact.mean(dim=time_dim)
             post_mean = _as_scalar(post_avg.mean(dim=["chain", "draw"]))
-            post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
-            post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
+            post_lower, post_upper = hdi_bounds(post_avg, prob=hdi_prob)
 
             # Persistence ratio: post_mean / intervention_mean (as percentage)
             epsilon = 1e-8
@@ -704,10 +701,7 @@ class InterruptedTimeSeries(BaseExperiment):
         """
         Y_plot = Y.isel(treated_units=0) if "treated_units" in Y.dims else Y
         median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
-        hdi = az.hdi(Y_plot, hdi_prob=hdi_prob)
-        data_var = list(hdi.data_vars)[0]
-        bounds = np.asarray(hdi[data_var].values).reshape(-1)
-        lower, upper = float(bounds[0]), float(bounds[1])
+        lower, upper = hdi_bounds(Y_plot, prob=hdi_prob)
         return ax.errorbar(
             x,
             [median],
@@ -1274,21 +1268,17 @@ class InterruptedTimeSeries(BaseExperiment):
 
         if is_pymc:
             # PyMC: Compute statistics using xarray operations
-            from causalpy.reporting import _extract_hdi_bounds
-
             # Intervention period
             intervention_avg = self.intervention_impact.mean(dim=time_dim)
             intervention_mean = _as_scalar(intervention_avg.mean(dim=["chain", "draw"]))
-            intervention_hdi = az.hdi(intervention_avg, hdi_prob=hdi_prob)
-            intervention_lower, intervention_upper = _extract_hdi_bounds(
-                intervention_hdi, hdi_prob
+            intervention_lower, intervention_upper = hdi_bounds(
+                intervention_avg, prob=hdi_prob
             )
 
             # Post-intervention period
             post_avg = self.post_intervention_impact.mean(dim=time_dim)
             post_mean = _as_scalar(post_avg.mean(dim=["chain", "draw"]))
-            post_hdi = az.hdi(post_avg, hdi_prob=hdi_prob)
-            post_lower, post_upper = _extract_hdi_bounds(post_hdi, hdi_prob)
+            post_lower, post_upper = hdi_bounds(post_avg, prob=hdi_prob)
 
             # Cumulative (total) impacts
             intervention_cum = self.intervention_impact_cumulative.isel({time_dim: -1})
