@@ -25,6 +25,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
@@ -583,14 +584,13 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             print(f"Treated unit: {self.treated_units[0]}")
 
         tau_mean = float(self.tau_posterior.mean())
-        tau_hdi = az.hdi(self.tau_posterior.values.flatten(), hdi_prob=0.94)
+        tau_lower, tau_upper = hdi_bounds(self.tau_posterior.values, prob=HDI_PROB)
         print(
             f"Average treatment effect on the treated (ATT): "
             f"{round(tau_mean, round_to)}"
         )
         print(
-            f"  94% HDI: [{round(float(tau_hdi[0]), round_to)}, "
-            f"{round(float(tau_hdi[1]), round_to)}]"
+            f"  94% HDI: [{round(tau_lower, round_to)}, {round(tau_upper, round_to)}]"
         )
 
     def plot(

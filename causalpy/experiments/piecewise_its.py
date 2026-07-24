@@ -18,14 +18,13 @@ import re
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
+from causalpy._arviz_compat import hdi_bound_arrays
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
@@ -776,33 +775,20 @@ class PiecewiseITS(BaseExperiment):
         if "treated_units" in y_cf_mu.dims:
             y_cf_mu = y_cf_mu.isel(treated_units=0)
 
-        # Helper to extract HDI bounds from az.hdi() result (which returns a Dataset)
-        def _get_hdi_bounds(
-            hdi_result: xr.Dataset,
-        ) -> tuple[np.ndarray, np.ndarray]:
-            """Extract lower and upper bounds from az.hdi result."""
-            data_var = list(hdi_result.data_vars)[0]
-            hdi_data = hdi_result[data_var]
-            lower = hdi_data.sel(hdi="lower").values.flatten()
-            upper = hdi_data.sel(hdi="higher").values.flatten()
-            return lower, upper
-
         # Compute means and HDIs
         fitted_mean = y_pred_mu.mean(dim=["chain", "draw"]).values
-        fitted_hdi = az.hdi(y_pred_mu, hdi_prob=hdi_prob)
-        fitted_lower, fitted_upper = _get_hdi_bounds(fitted_hdi)
+        fitted_lower, fitted_upper = hdi_bound_arrays(y_pred_mu, prob=hdi_prob)
 
         cf_mean = y_cf_mu.mean(dim=["chain", "draw"]).values
-        cf_hdi = az.hdi(y_cf_mu, hdi_prob=hdi_prob)
-        cf_lower, cf_upper = _get_hdi_bounds(cf_hdi)
+        cf_lower, cf_upper = hdi_bound_arrays(y_cf_mu, prob=hdi_prob)
 
         effect_mean = self.effect.mean(dim=["chain", "draw"]).values
-        effect_hdi = az.hdi(self.effect, hdi_prob=hdi_prob)
-        effect_lower, effect_upper = _get_hdi_bounds(effect_hdi)
+        effect_lower, effect_upper = hdi_bound_arrays(self.effect, prob=hdi_prob)
 
         cum_effect_mean = self.cumulative_effect.mean(dim=["chain", "draw"]).values
-        cum_effect_hdi = az.hdi(self.cumulative_effect, hdi_prob=hdi_prob)
-        cum_effect_lower, cum_effect_upper = _get_hdi_bounds(cum_effect_hdi)
+        cum_effect_lower, cum_effect_upper = hdi_bound_arrays(
+            self.cumulative_effect, prob=hdi_prob
+        )
 
         # Build DataFrame
         result = pd.DataFrame(
