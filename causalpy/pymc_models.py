@@ -23,12 +23,11 @@ import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
 import xarray as xr
-from arviz import r2_score
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
+from causalpy.utils import _bayesian_r2_score, round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
@@ -451,7 +450,7 @@ class PyMCModel(pm.Model):
         for i, unit in enumerate(mu_data.coords["treated_units"].values):
             unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
             unit_y = y.sel(treated_units=unit).data
-            unit_score = r2_score(unit_y, unit_mu.data)
+            unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
 

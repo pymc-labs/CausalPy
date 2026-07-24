@@ -73,10 +73,9 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz import r2_score
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
+from causalpy.utils import _bayesian_r2_score, round_num
 
 __all__ = ["PyMCForecastModel"]
 
@@ -396,7 +395,7 @@ class PyMCForecastModel:
         for i, unit in enumerate(mu.coords["treated_units"].values):
             unit_mu = mu.sel(treated_units=unit).transpose("sample", "obs_ind")
             unit_y = y.sel(treated_units=unit).data
-            unit_score = r2_score(unit_y, unit_mu.data)
+            unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         return pd.Series(scores)

@@ -20,9 +20,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 
 import causalpy as cp
+import causalpy.pymc_forecast_models as pymc_forecast_models
+import causalpy.pymc_models as pymc_models
 from causalpy.utils import (
+    _bayesian_r2_score,
     _is_variable_dummy_coded,
     _series_has_2_levels,
     check_convex_hull_violation,
@@ -31,6 +35,96 @@ from causalpy.utils import (
     plot_correlations,
     round_num,
 )
+
+
+def test_bayesian_r2_score_matches_arviz_022():
+    """Bayesian R-squared matches the seeded upstream ArviZ regression."""
+    x = np.linspace(0, 1, 100)
+    random_state = np.random.RandomState(0)
+    y_true = random_state.normal(x, 1)
+    y_pred = x + random_state.randn(300, 100)
+
+    result = _bayesian_r2_score(y_true, y_pred)
+
+    expected = pd.Series(
+        [0.34799324897794087, 0.0286823512640429], index=["r2", "r2_std"]
+    )
+    pd.testing.assert_series_equal(result, expected, rtol=1e-14, atol=0.0)
+
+
+def test_bayesian_r2_score_constant_input_warns_and_returns_nan():
+    """Degenerate constant inputs retain ArViZ's warning and NaN results."""
+    y_true = np.ones(3)
+    y_pred = np.ones((2, 3))
+
+    with pytest.warns(RuntimeWarning, match="invalid value encountered in divide"):
+        result = _bayesian_r2_score(y_true, y_pred)
+
+    expected = pd.Series([np.nan, np.nan], index=["r2", "r2_std"])
+    pd.testing.assert_series_equal(result, expected)
+
+
+@pytest.mark.parametrize(
+    ("model_module", "score_method"),
+    [
+        (pymc_models, pymc_models.PyMCModel.score),
+        (pymc_forecast_models, pymc_forecast_models.PyMCForecastModel.score),
+    ],
+    ids=["pymc-model", "pymc-forecast-model"],
+)
+def test_model_score_uses_draw_wise_bayesian_r2(
+    monkeypatch, model_module, score_method
+):
+    """Both model score methods preserve the per-unit Bayesian R-squared output."""
+    x = np.linspace(0, 1, 100)
+
+    unit_0_random_state = np.random.RandomState(0)
+    unit_0_y = unit_0_random_state.normal(x, 1)
+    unit_0_pred = x + unit_0_random_state.randn(300, 100)
+
+    unit_1_random_state = np.random.RandomState(1)
+    unit_1_y = unit_1_random_state.normal(-x, 0.5)
+    unit_1_pred = -x + 1.5 * unit_1_random_state.randn(300, 100)
+
+    treated_units = ["unit_0", "unit_1"]
+    y = xr.DataArray(
+        np.column_stack((unit_0_y, unit_1_y)),
+        dims=("obs_ind", "treated_units"),
+        coords={"obs_ind": np.arange(100), "treated_units": treated_units},
+    )
+    mu = xr.DataArray(
+        np.stack((unit_0_pred.T, unit_1_pred.T), axis=1),
+        dims=("obs_ind", "treated_units", "sample"),
+        coords={
+            "obs_ind": np.arange(100),
+            "treated_units": treated_units,
+            "sample": np.arange(300),
+        },
+    )
+
+    monkeypatch.setattr(model_module.az, "extract", lambda *args, **kwargs: mu)
+
+    class DummyPredictor:
+        def predict(self, X):
+            return None
+
+    result = score_method(DummyPredictor(), X=None, y=y)
+
+    expected = pd.Series(
+        [
+            0.34799324897794087,
+            0.0286823512640429,
+            0.4898352905573437,
+            0.01679067148443987,
+        ],
+        index=[
+            "unit_0_r2",
+            "unit_0_r2_std",
+            "unit_1_r2",
+            "unit_1_r2_std",
+        ],
+    )
+    pd.testing.assert_series_equal(result, expected, rtol=1e-14, atol=0.0)
 
 
 def test_dummy_coding():
