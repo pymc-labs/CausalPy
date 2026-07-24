@@ -32,6 +32,12 @@ from sklearn.base import RegressorMixin
 
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import get_maketables_adapter
+from causalpy.plot_styles import (
+    active_theme,
+    apply_title_font,
+    bake_cycle_colors,
+    style_context,
+)
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
@@ -317,8 +323,9 @@ class BaseExperiment(ABC):
         `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_) and
         forwards the call here. This helper:
 
-        1. Applies the ``arviz-darkgrid`` style for the duration of the
-           draw call.
+        1. Applies the active plotting theme's style for the duration of the
+           draw call (see :mod:`causalpy.plot_styles`; the default theme is
+           ``arviz-darkgrid``), then applies the theme's title font, if any.
         2. Calls the subclass's backend-agnostic :meth:`_plot`.
         3. Mutates the resulting legend(s) in place when *legend_kwargs*
            is supplied, preserving custom handles built by the subclass.
@@ -374,8 +381,17 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
-        with plt.style.context(az.style.library["arviz-darkgrid"]):
+        theme = active_theme()
+        with plt.style.context(style_context(theme)):
             fig, ax = self._plot(**draw_kwargs)
+            # Freeze deferred "CN" cycle colours while the themed cycle is still
+            # active; otherwise a figure drawn later (docs, notebooks) would
+            # re-resolve them against the default cycle. Skipped for the default
+            # theme to keep its output byte-for-byte unchanged.
+            if theme.rcparams is not None:
+                bake_cycle_colors(fig)
+        if theme.title_font is not None:
+            apply_title_font(fig, theme.title_font)
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
