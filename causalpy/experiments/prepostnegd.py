@@ -27,6 +27,7 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     plot_posterior_over_x,
@@ -45,8 +46,9 @@ class PrePostNEGD(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula.
     group_variable_name : str
@@ -101,7 +103,7 @@ class PrePostNEGD(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         group_variable_name: str,
         pretreatment_variable_name: str,
@@ -112,7 +114,7 @@ class PrePostNEGD(BaseExperiment):
         self.pred_xi: np.ndarray
         self.pred_untreated: xr.DataArray
         self.pred_treated: xr.DataArray
-        self.data = data
+        self.data = to_pandas(data)
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
         self.group_variable_name = group_variable_name
