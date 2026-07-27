@@ -2632,18 +2632,15 @@ class ETWFERegression(PyMCModel):
     The cohort effects :math:`\tau_{gk}` are partially pooled towards a common
     event-time profile :math:`\bar{\tau}_k` via a non-centred parameterisation.
 
-    Parameters
-    ----------
-    sample_kwargs : dict, optional
-        Dictionary of kwargs passed to :func:`pymc.sample`.
-    priors : dict, optional
-        Dictionary of :class:`pymc_extras.prior.Prior` objects overriding the
-        model's priors. Recognised keys are ``alpha_dummy``, ``beta_t_dummy``,
-        ``mu_a``, ``sd_a``, ``a_z``, ``sd_bt``, ``beta_t_mundlak``, ``g_u``,
-        ``g_t``, ``tau_bar``, ``sd_dev``, ``dev``, ``beta`` and ``y_hat``.
-
     Notes
     -----
+    The constructor is inherited unchanged from :class:`PyMCModel`, taking
+    ``sample_kwargs`` (forwarded to :func:`pymc.sample`) and ``priors``, a
+    dictionary of :class:`pymc_extras.prior.Prior` objects. Recognised prior
+    keys are ``alpha_dummy``, ``beta_t_dummy``, ``mu_a``, ``sd_a``, ``a_z``,
+    ``sd_bt``, ``beta_t_mundlak``, ``g_u``, ``g_t``, ``tau_bar``, ``sd_dev``,
+    ``dev``, ``beta`` and ``y_hat``.
+
     **All panel structure is supplied to** :meth:`fit`, not to ``__init__``. This
     keeps the constructor signature identical to :class:`PyMCModel`, so
     :meth:`PyMCModel._clone` (and hence
@@ -2670,8 +2667,8 @@ class ETWFERegression(PyMCModel):
     orthogonalises ``g_u`` against ``mu_a`` and improves geometry. It does not
     change the estimand.
 
-    Example
-    -------
+    Examples
+    --------
     >>> import numpy as np
     >>> import xarray as xr
     >>> from causalpy.pymc_models import ETWFERegression
@@ -2982,7 +2979,14 @@ class ETWFERegression(PyMCModel):
 
         Parameters
         ----------
-        X, y, coords : see :meth:`build_model`
+        X : xarray.DataArray
+            Covariate matrix with dims ``["obs_ind", "coeffs"]``. May have zero
+            columns, in which case no ``beta`` is created.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict
+            Coordinate metadata; must supply ``units``, ``periods``, ``cohorts``
+            and ``ev`` alongside the usual ``obs_ind`` / ``treated_units``.
         unit_idx, time_idx, cohort_idx, ev_idx : numpy.ndarray
             Integer position arrays of length ``n_obs``.
         effect_indicator : numpy.ndarray
@@ -3083,6 +3087,9 @@ class ETWFERegression(PyMCModel):
             Ignored; accepted for API compatibility.
         out_of_sample : bool, optional
             Ignored; accepted for API compatibility.
+        **kwargs
+            Ignored; accepted for API compatibility with
+            :meth:`PyMCModel.predict`.
 
         Returns
         -------
