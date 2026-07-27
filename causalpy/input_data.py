@@ -31,7 +31,9 @@ loaders in :mod:`causalpy.data` all hand back pandas regardless of what was
 passed in. This module widens what you may pass, not what you get back.
 
 Pandas inputs retain their index. Dataframes from other libraries have no
-index concept, so conversion produces a default ``RangeIndex``.
+index concept, so conversion produces a default ``RangeIndex``. Experiments
+that read the index as a time axis take a ``time_column`` argument instead;
+see :func:`to_pandas_with_time_index`.
 """
 
 from __future__ import annotations
@@ -40,7 +42,9 @@ import narwhals as nw
 import pandas as pd
 from narwhals.typing import IntoDataFrame
 
-__all__ = ["DataFrameLike", "to_pandas"]
+from causalpy.custom_exceptions import DataException
+
+__all__ = ["DataFrameLike", "to_pandas", "to_pandas_with_time_index"]
 
 type DataFrameLike = IntoDataFrame
 """Any eager dataframe Narwhals supports: pandas, Polars, PyArrow, and others.
@@ -108,3 +112,71 @@ def to_pandas(data: DataFrameLike, *, argument_name: str = "data") -> pd.DataFra
             f"Got {type(data).__name__}.{hint}"
         ) from error
     return frame.to_pandas()
+
+
+def to_pandas_with_time_index(
+    data: DataFrameLike,
+    time_column: str | None = None,
+    *,
+    argument_name: str = "data",
+) -> pd.DataFrame:
+    """Convert a dataframe-like input and put its time axis on the index.
+
+    Experiments that compare observations against a ``treatment_time`` need a
+    time axis. Pandas callers have historically supplied it as the dataframe
+    index. Dataframes from other libraries have no index, so those callers must
+    name the column that holds the time axis.
+
+    Parameters
+    ----------
+    data : dataframe-like
+        Any eager dataframe supported by Narwhals.
+    time_column : str or None, default None
+        Column holding the time axis. When given, it becomes the index. When
+        None, the pandas index of ``data`` is used, which requires a pandas
+        input.
+    argument_name : str, default "data"
+        Name of the calling argument, used in error messages.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A pandas dataframe indexed by the time axis.
+
+    Raises
+    ------
+    DataException
+        If ``time_column`` is missing from the data, or if a non-pandas input
+        arrives without a ``time_column``.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from causalpy.input_data import to_pandas_with_time_index
+    >>> frame = pd.DataFrame({"t": [1, 2], "y": [3, 4]})
+    >>> result = to_pandas_with_time_index(frame, time_column="t")
+    >>> result.index.name
+    't'
+    >>> result.index.tolist()
+    [1, 2]
+    >>> result.columns.tolist()
+    ['y']
+    """
+    has_pandas_index = isinstance(data, pd.DataFrame)
+    frame = to_pandas(data, argument_name=argument_name)
+
+    if time_column is None:
+        if not has_pandas_index:
+            raise DataException(
+                f"`{argument_name}` is not a pandas dataframe, so it carries no "
+                "index to use as the time axis. Pass `time_column` naming the "
+                "column that holds the time axis."
+            )
+        return frame
+
+    if time_column not in frame.columns:
+        raise DataException(
+            f"`time_column` '{time_column}' is not a column of `{argument_name}`. "
+            f"Available columns: {list(frame.columns)}."
+        )
+    return frame.set_index(time_column)
