@@ -401,7 +401,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             raise ValueError(
                 f"conditioning must be 'mundlak', 'dummy' or None, got {conditioning!r}"
             )
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             return conditioning or "mundlak"
         if conditioning == "mundlak":
             raise ValueError(
@@ -442,7 +442,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self._fit_model_etwfe()
         self._check_etwfe_convergence()
         self._populate_etwfe_fitted_values()
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self._compute_etwfe_effects_bayesian()
         else:
             self._compute_etwfe_effects_ols()
@@ -533,7 +533,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 f"se_type must be 'cluster' or 'classical', got {self.se_type!r}"
             )
 
-        if isinstance(self.model, PyMCModel) and not isinstance(
+        if self._model_backend.is_bayesian and not isinstance(
             self.model, ETWFERegression
         ):
             raise ValueError(
@@ -795,9 +795,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             columns=pd.Index(index.ev_grid, name="event_time"),
         )
 
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             self._build_etwfe_design_bayesian()
-        elif isinstance(self.model, RegressorMixin):
+        elif self._model_backend.is_ols:
             self._build_etwfe_design_ols()
         else:  # pragma: no cover - defensive, BaseExperiment already checks
             raise ValueError("Model type not recognized")
@@ -1031,7 +1031,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 )
 
         # --- 4. OLS rank deficiency -------------------------------------------
-        if isinstance(self.model, RegressorMixin):
+        if self._model_backend.is_ols:
             n_columns = int(self.X_full.shape[1])
             rank = int(np.linalg.matrix_rank(self.X_full))
             if rank < n_columns:
@@ -1058,12 +1058,14 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         the test suite's mocked sampler produces -- R-hat is undefined, and an
         unguarded comparison would warn on every mocked fit.
         """
-        if not isinstance(self.model, PyMCModel):
+        if not self._model_backend.is_bayesian:
             return
-        idata = getattr(self.model, "idata", None)
+        # The adapter's ``idata`` honestly returns None when the backend cannot
+        # supply one or has not been fit, so no getattr probing is needed.
+        idata = self._model_backend.idata
         if idata is None or "posterior" not in idata:
             return
-        if "att" not in idata.posterior:  # pragma: no cover - defensive
+        if "att" not in idata["posterior"]:  # pragma: no cover - defensive
             return
         try:
             rhat = float(np.asarray(az.rhat(idata, var_names=["att"])["att"]))
@@ -1095,7 +1097,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
         """
-        if self.estimator == "etwfe" and isinstance(self.model, PyMCModel):
+        if self.estimator == "etwfe" and self._model_backend.is_bayesian:
             self.model.print_coefficients(
                 list(getattr(self, "_etwfe_covariate_labels", [])), round_to
             )
@@ -1118,9 +1120,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             ``None`` for every non-ETWFE or non-PyMC fit, which restores the
             adapter's standard resolution path.
         """
-        if self.estimator != "etwfe" or not isinstance(self.model, PyMCModel):
+        if self.estimator != "etwfe" or not self._model_backend.is_bayesian:
             return None
-        posterior = self._etwfe_idata.posterior
+        posterior = self._etwfe_idata["posterior"]
 
         pieces: list[xr.DataArray] = [posterior["att"]]
         tau_bar = posterior["tau_bar"]
@@ -1144,25 +1146,35 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         return stacked.assign_coords(coeffs=self._etwfe_coef_labels())
 
     @property
-    def _etwfe_idata(self) -> Any:
+    def _etwfe_idata(self) -> az.InferenceData:
         """The fitted PyMC model's inference data.
+
+        Delegates to the backend adapter rather than probing ``self.model``
+        with ``getattr``: ARCHITECTURE.md is explicit that capability is
+        discovered through ``ModelAdapter``, not through ``AttributeError``.
 
         Raises
         ------
         RuntimeError
-            If the model has not been fit.
+            If the backend is not Bayesian or the model has not been fit.
         """
-        idata = getattr(self.model, "idata", None)
-        if idata is None:  # pragma: no cover - defensive
-            raise RuntimeError("The ETWFE model has not been fit.")
-        return idata
+        return self._model_backend.require_idata()
 
     def _fit_model_etwfe(self) -> None:
-        """Fit the ETWFE model on the full sample."""
-        model = self.model
-        if isinstance(model, ETWFERegression):
+        """Fit the ETWFE model on the full sample.
+
+        Both branches go through ``self._model_backend`` rather than touching
+        ``self.model`` directly, so backend coercion, prediction
+        canonicalisation and the ``fit_intercept=False`` clone-and-warn all stay
+        in :mod:`causalpy.experiments.model_adapter` (see ARCHITECTURE.md).
+        """
+        backend = self._model_backend
+        if backend.is_bayesian:
             index = self._etwfe_index
-            model.fit(
+            # The panel index arrays ride the adapter's ``**fit_kwargs``
+            # passthrough; ETWFERegression.fit widens the standard signature to
+            # receive them.
+            backend.fit(
                 X=self._etwfe_X,
                 y=self._etwfe_y,
                 coords=self._etwfe_coords,
@@ -1176,38 +1188,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 dbar_time=self._etwfe_dbar_time,
                 conditioning=self.conditioning or "mundlak",
             )
-            # ``y_pred`` is the canonical prediction container the rest of the
-            # class dispatches on via ``has_posterior_draws``: an xr.DataArray
-            # with dims (chain, draw, obs_ind, treated_units). ETWFERegression
-            # predicts in-sample only, so take ``mu`` off its posterior
-            # predictive rather than re-predicting on new data.
-            self.y_pred = model.predict()["posterior_predictive"]["mu"]
-        elif isinstance(model, RegressorMixin):
-            # NOTE: ``fit_intercept=False`` is handled centrally by
-            # ``model_adapter._prepare_sklearn_model``, which clones the user's
-            # estimator and warns. Do not set it here -- mutating ``model``
-            # would break that "original instance is unchanged" contract.
-            model.fit(X=self.X_full, y=self.y_full)
-            self._etwfe_coefs = np.asarray(
-                model.get_coeffs(),  # type: ignore[attr-defined]
-                dtype=float,
-            ).ravel()
-            self._etwfe_fitted = np.squeeze(
-                np.asarray(model.predict(self.X_full), dtype=float)
-            )
-            # Same canonical container for the OLS path, as singleton
-            # chain/draw dims, so ``has_posterior_draws`` reports False and the
-            # point-estimate branches are taken.
-            self.y_pred = xr.DataArray(
-                self._etwfe_fitted.reshape(1, 1, -1, 1),
-                dims=("chain", "draw", "obs_ind", "treated_units"),
-                coords={
-                    "chain": [0],
-                    "draw": [0],
-                    "obs_ind": np.asarray(self.data.index),
-                    "treated_units": ["unit_0"],
-                },
-            )
+            # ETWFE predicts in-sample only -- every index array is bound to
+            # this panel -- so pass the design back in rather than new data.
+            # The adapter returns the canonical (chain, draw, obs_ind,
+            # treated_units) container the rest of the class dispatches on via
+            # ``has_posterior_draws``.
+            self.y_pred = backend.predict(X=self._etwfe_X)
+        elif backend.is_ols:
+            backend.fit(X=self.X_full, y=self.y_full)
+            self._etwfe_coefs = np.asarray(backend.coefficients(), dtype=float).ravel()
+            # Singleton chain/draw dims, so ``has_posterior_draws`` reports
+            # False and the point-estimate branches are taken downstream.
+            self.y_pred = backend.predict(X=self.X_full)
+            self._etwfe_fitted = np.squeeze(np.asarray(self.y_pred.values, dtype=float))
         else:  # pragma: no cover - defensive, BaseExperiment already checks
             raise ValueError("Model type not recognized")
 
@@ -1225,15 +1218,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         cell effect exactly when the model fits perfectly.
         """
         index = self._etwfe_index
-        if isinstance(self.model, PyMCModel):
+        if self._model_backend.is_bayesian:
             idata = self._etwfe_idata
             mu = (
-                idata.posterior_predictive["mu"]
+                idata["posterior_predictive"]["mu"]
                 .mean(dim=["chain", "draw"])
                 .isel(treated_units=0)
                 .values
             )
-            tau_mean = idata.posterior["tau"].mean(dim=["chain", "draw"]).values
+            tau_mean = idata["posterior"]["tau"].mean(dim=["chain", "draw"]).values
         else:
             mu = self._etwfe_fitted
             tau_mean = self._etwfe_tau_matrix_ols()
@@ -1420,7 +1413,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """
         self.hdi_prob_ = hdi_prob
         index = self._etwfe_index
-        posterior = self._etwfe_idata.posterior
+        posterior = self._etwfe_idata["posterior"]
 
         # The in-model ATT deterministic: read its draws straight off the
         # posterior rather than reconstructing it from differenced predictions.
@@ -1943,9 +1936,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         )
         axes: list[plt.Axes] = list(axes_array.ravel())
 
-        is_bayesian = isinstance(self.model, PyMCModel)
+        is_bayesian = self._model_backend.is_bayesian
         if is_bayesian:
-            tau_draws = self._etwfe_idata.posterior["tau"].values
+            tau_draws = self._etwfe_idata["posterior"]["tau"].values
             lower_pct = (1 - hdi_prob) / 2 * 100
             upper_pct = (1 + hdi_prob) / 2 * 100
             band_label = f"{int(hdi_prob * 100)}% HDI"
@@ -2625,7 +2618,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if self.estimator == "etwfe":
             # ETWFE aggregates the posterior effect surface directly; there are no
             # differenced posterior predictive draws to recompute from.
-            tau_draws = self._etwfe_idata.posterior["tau"].values
+            tau_draws = self._etwfe_idata["posterior"]["tau"].values
             return self._apply_event_window(
                 self._etwfe_att_event_time_bayesian(
                     tau_draws,
