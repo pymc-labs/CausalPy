@@ -663,10 +663,16 @@ def noisy_panel(**kwargs) -> pd.DataFrame:
 
 
 def fit_ols(data: pd.DataFrame, **kwargs):
-    """Fit the ETWFE experiment with a plain OLS model."""
+    """Fit the ETWFE experiment with a plain OLS model.
+
+    ``fit_intercept=False`` because the saturated design already carries an
+    intercept from patsy. Passing the default ``True`` makes CausalPy clone the
+    estimator and emit a ``UserWarning``, which would pollute the tests here
+    that assert on warning contents.
+    """
     return cp.StaggeredDifferenceInDifferences(
         data,
-        model=SklearnLinearRegression(),
+        model=SklearnLinearRegression(fit_intercept=False),
         estimator="etwfe",
         **{**BASE_KWARGS, **kwargs},
     )
@@ -754,6 +760,7 @@ def test_etwfe_ols_smoke(ols_result):
         "att",
         "att_std",
         "n_obs",
+        "identified",
     ]
     assert list(ols_result.att_group_time_.columns) == [
         "cohort",
@@ -761,6 +768,7 @@ def test_etwfe_ols_smoke(ols_result):
         "att",
         "att_std",
         "n_obs",
+        "identified",
     ]
     assert set(ols_result.tau_surface_.columns) == {
         "cohort",
@@ -995,6 +1003,7 @@ def test_imputation_path_is_untouched():
         "att",
         "att_std",
         "n_obs",
+        "identified",
     ]
 
 
@@ -1037,6 +1046,7 @@ def test_etwfe_bayesian_schema(mock_pymc_sample, conditioning):
         "att_lower",
         "att_upper",
         "n_obs",
+        "identified",
     ]
     assert list(result.att_group_time_.columns) == [
         "cohort",
@@ -1044,6 +1054,7 @@ def test_etwfe_bayesian_schema(mock_pymc_sample, conditioning):
         "att",
         "att_lower",
         "att_upper",
+        "identified",
     ]
     assert set(result.tau_surface_.columns) == {
         "cohort",
@@ -1101,6 +1112,7 @@ def test_etwfe_bayesian_reporting_entry_points(mock_pymc_sample):
         "att_lower",
         "att_upper",
         "n_obs",
+        "identified",
     ]
     narrow = result.get_plot_data(hdi_prob=0.5)
     assert len(narrow) == len(default)

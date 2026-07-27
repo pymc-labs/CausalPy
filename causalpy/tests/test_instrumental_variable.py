@@ -249,6 +249,47 @@ def test_iv_continuous_treatment_warning(iv_data, sample_kwargs):
         )
 
 
+def test_iv_accepts_transformed_treatment_lhs(mock_pymc_sample, sample_kwargs):
+    """The parsed first-stage treatment is used throughout IV fitting."""
+    Z = np.linspace(0.1, 1, 20)
+    X = np.exp(1 + 2 * Z)
+    y = 3 * np.log(X)
+    df = pd.DataFrame({"y": y, "X": X, "Z": Z})
+
+    with pytest.warns(UserWarning, match="treatment variable is not Binary"):
+        result = cp.InstrumentalVariable(
+            instruments_data=df[["X", "Z"]],
+            data=df[["y", "X"]],
+            instruments_formula="np.log(X) ~ 1 + Z",
+            formula="y ~ 1 + np.log(X)",
+            model=cp.pymc_models.InstrumentalVariableRegression(
+                sample_kwargs=sample_kwargs
+            ),
+        )
+
+    np.testing.assert_allclose(result.t.ravel(), np.log(X))
+    assert result.instrument_variable_name == "np.log(X)"
+    assert hasattr(result, "second_stage_reg")
+
+
+def test_iv_rejects_interaction_with_transformed_treatment(sample_kwargs):
+    """Unsupported transformed-treatment interactions fail before fitting."""
+    Z = np.linspace(0.1, 1, 20)
+    X = np.exp(1 + 2 * Z)
+    df = pd.DataFrame({"y": 3 * np.log(X), "X": X, "Z": Z})
+
+    with pytest.raises(DataException, match="Interactions with a transformed"):
+        cp.InstrumentalVariable(
+            instruments_data=df[["X", "Z"]],
+            data=df,
+            instruments_formula="np.log(X) ~ 1 + Z",
+            formula="y ~ 1 + np.log(X)*Z",
+            model=cp.pymc_models.InstrumentalVariableRegression(
+                sample_kwargs=sample_kwargs
+            ),
+        )
+
+
 # =============================================================================
 # Test Binary Treatment
 # =============================================================================
@@ -399,7 +440,7 @@ def test_iv_coords_set(iv_data, sample_kwargs):
 # =============================================================================
 
 
-@pytest.mark.parametrize("method", ["plot", "summary", "effect_summary"])
+@pytest.mark.parametrize("method", ["plot", "effect_summary"])
 def test_iv_not_implemented_methods(iv_data, sample_kwargs, method):
     """Test that unimplemented methods raise NotImplementedError."""
     result = cp.InstrumentalVariable(

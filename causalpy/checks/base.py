@@ -37,6 +37,17 @@ def clone_model(model: Any) -> Any:
     PyMC models cannot survive ``copy.deepcopy`` (the class identity is
     lost), so we use their ``_clone()`` method instead.  For all other
     model types we fall back to ``copy.deepcopy``.
+
+    Parameters
+    ----------
+    model : Any
+        The model instance to clone. PyMC models must expose a ``_clone()``
+        method; everything else falls back to :func:`copy.deepcopy`.
+
+    Returns
+    -------
+    Any
+        A fresh, unfitted copy of ``model``.
     """
     if hasattr(model, "_clone"):
         return model._clone()
@@ -88,6 +99,12 @@ class Check(Protocol):
     def validate(self, experiment: BaseExperiment) -> None:
         """Verify the check is applicable to the given experiment.
 
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The experiment instance whose type is checked against
+            ``applicable_methods``.
+
         Raises
         ------
         TypeError
@@ -112,5 +129,7 @@ class Check(Protocol):
         Returns
         -------
         CheckResult
+            Outcome of the check, including pass/fail status and any
+            diagnostic payload produced by the implementation.
         """
         ...

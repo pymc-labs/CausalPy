@@ -70,6 +70,7 @@ REAL_WORLD_DATASETS: dict[str, str] = {
     "lalonde": "lalonde.csv",
     "zipcodes": "zipcodes_data.csv",
     "nevo": "data_nevo.csv",
+    "california_prop99": "california_prop99.csv",
 }
 
 
@@ -108,6 +109,10 @@ def load_data(dataset: str) -> pd.DataFrame:
           series analysis. Based on synthetic data from Juan Orduz's blog post on
           `time-based regression for geo-experiments <https://juanitorduz.github.io/time_based_regression_pymc/>`_.
         - ``"nevo"`` - Berry, Levinsohn, and Pakes (1995) cereal data for BLP estimation
+        - ``"california_prop99"`` - California Proposition 99 cigarette sales data
+          (Abadie, Diamond & Hainmueller, 2010). Wide-format panel of annual per-capita
+          cigarette sales (packs) for 39 US states, 1970--2000. Treatment: California in
+          1989.
 
     Returns
     -------

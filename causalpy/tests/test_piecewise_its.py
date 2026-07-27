@@ -286,6 +286,43 @@ def test_piecewise_its_no_step_or_ramp():
         )
 
 
+def test_piecewise_its_parser_preserves_nested_threshold_expressions():
+    """Patsy's parsed factors preserve nested parentheses and commas."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.formula = "y ~ step(t, int(50)) + ramp(t, foo(a, b))"
+
+    assert experiment._parse_step_ramp_terms() == [
+        {"transform": "step", "variable": "t", "raw_threshold": "int(50)"},
+        {"transform": "ramp", "variable": "t", "raw_threshold": "foo(a, b)"},
+    ]
+
+
+@pytest.mark.parametrize("factor", ["np.step(t, 50)", "mystep(t, 50)"])
+def test_piecewise_its_parser_requires_bare_transform_name(factor):
+    """Qualified or similarly named functions are not interruption transforms."""
+    assert cp.PiecewiseITS._parse_step_ramp_factor(factor) == []
+
+
+@pytest.mark.parametrize("raw_threshold", ["50'", "''50''"])
+def test_piecewise_its_threshold_unwraps_only_one_matched_quote_pair(raw_threshold):
+    """Stray or repeated quotes are not silently stripped into valid numbers."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.data = pd.DataFrame({"t": np.arange(100)})
+    terms = [{"transform": "step", "variable": "t", "raw_threshold": raw_threshold}]
+
+    with pytest.raises(FormulaException, match="Invalid numeric threshold"):
+        experiment._extract_and_canonicalize_interruption_times(terms, "t")
+
+
+def test_piecewise_its_matched_quoted_threshold_still_parses():
+    """A single matched quote pair remains supported."""
+    experiment = object.__new__(cp.PiecewiseITS)
+    experiment.data = pd.DataFrame({"t": np.arange(100)})
+    terms = [{"transform": "step", "variable": "t", "raw_threshold": "'50'"}]
+
+    assert experiment._extract_and_canonicalize_interruption_times(terms, "t") == [50]
+
+
 def test_piecewise_its_missing_column():
     """Test that missing column in formula raises error."""
     from patsy import PatsyError
@@ -362,7 +399,7 @@ def test_piecewise_its_ols_single_interruption():
     )
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.9  # Should fit well with low noise
+    assert result.score["unit_0_r2"] > 0.9  # Should fit well with low noise
     assert len(result.labels) == 4  # Intercept, time, step, ramp
 
 
@@ -480,7 +517,7 @@ def test_piecewise_its_ols_effect_consistency():
 
     # Effect should equal fitted - counterfactual
     expected_effect = np.squeeze(result.y_pred) - np.squeeze(result.y_counterfactual)
-    np.testing.assert_allclose(result.effect, expected_effect)
+    np.testing.assert_allclose(np.squeeze(result.effect), expected_effect)
 
 
 def test_piecewise_its_ols_cumulative_effect():
@@ -501,8 +538,10 @@ def test_piecewise_its_ols_cumulative_effect():
     )
 
     # Cumulative effect should be cumsum of effect
-    expected_cumulative = np.cumsum(result.effect)
-    np.testing.assert_allclose(result.cumulative_effect, expected_cumulative)
+    expected_cumulative = np.cumsum(np.squeeze(result.effect))
+    np.testing.assert_allclose(
+        np.squeeze(result.cumulative_effect), expected_cumulative
+    )
 
 
 def test_piecewise_its_ols_plot():
@@ -939,10 +978,10 @@ def test_piecewise_its_post_impact_attributes():
     assert len(result.datapost) == 50
 
     # post_impact should have same length as datapost
-    assert len(result.post_impact) == len(result.datapost)
+    assert result.post_impact.sizes["obs_ind"] == len(result.datapost)
 
     # post_pred should have same length as datapost
-    assert len(result.post_pred) == len(result.datapost)
+    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
 
 
 # ==============================================================================
@@ -974,11 +1013,12 @@ def test_piecewise_its_instance_attributes():
     assert result.time_col == "t"
     assert result.outcome_variable_name == "y"
 
-    # Check X and y are xarray DataArrays
-    assert hasattr(result.X, "dims")
-    assert hasattr(result.y, "dims")
-    assert "obs_ind" in result.X.dims
-    assert "coeffs" in result.X.dims
+    # Check design Dataset contains X and y DataArrays
+    assert hasattr(result, "design")
+    assert "X" in result.design
+    assert "y" in result.design
+    assert "obs_ind" in result.design["X"].dims
+    assert "coeffs" in result.design["X"].dims
 
     # Check design info stored
     assert hasattr(result, "_x_design_info")
@@ -1143,9 +1183,13 @@ def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
-    # post_pred should be dict-like with posterior_predictive
-    assert "posterior_predictive" in result.post_pred
-    assert "mu" in result.post_pred["posterior_predictive"]
+    assert result.post_pred.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
 
 
 def test_piecewise_its_datetime_post_intervention_attributes():
@@ -1205,11 +1249,11 @@ def test_piecewise_its_counterfactual_zeros_interruption_terms():
     )
 
     # Pre-intervention: effect should be approximately 0
-    pre_effect = result.effect[:50]
+    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
     assert np.allclose(pre_effect, 0, atol=1e-10)
 
     # Post-intervention: effect should be non-zero
-    post_effect = result.effect[50:]
+    post_effect = result.effect.isel(obs_ind=slice(50, None))
     assert not np.allclose(post_effect, 0)
 
 
@@ -1260,7 +1304,7 @@ def test_piecewise_its_ols_various_effects(level_change, slope_change):
     result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.5  # Should have reasonable fit
+    assert result.score["unit_0_r2"] > 0.5  # Should have reasonable fit
 
 
 @pytest.mark.parametrize(
@@ -1328,7 +1372,7 @@ def test_piecewise_its_unrecognized_model_type():
     class FakeModel:
         pass
 
-    with pytest.raises(ValueError, match="Model type not recognized"):
+    with pytest.raises(ValueError, match="Unsupported model type"):
         cp.PiecewiseITS(
             df,
             formula="y ~ 1 + t + step(t, 50)",
@@ -1353,9 +1397,8 @@ def test_piecewise_its_score_attribute_ols():
         model=LinearRegression(),
     )
 
-    # Score should be a float for OLS
-    assert isinstance(result.score, float)
-    assert 0 <= result.score <= 1
+    assert list(result.score.index) == ["unit_0_r2"]
+    assert 0 <= result.score["unit_0_r2"] <= 1
 
 
 def test_piecewise_its_ols_model_without_fit_intercept():
@@ -1409,13 +1452,13 @@ def test_piecewise_its_x_y_shapes():
     )
 
     # X should be (n_obs, n_coeffs)
-    assert result.X.shape == (100, 4)
+    assert result.design["X"].shape == (100, 4)
 
     # y should be (n_obs, 1) for treated_units
-    assert result.y.shape == (100, 1)
+    assert result.design["y"].shape == (100, 1)
 
     # Check coordinates
-    assert list(result.X.coords["coeffs"].values) == result.labels
+    assert list(result.design["X"].coords["coeffs"].values) == result.labels
 
 
 def test_piecewise_its_y_pred_shape():
@@ -1450,7 +1493,7 @@ def test_piecewise_its_effect_pre_intervention_zero():
     )
 
     # Effect before interruption should be zero
-    pre_effect = result.effect[:50]
+    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
     np.testing.assert_allclose(pre_effect, 0, atol=1e-10)
 
 

@@ -63,6 +63,12 @@ class EstimateEffect:
     def validate(self, context: PipelineContext) -> None:
         """Check that the step is properly configured.
 
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context (unused at validation time but required by the
+            pipeline step interface).
+
         Raises
         ------
         TypeError
@@ -86,6 +92,12 @@ class EstimateEffect:
 
         The experiment constructor receives ``context.data`` as its first
         positional argument, followed by all captured keyword arguments.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context. ``context.data`` is forwarded to the experiment
+            constructor as the first positional argument.
 
         Returns
         -------

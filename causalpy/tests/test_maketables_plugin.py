@@ -13,6 +13,8 @@
 #   limitations under the License.
 """Tests for optional maketables plugin hooks on experiment objects."""
 
+from typing import cast
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -23,6 +25,11 @@ import causalpy as cp
 from causalpy.data.simulate_data import (
     generate_piecewise_its_data,
     generate_staggered_did_data,
+)
+from causalpy.experiments.model_adapter import (
+    ModelAdapter,
+    PyMCModelAdapter,
+    SklearnModelAdapter,
 )
 from causalpy.maketables_adapters import (
     PyMCMaketablesAdapter,
@@ -566,8 +573,13 @@ class TestSafeObservationCount:
         stub = _Stub(data=np.zeros((42, 3)))
         assert _safe_observation_count(stub) == 42
 
-    def test_returns_count_from_X_attr(self):
-        stub = _Stub(X=np.zeros((10, 2)))
+    def test_returns_count_from_design_dataset(self):
+        import xarray as xr
+
+        design = xr.Dataset(
+            {"X": xr.DataArray(np.zeros((10, 2)), dims=["obs_ind", "coeffs"])}
+        )
+        stub = _Stub(design=design)
         assert _safe_observation_count(stub) == 10
 
     def test_returns_none_when_no_attrs(self):
@@ -575,7 +587,7 @@ class TestSafeObservationCount:
         assert _safe_observation_count(stub) is None
 
     def test_skips_none_attrs(self):
-        stub = _Stub(data=None, X=None, datapre=np.zeros((5, 1)))
+        stub = _Stub(data=None, datapre=np.zeros((5, 1)))
         assert _safe_observation_count(stub) == 5
 
     def test_skips_attr_without_shape(self):
@@ -712,16 +724,28 @@ class TestGetMaketablesHdiProb:
 
 
 class TestGetMaketablesAdapter:
-    def test_unsupported_model_raises(self):
+    def test_dispatches_on_model_adapter_kind(self):
+        pymc_backend = PyMCModelAdapter(cp.pymc_models.LinearRegression())
+        sklearn_backend = SklearnModelAdapter(
+            cp.create_causalpy_compatible_class(LinearRegression(fit_intercept=False))
+        )
+
+        assert isinstance(get_maketables_adapter(pymc_backend), PyMCMaketablesAdapter)
+        assert isinstance(
+            get_maketables_adapter(sklearn_backend), SklearnMaketablesAdapter
+        )
+
+    def test_unsupported_backend_raises(self):
+        unsupported = _Stub(kind="pymc-forecast")
         with pytest.raises(TypeError, match="Unsupported model backend"):
-            get_maketables_adapter("not_a_model")
+            get_maketables_adapter(cast(ModelAdapter, unsupported))
 
 
 class TestSklearnAdapterUnit:
     def test_coef_table_success(self):
         adapter = SklearnMaketablesAdapter()
-        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
-        stub = _Stub(labels=["a", "b"], model=model)
+        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b"], _model_backend=backend)
         frame = adapter.coef_table(stub)
         assert list(frame.index) == ["a", "b"]
         assert frame["b"].notna().all()
@@ -764,8 +788,8 @@ class TestSklearnAdapterUnit:
 class TestSklearnAdapterCoefMismatch:
     def test_coef_count_mismatch_raises(self):
         adapter = SklearnMaketablesAdapter()
-        model = _Stub(get_coeffs=lambda: [1.0, 2.0])
-        stub = _Stub(labels=["a", "b", "c"], model=model)
+        backend = _Stub(coefficients=lambda: [1.0, 2.0])
+        stub = _Stub(labels=["a", "b", "c"], _model_backend=backend)
         with pytest.raises(ValueError, match="Coefficient count mismatch"):
             adapter.coef_table(stub)
 

@@ -15,5 +15,14 @@
 Shared constants for the CausalPy package.
 """
 
+#: Default probability mass for highest-density-interval (HDI) bands and
+#: summary intervals across CausalPy plots and reports. Matches the
+#: :func:`arviz.hdi` default of 0.94. Override on a per-call basis by passing
+#: ``hdi_prob`` to the relevant method (e.g.
+#: :meth:`causalpy.experiments.interrupted_time_series.InterruptedTimeSeries.analyze_persistence`),
+#: or globally for ``maketables`` rendering via
+#: :meth:`causalpy.experiments.base.BaseExperiment.set_maketables_options`.
 HDI_PROB: float = 0.94
+
+#: Default font size used in matplotlib legends across CausalPy plots.
 LEGEND_FONT_SIZE: int = 12

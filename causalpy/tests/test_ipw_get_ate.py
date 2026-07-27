@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 import causalpy as cp
+from causalpy.custom_exceptions import DataException
 
 
 @pytest.fixture(scope="module")
@@ -54,6 +55,48 @@ def ipw_result(mock_pymc_sample):
 def propensity_scores(ipw_result):
     """Extract propensity scores from the first posterior sample."""
     return ipw_result.idata["posterior"]["p"].stack(z=("chain", "draw"))[:, 0].values
+
+
+def test_ipw_accepts_binary_transformed_treatment(mock_pymc_sample):
+    """IPW validates and fits the treatment vector produced by Patsy."""
+    df = cp.load_data("nhefs")
+    result = cp.InversePropensityWeighting(
+        df,
+        formula="I(1 - trt) ~ 1 + age + race",
+        outcome_variable="outcome",
+        weighting_scheme="robust",
+        model=cp.pymc_models.PropensityScore(
+            sample_kwargs={"tune": 5, "draws": 5, "chains": 1}
+        ),
+    )
+
+    np.testing.assert_array_equal(result.t.ravel(), 1 - df["trt"].to_numpy())
+
+
+def test_ipw_rejects_nonbinary_transformed_treatment():
+    """A transformed LHS must still satisfy the Bernoulli model's 0/1 contract."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="0-1 binary"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="center(trt) ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
+
+
+def test_ipw_missing_treatment_expression_raises_data_exception():
+    """Missing formula inputs retain a CausalPy validation error."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="Unable to evaluate propensity formula"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="missing_treatment ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
 
 
 class TestComputeAteRobust:
@@ -220,3 +263,24 @@ class TestGetAteDispatch:
         assert np.isclose(ate_list[0], ate, equal_nan=True)
         assert np.isclose(ate_list[1], trt, equal_nan=True)
         assert np.isclose(ate_list[2], ntrt, equal_nan=True)
+
+
+class TestDesignInfoAttributes:
+    """Regression for #835: ``_t_design_info`` must hold the treatment design
+    (left-hand side of the formula) and ``_x_design_info`` must hold the
+    covariate design (right-hand side). The previous implementation assigned
+    both to ``_t_design_info``, silently overwriting the treatment side."""
+
+    def test_t_design_info_is_treatment_side(self, ipw_result):
+        """The treatment side of ``trt ~ 1 + age + race`` is the lone column ``trt``."""
+        assert ipw_result._t_design_info.column_names == ["trt"]
+
+    def test_x_design_info_is_covariate_side(self, ipw_result):
+        """The covariate side mirrors the right-hand side of the formula."""
+        assert hasattr(ipw_result, "_x_design_info")
+        assert "age" in ipw_result._x_design_info.column_names
+        assert "race" in ipw_result._x_design_info.column_names
+
+    def test_t_and_x_design_info_are_distinct(self, ipw_result):
+        """The two attributes must point to different design objects."""
+        assert ipw_result._t_design_info is not ipw_result._x_design_info

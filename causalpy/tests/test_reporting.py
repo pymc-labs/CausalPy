@@ -15,6 +15,8 @@
 Tests for reporting utilities.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -331,6 +333,67 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
+    """``_compute_statistics_did_ols`` must compute one residual per
+    observation, not an (n, n) array.
+
+    ``y_da`` (shape ``(n, 1)``, dims ``obs_ind x treated_units``) minus a bare
+    ``(n,)`` ``y_pred`` array used to broadcast positionally against the
+    *last* axis (``treated_units``, size 1) instead of ``obs_ind``, producing
+    an ``(n, n)`` array of every observation's y minus every *other*
+    observation's prediction. That inflated the reported SE by roughly 70x
+    on this dataset. This test checks the residual shape directly and checks
+    the reported SE against an independent statsmodels fit, up to the
+    still-present (separately tracked) mean/(n-p) denominator convention
+    difference, which is out of scope for this fix.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+    formula = "y ~ 1 + group * post_treatment"
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
+    n = X_da.shape[0]
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["treatment_effect"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=df).fit()
+    interaction_col = next(
+        name for name in sm_fit.params.index if "group" in name and "post" in name
+    )
+    unbiased_se = sm_fit.bse[interaction_col]
+    # CausalPy still divides by n rather than (n - p) here (tracked
+    # separately), so the correctly-shaped residuals give an SE smaller than
+    # the unbiased statsmodels value by sqrt((n - p) / n), not an exact match.
+    p = X_da.shape[1]
+    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
+    # Guard against regressing to the (n, n) broadcast bug: that variant
+    # inflated the SE by roughly 70x on this dataset.
+    assert reported_se < unbiased_se * 2
+
+
+@pytest.mark.integration
 def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
@@ -400,6 +463,58 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
     assert "median" not in stats.table.columns
     assert "hdi_lower" not in stats.table.columns
     assert "hdi_upper" not in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
+    """Regression-pin for RD OLS ``effect_summary()`` intervals.
+
+    The pre-#1049 ``_compute_statistics_rd_ols`` subtracted a bare ``(n,)``
+    ``y_pred`` array from the ``(n, 1)`` y DataArray, broadcasting to an
+    ``(n, n)`` residual matrix (every observation's y minus every *other*
+    observation's prediction) and inflating the MSE ~9x on this dataset, so
+    the reported standard errors were ~3x too wide. ``_point_residuals``
+    fixed that; this test pins the corrected residual shape and SE against
+    an independent statsmodels fit so they cannot silently move again.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _point_residuals
+
+    formula = "y ~ 1 + x + treated + x:treated"
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula=formula,
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    n, p = result.design["X"].shape
+    residuals = _point_residuals(result)
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["discontinuity"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=result.fit_data).fit()
+    interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
+    unbiased_se = sm_fit.bse[interaction_col]
+    # CausalPy divides the residual sum of squares by n rather than (n - p)
+    # (same convention as the DiD OLS path, tracked separately), so the
+    # correctly-shaped residuals give an SE smaller than the unbiased
+    # statsmodels value by sqrt((n - p) / n), not an exact match.
+    expected_se_with_mean_denominator = unbiased_se * np.sqrt((n - p) / n)
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(expected_se_with_mean_denominator, rel=1e-6)
+    # Guard against regressing to the (n, n) broadcast bug: that variant
+    # inflated the SE by roughly 3x on this dataset.
+    assert reported_se < unbiased_se * 2
 
 
 @pytest.mark.integration
@@ -584,7 +699,7 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind").isel(treated_units=0)
+    avg_effect = result.post_impact.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -886,6 +1001,17 @@ def test_extract_hdi_bounds_dataarray():
     assert upper == 3.0
 
 
+def test_as_scalar_handles_singleton_arrays():
+    """_as_scalar should work for both scalar and singleton-array values."""
+    import xarray as xr
+
+    from causalpy.utils import _as_scalar
+
+    assert _as_scalar(np.array(2.5)) == 2.5
+    assert _as_scalar(np.array([2.5])) == 2.5
+    assert _as_scalar(xr.DataArray([2.5], dims=["treated_units"])) == 2.5
+
+
 def test_compute_tail_probabilities_increase():
     """Test _compute_tail_probabilities with direction='increase'."""
     import xarray as xr
@@ -1014,6 +1140,120 @@ def test_compute_statistics_rope_decrease():
     # With draws around -5, virtually all should satisfy effect < -1.0
     assert stats["avg"]["p_rope"] > 0.95
     assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_with_singleton_treated_unit_dim():
+    """Regression test for singleton dims surviving reductions in xarray workflows."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(123)
+    impact = xr.DataArray(
+        rng.normal(loc=2.0, scale=0.1, size=(1, 100, 4, 1)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 100, 4, 1)) * 10.0,
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["mean"], float)
+    assert isinstance(stats["cum"]["mean"], float)
+    assert isinstance(stats["avg"]["relative_mean"], float)
+    assert isinstance(stats["cum"]["relative_mean"], float)
+
+
+def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
+    """Exercise _compute_statistics branches where az.hdi returns a DataArray."""
+    import xarray as xr
+
+    from causalpy import reporting as reporting_mod
+
+    def fake_hdi(_obj, hdi_prob=0.95):
+        _ = hdi_prob
+        return xr.DataArray(
+            [0.1, 0.9], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+        )
+
+    monkeypatch.setattr(reporting_mod.az, "hdi", fake_hdi)
+
+    impact = xr.DataArray(
+        np.random.normal(1.0, 0.1, (2, 20, 4)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((2, 20, 4)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+
+    stats = reporting_mod._compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["hdi_lower"], float)
+    assert isinstance(stats["cum"]["hdi_lower"], float)
+    assert isinstance(stats["avg"]["relative_hdi_lower"], float)
+    assert isinstance(stats["cum"]["relative_hdi_lower"], float)
+
+
+def test_extract_window_canonical_dataarray():
+    """_extract_window returns the canonical DataArray unchanged for 'post'."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_impact=xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
+        datapost=datapost,
+    )
+
+    windowed_impact, window_coords = _extract_window(result, window="post")
+
+    assert isinstance(windowed_impact, xr.DataArray)
+    assert window_coords.equals(datapost.index)
+
+
+def test_extract_counterfactual_canonical_dataarray():
+    """_extract_counterfactual selects the window from the canonical DataArray."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_counterfactual
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_pred=xr.DataArray(
+            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
+        datapost=datapost,
+    )
+
+    window_coords = datapost.index[:2]
+    counterfactual = _extract_counterfactual(result, window_coords)
+
+    assert isinstance(counterfactual, xr.DataArray)
+    np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
 
 def test_compute_statistics_rope_increase():
@@ -1192,26 +1432,43 @@ def test_select_treated_unit():
     assert "treated_units" not in result.dims
 
 
-def test_select_treated_unit_numpy():
-    """Test _select_treated_unit_numpy helper."""
-    from causalpy.reporting import _select_treated_unit_numpy
+def test_effect_summary_timeseries_dispatches_on_draws_not_backend():
+    """Contract: the container, not backend identity, decides the statistics.
 
-    # Create mock result object
-    class MockResult:
-        treated_units = ["unit_a", "unit_b", "unit_c"]
+    A prediction container carrying posterior draws gets HDI summaries; a
+    singleton (chain=1, draw=1) container falls back to t-based intervals —
+    regardless of which backend produced it.
+    """
+    import xarray as xr
 
-    result = MockResult()
+    from causalpy.reporting import _effect_summary_timeseries
 
-    # Create mock 2D numpy array (time x units)
-    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    def containers(n_draws):
+        rng = np.random.default_rng(42)
+        obs_ind = [0, 1, 2, 3]
+        impact = xr.DataArray(
+            rng.normal(5.0, 0.5, size=(1, n_draws, 4)),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        counterfactual = xr.DataArray(
+            np.full((1, n_draws, 4), 10.0),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        return impact, counterfactual, pd.Index(obs_ind)
 
-    # Select by name
-    selected = _select_treated_unit_numpy(data, result, "unit_b")
-    np.testing.assert_array_equal(selected, np.array([2, 5, 8]))
+    impact, counterfactual, window_coords = containers(n_draws=200)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "hdi_lower" in summary.table.columns
+    assert "ci_lower" not in summary.table.columns
 
-    # Select first when None provided
-    selected = _select_treated_unit_numpy(data, result, None)
-    np.testing.assert_array_equal(selected, np.array([1, 4, 7]))
+    impact, counterfactual, window_coords = containers(n_draws=1)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "ci_lower" in summary.table.columns
+    assert "hdi_lower" not in summary.table.columns
 
 
 # ==============================================================================
@@ -1249,11 +1506,15 @@ def test_detect_experiment_type_prepostnegd():
 
 def test_extract_window_invalid_type():
     """Test _extract_window raises error for invalid window type."""
+    import xarray as xr
+
     from causalpy.reporting import _extract_window
 
     # Create a minimal mock result
     class MockResult:
-        post_impact = np.array([1, 2, 3])
+        post_impact = xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [0, 1, 2]}
+        )
         datapost = pd.DataFrame({"y": [1, 2, 3]}, index=[0, 1, 2])
 
     result = MockResult()
@@ -1428,8 +1689,8 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
-    """Test _extract_counterfactual with dict format PyMC results."""
+def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
+    """_extract_counterfactual selects a window from canonical PyMC predictions."""
     from causalpy.reporting import _extract_counterfactual
 
     df = its_data
@@ -1441,20 +1702,11 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    # Convert InferenceData to dict format
-    post_pred_dict = {"posterior_predictive": result.post_pred.posterior_predictive}
-    original_post_pred = result.post_pred
-    result.post_pred = post_pred_dict
-
-    # Should handle dict format
     window_coords = result.datapost.index[:10]
     counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
 
-    # Restore original
-    result.post_pred = original_post_pred
-
-    assert counterfactual is not None
-    assert hasattr(counterfactual, "shape")
+    assert counterfactual.sizes["obs_ind"] == 10
+    assert {"chain", "draw"} <= set(counterfactual.dims)
 
 
 @pytest.mark.integration

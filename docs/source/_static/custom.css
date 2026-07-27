@@ -1,0 +1,5 @@
+/* Hanging indent for bibliography entries with bullet markers */
+.citation[role="doc-biblioentry"] p {
+    padding-left: 1em;
+    text-indent: -1em;
+}

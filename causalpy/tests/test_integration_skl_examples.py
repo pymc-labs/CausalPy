@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 from sklearn.linear_model import LinearRegression
@@ -52,6 +53,43 @@ def test_did(did_data):
 
 
 @pytest.mark.integration
+def test_did_causal_impact_order_independent_ols(did_data):
+    """
+    Regression test: causal_impact must not depend on which variable is
+    written first in the DiD interaction term.
+
+    Previously, DifferenceInDifferences.algorithm() looked up the OLS
+    interaction coefficient using a single concatenated substring
+    ("group:post_treatment"), which only matched patsy's column naming when
+    the formula wrote the group variable first. Writing the formula the
+    other way round (post_treatment*group) fit an identical model but
+    silently produced causal_impact=None instead of the real value.
+    """
+    data = did_data
+
+    result_group_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    result_post_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + post_treatment*group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    assert result_group_first.causal_impact is not None
+    assert result_post_first.causal_impact is not None
+    assert result_group_first.causal_impact == pytest.approx(
+        result_post_first.causal_impact
+    )
+
+
+@pytest.mark.integration
 def test_rd_drinking():
     """
     Test Regression Discontinuity scikit-learn experiment on drinking age data.
@@ -76,6 +114,20 @@ def test_rd_drinking():
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.pred_discon.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    (discontinuity_design,) = build_design_matrices(
+        [result._x_design_info], result.x_discon
+    )
+    legacy_prediction = result.model.predict(np.asarray(discontinuity_design))
+    expected = np.squeeze(legacy_prediction[1]) - np.squeeze(legacy_prediction[0])
+    assert np.asarray(result.discontinuity_at_threshold).item() == pytest.approx(
+        expected
+    )
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)

@@ -62,7 +62,13 @@ class McCraryDensityTest:
         self.alpha = alpha
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment is a RegressionDiscontinuity instance."""
+        """Verify the experiment is a RegressionDiscontinuity instance.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment, RegressionDiscontinuity):
             raise TypeError(
                 "McCraryDensityTest requires a RegressionDiscontinuity experiment."
@@ -73,7 +79,15 @@ class McCraryDensityTest:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Test for manipulation of the running variable at the threshold."""
+        """Test for manipulation of the running variable at the threshold.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted RegressionDiscontinuity experiment.
+        context : PipelineContext
+            Pipeline context (unused; required by the check protocol).
+        """
         rd = experiment
         threshold = rd.treatment_threshold  # type: ignore[attr-defined]
         running_var = rd.running_variable_name  # type: ignore[attr-defined]
