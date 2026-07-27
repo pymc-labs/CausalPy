@@ -72,6 +72,29 @@ class TestToPandasWithTimeIndex:
         with pytest.raises(DataException, match="is not a column of"):
             to_pandas_with_time_index(frame, time_column="date")
 
+    def test_time_column_conflicting_with_named_index_raises(self):
+        """A named index plus a time_column is ambiguous, so it is refused."""
+        frame = pd.DataFrame(
+            {"t": [100, 200], "y": [1, 2]}, index=pd.Index([7, 8], name="old")
+        )
+        with pytest.raises(DataException, match="already has a meaningful index"):
+            to_pandas_with_time_index(frame, time_column="t")
+
+    def test_time_column_conflicting_with_datetime_index_raises(self):
+        """A DatetimeIndex plus a time_column is refused rather than dropped."""
+        frame = pd.DataFrame(
+            {"t": [100, 200], "y": [1, 2]},
+            index=pd.to_datetime(["2020-01-01", "2020-01-02"]),
+        )
+        with pytest.raises(DataException, match="already has a meaningful index"):
+            to_pandas_with_time_index(frame, time_column="t")
+
+    def test_time_column_with_default_index_is_allowed(self):
+        """An unnamed RangeIndex is not meaningful, so time_column is fine."""
+        frame = pd.DataFrame({"t": [100, 200], "y": [1, 2]})
+        result = to_pandas_with_time_index(frame, time_column="t")
+        assert result.index.tolist() == [100, 200]
+
 
 class TestInterruptedTimeSeries:
     """InterruptedTimeSeries with an explicit time column."""
@@ -122,6 +145,19 @@ class TestInterruptedTimeSeries:
                 pd.to_datetime("2015-01-01"),
                 formula="timeseries ~ 1 + linear_trend",
                 model=LinearRegression(),
+            )
+
+    def test_time_column_with_existing_index_raises(self, its_simple_data):
+        """Passing time_column alongside a DatetimeIndex is refused."""
+        flat = its_simple_data.rename_axis("date").reset_index()
+        both = flat.set_index(pd.Index(range(len(flat)), name="row"))
+        with pytest.raises(DataException, match="already has a meaningful index"):
+            cp.InterruptedTimeSeries(
+                both,
+                pd.to_datetime("2015-01-01"),
+                formula="timeseries ~ 1 + linear_trend",
+                model=LinearRegression(),
+                time_column="date",
             )
 
     def test_pandas_input_index_is_not_renamed(self, its_simple_data):

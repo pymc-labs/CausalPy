@@ -146,8 +146,9 @@ def to_pandas_with_time_index(
     Raises
     ------
     DataException
-        If ``time_column`` is missing from the data, or if a non-pandas input
-        arrives without a ``time_column``.
+        If ``time_column`` is missing from the data, if a non-pandas input
+        arrives without a ``time_column``, or if ``time_column`` is given for a
+        dataframe that already carries a meaningful index.
 
     Examples
     --------
@@ -179,4 +180,33 @@ def to_pandas_with_time_index(
             f"`time_column` '{time_column}' is not a column of `{argument_name}`. "
             f"Available columns: {list(frame.columns)}."
         )
+    if not _has_default_index(frame):
+        raise DataException(
+            f"`{argument_name}` already has a meaningful index "
+            f"({frame.index.name or 'unnamed'}, {type(frame.index).__name__}), and "
+            f"`time_column` '{time_column}' was also given. Setting the column as "
+            "the index would drop the existing one, which would silently change the "
+            "time axis. Pass only one: drop `time_column` to keep the index, or "
+            "call `.reset_index(drop=True)` on the data to discard the index."
+        )
     return frame.set_index(time_column)
+
+
+def _has_default_index(frame: pd.DataFrame) -> bool:
+    """Report whether a dataframe carries no meaningful index.
+
+    A default ``RangeIndex`` with no name is what pandas assigns when nobody
+    chose an index, and it is what conversion from an index-less dataframe
+    library produces.
+
+    Parameters
+    ----------
+    frame : pandas.DataFrame
+        The dataframe to inspect.
+
+    Returns
+    -------
+    bool
+        True when the index is an unnamed ``RangeIndex``.
+    """
+    return isinstance(frame.index, pd.RangeIndex) and frame.index.name is None
