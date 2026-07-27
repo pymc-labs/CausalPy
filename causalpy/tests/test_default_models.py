@@ -22,6 +22,7 @@ import pytest
 import causalpy as cp
 from causalpy.data.simulate_data import generate_staggered_did_data
 from causalpy.pymc_models import (
+    ETWFERegression,
     InstrumentalVariableRegression,
     LinearRegression,
     PropensityScore,
@@ -160,6 +161,24 @@ def sample_kwargs():
             LinearRegression,
         ),
         (
+            cp.StaggeredDifferenceInDifferences,
+            {
+                "data": lambda: generate_staggered_did_data(
+                    n_units=30,
+                    n_time_periods=15,
+                    treatment_cohorts={5: 10, 10: 10},
+                    seed=42,
+                ),
+                "formula": "y ~ 1 + C(unit) + C(time)",
+                "unit_variable_name": "unit",
+                "time_variable_name": "time",
+                "treated_variable_name": "treated",
+                "treatment_time_variable_name": "treatment_time",
+                "estimator": "etwfe",
+            },
+            ETWFERegression,
+        ),
+        (
             cp.InstrumentalVariable,
             lambda: _iv_data(),
             InstrumentalVariableRegression,
@@ -183,6 +202,7 @@ def sample_kwargs():
         "PrePostNEGD",
         "SyntheticControl",
         "StaggeredDifferenceInDifferences",
+        "StaggeredDifferenceInDifferences-etwfe",
         "InstrumentalVariable",
         "InversePropensityWeighting",
     ],

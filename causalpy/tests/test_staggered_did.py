@@ -544,6 +544,78 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
     assert "Staggered DiD" in summary.text
 
 
+def test_treated_weighted_mean_weights_by_n_obs():
+    """``_treated_weighted_mean`` weights rows by their treated-cell counts.
+
+    If it silently fell back to an unweighted mean, the reported ATT would be
+    biased whenever the panel is unbalanced in event time.
+    """
+    from causalpy.reporting import _treated_weighted_mean
+
+    table = pd.DataFrame({"att": [1.0, 5.0], "n_obs": [30, 10]})
+    # weighted: (1*30 + 5*10) / 40 = 2.0 ; unweighted would be 3.0
+    assert _treated_weighted_mean(table, "att") == pytest.approx(2.0)
+
+
+def test_treated_weighted_mean_falls_back_without_n_obs():
+    """Without an ``n_obs`` column, or with zero total weight, fall back to the mean."""
+    from causalpy.reporting import _treated_weighted_mean
+
+    assert _treated_weighted_mean(
+        pd.DataFrame({"att": [1.0, 5.0]}), "att"
+    ) == pytest.approx(3.0)
+    assert _treated_weighted_mean(
+        pd.DataFrame({"att": [1.0, 5.0], "n_obs": [0, 0]}), "att"
+    ) == pytest.approx(3.0)
+
+
+@pytest.mark.integration
+def test_staggered_did_effect_summary_reports_treated_weighted_att():
+    """The reported ATT is the treated-observation-weighted average, not a row mean.
+
+    Under staggered adoption only the earliest cohorts reach the largest event
+    times, so late event-time rows rest on fewer treated observations. With a
+    growing effect those thin rows are also the large ones, so an unweighted
+    mean over event-time rows is biased upward. On noise-free data the weighted
+    average recovers the true ATT exactly; the unweighted mean does not.
+
+    Runs on the sklearn path because ``mock_pymc_sample`` makes numeric
+    recovery impossible on the PyMC path.
+    """
+    df = generate_staggered_did_data(
+        n_units=40,
+        n_time_periods=16,
+        treatment_cohorts={5: 12, 9: 12},
+        treatment_effects=lambda k: 1 + 0.4 * k,
+        cohort_effect_scale={5: 1.0, 9: 1.6},
+        sigma=0.0,
+        seed=7,
+    )
+    true_att = df.loc[df["treated"] == 1, "tau"].mean()
+
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        treatment_time_variable_name="treatment_time",
+        model=LinearRegression(),
+    )
+
+    post = result.att_event_time_.query("event_time >= 0")
+    weighted = np.average(post["att"], weights=post["n_obs"])
+    unweighted = post["att"].mean()
+
+    # the weighted average is the estimand; the unweighted mean is materially off
+    assert weighted == pytest.approx(true_att, abs=1e-8)
+    assert abs(unweighted - true_att) > 0.1
+
+    # and the prose reports the weighted number, not the row mean
+    assert f"{weighted:.2f}" in result.effect_summary().text
+    assert "over treated observations" in result.effect_summary().text
+
+
 @pytest.mark.integration
 def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
     """Test that Bayesian results store hdi_prob_ and report it correctly in prose.
@@ -619,6 +691,273 @@ def test_generate_staggered_did_data_too_many_units():
             n_units=10,
             treatment_cohorts={5: 20},  # More than n_units
         )
+
+
+def test_generate_staggered_did_data_backwards_compatible():
+    """
+    Guard that adding new keyword arguments did not perturb the RNG stream.
+
+    The expected values below were captured from the generator before
+    ``cohort_effect_scale`` / ``n_covariates`` / ``covariate_coefs`` were added.
+    A call that passes none of the new arguments must reproduce them exactly.
+    """
+    expected = pd.DataFrame(
+        {
+            "unit": [0] * 5 + [1] * 5 + [2] * 5 + [3] * 5,
+            "time": [0, 1, 2, 3, 4] * 4,
+            "treated": [0, 0, 1, 1, 1] + [0] * 5 + [0, 0, 1, 1, 1] + [0] * 5,
+            "treatment_time": [2.0] * 5 + [np.inf] * 5 + [2.0] * 5 + [np.inf] * 5,
+            "y": [
+                -0.9527050614304997,
+                -0.6597299985728473,
+                2.3008951661601644,
+                2.0269462382913033,
+                2.162986770562955,
+                -3.8466280090935783,
+                -3.8615890197578087,
+                -1.5129026586600696,
+                -2.4211737603176995,
+                -2.18920055175791,
+                -0.7905975692428926,
+                0.8099935540876115,
+                2.551478053745799,
+                2.470495888187779,
+                3.308034458864511,
+                0.19624883690526568,
+                0.7616719581021488,
+                2.215336141747707,
+                1.780297341942787,
+                2.9351520757133693,
+            ],
+            "y0": [
+                -1.3416010291449738,
+                -0.6927453473534554,
+                0.7372745626761481,
+                0.2931915671652805,
+                0.5926330020045739,
+                -4.031003401134828,
+                -3.382147719343309,
+                -1.9521278093137058,
+                -2.396210804824573,
+                -2.09676936998528,
+                -0.4501327970409219,
+                0.1987228847505964,
+                1.6287427947801998,
+                1.1846597992693324,
+                1.4841012341086257,
+                -0.06990575587140868,
+                0.5789499259201096,
+                2.008969835949713,
+                1.5648868404388456,
+                1.864328275278139,
+            ],
+            "tau": [0.0, 0.0, 1.0, 1.5, 2.0]
+            + [0.0] * 5
+            + [0.0, 0.0, 1.0, 1.5, 2.0]
+            + [0.0] * 5,
+        }
+    )
+
+    df = generate_staggered_did_data(
+        n_units=4, n_time_periods=5, treatment_cohorts={2: 2}, seed=42
+    )
+    pd.testing.assert_frame_equal(df, expected, check_exact=True)
+
+    # Explicitly passing the new arguments at their defaults must also be a no-op
+    df_explicit = generate_staggered_did_data(
+        n_units=4,
+        n_time_periods=5,
+        treatment_cohorts={2: 2},
+        cohort_effect_scale=None,
+        n_covariates=0,
+        covariate_coefs=None,
+        seed=42,
+    )
+    pd.testing.assert_frame_equal(df_explicit, expected, check_exact=True)
+
+
+def test_generate_staggered_did_data_callable_effects():
+    """Test that treatment_effects accepts a callable over event-time."""
+
+    def profile(k):
+        return min(1 + 0.4 * k, 5)
+
+    df = generate_staggered_did_data(
+        n_units=10,
+        n_time_periods=20,
+        treatment_cohorts={2: 5},
+        treatment_effects=profile,
+        sigma=0.0,
+        seed=42,
+    )
+
+    treated = df[df["treated"] == 1].copy()
+    treated["event_time"] = (treated["time"] - treated["treatment_time"]).astype(int)
+
+    for k, group in treated.groupby("event_time"):
+        assert np.allclose(group["tau"], profile(k)), f"event_time {k} mismatch"
+
+    # The cap must actually bind: 1 + 0.4 * k reaches 5 at k = 10
+    assert treated["event_time"].max() >= 10
+    assert np.allclose(treated.loc[treated["event_time"] >= 10, "tau"], 5.0)
+    assert np.allclose(treated.loc[treated["event_time"] == 0, "tau"], 1.0)
+
+    # Untreated rows still get zero effect
+    assert (df.loc[df["treated"] == 0, "tau"] == 0.0).all()
+
+    # The dict path (including the "reuse the max event-time" fallback) is unchanged
+    df_dict = generate_staggered_did_data(
+        n_units=10,
+        n_time_periods=20,
+        treatment_cohorts={2: 5},
+        treatment_effects={0: 1.0, 1: 1.5},
+        sigma=0.0,
+        seed=42,
+    )
+    treated_dict = df_dict[df_dict["treated"] == 1].copy()
+    treated_dict["event_time"] = (
+        treated_dict["time"] - treated_dict["treatment_time"]
+    ).astype(int)
+    assert np.allclose(treated_dict.loc[treated_dict["event_time"] == 0, "tau"], 1.0)
+    assert np.allclose(treated_dict.loc[treated_dict["event_time"] >= 1, "tau"], 1.5)
+
+
+def test_generate_staggered_did_data_cohort_effect_scale():
+    """Test that cohort_effect_scale rescales a cohort's whole effect profile."""
+    df = generate_staggered_did_data(
+        n_units=20,
+        n_time_periods=16,
+        treatment_cohorts={4: 8, 8: 8},
+        treatment_effects=lambda k: 1 + 0.4 * k,
+        cohort_effect_scale={8: 1.5},
+        sigma=0.0,
+        seed=42,
+    )
+
+    treated = df[df["treated"] == 1].copy()
+    treated["event_time"] = (treated["time"] - treated["treatment_time"]).astype(int)
+
+    cohort_a = (
+        treated[treated["treatment_time"] == 4].groupby("event_time")["tau"].mean()
+    )
+    cohort_b = (
+        treated[treated["treatment_time"] == 8].groupby("event_time")["tau"].mean()
+    )
+
+    matched = cohort_a.index.intersection(cohort_b.index)
+    assert len(matched) > 0
+    np.testing.assert_allclose(
+        cohort_b.loc[matched].to_numpy(),
+        1.5 * cohort_a.loc[matched].to_numpy(),
+        rtol=0,
+        atol=1e-12,
+    )
+
+    # Cohort 4 is absent from the dict, so it keeps the unscaled profile
+    np.testing.assert_allclose(
+        cohort_a.to_numpy(),
+        1 + 0.4 * cohort_a.index.to_numpy(),
+        rtol=0,
+        atol=1e-12,
+    )
+
+
+def test_generate_staggered_did_data_covariates():
+    """Test that covariates are added and enter the untreated potential outcome."""
+    kwargs = {
+        "n_units": 15,
+        "n_time_periods": 10,
+        "treatment_cohorts": {3: 5, 6: 5},
+        "sigma": 0.5,
+        "seed": 42,
+    }
+    df = generate_staggered_did_data(n_covariates=2, **kwargs)
+    df_no_cov = generate_staggered_did_data(**kwargs)
+
+    assert "x1" in df.columns
+    assert "x2" in df.columns
+    assert list(df.columns[-2:]) == ["x1", "x2"]
+    assert "x1" not in df_no_cov.columns
+
+    # The covariate contribution shows up in y0 (the untreated potential outcome)
+    contribution = df["x1"] + df["x2"]
+    np.testing.assert_array_equal(df["y0"].to_numpy(), (df_no_cov["y0"] + contribution))
+    np.testing.assert_allclose(
+        df["y"].to_numpy(),
+        (df_no_cov["y"] + contribution).to_numpy(),
+        rtol=0,
+        atol=1e-12,
+    )
+
+    # y - y0 == tau up to the idiosyncratic noise
+    residual = df["y"] - df["y0"] - df["tau"]
+    assert abs(residual.mean()) < 0.1
+    assert abs(residual.std() - 0.5) < 0.1
+
+    # Non-unit coefficients are respected
+    df_coefs = generate_staggered_did_data(
+        n_covariates=2, covariate_coefs=[2.0, -1.0], **kwargs
+    )
+    np.testing.assert_allclose(
+        df_coefs["y0"].to_numpy(),
+        (df_no_cov["y0"] + 2.0 * df_coefs["x1"] - df_coefs["x2"]).to_numpy(),
+        rtol=0,
+        atol=1e-12,
+    )
+
+    # A scalar is broadcast to every covariate
+    df_scalar = generate_staggered_did_data(
+        n_covariates=2, covariate_coefs=3.0, **kwargs
+    )
+    np.testing.assert_allclose(
+        df_scalar["y0"].to_numpy(),
+        (df_no_cov["y0"] + 3.0 * (df_scalar["x1"] + df_scalar["x2"])).to_numpy(),
+        rtol=0,
+        atol=1e-12,
+    )
+
+
+def test_generate_staggered_did_data_covariate_coefs_length_mismatch():
+    """Test that a covariate_coefs length mismatch raises ValueError."""
+    with pytest.raises(ValueError, match="lengths must match"):
+        generate_staggered_did_data(
+            n_units=10,
+            n_time_periods=5,
+            treatment_cohorts={2: 5},
+            n_covariates=2,
+            covariate_coefs=[1.0, 2.0, 3.0],
+            seed=42,
+        )
+
+
+def test_generate_staggered_did_data_noise_free_identity():
+    """
+    With sigma=0 the identity ``y == y0 + tau`` must hold exactly.
+
+    This is the invariant the ETWFE ground-truth validation suite relies on:
+    a noise-free frame is an exact algebraic statement of the DGP.
+    """
+    df = generate_staggered_did_data(
+        n_units=24,
+        n_time_periods=12,
+        treatment_cohorts={4: 8, 8: 8},
+        treatment_effects=lambda k: 1 + 0.4 * k,
+        cohort_effect_scale={4: 1.0, 8: 1.6},
+        n_covariates=2,
+        sigma=0.0,
+        seed=42,
+    )
+
+    np.testing.assert_array_equal(df["y"].to_numpy(), (df["y0"] + df["tau"]).to_numpy())
+
+    # ... and also in the plainest configuration, with no new arguments at all
+    df_plain = generate_staggered_did_data(sigma=0.0, seed=42)
+    np.testing.assert_array_equal(
+        df_plain["y"].to_numpy(), (df_plain["y0"] + df_plain["tau"]).to_numpy()
+    )
+
+    # The treated-cell mean of tau is the average-over-the-treated ATT
+    assert df.loc[df["treated"] == 1, "tau"].mean() > 0
 
 
 # ==============================================================================

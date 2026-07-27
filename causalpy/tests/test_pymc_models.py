@@ -11,6 +11,8 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
+from typing import Literal
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -20,7 +22,12 @@ import xarray as xr
 from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import LinearRegression, PyMCModel, WeightedSumFitter
+from causalpy.pymc_models import (
+    ETWFERegression,
+    LinearRegression,
+    PyMCModel,
+    WeightedSumFitter,
+)
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -836,3 +843,504 @@ class TestPriorIntegration:
         assert "beta" in model.priors
         beta_prior = model.priors["beta"]
         assert beta_prior.distribution == "Dirichlet"
+
+
+# ---------------------------------------------------------------------------
+# ETWFERegression
+# ---------------------------------------------------------------------------
+
+# A small hand-checkable panel:
+#   4 units x 5 periods, units 0 and 1 adopt at t=2, unit 2 adopts at t=3,
+#   unit 3 is never treated. Event-time grid is [0, 1, 2].
+ETWFE_N_UNITS = 4
+ETWFE_N_PERIODS = 5
+ETWFE_COHORTS = [2, 3]
+ETWFE_EV_GRID = [0, 1, 2]
+ETWFE_NEVER = 10**6
+
+
+def etwfe_panel(n_covariates: int = 0, seed: int = 0) -> dict:
+    """Build the index bundle for a small, hand-checkable staggered panel.
+
+    Mirrors the array contract that ``_build_etwfe_index`` produces, but is built
+    here with plain numpy so these tests do not depend on the experiment module.
+    """
+    n_units, n_periods = ETWFE_N_UNITS, ETWFE_N_PERIODS
+    n_obs = n_units * n_periods
+    unit_idx = np.repeat(np.arange(n_units), n_periods)
+    time_idx = np.tile(np.arange(n_periods), n_units)
+
+    adoption = np.array([2, 2, 3, ETWFE_NEVER])[unit_idx]
+    treated = (adoption < ETWFE_NEVER) & (time_idx >= adoption)
+    cohort_positions = {2: 0, 3: 1}
+    cohort_idx = np.array([cohort_positions.get(int(g), 0) for g in adoption])
+    ev_idx = np.where(treated, np.clip(time_idx - adoption, 0, 2), 0)
+    effect_indicator = treated.astype(float)
+
+    att_weights = np.zeros((len(ETWFE_COHORTS), len(ETWFE_EV_GRID)))
+    for c, e in zip(cohort_idx[treated], ev_idx[treated], strict=True):
+        att_weights[c, e] += 1.0
+    att_weights /= att_weights.sum()
+
+    dbar_unit = np.array(
+        [effect_indicator[unit_idx == u].mean() for u in range(n_units)]
+    )[unit_idx]
+    dbar_unit = dbar_unit - dbar_unit.mean()
+    dbar_time = np.array(
+        [effect_indicator[time_idx == t].mean() for t in range(n_periods)]
+    )[time_idx]
+    dbar_time = dbar_time - dbar_time.mean()
+
+    rng = np.random.default_rng(seed)
+    y = xr.DataArray(
+        rng.normal(size=(n_obs, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    covariate_names = [f"x{i + 1}" for i in range(n_covariates)]
+    X = xr.DataArray(
+        rng.normal(size=(n_obs, n_covariates)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(n_obs), "coeffs": covariate_names},
+    )
+    coords = {
+        "obs_ind": np.arange(n_obs),
+        "treated_units": ["unit_0"],
+        "units": np.arange(n_units),
+        "periods": np.arange(n_periods),
+        "cohorts": ETWFE_COHORTS,
+        "ev": ETWFE_EV_GRID,
+    }
+    if n_covariates:
+        coords["coeffs"] = covariate_names
+
+    return {
+        "X": X,
+        "y": y,
+        "coords": coords,
+        "covariate_names": covariate_names,
+        "unit_idx": unit_idx,
+        "time_idx": time_idx,
+        "cohort_idx": cohort_idx,
+        "ev_idx": ev_idx,
+        "effect_indicator": effect_indicator,
+        "att_weights": att_weights,
+        "dbar_unit": dbar_unit,
+        "dbar_time": dbar_time,
+    }
+
+
+def etwfe_fit_kwargs(panel: dict) -> dict:
+    """Extract the keyword-only panel arguments accepted by ``fit``/``build_model``."""
+    return {
+        key: panel[key]
+        for key in (
+            "unit_idx",
+            "time_idx",
+            "cohort_idx",
+            "ev_idx",
+            "effect_indicator",
+            "att_weights",
+            "dbar_unit",
+            "dbar_time",
+        )
+    }
+
+
+def fit_etwfe(
+    panel: dict,
+    conditioning: Literal["dummy", "mundlak"],
+    **model_kwargs,
+) -> ETWFERegression:
+    """Fit an ``ETWFERegression`` on a panel produced by :func:`etwfe_panel`."""
+    model = ETWFERegression(
+        sample_kwargs={"chains": 2, "draws": 10, "progressbar": False}, **model_kwargs
+    )
+    model.fit(
+        panel["X"],
+        panel["y"],
+        panel["coords"],
+        conditioning=conditioning,
+        **etwfe_fit_kwargs(panel),
+    )
+    return model
+
+
+def test_etwfe_regression_builds_dummy_variant(mock_pymc_sample):
+    """The dummy variant creates free unit intercepts and no Mundlak terms."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "dummy")
+    posterior = model.idata.posterior
+
+    for name in ("alpha", "beta_t", "tau_bar", "sd_dev", "dev", "tau", "att"):
+        assert name in posterior, f"{name} missing from posterior"
+
+    assert posterior["alpha"].dims == ("chain", "draw", "units")
+    assert posterior["beta_t"].dims == ("chain", "draw", "periods")
+    assert posterior["tau_bar"].dims == ("chain", "draw", "ev")
+    assert posterior["dev"].dims == ("chain", "draw", "cohorts", "ev")
+    assert posterior["tau"].dims == ("chain", "draw", "cohorts", "ev")
+    assert posterior["att"].dims == ("chain", "draw")
+
+    # alpha is a free random variable under "dummy", not a Deterministic
+    deterministic_names = {var.name for var in model.deterministics}
+    assert "alpha" not in deterministic_names
+    assert {"tau", "att", "mu"} <= deterministic_names
+
+    # Mundlak-only machinery must be absent
+    for name in ("g_u", "g_t", "mu_a", "sd_a", "a_z", "sd_bt"):
+        assert name not in posterior
+    assert "dbar_unit" not in model.named_vars
+    assert "dbar_time" not in model.named_vars
+
+    # No covariates were supplied
+    assert "beta" not in posterior
+    assert "X" not in model.named_vars
+
+
+def test_etwfe_regression_builds_mundlak_variant(mock_pymc_sample):
+    """The mundlak variant adds hierarchical intercepts and treatment means."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "mundlak")
+    posterior = model.idata.posterior
+
+    for name in (
+        "alpha",
+        "beta_t",
+        "mu_a",
+        "sd_a",
+        "a_z",
+        "sd_bt",
+        "g_u",
+        "g_t",
+        "tau_bar",
+        "sd_dev",
+        "dev",
+        "tau",
+        "att",
+    ):
+        assert name in posterior, f"{name} missing from posterior"
+
+    assert posterior["alpha"].dims == ("chain", "draw", "units")
+    assert posterior["a_z"].dims == ("chain", "draw", "units")
+    assert posterior["beta_t"].dims == ("chain", "draw", "periods")
+    assert posterior["mu_a"].dims == ("chain", "draw")
+    assert posterior["g_u"].dims == ("chain", "draw")
+    assert posterior["g_t"].dims == ("chain", "draw")
+
+    # alpha is a Deterministic under "mundlak" (non-centred parameterisation)
+    deterministic_names = {var.name for var in model.deterministics}
+    assert "alpha" in deterministic_names
+
+    assert "dbar_unit" in model.named_vars
+    assert "dbar_time" in model.named_vars
+
+
+def test_etwfe_regression_posterior_predictive_contains_mu(mock_pymc_sample):
+    """fit() must populate both y_hat and mu in the posterior predictive group."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "mundlak")
+
+    posterior_predictive = model.idata.posterior_predictive
+    assert "y_hat" in posterior_predictive
+    assert "mu" in posterior_predictive
+    assert posterior_predictive["mu"].dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+
+
+def test_etwfe_regression_with_covariates(mock_pymc_sample):
+    """Supplying covariates creates a beta with (treated_units, coeffs) dims."""
+    panel = etwfe_panel(n_covariates=2)
+    model = fit_etwfe(panel, "dummy")
+    posterior = model.idata.posterior
+
+    assert "beta" in posterior
+    assert posterior["beta"].dims == ("chain", "draw", "treated_units", "coeffs")
+    assert list(posterior["beta"].coords["coeffs"].values) == panel["covariate_names"]
+    assert "X" in model.named_vars
+
+
+def test_etwfe_regression_without_covariates_has_no_beta(mock_pymc_sample):
+    """A zero-column X must not create an X data node or a beta variable."""
+    panel = etwfe_panel(n_covariates=0)
+    model = fit_etwfe(panel, "mundlak")
+
+    assert "beta" not in model.idata.posterior
+    assert "beta" not in model.named_vars
+    assert "X" not in model.named_vars
+
+
+def test_etwfe_regression_clone_is_unfitted(mock_pymc_sample):
+    """_clone() must return an unfitted instance of the same type."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "dummy")
+    assert model.idata is not None
+
+    clone = model._clone()
+    assert type(clone) is ETWFERegression
+    assert clone.idata is None
+    assert clone.sample_kwargs == model.sample_kwargs
+
+
+def test_etwfe_regression_clone_preserves_user_priors():
+    """User-supplied priors survive a clone, which PriorSensitivity relies on."""
+    custom = Prior("Normal", mu=0, sigma=7, dims="ev")
+    model = ETWFERegression(priors={"tau_bar": custom})
+    clone = model._clone()
+    assert clone.priors["tau_bar"] == custom
+
+
+def test_etwfe_regression_data_setter_raises():
+    """_data_setter is not supported: every index array is bound to the panel."""
+    model = ETWFERegression()
+    with pytest.raises(NotImplementedError, match="bound to the panel"):
+        model._data_setter(np.ones((3, 2)))
+
+
+def test_etwfe_regression_predict_raises_when_unfitted():
+    """predict() must raise a RuntimeError before fit()."""
+    model = ETWFERegression()
+    with pytest.raises(RuntimeError, match="has not been fit"):
+        model.predict()
+
+
+def test_etwfe_regression_predict_returns_in_sample(mock_pymc_sample):
+    """predict() returns the posterior predictive computed during fit()."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "dummy")
+
+    prediction = model.predict()
+    assert isinstance(prediction, az.InferenceData)
+    assert "posterior_predictive" in prediction
+    assert "mu" in prediction["posterior_predictive"]
+    xr.testing.assert_identical(
+        prediction["posterior_predictive"]["mu"],
+        model.idata.posterior_predictive["mu"],
+    )
+
+    # mu has the right dims, so score() and calculate_impact() keep working
+    scores = model.score(panel["X"], panel["y"])
+    assert isinstance(scores, pd.Series)
+    impact = model.calculate_impact(panel["y"], prediction)
+    assert impact.dims[-1] == "obs_ind"
+
+
+def test_etwfe_regression_print_coefficients_no_covariates(mock_pymc_sample, capsys):
+    """print_coefficients works without any covariates and reports att/tau_bar."""
+    panel = etwfe_panel()
+    model = fit_etwfe(panel, "mundlak")
+    model.print_coefficients([])
+
+    captured = capsys.readouterr().out
+    assert "Model coefficients:" in captured
+    assert "att" in captured
+    assert "tau_bar[0]" in captured
+    assert "sd_dev" in captured
+    assert "g_u" in captured
+    assert "g_t" in captured
+    assert "y_hat_sigma" in captured
+
+
+def test_etwfe_regression_print_coefficients_with_covariates(mock_pymc_sample, capsys):
+    """Covariate rows are printed when labels are supplied."""
+    panel = etwfe_panel(n_covariates=2)
+    model = fit_etwfe(panel, "dummy")
+    model.print_coefficients(panel["covariate_names"])
+
+    captured = capsys.readouterr().out
+    for name in panel["covariate_names"]:
+        assert name in captured
+    # dummy conditioning has no Mundlak coefficients to report
+    assert "g_u" not in captured
+
+
+def test_etwfe_regression_print_coefficients_raises_when_unfitted():
+    """print_coefficients raises before fit()."""
+    model = ETWFERegression()
+    with pytest.raises(RuntimeError, match="has not been fit"):
+        model.print_coefficients([])
+
+
+def test_etwfe_regression_priors_from_data_scales_linearly():
+    """Scaling y by 10 scales every scale-adaptive prior by 10. No sampling."""
+    panel = etwfe_panel()
+    X, y = panel["X"], panel["y"]
+
+    model = ETWFERegression()
+    base = model.priors_from_data(X, y)
+    scaled = model.priors_from_data(X, y * 10)
+
+    for name in ("sd_a", "sd_bt", "sd_dev"):
+        assert scaled[name].parameters["sigma"] == pytest.approx(
+            10 * base[name].parameters["sigma"]
+        )
+    for name in ("g_u", "g_t", "tau_bar", "beta", "beta_t_dummy", "alpha_dummy"):
+        assert scaled[name].parameters["sigma"] == pytest.approx(
+            10 * base[name].parameters["sigma"]
+        )
+    assert scaled["mu_a"].parameters["mu"] == pytest.approx(
+        10 * base["mu_a"].parameters["mu"]
+    )
+    assert scaled["mu_a"].parameters["sigma"] == pytest.approx(
+        10 * base["mu_a"].parameters["sigma"]
+    )
+    assert scaled["y_hat"].parameters["sigma"].parameters["sigma"] == pytest.approx(
+        10 * base["y_hat"].parameters["sigma"].parameters["sigma"]
+    )
+
+
+def test_etwfe_regression_scale_adaptive_priors_are_not_in_default_priors():
+    """default_priors beats priors_from_data, so scale-adaptive keys must not be there.
+
+    See the note on the ETWFERegression class body and the prior merge in
+    ``PyMCModel.fit``.
+    """
+    scale_adaptive = {
+        "alpha_dummy",
+        "beta_t_dummy",
+        "mu_a",
+        "sd_a",
+        "sd_bt",
+        "g_u",
+        "g_t",
+        "tau_bar",
+        "sd_dev",
+        "beta",
+        "y_hat",
+    }
+    assert scale_adaptive.isdisjoint(ETWFERegression.default_priors)
+
+
+def test_etwfe_regression_user_priors_win_over_data_driven(mock_pymc_sample):
+    """A user-supplied prior survives the merge performed inside fit()."""
+    panel = etwfe_panel()
+    custom = Prior("Normal", mu=0, sigma=0.123, dims="ev")
+    model = fit_etwfe(panel, "dummy", priors={"tau_bar": custom})
+    assert model.priors["tau_bar"] is custom
+
+
+def test_etwfe_regression_rejects_unknown_conditioning():
+    """An unrecognised conditioning value raises a ValueError."""
+    panel = etwfe_panel()
+    model = ETWFERegression()
+    with pytest.raises(ValueError, match="conditioning must be"):
+        model.build_model(
+            panel["X"],
+            panel["y"],
+            panel["coords"],
+            conditioning="nonsense",
+            **etwfe_fit_kwargs(panel),
+        )
+
+
+def test_etwfe_regression_mundlak_requires_treatment_means():
+    """conditioning='mundlak' without dbar_unit/dbar_time raises."""
+    panel = etwfe_panel()
+    kwargs = etwfe_fit_kwargs(panel)
+    kwargs["dbar_unit"] = None
+    model = ETWFERegression()
+    with pytest.raises(ValueError, match="requires both dbar_unit and dbar_time"):
+        model.build_model(
+            panel["X"], panel["y"], panel["coords"], conditioning="mundlak", **kwargs
+        )
+
+
+def test_etwfe_regression_mu_is_exact_given_known_parameters():
+    """The mu graph must equal alpha[u] + beta_t[t] + E * tau[g, k], exactly.
+
+    This is the highest-value structural test: it substitutes known constants for
+    the free random variables with ``pm.do`` and evaluates the resulting graph, so
+    every fancy-indexing bug shows up with no MCMC at all. ``build_model`` is
+    called directly (no ``fit``), which is safe because it merges the data-driven
+    priors itself.
+    """
+    panel = etwfe_panel()
+    model = ETWFERegression()
+    model.build_model(
+        panel["X"],
+        panel["y"],
+        panel["coords"],
+        conditioning="dummy",
+        **etwfe_fit_kwargs(panel),
+    )
+
+    alpha = np.array([1.0, -2.0, 0.5, 3.0])
+    beta_t = np.array([0.1, -0.4, 0.3, 0.0, -0.2])
+    tau = np.array([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]])
+    # tau = tau_bar + sd_dev * dev, so tau_bar = 0 and sd_dev = 1 pins tau == dev
+    pinned = pm.do(
+        model,
+        {
+            "alpha": alpha,
+            "beta_t": beta_t,
+            "tau_bar": np.zeros(len(ETWFE_EV_GRID)),
+            "sd_dev": 1.0,
+            "dev": tau,
+        },
+    )
+
+    mu = pinned["mu"].eval()
+    expected = (
+        alpha[panel["unit_idx"]]
+        + beta_t[panel["time_idx"]]
+        + panel["effect_indicator"] * tau[panel["cohort_idx"], panel["ev_idx"]]
+    )
+    assert mu.shape == (len(expected), 1)
+    np.testing.assert_allclose(mu[:, 0], expected, rtol=0, atol=1e-12)
+
+    # And the in-model ATT is exactly the weighted sum of the tau surface
+    np.testing.assert_allclose(
+        pinned["att"].eval(),
+        float((tau * panel["att_weights"]).sum()),
+        rtol=0,
+        atol=1e-12,
+    )
+
+
+def test_etwfe_regression_mu_includes_mundlak_and_covariate_terms():
+    """Under mundlak with covariates, mu picks up g_u, g_t and X @ beta."""
+    panel = etwfe_panel(n_covariates=2)
+    model = ETWFERegression()
+    model.build_model(
+        panel["X"],
+        panel["y"],
+        panel["coords"],
+        conditioning="mundlak",
+        **etwfe_fit_kwargs(panel),
+    )
+
+    alpha = np.array([1.0, -2.0, 0.5, 3.0])
+    beta_t = np.array([0.1, -0.4, 0.3, 0.0, -0.2])
+    tau = np.array([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]])
+    g_u, g_t = 0.7, -0.3
+    beta = np.array([[2.0, -1.5]])
+
+    pinned = pm.do(
+        model,
+        {
+            "mu_a": 0.0,
+            "sd_a": 1.0,
+            "a_z": alpha,
+            "beta_t": beta_t,
+            "tau_bar": np.zeros(len(ETWFE_EV_GRID)),
+            "sd_dev": 1.0,
+            "dev": tau,
+            "g_u": g_u,
+            "g_t": g_t,
+            "beta": beta,
+        },
+    )
+
+    expected = (
+        alpha[panel["unit_idx"]]
+        + beta_t[panel["time_idx"]]
+        + g_u * panel["dbar_unit"]
+        + g_t * panel["dbar_time"]
+        + panel["effect_indicator"] * tau[panel["cohort_idx"], panel["ev_idx"]]
+        + panel["X"].values @ beta[0]
+    )
+    np.testing.assert_allclose(pinned["mu"].eval()[:, 0], expected, rtol=0, atol=1e-12)

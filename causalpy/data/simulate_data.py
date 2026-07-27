@@ -15,6 +15,8 @@
 Functions that generate data sets used in examples
 """
 
+from collections.abc import Callable
+
 import numpy as np
 import pandas as pd
 from scipy.stats import gamma
@@ -546,14 +548,48 @@ def _create_series(
     )
 
 
+def _resolve_covariate_coefs(
+    n_covariates: int,
+    covariate_coefs: list[float] | float | None,
+) -> np.ndarray:
+    """
+    Validate and broadcast covariate coefficients to a length-``n_covariates`` array.
+
+    :param n_covariates:
+        Number of covariate columns requested.
+    :param covariate_coefs:
+        Scalar (broadcast to every covariate), sequence of per-covariate
+        coefficients, or ``None`` (equivalent to ``1.0``).
+    """
+    if n_covariates < 0:
+        raise ValueError(f"n_covariates must be non-negative, got {n_covariates}")
+
+    if covariate_coefs is None:
+        covariate_coefs = 1.0
+
+    if np.isscalar(covariate_coefs):
+        return np.full(n_covariates, float(covariate_coefs))  # type: ignore[arg-type]
+
+    coefs = np.asarray(covariate_coefs, dtype=float).ravel()
+    if coefs.shape[0] != n_covariates:
+        raise ValueError(
+            f"covariate_coefs has length {coefs.shape[0]} but n_covariates "
+            f"is {n_covariates}; lengths must match"
+        )
+    return coefs
+
+
 def generate_staggered_did_data(
     n_units: int = 50,
     n_time_periods: int = 20,
     treatment_cohorts: dict[int, int] | None = None,
-    treatment_effects: dict[int, float] | None = None,
+    treatment_effects: dict[int, float] | Callable[[int], float] | None = None,
     unit_fe_scale: float = 2.0,
     time_fe_scale: float = 1.0,
     sigma: float = 0.5,
+    cohort_effect_scale: dict[int, float] | None = None,
+    n_covariates: int = 0,
+    covariate_coefs: list[float] | float | None = None,
     seed: int | None = None,
 ) -> pd.DataFrame:
     """
@@ -561,7 +597,8 @@ def generate_staggered_did_data(
 
     Creates a balanced panel dataset where different cohorts of units receive
     treatment at different times. Supports dynamic treatment effects that vary
-    by event-time (time relative to treatment).
+    by event-time (time relative to treatment), cohort-specific scaling of that
+    effect profile, and optional time-varying covariates.
 
     Parameters
     ----------
@@ -574,9 +611,13 @@ def generate_staggered_did_data(
         Units not assigned to any cohort are never-treated.
         Default: {5: 10, 10: 10, 15: 10} (3 cohorts of 10 units each,
         leaving 20 never-treated units).
-    treatment_effects : dict[int, float], optional
-        Dictionary mapping event-time (t - G) to treatment effect.
-        Event-time 0 is the first treated period.
+    treatment_effects : dict[int, float] or callable, optional
+        Either a dictionary mapping event-time (t - G) to treatment effect, or a
+        callable taking an integer event-time and returning the effect. Event-time
+        0 is the first treated period. When a dictionary is given, event-times
+        beyond the largest specified key reuse the effect at that largest key.
+        A callable is evaluated at every treated event-time, so growing or capped
+        profiles are expressed directly, e.g. ``lambda k: min(1 + 0.4 * k, 5)``.
         Default: {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5} with constant effect
         of 2.5 for all subsequent periods.
     unit_fe_scale : float, default=2.0
@@ -585,6 +626,18 @@ def generate_staggered_did_data(
         Scale of time fixed effects (drawn from Normal(0, time_fe_scale)).
     sigma : float, default=0.5
         Standard deviation of idiosyncratic noise.
+    cohort_effect_scale : dict[int, float], optional
+        Dictionary mapping adoption time :math:`G` to a multiplicative scale
+        applied to that cohort's effect profile. Cohorts absent from the
+        dictionary get a scale of 1.0. Use this to make treatment effects differ
+        across cohorts, which is the setting where a single two-way fixed effects
+        coefficient is biased. Default: ``None`` (every cohort scaled by 1.0).
+    n_covariates : int, default=0
+        Number of time-varying covariate columns to add, named ``x1`` ... ``xn``.
+        Each is drawn iid from Normal(0, 1).
+    covariate_coefs : list[float] or float, optional
+        Coefficients on the covariates. A scalar is broadcast to all covariates;
+        a sequence must have length ``n_covariates``. Default: 1.0.
     seed : int, optional
         Random seed for reproducibility.
 
@@ -597,8 +650,17 @@ def generate_staggered_did_data(
         - treated: Binary indicator (1 if treated at time t, 0 otherwise)
         - treatment_time: Time of treatment adoption (np.inf for never-treated)
         - y: Observed outcome
-        - y0: Counterfactual outcome (for validation)
+        - y0: Untreated potential outcome, including any covariate
+          contribution but excluding noise (for validation)
         - tau: True treatment effect (for validation)
+        - x1 ... xn: Covariates, only when ``n_covariates > 0``
+
+    Raises
+    ------
+    ValueError
+        If the treatment cohorts request more units than ``n_units``, if
+        ``n_covariates`` is negative, or if ``covariate_coefs`` is a sequence
+        whose length differs from ``n_covariates``.
 
     Examples
     --------
@@ -613,12 +675,31 @@ def generate_staggered_did_data(
 
     .. math::
 
-        Y_{it} = \\alpha_i + \\lambda_t + \\tau_{it} \\cdot D_{it} + \\varepsilon_{it}
+        Y_{it} = \\underbrace{
+            \\alpha_i + \\lambda_t + \\sum_{j=1}^{J} \\gamma_j x_{ijt}
+        }_{Y_{it}(0)}
+        + s_{G_i} \\, \\tau(t - G_i) \\cdot D_{it} + \\varepsilon_{it}
 
     where :math:`\\alpha_i` is the unit fixed effect, :math:`\\lambda_t` is the
-    time fixed effect, :math:`D_{it}` is the treatment indicator, and
-    :math:`\\tau_{it}` is the dynamic treatment effect that depends on
-    event-time :math:`e = t - G_i`.
+    time fixed effect, :math:`x_{ijt}` are the covariates with coefficients
+    :math:`\\gamma_j`, :math:`D_{it}` is the treatment indicator,
+    :math:`\\tau(\\cdot)` is the dynamic treatment effect profile over event-time
+    :math:`k = t - G_i`, and :math:`s_{G_i}` is the cohort effect scale
+    (1.0 by default).
+
+    The ``y0`` column holds :math:`Y_{it}(0)` and therefore *includes* the
+    covariate contribution; ``tau`` holds :math:`s_{G_i}\\tau(k) \\cdot D_{it}`.
+    With ``sigma=0`` the identity ``y == y0 + tau`` holds exactly, which makes
+    the frame usable as an algebraic ground truth. Because ``tau`` is stored per
+    observation, ``df.loc[df["treated"] == 1, "tau"].mean()`` is the
+    average-over-the-treated ATT.
+
+    The covariates generated here are **not confounders**. They are drawn iid
+    from Normal(0, 1), independent of adoption timing, so omitting them from an
+    estimator costs precision but induces no bias. They exist to exercise
+    covariate code paths and to demonstrate variance reduction. Generating
+    genuinely confounding covariates -- ones that drive selection into treatment
+    timing -- is out of scope here and remains future work.
     """
     rng = np.random.default_rng(seed)
 
@@ -630,6 +711,8 @@ def generate_staggered_did_data(
     if treatment_effects is None:
         treatment_effects = {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5}
 
+    effects_are_callable = callable(treatment_effects)
+
     # Validate cohort assignments don't exceed n_units
     total_treated = sum(treatment_cohorts.values())
     if total_treated > n_units:
@@ -637,6 +720,9 @@ def generate_staggered_did_data(
             f"Total units in treatment cohorts ({total_treated}) "
             f"exceeds n_units ({n_units})"
         )
+
+    # Validate covariate specification before touching the RNG
+    coefs = _resolve_covariate_coefs(n_covariates, covariate_coefs)
 
     # Generate unit fixed effects
     unit_fe = rng.normal(0, unit_fe_scale, n_units)
@@ -656,29 +742,37 @@ def generate_staggered_did_data(
 
     # Build panel data
     rows = []
+    epsilons = []
     for i in range(n_units):
         for t in range(n_time_periods):
             g_i = treatment_times[i]
             is_treated = t >= g_i
 
-            # Counterfactual outcome (no treatment)
+            # Counterfactual outcome (no treatment); the covariate contribution
+            # is folded in after the loop so that the RNG draw sequence above is
+            # unchanged when n_covariates == 0.
             y0 = unit_fe[i] + time_fe[t]
 
             # Treatment effect based on event-time
             if is_treated:
                 event_time = int(t - g_i)
+                if effects_are_callable:
+                    tau = float(treatment_effects(event_time))  # type: ignore[operator]
                 # Use specified effect or last available effect for later periods
-                if event_time in treatment_effects:
-                    tau = treatment_effects[event_time]
+                elif event_time in treatment_effects:  # type: ignore[operator]
+                    tau = treatment_effects[event_time]  # type: ignore[index]
                 else:
                     # Use the effect for the maximum specified event-time
-                    max_event_time = max(treatment_effects.keys())
-                    tau = treatment_effects[max_event_time]
+                    max_event_time = max(treatment_effects.keys())  # type: ignore[union-attr]
+                    tau = treatment_effects[max_event_time]  # type: ignore[index]
+                if cohort_effect_scale is not None:
+                    tau = tau * cohort_effect_scale.get(int(g_i), 1.0)
             else:
                 tau = 0.0
 
             # Add noise
             epsilon = rng.normal(0, sigma)
+            epsilons.append(epsilon)
 
             # Observed outcome
             y = y0 + tau + epsilon
@@ -696,6 +790,19 @@ def generate_staggered_did_data(
             )
 
     df = pd.DataFrame(rows)
+
+    # Covariates are drawn last so that all draws above are byte-for-byte
+    # identical to a call with n_covariates == 0.
+    if n_covariates > 0:
+        X = rng.normal(0, 1, size=(len(df), n_covariates))
+        df["y0"] = df["y0"] + X @ coefs
+        # Recompute (rather than shift) y from the augmented y0, so the
+        # association order matches the loop above and ``y == y0 + tau`` stays
+        # exact when sigma == 0.
+        df["y"] = df["y0"] + df["tau"] + np.asarray(epsilons)
+        for j in range(n_covariates):
+            df[f"x{j + 1}"] = X[:, j]
+
     return df
 
 

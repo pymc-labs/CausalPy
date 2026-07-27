@@ -34,6 +34,7 @@ did_skl.ipynb
 did_pymc.ipynb
 did_pymc_banks.ipynb
 staggered_did_pymc.ipynb
+staggered_did_etwfe_pymc.ipynb
 :::
 
 :::{toctree}
