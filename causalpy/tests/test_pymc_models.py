@@ -1619,6 +1619,52 @@ def test_etwfe_regression_mundlak_requires_treatment_means():
         )
 
 
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda w: w * -1.0, "non-negative"),
+        (lambda w: w * 2.0, "must sum to 1.0"),
+    ],
+)
+def test_etwfe_regression_rejects_malformed_att_weights(mutate, match):
+    """Negative or non-normalised ATT weights are rejected before model build."""
+    panel = etwfe_panel()
+    kwargs = etwfe_fit_kwargs(panel)
+    kwargs["att_weights"] = mutate(np.asarray(kwargs["att_weights"], dtype=float))
+    model = ETWFERegression()
+    with pytest.raises(ValueError, match=match):
+        model.build_model(
+            panel["X"], panel["y"], panel["coords"], conditioning="dummy", **kwargs
+        )
+
+
+def test_etwfe_regression_rejects_weight_on_unoccupied_cell():
+    """Weight on a cell with no in-scope observation is rejected.
+
+    The in-model ``att`` sums ``tau * att_weights`` over the whole surface, and
+    unoccupied cells carry a prior-only ``tau``. Putting weight there would
+    silently leak the prior into the headline estimand.
+    """
+    panel = etwfe_panel()
+    kwargs = etwfe_fit_kwargs(panel)
+    weights = np.zeros_like(np.asarray(kwargs["att_weights"], dtype=float))
+    # Move all the mass onto the last cell, then make sure nothing loads on it.
+    weights[-1, -1] = 1.0
+    kwargs["att_weights"] = weights
+    effect = np.asarray(kwargs["effect_indicator"], dtype=float).copy()
+    last_cell = (np.asarray(kwargs["cohort_idx"]) == weights.shape[0] - 1) & (
+        np.asarray(kwargs["ev_idx"]) == weights.shape[1] - 1
+    )
+    effect[last_cell] = 0.0
+    kwargs["effect_indicator"] = effect
+
+    model = ETWFERegression()
+    with pytest.raises(ValueError, match="no in-scope observation"):
+        model.build_model(
+            panel["X"], panel["y"], panel["coords"], conditioning="dummy", **kwargs
+        )
+
+
 def test_etwfe_regression_mu_is_exact_given_known_parameters():
     """The mu graph must equal alpha[u] + beta_t[t] + E * tau[g, k], exactly.
 

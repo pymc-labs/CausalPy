@@ -2605,6 +2605,65 @@ class StateSpaceTimeSeries(PyMCModel):
         return super().score(X, y, coords, **kwargs)
 
 
+def _validate_att_weights(
+    att_weights: np.ndarray,
+    effect_indicator: np.ndarray,
+    cohort_idx: np.ndarray,
+    ev_idx: np.ndarray,
+) -> None:
+    """Check the ATT weight matrix before it is baked into the model graph.
+
+    The in-model ``att`` deterministic sums ``tau * att_weights`` over the
+    *entire* ``(cohorts, ev)`` surface, including cells that carry no treated
+    observations. Those cells still have a ``tau`` value -- drawn from the
+    shared event-time profile rather than informed by data -- so the headline
+    ATT is only meaningful because the weights are exactly zero there.
+
+    That invariant holds by construction today (the weights are treated-cell
+    counts), but it is the single assumption the headline estimand rests on,
+    and nothing else in the model would notice if a future change broke it.
+    These checks are cheap and run once per fit.
+
+    Parameters
+    ----------
+    att_weights : numpy.ndarray
+        ``(n_cohorts, n_ev)`` weight matrix.
+    effect_indicator : numpy.ndarray
+        0/1 array marking cells that carry an effect parameter.
+    cohort_idx, ev_idx : numpy.ndarray
+        Observation-aligned position arrays into ``att_weights``.
+
+    Raises
+    ------
+    ValueError
+        If the weights are negative, do not sum to one, or place mass on a
+        cell with no in-scope observation behind it.
+    """
+    weights = np.asarray(att_weights, dtype=float)
+    if np.any(weights < 0) or not np.all(np.isfinite(weights)):
+        raise ValueError(
+            "att_weights must be finite and non-negative; got "
+            f"min={np.nanmin(weights)}."
+        )
+    total = weights.sum()
+    if not np.isclose(total, 1.0):
+        raise ValueError(f"att_weights must sum to 1.0, got {total!r}.")
+
+    # Every cell carrying weight must have at least one in-scope observation,
+    # otherwise the ATT would be reading a prior-only tau.
+    occupied = np.zeros_like(weights, dtype=bool)
+    in_scope = np.asarray(effect_indicator) == 1
+    occupied[np.asarray(cohort_idx)[in_scope], np.asarray(ev_idx)[in_scope]] = True
+    leaking = np.argwhere((weights > 0) & ~occupied)
+    if leaking.size:
+        cells = ", ".join(f"(cohort={g}, ev={k})" for g, k in leaking[:5])
+        raise ValueError(
+            f"att_weights place mass on {len(leaking)} (cohort, event time) "
+            f"cell(s) with no in-scope observation: {cells}. The in-model ATT "
+            "would read a prior-only tau there."
+        )
+
+
 class ETWFERegression(PyMCModel):
     r"""Extended two-way fixed effects (ETWFE) regression for staggered adoption.
 
@@ -2743,6 +2802,15 @@ class ETWFERegression(PyMCModel):
         All scale-dependent priors are produced here rather than in
         ``default_priors``; see the note on the class body for why.
 
+        .. note::
+           Priors adapt to the scale of ``y`` only -- the covariate matrix
+           ``X`` is not inspected. The ``beta`` prior is therefore
+           ``Normal(0, 2 * sd_y)``, which is weakly informative when covariates
+           are roughly unit-scale and becomes tight (relative to the plausible
+           coefficient magnitude) when they are not. Standardise covariates
+           before passing them, or override the ``beta`` prior explicitly, if
+           they span very different scales.
+
         Parameters
         ----------
         X : xarray.DataArray
@@ -2851,6 +2919,7 @@ class ETWFERegression(PyMCModel):
             raise ValueError(
                 "conditioning='mundlak' requires both dbar_unit and dbar_time."
             )
+        _validate_att_weights(att_weights, effect_indicator, cohort_idx, ev_idx)
 
         priors = self._resolved_priors(X, y)
 
@@ -2924,6 +2993,11 @@ class ETWFERegression(PyMCModel):
             # --- covariates --------------------------------------------------------
             if n_covariates > 0:
                 X_ = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+                # ``beta`` keeps the codebase-wide ``(treated_units, coeffs)``
+                # dims so that ``print_coefficients`` and the maketables
+                # adapters can read it like any other coefficient vector. ETWFE
+                # is a single-outcome estimator, so ``treated_units`` is always
+                # length 1 and only ``beta[0]`` is ever used.
                 beta = priors["beta"].create_variable("beta")
                 mu_lin = mu_lin + pt.dot(X_, beta[0])
 

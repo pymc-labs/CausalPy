@@ -106,7 +106,14 @@ def make_noise_free_panel(**overrides) -> pd.DataFrame:
     defaults: dict = {
         "n_units": 24,
         "n_time_periods": 12,
-        "treatment_cohorts": {4: 8, 8: 8},
+        # Cohort sizes are deliberately UNEQUAL. With equal sizes every treated
+        # (g, k) cell holds the same number of observations, the ATT weight
+        # matrix is uniform, and a weighted average is numerically identical to
+        # an unweighted one -- so the exactness tests below would pass even if
+        # the aggregation dropped the weights entirely. 10 vs 6 makes the
+        # weights non-uniform, and an unweighted aggregation then misses the
+        # true ATT by ~0.016, far outside the 1e-8 tolerance these tests use.
+        "treatment_cohorts": {4: 10, 8: 6},
         "treatment_effects": lambda k: 1 + 0.4 * k,
         "cohort_effect_scale": {4: 1.0, 8: 1.6},
         "sigma": 0.0,
@@ -133,7 +140,9 @@ def make_noisy_panel(**overrides) -> pd.DataFrame:
     defaults: dict = {
         "n_units": 40,
         "n_time_periods": 16,
-        "treatment_cohorts": {5: 12, 10: 12},
+        # Unequal for the same reason as the noise-free panel: uniform ATT
+        # weights would make weighted and unweighted aggregation indistinguishable.
+        "treatment_cohorts": {5: 14, 10: 10},
         "treatment_effects": lambda k: 1 + 0.4 * k,
         "cohort_effect_scale": {5: 1.0, 10: 1.8},
         "sigma": 0.1,
@@ -439,6 +448,17 @@ def test_tier1_att_weights_are_treated_cell_shares(noise_free_df, ols_fit):
 
     weights = ols_fit.att_weights_
     assert weights.to_numpy().sum() == pytest.approx(1.0, abs=EXACT)
+
+    # Guard the *discriminating power* of every exactness test on this panel:
+    # if the cohort sizes ever became equal the weight matrix would go uniform,
+    # and a weighted aggregation would be numerically identical to an unweighted
+    # one -- so those tests would still pass with the weights dropped entirely.
+    nonzero = weights.to_numpy()[weights.to_numpy() > 0]
+    assert len(np.unique(np.round(nonzero, 12))) > 1, (
+        "ATT weights are uniform on this panel, so the exactness tests can no "
+        "longer distinguish weighted from unweighted aggregation. Restore "
+        "unequal cohort sizes in make_noise_free_panel()."
+    )
     for (cohort, k), share in shares.items():
         assert weights.loc[cohort, k] == pytest.approx(share, abs=EXACT)
 
@@ -502,6 +522,19 @@ def test_tier2_etwfe_beats_naive_single_delta_twfe():
 # ===========================================================================
 
 
+# NOTE ON THE ``slow`` MARKER (applies to Tier 3 and Tier 4 below).
+#
+# These two are the ONLY tests anywhere in the suite that run a real sampler
+# against the in-model ``att`` deterministic. Every other Bayesian test uses the
+# ``mock_pymc_sample`` fixture, which replaces ``pm.sample`` with prior
+# predictive draws and therefore cannot check recovery at all.
+#
+# CI currently runs ``pytest`` with no ``-m`` deselection, so they execute on
+# every PR (~23s combined, measured). If a future change adds
+# ``-m "not slow"``, these drop out and the Bayesian path loses its only
+# genuine numerical coverage -- Tier 1 would still prove the OLS path
+# algebraically, but nothing would tie that guarantee to the sampler. If the
+# runtime ever needs cutting, shrink the panels rather than deselecting.
 @pytest.mark.slow
 def test_tier3_bayesian_posterior_covers_true_att(real_pymc_sample):
     """Real MCMC: the true ATT sits inside the 94% HDI and the chains converge.
