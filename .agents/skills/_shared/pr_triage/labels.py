@@ -57,8 +57,11 @@ LABS = {
 AGING_DAYS = 30
 STALE_DAYS = 90
 
-# Precedence order for the single derived `next_action`. First match wins.
-# This is the ONE place priority judgment is encoded; tune it here.
+# Precedence order for the single derived `next_action`. First match wins:
+# `_next_action` walks this list and returns the first action whose predicate
+# holds, and the CLI table / consumers sort by it. This is the ONE place
+# priority judgment is encoded; tune it here. `ready-for-review` is the
+# always-true fallback and must stay last.
 NEXT_ACTION_ORDER = [
     "decision",  # needs a maintainer decision (the hard queue)
     "stale-draft",  # your own draft, idle >= STALE_DAYS
@@ -214,21 +217,34 @@ def _review_state(reviewDecision: str | None) -> str:
 
 
 def _next_action(f: dict) -> str:
+    """Derive the single `next_action`. Precedence is `NEXT_ACTION_ORDER`,
+    read verbatim: we walk that list and return the first action whose
+    predicate matches, so reordering the list up top genuinely reorders the
+    classification (true first-match-wins). `ready-for-review` is the
+    always-true fallback and must stay last in the list."""
     draft = f["lifecycle"] == "draft"
-    if f["decision_needed"]:
-        return "decision"
-    if draft:
-        if f["idle_band"] == "stale":
-            return "stale-draft"
-        if f["idle_band"] == "aging":
-            return "aging-draft"
-        return "in-flight-draft"
-    if f["review"] == "changes-requested":
-        return "waiting-on-author"
-    if f["review"] == "approved" and f["conflict"] == "clean" and f["ci"] != "red":
-        return "ready-to-merge"
-    if f["conflict"] == "conflicting" or f["ci"] == "red":
-        return "mechanical"
+    predicates = {
+        "decision": lambda: f["decision_needed"],
+        "stale-draft": lambda: draft and f["idle_band"] == "stale",
+        "aging-draft": lambda: draft and f["idle_band"] == "aging",
+        "in-flight-draft": lambda: draft,
+        "waiting-on-author": lambda: f["review"] == "changes-requested",
+        "ready-to-merge": lambda: (
+            f["review"] == "approved"
+            and f["conflict"] == "clean"
+            and f["ci"] != "red"
+        ),
+        "mechanical": lambda: f["conflict"] == "conflicting" or f["ci"] == "red",
+        "ready-for-review": lambda: True,
+    }
+    # Guard against drift between the precedence list and the predicate map.
+    assert set(predicates) == set(NEXT_ACTION_ORDER), (
+        "predicate keys out of sync with NEXT_ACTION_ORDER: "
+        f"{set(predicates) ^ set(NEXT_ACTION_ORDER)}"
+    )
+    for action in NEXT_ACTION_ORDER:
+        if predicates[action]():
+            return action
     return "ready-for-review"
 
 
