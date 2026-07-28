@@ -103,6 +103,31 @@ def _days_since(ts: str) -> int:
     return (_now() - _parse_ts(ts)).days
 
 
+def _last_activity(pr: dict) -> str:
+    """Timestamp of the PR's last real activity, used to measure idleness.
+
+    Intentionally NOT `updatedAt`: that field is bumped by every mutation to
+    the PR, including the label-only `gh pr edit` writes the labeller itself
+    performs. If idleness were read from `updatedAt`, applying `status:aging`
+    would reset the clock, the next reconcile run would see a "fresh" PR and
+    remove the label it just added, and aging/stale state could never stick.
+
+    Instead we take the most recent of: PR creation, last commit, and last
+    human/CI comment. None of those are moved by a label edit, so the idle
+    figure is stable across labeller runs, and the digest (which shares this
+    core) reads the same number."""
+    stamps = [pr["createdAt"]]
+    for commit in pr.get("commits") or []:
+        # committedDate is the push time; take them all so a rebase that
+        # reorders commits can't hide the newest one.
+        if commit.get("committedDate"):
+            stamps.append(commit["committedDate"])
+    for c in pr.get("comments") or []:
+        if c.get("createdAt"):
+            stamps.append(c["createdAt"])
+    return max(stamps, key=_parse_ts)
+
+
 def _gh_json(args: list[str]) -> object:
     out = subprocess.run(
         ["gh", *args], capture_output=True, text=True, check=True
@@ -112,10 +137,23 @@ def _gh_json(args: list[str]) -> object:
 
 def fetch_prs(repo: str) -> list[dict]:
     """Fetch open PRs. Forces GitHub to compute the lazily-evaluated
-    `mergeable` field, which comes back UNKNOWN in bulk listings."""
+    `mergeable` field, which comes back UNKNOWN in bulk listings.
+
+    We deliberately fetch `comments` (and `commits`, per-PR below) rather than
+    trusting `updatedAt` to measure idleness. `updatedAt` is bumped by ANY edit
+    to the PR, including the label-only `gh pr edit` writes this very system
+    makes when it applies `status:aging`/`status:stale`. Reading idleness from
+    it would mean each labeller apply resets the idle clock, so the next run
+    sees a fresh PR and strips the aging/stale label it just added: the state
+    could never persist. See `_last_activity`.
+
+    `commits` is fetched per-PR, NOT in the bulk list: a bulk `pr list` that
+    includes `commits` (each carrying an authors connection) blows past
+    GitHub's 500k GraphQL node budget. We piggy-back the commit fetch onto the
+    same per-PR `gh pr view` used to resolve lazy `mergeable`."""
     fields = (
         "number,title,author,isDraft,mergeable,reviewDecision,"
-        "updatedAt,createdAt,labels,statusCheckRollup"
+        "updatedAt,createdAt,labels,statusCheckRollup,comments"
     )
     prs = (
         _gh_json(
@@ -134,22 +172,28 @@ def fetch_prs(repo: str) -> list[dict]:
         )
         or []
     )
-    # Poke each UNKNOWN mergeable once; `gh pr view` triggers the computation.
+    # Per-PR pass: fetch `commits` (too expensive in bulk, see docstring) and,
+    # in the same call, resolve any UNKNOWN `mergeable` (`gh pr view` triggers
+    # the lazy computation). One `gh pr view` per PR covers both.
     for pr in prs:
+        want = ["commits"]
         if pr.get("mergeable") == "UNKNOWN":
-            with contextlib.suppress(subprocess.CalledProcessError):
-                v = _gh_json(
-                    [
-                        "pr",
-                        "view",
-                        str(pr["number"]),
-                        "--repo",
-                        repo,
-                        "--json",
-                        "mergeable",
-                    ]
-                )
-                if v:
+            want.append("mergeable")
+        with contextlib.suppress(subprocess.CalledProcessError):
+            v = _gh_json(
+                [
+                    "pr",
+                    "view",
+                    str(pr["number"]),
+                    "--repo",
+                    repo,
+                    "--json",
+                    ",".join(want),
+                ]
+            )
+            if v:
+                pr["commits"] = v.get("commits", [])
+                if "mergeable" in want:
                     pr["mergeable"] = v.get("mergeable", "UNKNOWN")
     return prs
 
@@ -230,9 +274,7 @@ def _next_action(f: dict) -> str:
         "in-flight-draft": lambda: draft,
         "waiting-on-author": lambda: f["review"] == "changes-requested",
         "ready-to-merge": lambda: (
-            f["review"] == "approved"
-            and f["conflict"] == "clean"
-            and f["ci"] != "red"
+            f["review"] == "approved" and f["conflict"] == "clean" and f["ci"] != "red"
         ),
         "mechanical": lambda: f["conflict"] == "conflicting" or f["ci"] == "red",
         "ready-for-review": lambda: True,
@@ -298,7 +340,7 @@ def classify(prs: list[dict]) -> list[PRFacts]:
             "decision_needed": "needs:maintainer-decision" in names,
             "major": "major" in names,
             "risk": risk,
-            "idle_days": _days_since(pr["updatedAt"]),
+            "idle_days": _days_since(_last_activity(pr)),
             "age_days": _days_since(pr["createdAt"]),
         }
         f["idle_band"] = _idle_band(f["idle_days"])
