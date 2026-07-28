@@ -70,6 +70,10 @@ NEXT_ACTION_ORDER = [
     "ready-for-review",  # clean, green/pending, awaiting a reviewer
 ]
 
+# Rank lookup so the CLI table and any consumer order by this list, not
+# alphabetically. Editing NEXT_ACTION_ORDER above now actually reorders output.
+NEXT_ACTION_RANK = {a: i for i, a in enumerate(NEXT_ACTION_ORDER)}
+
 # The `status:*` labels the labeller is allowed to manage. It touches ONLY this
 # namespace, never `review:*`, `major`, `needs:maintainer-decision`, etc.
 STATUS_LABELS = {
@@ -246,6 +250,10 @@ def _status_labels_for(f: dict) -> list[str]:
             labels.append("status:waiting-on-author")
         if f["next_action"] == "ready-for-review":
             labels.append("status:ready-for-review")
+    # Guard against drift: the labeller only manages the STATUS_LABELS set.
+    assert set(labels) <= STATUS_LABELS, (
+        f"emitted labels {set(labels) - STATUS_LABELS} are outside STATUS_LABELS"
+    )
     return labels
 
 
@@ -253,7 +261,7 @@ def classify(prs: list[dict]) -> list[PRFacts]:
     results: list[PRFacts] = []
     for pr in prs:
         login = pr["author"]["login"]
-        names = [l["name"] for l in pr.get("labels", [])]
+        names = [lab["name"] for lab in pr.get("labels", [])]
         risk = next(
             (n.split(":", 1)[1] for n in names if n.startswith("review:")), None
         )
@@ -305,7 +313,13 @@ def main() -> int:
         json.dump(payload, sys.stdout, indent=2)
         print()
     else:
-        for f in sorted(facts, key=lambda x: (x.next_action, -x.idle_days)):
+        for f in sorted(
+            facts,
+            key=lambda x: (
+                NEXT_ACTION_RANK.get(x.next_action, len(NEXT_ACTION_ORDER)),
+                -x.idle_days,
+            ),
+        ):
             print(
                 f"#{f.number:<5} {f.next_action:<18} idle{f.idle_days:>4}d "
                 f"{f.author_class:<10} {f.title[:55]}"

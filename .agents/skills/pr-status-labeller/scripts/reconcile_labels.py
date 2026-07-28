@@ -51,6 +51,11 @@ LABEL_DEFS = {
     "status:stale": ("5319E7", f"No activity in >={core.STALE_DAYS}d"),
 }
 
+# LABEL_DEFS must cover exactly the managed namespace declared in core.
+assert set(LABEL_DEFS) == core.STATUS_LABELS, (
+    f"LABEL_DEFS out of sync with STATUS_LABELS: {set(LABEL_DEFS) ^ core.STATUS_LABELS}"
+)
+
 
 def _gh(args: list[str]) -> None:
     subprocess.run(["gh", *args], check=True, capture_output=True, text=True)
@@ -84,7 +89,9 @@ def ensure_labels(repo: str) -> None:
 
 
 def current_status_labels(pr: dict) -> set[str]:
-    return {l["name"] for l in pr.get("labels", []) if l["name"].startswith("status:")}
+    return {
+        lab["name"] for lab in pr.get("labels", []) if lab["name"].startswith("status:")
+    }
 
 
 def main() -> int:

@@ -69,7 +69,9 @@ def pick_hard_item(prs: list[dict]) -> dict | None:
 
 def build(payload: dict, day: str, mention: str | None) -> dict:
     prs = payload["prs"]
-    by = lambda a: [f for f in prs if f["next_action"] == a]
+
+    def by(action):
+        return [f for f in prs if f["next_action"] == action]
 
     hard = pick_hard_item(prs)
     other_hard = [
@@ -82,8 +84,11 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
         and (hard is None or f["number"] != hard["number"])
     ]
 
+    hard_numbers = {f["number"] for f in other_hard}
+    if hard is not None:
+        hard_numbers.add(hard["number"])
     reviews = sorted(
-        by("ready-for-review"),
+        (f for f in by("ready-for-review") if f["number"] not in hard_numbers),
         key=lambda f: (f["author_class"] != "external", f["idle_days"]),
     )
     waiting = by("waiting-on-author")
