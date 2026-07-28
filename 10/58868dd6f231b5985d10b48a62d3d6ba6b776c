@@ -1,0 +1,23 @@
+.agents/skills/_shared/pr_triage/labels.py
+  s_55ba8a0054dd1c::t_4dcc9d8f2f9141 73-76,253-256,264,316-322
+.agents/skills/pr-digest/scripts/build_digest.py
+  s_55ba8a0054dd1c::t_69cef86933d020 72-74,87-89,91
+.agents/skills/pr-status-labeller/scripts/reconcile_labels.py
+  s_55ba8a0054dd1c::t_2ae48d47a1c519 54-58,92-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1058868dd6f231b5985d10b48a62d3d6ba6b776c",
+  "prompts": {},
+  "sessions": {
+    "s_55ba8a0054dd1c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e81b9661-c8bb-4f98-b20b-11646f1d9312",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
