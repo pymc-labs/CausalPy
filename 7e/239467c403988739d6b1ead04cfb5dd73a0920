@@ -1,0 +1,43 @@
+causalpy/tests/test_pymc_models.py
+  s_6cdb3f9eca54e6::t_9a564748eaa685 113,841
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "7e239467c403988739d6b1ead04cfb5dd73a0920",
+  "prompts": {},
+  "sessions": {
+    "s_1b92c32de2161b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062db4284ffe9fvcXX2KLIPJvE",
+        "model": "kimi-k2.7-code"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    },
+    "s_508487dc244b60": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062db42bfffeT2GH8IqpFO4D4X",
+        "model": "qwen3.7-max"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    },
+    "s_6cdb3f9eca54e6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066e0a83dffet2I7yq3qoEkf6v",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    },
+    "s_eb4791e8775def": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062b5dec3ffeVrXLSQQpZzpqxL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}
