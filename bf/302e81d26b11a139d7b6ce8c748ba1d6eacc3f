@@ -1,0 +1,21 @@
+causalpy/experiments/model_adapter.py
+  s_6cdb3f9eca54e6::t_30b6c052fcad68 230-233
+causalpy/tests/test_pymc_models.py
+  s_6cdb3f9eca54e6::t_9a564748eaa685 145-150,1027-1035
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "bf302e81d26b11a139d7b6ce8c748ba1d6eacc3f",
+  "prompts": {},
+  "sessions": {
+    "s_6cdb3f9eca54e6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066e0a83dffet2I7yq3qoEkf6v",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

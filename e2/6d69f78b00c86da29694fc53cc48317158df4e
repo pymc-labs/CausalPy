@@ -1,0 +1,19 @@
+.agents/skills/_shared/pr_triage/labels.py
+  s_19648004aff2ce::t_2899761c839190 60-64,220-224,226-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e26d69f78b00c86da29694fc53cc48317158df4e",
+  "prompts": {},
+  "sessions": {
+    "s_19648004aff2ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_19648004aff2ce",
+        "model": "unknown"
+      },
+      "human_author": "daimon-pymclabs <noreply@anthropic.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+environment.yml
+  s_94e3ef76914059::t_8aa6b358eaa884 14-15,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1f9a5ccbf708c418ed09e6c83e461fb925b70c7c",
+  "prompts": {},
+  "sessions": {
+    "s_94e3ef76914059": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "036ad110-8dcc-4df0-83d3-5dcb568b9526",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
