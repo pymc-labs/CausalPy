@@ -1,0 +1,19 @@
+causalpy/tests/test_panel_regression.py
+  s_11d770428f1a95::t_2c365bf410f2fd 637-639
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "46a651ce22c71c910478934549e44e4a3823d76d",
+  "prompts": {},
+  "sessions": {
+    "s_11d770428f1a95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3d0f1850333550f5",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
