@@ -20,7 +20,7 @@ dependencies:
   - jinja2
   - make
   - matplotlib>=3.5.3
-  - narwhals>=1.13.0
+  - narwhals>=1.13.1
   - nbconvert
   - nbformat
   - numpy

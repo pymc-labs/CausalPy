@@ -44,7 +44,7 @@ dependencies = [
     "ipython!=8.7.0",
     "jinja2",
     "matplotlib>=3.5.3",
-    "narwhals>=1.13.0",
+    "narwhals>=1.13.1",
     "numpy",
     "pandas",
     "patsy",
