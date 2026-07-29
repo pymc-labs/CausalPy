@@ -1,0 +1,19 @@
+causalpy/tests/test_hdi_prob_wiring.py
+  s_4cd2ec07c88e2b::t_e50650bce880bb 15-17,26-30,33,37,361-366,473-485,487-494,497-507,509,512-516,518-528,534-536,538-541,543-544,547-549
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4e3f5758c16aa9965cb2ee294ece8b9942a8c227",
+  "prompts": {},
+  "sessions": {
+    "s_4cd2ec07c88e2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2898385-7069-40f2-b914-9321ee576d2d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
