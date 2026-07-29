@@ -1,0 +1,31 @@
+causalpy/tests/test_public_signatures.py
+  s_69c6e8844a67e9::t_59a5bd7007eb97 451-504
+.pre-commit-config.yaml
+  s_11d770428f1a95::t_71beeefbc94c0e 49-50,55
+pyproject.toml
+  s_11d770428f1a95::t_c527d451cead45 178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7f560a84afee0834d2e26f53b07d62526185f181",
+  "prompts": {},
+  "sessions": {
+    "s_11d770428f1a95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3d0f1850333550f5",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    },
+    "s_69c6e8844a67e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f9cf6bf-cf0d-4aa2-a535-1b68c2dbc657",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
