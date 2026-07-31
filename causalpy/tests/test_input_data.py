@@ -75,17 +75,35 @@ def test_polars_datetime_column_survives_conversion():
 )
 def test_non_dataframe_input_raises(bad_input):
     """Anything that is not an eager dataframe raises TypeError."""
-    with pytest.raises(TypeError, match="must be a dataframe supported by Narwhals"):
+    with pytest.raises(TypeError, match="must be an eager dataframe"):
         to_pandas(bad_input)
 
 
 def test_lazy_frame_raises():
     """Lazy frames are rejected, since CausalPy needs materialized data."""
-    with pytest.raises(TypeError, match="must be a dataframe supported by Narwhals"):
+    with pytest.raises(TypeError, match="must be an eager dataframe"):
         to_pandas(pl.LazyFrame({"y": [1, 2]}))
+
+
+def test_lazy_frame_error_points_at_collect():
+    """The lazy case says what to do, since the library itself is supported.
+
+    Telling a Polars caller that Polars is supported and that their object is
+    not a supported dataframe is the confusing part, so the message names the
+    fix rather than leaving them to guess.
+    """
+    with pytest.raises(TypeError, match=r"Call `\.collect\(\)` first"):
+        to_pandas(pl.LazyFrame({"y": [1, 2]}))
+
+
+def test_non_dataframe_error_has_no_lazy_hint():
+    """The collect hint stays out of the way for inputs that are not frames."""
+    with pytest.raises(TypeError) as excinfo:
+        to_pandas([1, 2])
+    assert "collect" not in str(excinfo.value)
 
 
 def test_error_message_names_the_argument():
     """The error message names the offending argument."""
-    with pytest.raises(TypeError, match="`donor_data` must be a dataframe"):
+    with pytest.raises(TypeError, match="`donor_data` must be an eager dataframe"):
         to_pandas([1, 2], argument_name="donor_data")

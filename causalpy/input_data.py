@@ -94,9 +94,17 @@ def to_pandas(data: DataFrameLike, *, argument_name: str = "data") -> pd.DataFra
     try:
         frame = nw.from_native(data, eager_only=True, pass_through=False)
     except TypeError as error:
+        # A lazy frame is the confusing case: the library is supported, the
+        # object is not, so say that rather than leaving the caller to guess.
+        hint = (
+            " Lazy frames are not accepted, because the modelling pipeline "
+            "needs materialized data. Call `.collect()` first."
+            if hasattr(data, "collect")
+            else ""
+        )
         raise TypeError(
-            f"`{argument_name}` must be a dataframe supported by Narwhals "
-            "(pandas, Polars, PyArrow, and others). "
-            f"Got {type(data).__name__}."
+            f"`{argument_name}` must be an eager dataframe supported by "
+            "Narwhals, such as pandas, Polars, or PyArrow. "
+            f"Got {type(data).__name__}.{hint}"
         ) from error
     return frame.to_pandas()
