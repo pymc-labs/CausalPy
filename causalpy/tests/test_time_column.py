@@ -27,8 +27,10 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.checks.placebo_in_time import PlaceboInTime
 from causalpy.custom_exceptions import BadIndexException, DataException
 from causalpy.input_data import to_pandas_with_time_index
+from causalpy.pipeline import PipelineContext
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
@@ -272,18 +274,47 @@ class TestTimestampMismatchMessage:
     than dates lands here, which is what surfaced it.
     """
 
-    def test_non_datetime_index_with_timestamp_treatment_time(self, sc_data):
-        """A string time axis plus a Timestamp treatment time explains itself."""
-        as_text = sc_data.copy()
-        as_text.index = as_text.index.astype(str)
-        with pytest.raises(BadIndexException, match="must not be pd.Timestamp"):
-            cp.SyntheticControl(
-                as_text,
-                pd.Timestamp("2020-01-01"),
-                control_units=["a", "b", "c", "d", "e", "f", "g"],
-                treated_units=["actual"],
-                model=LinearRegression(),
+    @staticmethod
+    def _build(name, data):
+        """Construct one of the three classes with a Timestamp treatment time."""
+        units = {
+            "control_units": ["a", "b", "c", "d", "e", "f", "g"],
+            "treated_units": ["actual"],
+        }
+        treatment_time = pd.Timestamp("2020-01-01")
+        if name == "InterruptedTimeSeries":
+            return cp.InterruptedTimeSeries(
+                data, treatment_time, formula="actual ~ 1 + a", model=LinearRegression()
             )
+        if name == "SyntheticControl":
+            return cp.SyntheticControl(
+                data, treatment_time, model=LinearRegression(), **units
+            )
+        return cp.SyntheticDifferenceInDifferences(data, treatment_time, **units)
+
+    @pytest.mark.parametrize(
+        "experiment",
+        [
+            "InterruptedTimeSeries",
+            "SyntheticControl",
+            "SyntheticDifferenceInDifferences",
+        ],
+    )
+    def test_non_datetime_index_with_timestamp_treatment_time(
+        self, sc_data, experiment, mock_pymc_sample
+    ):
+        """A string time axis plus a Timestamp treatment time explains itself.
+
+        Checked on all three classes, since the slip was copy-pasted into each
+        of them rather than living in one shared place.
+        """
+        as_text = sc_data.copy()
+        # Zero-padded so the string index stays sorted. Plain str() would give
+        # "10" < "9", and InterruptedTimeSeries checks monotonicity first, so
+        # it would raise about ordering before reaching the type check.
+        as_text.index = [f"{i:04d}" for i in range(len(as_text))]
+        with pytest.raises(BadIndexException, match="must not be pd.Timestamp"):
+            self._build(experiment, as_text)
 
 
 class TestUnsortedTimeColumnEndToEnd:
@@ -309,3 +340,48 @@ class TestUnsortedTimeColumnEndToEnd:
                 treated_units=["actual"],
                 time_column="time",
             )
+
+
+class TestSensitivityRefit:
+    """Checks that re-fit an experiment must not replay ``time_column``.
+
+    ``PlaceboInTime`` hands its factory a slice of ``experiment.data``, which
+    is already normalized: the time column has been moved onto the index, so
+    replaying the argument raised ``DataException`` on every fold. The check
+    swallows per-fold failures, so the user saw an inconclusive result rather
+    than an error. The other checks re-fit from the caller's original data and
+    do still need the argument.
+    """
+
+    def _context(self):
+        """Build a pipeline context from a Polars frame using time_column."""
+        n = 200
+        rng = np.random.default_rng(0)
+        frame = pd.DataFrame(
+            {
+                "date": np.arange(n),
+                "trend": np.arange(n) / n,
+                "y": rng.normal(size=n),
+            }
+        )
+        step = cp.steps.EstimateEffect(
+            cp.InterruptedTimeSeries,
+            treatment_time=150,
+            formula="y ~ 1 + trend",
+            model=LinearRegression(),
+            time_column="date",
+        )
+        return step.run(PipelineContext(data=pl.from_pandas(frame)))
+
+    def test_config_still_carries_time_column(self):
+        """The recorded config keeps it, since other checks re-fit raw data."""
+        context = self._context()
+        assert context.experiment_config["time_column"] == "date"
+        assert "date" not in context.experiment.data.columns
+
+    def test_placebo_factory_refits_without_time_column(self):
+        """The placebo factory rebuilds from normalized data without raising."""
+        context = self._context()
+        factory = PlaceboInTime(n_folds=2)._get_factory(context)
+        refit = factory(context.experiment.data.iloc[:100], 75)
+        assert isinstance(refit, cp.InterruptedTimeSeries)
