@@ -27,8 +27,6 @@ index concept, so conversion produces a default ``RangeIndex``.
 
 from __future__ import annotations
 
-from typing import Any
-
 import narwhals as nw
 import pandas as pd
 from narwhals.typing import IntoDataFrame
@@ -44,9 +42,7 @@ pipeline needs materialized data.
 """
 
 
-def to_pandas(
-    data: DataFrameLike | Any, *, argument_name: str = "data"
-) -> pd.DataFrame:
+def to_pandas(data: DataFrameLike, *, argument_name: str = "data") -> pd.DataFrame:
     """Convert a dataframe-like input to a pandas ``DataFrame``.
 
     Pandas inputs are copied so that later index renaming does not mutate the
@@ -83,11 +79,15 @@ def to_pandas(
     if isinstance(data, pd.DataFrame):
         return data.copy()
 
+    # Only the rejection of a non-dataframe is translated. Errors raised while
+    # converting a dataframe Narwhals did accept are left alone, so a genuine
+    # conversion failure is not reported as "this is not a dataframe".
     try:
-        return nw.from_native(data, eager_only=True, pass_through=False).to_pandas()
+        frame = nw.from_native(data, eager_only=True, pass_through=False)
     except TypeError as error:
         raise TypeError(
             f"`{argument_name}` must be a dataframe supported by Narwhals "
             "(pandas, Polars, PyArrow, and others). "
             f"Got {type(data).__name__}."
         ) from error
+    return frame.to_pandas()
