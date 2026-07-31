@@ -1,0 +1,19 @@
+causalpy/tests/test_integration_its_new_timeseries.py
+  s_c5e0308edcbe07::t_abfda858236a8e 98,154,162,197,234,271,277-282,284,290,293-295,297-302,304-311,313-330,335,337,339-341,343-345,347-355,360,363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "573ba4031d5da6cb3fd00828b7468200b02a98a1",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}
