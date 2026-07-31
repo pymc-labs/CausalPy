@@ -147,8 +147,9 @@ def to_pandas_with_time_index(
     ------
     DataException
         If ``time_column`` is missing from the data, if a non-pandas input
-        arrives without a ``time_column``, or if ``time_column`` is given for a
-        dataframe that already carries a meaningful index.
+        arrives without a ``time_column``, if ``time_column`` is given for a
+        dataframe that already carries a meaningful index, or if the resulting
+        time axis has duplicates or is not sorted.
 
     Examples
     --------
@@ -189,7 +190,23 @@ def to_pandas_with_time_index(
             "time axis. Pass only one: drop `time_column` to keep the index, or "
             "call `.reset_index(drop=True)` on the data to discard the index."
         )
-    return frame.set_index(time_column)
+    frame = frame.set_index(time_column)
+
+    # Only reachable through the time_column path. A dataframe library with no
+    # index also carries no row-order guarantee, so an unsorted column is an
+    # easy accident. The pre/post split is value-based and would survive it,
+    # but everything order-dependent downstream would not.
+    if not frame.index.is_unique:
+        raise DataException(
+            f"`time_column` '{time_column}' has duplicate values, so it cannot "
+            "be the time axis. Remove the duplicates before fitting."
+        )
+    if not frame.index.is_monotonic_increasing:
+        raise DataException(
+            f"`time_column` '{time_column}' is not sorted, so the time axis "
+            "would be out of order. Sort the data by that column before fitting."
+        )
+    return frame
 
 
 def _has_default_index(frame: pd.DataFrame) -> bool:
