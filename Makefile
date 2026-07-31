@@ -12,7 +12,10 @@ PACKAGE_DIR = causalpy
 
 DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
 DIFF_COVER_FAIL_UNDER ?= 96
-DIFF_COVER_EXCLUDE ?= causalpy/tests/*
+# diff-cover (10.3.0, 10.4.1) matches exclude patterns against the basename
+# and then the absolute path, never the repo-relative path. The pattern goes
+# through fnmatch, so a checkout path containing [ ? or * disables it.
+DIFF_COVER_EXCLUDE ?= $(CURDIR)/$(PACKAGE_DIR)/tests/*
 
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
