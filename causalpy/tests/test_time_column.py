@@ -95,6 +95,23 @@ class TestToPandasWithTimeIndex:
         result = to_pandas_with_time_index(frame, time_column="t")
         assert result.index.tolist() == [100, 200]
 
+    def test_duplicate_time_column_raises(self):
+        """A time axis with repeats is refused."""
+        frame = pl.DataFrame({"t": [1, 1, 2], "y": [3, 4, 5]})
+        with pytest.raises(DataException, match="duplicate values"):
+            to_pandas_with_time_index(frame, time_column="t")
+
+    def test_unsorted_time_column_raises(self):
+        """An out-of-order time axis is refused rather than silently accepted.
+
+        A dataframe library with no index carries no row-order guarantee, so
+        this is an easy accident. The pre/post split is value-based and would
+        survive it, but anything order-dependent downstream would not.
+        """
+        frame = pl.DataFrame({"t": [3, 1, 2], "y": [4, 5, 6]})
+        with pytest.raises(DataException, match="is not sorted"):
+            to_pandas_with_time_index(frame, time_column="t")
+
 
 class TestInterruptedTimeSeries:
     """InterruptedTimeSeries with an explicit time column."""
@@ -242,4 +259,29 @@ class TestSyntheticDifferenceInDifferences:
                 70,
                 control_units=["a", "b", "c", "d", "e", "f", "g"],
                 treated_units=["actual"],
+            )
+
+
+class TestUnsortedTimeColumnEndToEnd:
+    """An unsorted time column is refused at the experiment boundary.
+
+    SyntheticControl and SyntheticDifferenceInDifferences validate only the
+    treatment-time type, not index order, so before this guard they accepted a
+    shuffled time axis and scrambled it silently. InterruptedTimeSeries already
+    refused it via its own index validation.
+    """
+
+    @pytest.mark.parametrize(
+        "experiment", ["SyntheticControl", "SyntheticDifferenceInDifferences"]
+    )
+    def test_shuffled_time_column_raises(self, sc_data, experiment):
+        """Shuffling the rows of an otherwise valid frame is refused."""
+        shuffled = sc_data.sample(frac=1.0, random_state=1)
+        with pytest.raises(DataException, match="is not sorted"):
+            getattr(cp, experiment)(
+                to_polars_with_time(shuffled, "time"),
+                70,
+                control_units=["a", "b", "c", "d", "e", "f", "g"],
+                treated_units=["actual"],
+                time_column="time",
             )
