@@ -1,0 +1,19 @@
+causalpy/tests/test_migration_baseline_harness.py
+  s_edfa934933f7ae::t_8d18c869a4addd 29,36-62,1100-1102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ba8b2ef4e0c4fc7e1bfcb15aa8ea62726cd85295",
+  "prompts": {},
+  "sessions": {
+    "s_edfa934933f7ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91726c9f-81fb-4657-a9f9-aaa42d3e56c6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
