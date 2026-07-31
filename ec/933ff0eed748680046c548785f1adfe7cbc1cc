@@ -1,0 +1,19 @@
+scripts/migration_baseline/README.md
+  s_c5e0308edcbe07::t_86e822ee41cc1d 52-55,59-65,67,97-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ec933ff0eed748680046c548785f1adfe7cbc1cc",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}
