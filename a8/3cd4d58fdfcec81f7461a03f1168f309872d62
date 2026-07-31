@@ -1,0 +1,19 @@
+.gitignore
+  s_90d5beff458098::t_93ad7d1c835b1b 33-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a83cd4d58fdfcec81f7461a03f1168f309872d62",
+  "prompts": {},
+  "sessions": {
+    "s_90d5beff458098": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "304d8677-5a37-4e75-a457-6aaf754879e6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
