@@ -27,7 +27,7 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-from causalpy.custom_exceptions import DataException
+from causalpy.custom_exceptions import BadIndexException, DataException
 from causalpy.input_data import to_pandas_with_time_index
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
@@ -259,6 +259,30 @@ class TestSyntheticDifferenceInDifferences:
                 70,
                 control_units=["a", "b", "c", "d", "e", "f", "g"],
                 treated_units=["actual"],
+            )
+
+
+class TestTimestampMismatchMessage:
+    """The treatment-time mismatch error states the right requirement.
+
+    The ``treatment_time`` branch read "must be pd.Timestamp" on the path that
+    fires precisely because it already is one. The sibling
+    ``treatment_end_time`` branch had it right, so this was a copy-paste slip.
+    Reachable from any backend, but a ``time_column`` holding strings rather
+    than dates lands here, which is what surfaced it.
+    """
+
+    def test_non_datetime_index_with_timestamp_treatment_time(self, sc_data):
+        """A string time axis plus a Timestamp treatment time explains itself."""
+        as_text = sc_data.copy()
+        as_text.index = as_text.index.astype(str)
+        with pytest.raises(BadIndexException, match="must not be pd.Timestamp"):
+            cp.SyntheticControl(
+                as_text,
+                pd.Timestamp("2020-01-01"),
+                control_units=["a", "b", "c", "d", "e", "f", "g"],
+                treated_units=["actual"],
+                model=LinearRegression(),
             )
 
 
