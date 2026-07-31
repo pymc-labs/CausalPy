@@ -15,11 +15,20 @@
 Dataframe-agnostic input handling.
 
 CausalPy accepts any eager dataframe that `Narwhals
-<https://narwhals-dev.github.io/narwhals/>`_ supports (pandas, Polars,
-PyArrow, Modin, cuDF, and others) at its experiment boundaries. Inputs are
-converted to pandas immediately, because the modelling pipeline (patsy,
+<https://narwhals-dev.github.io/narwhals/>`_ supports at its experiment
+boundaries. The test suite exercises pandas, Polars, and PyArrow; the rest of
+the Narwhals-supported libraries follow from the same conversion but are not
+covered here. Lazy frames are rejected, because the modelling pipeline needs
+materialized data.
+
+Inputs are converted to pandas immediately, because that pipeline (patsy,
 statsmodels, scikit-learn, PyMC, and the plotting code) works on pandas and
-NumPy objects. Everything CausalPy returns is therefore still pandas-backed.
+NumPy objects.
+
+**Outputs are unchanged.** Everything CausalPy returns is still pandas-backed:
+``experiment.data``, the dataframes on :mod:`causalpy.reporting`, and the
+loaders in :mod:`causalpy.data` all hand back pandas regardless of what was
+passed in. This module widens what you may pass, not what you get back.
 
 Pandas inputs retain their index. Dataframes from other libraries have no
 index concept, so conversion produces a default ``RangeIndex``.
