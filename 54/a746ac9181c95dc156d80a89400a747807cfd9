@@ -1,0 +1,19 @@
+.gitignore
+  s_5b5d3983763000::t_67e5dcc18e19b8 33-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "54a746ac9181c95dc156d80a89400a747807cfd9",
+  "prompts": {},
+  "sessions": {
+    "s_5b5d3983763000": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "578e8f29-255c-40ba-baba-d19f2d601ba0",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
