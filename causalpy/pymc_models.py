@@ -259,16 +259,24 @@ class PyMCModel(pm.Model):
 
         self.priors = {**self.default_priors, **(priors or {})}
 
-    def _clone(self) -> "PyMCModel":
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration.
 
         ``copy.deepcopy`` of a ``pm.Model`` subclass loses its class
         identity, so this method constructs a new instance from the
         stored init parameters instead.
+
+        ``priors`` overrides the stored user priors on the copy. It is the sole
+        supported way to re-instantiate a model with a different prior set (used
+        by the ``auto_scale_sigma=False`` opt-out to pin the legacy noise prior),
+        so that no ``type(model)(...)`` reconstruction that could silently drop
+        subclass ``__init__`` configuration exists outside ``_clone``. Omitting
+        it (the ``clone_model`` sensitivity-check path) preserves the stored
+        priors unchanged.
         """
         return type(self)(
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def build_model(
@@ -686,9 +694,10 @@ def _uses_stock_y_hat_default(model: "PyMCModel") -> bool:
 
 
 #: Fallback outcome scale used when a treated unit's pre-treatment spread cannot
-#: be estimated (a constant series, or fewer than two observations). Keeping the
-#: scale at 1 reproduces the legacy ``HalfNormal(1)`` order of magnitude for
-#: those degenerate units instead of failing a fit that used to work.
+#: be estimated (a constant or sub-resolution series, or fewer than two
+#: observations). Keeping the scale at 1 reproduces the legacy ``HalfNormal(1)``
+#: order of magnitude for those degenerate units instead of failing a fit that
+#: used to work.
 _DEGENERATE_OUTCOME_SCALE = 1.0
 
 
@@ -697,8 +706,10 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
 
     Each treated unit's rate is ``2 / s_i``, giving ``sigma_i`` a prior mean of
     ``s_i / 2``, where ``s_i`` is that unit's sample standard deviation. Units
-    whose spread is not estimable fall back to ``s_i = 1`` with a warning;
-    non-finite outcomes are a data error and are rejected.
+    whose spread is not estimable -- constant, varying only below the outcome's
+    floating-point resolution, or with fewer than two observations -- fall back
+    to ``s_i = 1`` with a warning; non-finite outcomes are a data error and are
+    rejected.
     """
     y_values = np.asarray(
         y.transpose("obs_ind", "treated_units").values,
@@ -716,20 +727,34 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
         )
     if y_values.shape[0] < 2:
         scales = np.zeros(y_values.shape[1])
+        magnitudes = np.zeros(y_values.shape[1])
     else:
         scales = np.std(y_values, axis=0, ddof=1)
+        magnitudes = np.max(np.abs(y_values), axis=0)
     with np.errstate(divide="ignore", over="ignore"):
         rates = 2 / scales
-    # A zero (or subnormal) spread carries no scale information, so there is
-    # nothing to calibrate against and the fallback scale is used instead.
-    degenerate = ~np.isfinite(rates) | (rates <= 0)
+    # A spread carries no usable scale information in two cases. First, when it
+    # is zero or subnormal, ``2 / s`` overflows to non-finite or is non-positive.
+    # Second -- and this is the case the plain finite/positive test above misses
+    # -- when it is finite but negligible *relative to the outcome's own
+    # magnitude*. ``eps * |y|`` is the width of one representable float64 step at
+    # that magnitude, so a spread at or below it is indistinguishable from
+    # rounding noise; ``2 / s`` would mint that noise into an absurdly tight yet
+    # finite prior (a near-constant series -- e.g. a broken data pull -- is
+    # exactly this). The threshold is deliberately the resolution floor and no
+    # larger: above it the spread is genuine signal, however small in absolute
+    # terms, and the scale-equivariant ``Exponential(2 / s)`` prior is already
+    # calibrated to it. Both degenerate cases fall back to the default scale.
+    resolution = np.finfo(y_values.dtype).eps * magnitudes
+    degenerate = ~np.isfinite(rates) | (rates <= 0) | (scales <= resolution)
     if np.any(degenerate):
         warnings.warn(
             "Cannot estimate the pre-treatment outcome scale for treated unit(s) "
             f"{_format_treated_units(treated_units[degenerate])}; the series is "
-            "constant or has fewer than two observations. Falling back to an "
-            f"observation-noise scale of {_DEGENERATE_OUTCOME_SCALE} for those "
-            "units. Pass a custom y_hat prior to control this explicitly.",
+            "constant, varies only below its floating-point resolution, or has "
+            "fewer than two observations. Falling back to an observation-noise "
+            f"scale of {_DEGENERATE_OUTCOME_SCALE} for those units. Pass a custom "
+            "y_hat prior to control this explicitly.",
             UserWarning,
             stacklevel=2,
         )
@@ -1952,8 +1977,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._seasonality_component = None
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             n_order=self.n_order,
             n_changepoints_trend=self.n_changepoints_trend,
@@ -1961,7 +1990,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):
@@ -2446,8 +2475,12 @@ class StateSpaceTimeSeries(PyMCModel):
         self.ss_mod: Any = None
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             level_order=self.level_order,
             seasonal_length=self.seasonal_length,
@@ -2455,7 +2488,7 @@ class StateSpaceTimeSeries(PyMCModel):
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):
