@@ -760,6 +760,34 @@ class TestTimeSeriesModelClonePreservesPriors:
         assert cloned._user_priors == override
         assert cloned.level_order == 1
 
+    def test_all_shipped_pymc_model_clones_accept_priors_override(self):
+        """Every shipped ``PyMCModel._clone`` must accept the ``priors`` override.
+
+        The ``auto_scale_sigma=False`` opt-out pins the legacy prior via
+        ``_clone(priors=...)``; a subclass whose override dropped the parameter
+        would silently lose the pin. Since the design threads ``priors`` per
+        override rather than through a single template method, this guards the
+        exact drift that would reintroduce the bug one inheritance level up.
+        """
+        import inspect
+
+        from causalpy.pymc_models import PyMCModel
+
+        def _subclasses(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _subclasses(sub)
+
+        shipped = [
+            cls
+            for cls in _subclasses(PyMCModel)
+            if cls.__module__ == "causalpy.pymc_models"
+        ]
+        assert shipped  # sanity: the subclasses were discovered
+        for cls in shipped:
+            params = inspect.signature(cls._clone).parameters
+            assert "priors" in params, f"{cls.__name__}._clone drops priors override"
+
 
 class TestTimeSeriesModelCloneIsUnfitted:
     """Regression tests: ``_clone()`` returns a fresh model with no fitted state.

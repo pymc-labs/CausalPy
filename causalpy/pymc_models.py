@@ -693,9 +693,10 @@ def _uses_stock_y_hat_default(model: "PyMCModel") -> bool:
 
 
 #: Fallback outcome scale used when a treated unit's pre-treatment spread cannot
-#: be estimated (a constant series, or fewer than two observations). Keeping the
-#: scale at 1 reproduces the legacy ``HalfNormal(1)`` order of magnitude for
-#: those degenerate units instead of failing a fit that used to work.
+#: be estimated (a constant or sub-resolution series, or fewer than two
+#: observations). Keeping the scale at 1 reproduces the legacy ``HalfNormal(1)``
+#: order of magnitude for those degenerate units instead of failing a fit that
+#: used to work.
 _DEGENERATE_OUTCOME_SCALE = 1.0
 
 

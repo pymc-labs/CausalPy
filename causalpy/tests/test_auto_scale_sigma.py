@@ -484,6 +484,32 @@ def test_near_constant_series_falls_back_like_a_constant_one(fitter_cls):
 
 
 @pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_near_constant_unit_falls_back_only_for_that_unit(fitter_cls):
+    """The relative-resolution guard is per treated unit, not global.
+
+    One near-constant unit (a sub-resolution spread, caught only by the new
+    ``scales <= eps * |y|`` term) mixed with a healthy one: only the degenerate
+    unit falls back and is named in the warning; the healthy unit keeps its data
+    rate. A regression collapsing the per-unit magnitude to a single global
+    scalar (dropping ``axis=0``) would break this.
+    """
+    df, tt, treated = _make_data([1.0, 10.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    values = y.values.copy()
+    level = 5.0
+    values[:, 0] = level
+    values[-1, 0] = np.nextafter(level, np.inf)  # unit 0 near-constant
+    y = xr.DataArray(values, dims=y.dims, coords=y.coords)
+    with pytest.warns(UserWarning, match="Cannot estimate the pre-treatment") as record:
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    message = str(record[0].message)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    assert lam[0] == 2.0  # degenerate unit -> fallback
+    assert "treated_0" in message and "treated_1" not in message
+    np.testing.assert_allclose(lam[1], 2 / np.std(values[:, 1], ddof=1))
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
 def test_finite_but_sub_resolution_scale_falls_back(monkeypatch, fitter_cls):
     """A finite sd negligible against the data magnitude falls back, not ~2e200.
 
