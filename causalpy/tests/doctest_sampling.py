@@ -29,7 +29,7 @@ the doctests.
 Why here and not a package-root ``causalpy/conftest.py``
 --------------------------------------------------------
 This module lives under ``causalpy/tests/``, which is excluded from the built
-wheel by ``[tool.setuptools.packages.find] exclude = ["causalpy.test*"]``. No
+wheel by ``[tool.setuptools.packages.find] exclude = ["causalpy.test*", "docs*"]``. No
 test-only sampling shim ships to users. Excluding a single ``conftest.py``
 *module* from a setuptools wheel, by contrast, is not cleanly expressible
 (``packages.find`` excludes packages, and ``MANIFEST.in`` only shapes the
