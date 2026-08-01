@@ -1,0 +1,21 @@
+causalpy/tests/doctest_sampling.py
+  s_c3ce0eb209d541::t_e106e53f0dfecc 40-48,53-69,72,83,85,87-91,93-95,102-126
+causalpy/tests/test_doctest_sampling.py
+  s_c3ce0eb209d541::t_eb7960f8e53635 16-23,26-30,36-73,77-122,125-143,149-151,153,157,159-160,164-166,168,170,173-175,177-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b39f2b0c44cd5f7c75df8976900598d53804c0d5",
+  "prompts": {},
+  "sessions": {
+    "s_c3ce0eb209d541": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a766bd5-04ec-4d87-8525-15d0bf6486f7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
