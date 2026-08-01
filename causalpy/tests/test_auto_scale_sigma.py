@@ -598,7 +598,6 @@ class _ExtraArgWeightedSumFitter(WeightedSumFitter):
 
 
 @pytest.mark.integration
-@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_opt_out_preserves_subclass_init_config_through_clone(mock_pymc_sample):
     """auto_scale_sigma=False on a subclass with extra __init__ args keeps them.
 
