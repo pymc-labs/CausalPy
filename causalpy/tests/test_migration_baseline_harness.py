@@ -20,6 +20,7 @@ import copy
 import importlib.util
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,10 @@ import xarray as xr
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "migration_baseline" / "harness.py"
+README_PATH = REPO_ROOT / "scripts" / "migration_baseline" / "README.md"
+REPORT_TEMPLATE_PATH = (
+    REPO_ROOT / "scripts" / "migration_baseline" / "REPORT_TEMPLATE.md"
+)
 
 # The shared ``conftest`` registers ``mock_pymc_sample`` at *session* scope, so
 # once any earlier test in the run triggers it, ``pymc.sample`` (and
@@ -1191,3 +1196,59 @@ def test_harness_identity_binds_the_executing_file_to_its_committed_blob(
     copy_path.write_bytes(copy_path.read_bytes() + b"\n# uncommitted edit\n")
     with pytest.raises(harness.HarnessError, match="must be clean"):
         harness._harness_identity()
+
+
+# Every place a pinned revision is quoted outside ``STACK_COMMITS``. The
+# coordinator provisions its two worktrees from the README and transcribes the
+# attribution statement from REPORT_TEMPLATE, so a stale SHA in either document
+# sends a real capture at the wrong tree while the harness reports success.
+DOCUMENTED_PIN_QUOTES = (
+    (
+        "README.md",
+        README_PATH,
+        r"PyMC 5 reference `([0-9a-f]{40})` and PyMC 6 migration candidate "
+        r"`([0-9a-f]{40})`",
+        ("pymc5", "pymc6"),
+    ),
+    (
+        "README.md coordinator procedure",
+        README_PATH,
+        r"provision `PYMC6_ROOT` as a separate clean detached worktree at "
+        r"`([0-9a-f]{40})`",
+        ("pymc6",),
+    ),
+    (
+        "REPORT_TEMPLATE.md",
+        REPORT_TEMPLATE_PATH,
+        r"- Reference checkout: `([0-9a-f]{40})`",
+        ("pymc5",),
+    ),
+    (
+        "REPORT_TEMPLATE.md",
+        REPORT_TEMPLATE_PATH,
+        r"- Candidate checkout: `([0-9a-f]{40})`",
+        ("pymc6",),
+    ),
+)
+
+
+def test_pinned_revisions_are_documented_consistently() -> None:
+    """Re-pinning must move the constant and both documents together."""
+    harness = _load_harness_module()
+    assert set(harness.STACK_COMMITS) == {"pymc5", "pymc6"}
+    assert harness.PYMC5_COMMIT != harness.PYMC6_COMMIT
+    for stack, commit in harness.STACK_COMMITS.items():
+        assert harness._COMMIT_PATTERN.fullmatch(commit), (
+            f"{stack} pin is not a full lowercase SHA-1: {commit!r}"
+        )
+
+    for label, path, pattern, stacks in DOCUMENTED_PIN_QUOTES:
+        matches = re.findall(pattern, path.read_text(encoding="utf-8"))
+        assert len(matches) == 1, (
+            f"{label} must quote the pinned revisions exactly once via {pattern!r}"
+        )
+        quoted = matches[0] if isinstance(matches[0], tuple) else (matches[0],)
+        expected = tuple(harness.STACK_COMMITS[stack] for stack in stacks)
+        assert quoted == expected, (
+            f"{label} quotes {quoted}, but the harness pins {expected}"
+        )

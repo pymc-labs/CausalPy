@@ -1,8 +1,16 @@
 # PyMC Migration Baseline Harness
 
-This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
+This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `7b3e257b4b006800f445bec6303a399ef7ec2ffc`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
+
+The candidate is the head of the `pymc6_and_pymcmarketing1_migration` integration branch, so the evidence describes the tree that is proposed for `main`. It is not the harness checkout: `scripts/migration_baseline/harness.py` is executed from its own committed checkout, whose `HEAD` intentionally differs from both sampled revisions.
 
 The tracked implementation is `scripts/migration_baseline/harness.py`; generated JSON and Markdown evidence belongs outside every Git checkout. The harness rejects destinations inside its own checkout or either sampled checkout, and creates evidence files without replacing an existing path.
+
+## Re-pinning the candidate revision
+
+`PYMC6_COMMIT` in `harness.py` moved once already, from `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` (the merge of #1091) to the current value, because 121 further commits touching 60 files under `causalpy/` merged into the integration branch afterwards. Evidence captured at the superseded pin would have described a tree predating most of the migration.
+
+Re-pin only by editing `PYMC6_COMMIT`, this document, and [REPORT_TEMPLATE.md](REPORT_TEMPLATE.md) together in a reviewed commit; `test_pinned_revisions_are_documented_consistently` fails when they disagree. Re-pinning invalidates any capture taken at the previous pin: `capture` refuses a checkout whose `HEAD` is not the pinned revision, and `compare` refuses an artifact whose recorded `expected_commit` or `actual_commit` is not the currently pinned revision, so a stale artifact cannot be mixed into a new batch. Discard it and capture a fresh batch.
 
 ## Historical v1 result and v2 evidence requirement
 
@@ -47,7 +55,18 @@ The two repeat captures for one stack must have identical runtime provenance, po
 
 Run the four capture commands as independent processes from a clean, committed harness checkout. One coordinator-generated canonical UUID is required for the whole batch; each capture receives its fixed role and a fresh capture UUID is generated inside the harness. The outputs below are create-only: use a newly created evidence directory, not an existing directory or old v1 evidence.
 
-The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` and install it into its own editable-install prefix. Do not use the committed `migration/1048-baseline-harness` checkout as `PYMC6_ROOT`: its source `HEAD` intentionally differs from the migration candidate.
+The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `7b3e257b4b006800f445bec6303a399ef7ec2ffc` and install it into its own editable-install prefix. Do not use the committed `migration/1048-baseline-harness` checkout as `PYMC6_ROOT`: its source `HEAD` intentionally differs from the migration candidate.
+
+### Host requirements
+
+The protocol is not runnable on a small shared CI container or agent sandbox; it must be scheduled on a host that provides all of the following.
+
+- **Environment manager:** `mamba`, `micromamba` or `conda` on `PATH`, able to create two prefixes. `pip` alone is not sufficient: the two stacks need incompatible PyMC/PyTensor/ArviZ trees and their compiled dependencies.
+- **Two distinct prefixes:** `PYMC5_PREFIX` with PyMC 5 / PyTensor 2 / ArviZ 0, and `PYMC6_PREFIX` with PyMC 6 / PyTensor 3 / ArviZ 1, each with an editable CausalPy install whose `direct_url.json` target is exactly that stack's checkout. The two prefixes must agree on platform, machine, Python version/implementation and NumPy/pandas/xarray versions, or capture is rejected. Budget roughly 5–8 GB of disk for the two prefixes, the two worktrees and the PyTensor compile caches.
+- **Memory:** at least 8 GB of RAM available to the run. Each capture holds four chains of retained draws plus both models' posteriors in memory before serializing summaries, on top of a full PyTensor/NumPy toolchain and its C/numba compilation.
+- **CPU:** at least 4 cores. `cores=1` is a registered protocol constant, so the four chains of each model are sampled serially and extra cores do not shorten a capture; they are needed for the C/numba compilation steps and to keep the host from thrashing. Do not run the captures concurrently — each is an independent process and the two stacks must not contend for memory.
+- **Wall time:** hours, not minutes. Four captures run sequentially, each sampling two models at four chains × (1,000 tune + 1,000 draws) with `target_accept=0.95`, i.e. 32 serial chain runs in total, preceded by a cold PyTensor compile in each prefix. Schedule it as a long uninterrupted job.
+- **Isolation:** a clean host with no other memory-hungry work. Point `PYTENSOR_FLAGS=compiledir=...` at a per-prefix directory so the two stacks never share a compile cache.
 
 Set the six coordinator variables below to your own locations. `WORKTREES` is any
 directory outside every CausalPy checkout; `MAMBA` is whichever environment

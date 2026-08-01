@@ -31,8 +31,23 @@ ARTIFACT_SCHEMA_VERSION = 2
 COMPARISON_SCHEMA_VERSION = 2
 SCENARIO_VERSION = 2
 
+# The only two revisions whose numerical difference may be attributed to the
+# PyMC 5 -> PyMC 6 migration. ``PYMC5_COMMIT`` is the pre-migration reference and
+# never moves. ``PYMC6_COMMIT`` is the migration candidate: the head of the
+# `pymc6_and_pymcmarketing1_migration` integration branch that the evidence will
+# describe. The coordinator checks both out as clean detached worktrees and every
+# other revision is rejected, so evidence can never silently describe two
+# arbitrary trees.
+#
+# Re-pinning the candidate is a deliberate, reviewed source change to this line
+# plus `scripts/migration_baseline/README.md` and
+# `scripts/migration_baseline/REPORT_TEMPLATE.md`, which
+# `test_pinned_revisions_are_documented_consistently` keeps in agreement. Move it
+# only when further behavioral change merges into the integration branch before a
+# capture is run, and then discard evidence captured at the superseded pin rather
+# than mixing the two batches.
 PYMC5_COMMIT = "79c0a87072fd4653bfaed1eb085f965594c7f03a"
-PYMC6_COMMIT = "18a524a1a8512aaa21c46e0ccddbc54501c9eb1a"
+PYMC6_COMMIT = "7b3e257b4b006800f445bec6303a399ef7ec2ffc"
 STACK_COMMITS = {"pymc5": PYMC5_COMMIT, "pymc6": PYMC6_COMMIT}
 _COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
