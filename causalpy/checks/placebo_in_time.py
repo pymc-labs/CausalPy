@@ -811,14 +811,37 @@ class PlaceboInTime:
             ``(idata, theta_new_samples)`` where ``theta_new_samples``
             are draws from the posterior predictive for a new null
             period.
+
+        Raises
+        ------
+        ValueError
+            If the between-fold spread is unidentified, i.e.
+            ``np.nanstd(fold_means)`` is not positive and finite. Building the
+            null in that case would collapse it to a prior-driven width and
+            could report a spurious verdict.
         """
         n_folds = len(fold_means)
         fold_sds = np.where(fold_sds < 1e-6, 1e-6, fold_sds)
 
         prior_mu_center = float(np.nanmean(fold_means))
         prior_mu_scale = float(np.nanstd(fold_means))
-        if prior_mu_scale <= 0.0:
-            prior_mu_scale = 1.0
+        # A non-positive (or non-finite) between-fold spread means the null's
+        # scale is unidentified from these folds. Silently substituting a bare
+        # ``1.0`` here strips all data scaling from the ``mu`` and ``tau``
+        # priors and collapses the null to a prior-driven O(1) width, which on
+        # a large-scale series flips the verdict to a spurious SUPPORTED. Fail
+        # loudly instead. ``run`` already abstains (INCONCLUSIVE) before
+        # reaching this point when fewer than ``MIN_USABLE_FOLDS`` folds
+        # complete; this guards the residual case of >= 2 folds whose
+        # cumulative impacts coincide (e.g. an almost-constant series).
+        if not np.isfinite(prior_mu_scale) or prior_mu_scale <= 0.0:
+            raise ValueError(
+                "Cannot identify the hierarchical status-quo null: the "
+                f"{n_folds} completed placebo fold(s) have no between-fold "
+                "spread in their cumulative impacts (np.nanstd(fold_means) is "
+                "not positive). Use more folds or a longer pre-intervention "
+                "span so the placebo windows differ."
+            )
 
         scale = self.prior_scale
         coords = {"fold": np.arange(n_folds)}

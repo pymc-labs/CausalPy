@@ -979,7 +979,6 @@ def test_single_fold_directly_does_not_report_supported_on_large_scale():
     # A single usable fold cannot characterise the null distribution, so the
     # verdict must abstain rather than (spuriously) claim the effect is real.
     assert result.passed is None
-    assert result.passed is not True
     assert "SUPPORTED" not in result.text
     assert "INCONCLUSIVE" in result.text
     # No degenerate null was built.
@@ -1025,11 +1024,66 @@ def test_skips_down_to_single_fold_does_not_report_supported_on_large_scale():
     assert result.metadata["n_folds_requested"] == 2
     assert result.metadata["n_folds_completed"] == 1
     assert result.passed is None
-    assert result.passed is not True
     assert "SUPPORTED" not in result.text
     assert "INCONCLUSIVE" in result.text
     assert "null_samples" not in result.metadata
     assert "p_effect_outside_null" not in result.metadata
+
+
+def test_build_status_quo_model_raises_when_between_fold_spread_unidentified():
+    """>=2 folds with identical means must not fabricate a scale-free null.
+
+    The single-fold routes are abstained in :meth:`PlaceboInTime.run` before
+    the model is built.  This guards the residual root cause directly: when the
+    completed folds have no between-fold spread (``np.nanstd(fold_means) == 0``,
+    e.g. an almost-constant series with >= 2 folds), the old ``prior_mu_scale``
+    fallback to ``1.0`` stripped all data scaling and collapsed the null to an
+    O(1) width, flipping the verdict to a spurious SUPPORTED.  It must now fail
+    loudly rather than build that null.
+    """
+    check = PlaceboInTime(sample_kwargs=_FAST_HIERARCHICAL_KWARGS)
+    with pytest.raises(ValueError, match="Cannot identify the hierarchical"):
+        check._build_status_quo_model(
+            np.array([5000.0, 5000.0]),
+            np.array([300.0, 300.0]),
+        )
+
+
+def test_identical_folds_do_not_report_supported_end_to_end():
+    """A near-constant large-scale series must never surface as SUPPORTED.
+
+    Two folds complete (so the single-fold count guard does not apply) but with
+    identical cumulative impacts, so the between-fold null spread is
+    unidentified.  ``run`` must not return a verdict for such a degenerate
+    configuration.
+    """
+    data = pd.DataFrame({"y": np.zeros(120)}, index=np.arange(120))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=90,
+        cumulative_mean=5150.0,
+        cumulative_sd=0.0,
+    )
+
+    def factory(fold_data, treatment_time):
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=5000.0,
+            cumulative_sd=0.0,
+            seed=1,
+        )
+
+    check = PlaceboInTime(
+        n_folds=2,
+        intervention_length=30,
+        experiment_factory=factory,
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        random_seed=42,
+    )
+
+    with pytest.raises(ValueError, match="Cannot identify the hierarchical"):
+        check.run(experiment)
 
 
 def test_random_run_is_inconclusive_with_no_feasible_folds():
