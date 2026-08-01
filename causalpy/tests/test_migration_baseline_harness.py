@@ -470,6 +470,40 @@ def test_capture_rejects_dirty_pinned_checkout_before_import(
         )
 
 
+def test_capture_rejects_an_unpinned_revision_before_import(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A clean checkout at the wrong revision is not migration evidence.
+
+    This is what makes re-pinning ``PYMC6_COMMIT`` safe: once the pin moves,
+    the superseded worktree can no longer be captured at all, so a stale tree
+    cannot be sampled and labelled as the migration candidate.
+    """
+    harness = _load_harness_module()
+    superseded_commit = "1" * 40
+    assert superseded_commit not in harness.STACK_COMMITS.values()
+
+    def fake_run_git(_repo_root: Path, *arguments: str) -> str:
+        if arguments == ("rev-parse", "HEAD"):
+            return superseded_commit
+        assert arguments == ("status", "--porcelain")
+        return ""
+
+    def unexpected_import(_repo_root: Path) -> None:
+        pytest.fail("an unpinned revision must be rejected before importing CausalPy")
+
+    monkeypatch.setattr(harness, "_run_git", fake_run_git)
+    monkeypatch.setattr(harness, "_import_capture_dependencies", unexpected_import)
+
+    with pytest.raises(harness.HarnessError, match="capture requires"):
+        harness._capture_artifact(
+            "pymc6",
+            tmp_path,
+            batch_id="00000000-0000-4000-8000-000000000000",
+            capture_role="candidate_first",
+        )
+
+
 def test_did_capture_fixture_passes_constructor_validation_without_mcmc() -> None:
     """The pinned DiD fixture reaches real constructor validation with OLS only."""
     harness = _load_harness_module()
@@ -850,6 +884,34 @@ def test_comparator_requires_the_executing_harness_commit(
         harness.compare_artifacts(*artifacts)
 
 
+@pytest.mark.parametrize(
+    ("provenance_key", "message"),
+    [
+        ("expected_commit", "unexpected registered commit"),
+        ("actual_commit", "differs from the pinned"),
+    ],
+)
+def test_comparator_rejects_an_artifact_from_a_superseded_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provenance_key: str,
+    message: str,
+) -> None:
+    """Evidence captured at a superseded pin cannot enter a new batch.
+
+    Re-pinning ``PYMC6_COMMIT`` is therefore strictly narrowing: artifacts
+    recorded against the previous candidate are refused rather than silently
+    compared against captures of a different tree.
+    """
+    harness = _load_harness_module()
+    artifacts = list(_valid_artifact_batch(harness, tmp_path))
+    artifacts[2]["provenance"][provenance_key] = "1" * 40
+    monkeypatch.setattr(harness, "_harness_identity", _fake_harness_identity)
+
+    with pytest.raises(harness.HarnessError, match=message):
+        harness.compare_artifacts(*artifacts)
+
+
 def test_comparator_requires_four_unique_role_bound_capture_ids(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1202,19 +1264,21 @@ def test_harness_identity_binds_the_executing_file_to_its_committed_blob(
 # coordinator provisions its two worktrees from the README and transcribes the
 # attribution statement from REPORT_TEMPLATE, so a stale SHA in either document
 # sends a real capture at the wrong tree while the harness reports success.
+# The anchors tolerate reflowed whitespace: a rewrapped paragraph must not look
+# like pin drift, or the next author reflows the prose and deletes the test.
 DOCUMENTED_PIN_QUOTES = (
     (
         "README.md",
         README_PATH,
-        r"PyMC 5 reference `([0-9a-f]{40})` and PyMC 6 migration candidate "
-        r"`([0-9a-f]{40})`",
+        r"PyMC\s+5\s+reference\s+`([0-9a-f]{40})`\s+and\s+PyMC\s+6\s+migration"
+        r"\s+candidate\s+`([0-9a-f]{40})`",
         ("pymc5", "pymc6"),
     ),
     (
         "README.md coordinator procedure",
         README_PATH,
-        r"provision `PYMC6_ROOT` as a separate clean detached worktree at "
-        r"`([0-9a-f]{40})`",
+        r"provision\s+`PYMC6_ROOT`\s+as\s+a\s+separate\s+clean\s+detached"
+        r"\s+worktree\s+at\s+`([0-9a-f]{40})`",
         ("pymc6",),
     ),
     (
@@ -1232,8 +1296,8 @@ DOCUMENTED_PIN_QUOTES = (
 )
 
 
-def test_pinned_revisions_are_documented_consistently() -> None:
-    """Re-pinning must move the constant and both documents together."""
+def test_pinned_revisions_are_distinct_full_shas() -> None:
+    """Both stacks must pin one resolved, distinct revision."""
     harness = _load_harness_module()
     assert set(harness.STACK_COMMITS) == {"pymc5", "pymc6"}
     assert harness.PYMC5_COMMIT != harness.PYMC6_COMMIT
@@ -1242,13 +1306,37 @@ def test_pinned_revisions_are_documented_consistently() -> None:
             f"{stack} pin is not a full lowercase SHA-1: {commit!r}"
         )
 
-    for label, path, pattern, stacks in DOCUMENTED_PIN_QUOTES:
-        matches = re.findall(pattern, path.read_text(encoding="utf-8"))
-        assert len(matches) == 1, (
-            f"{label} must quote the pinned revisions exactly once via {pattern!r}"
-        )
-        quoted = matches[0] if isinstance(matches[0], tuple) else (matches[0],)
-        expected = tuple(harness.STACK_COMMITS[stack] for stack in stacks)
-        assert quoted == expected, (
-            f"{label} quotes {quoted}, but the harness pins {expected}"
-        )
+
+@pytest.mark.parametrize(
+    ("label", "path", "pattern", "stacks"),
+    DOCUMENTED_PIN_QUOTES,
+    ids=[quote[0] for quote in DOCUMENTED_PIN_QUOTES],
+)
+def test_pinned_revisions_are_documented_consistently(
+    label: str, path: Path, pattern: str, stacks: tuple[str, ...]
+) -> None:
+    """Re-pinning must move the constant and every document that quotes it."""
+    harness = _load_harness_module()
+    matches = re.findall(pattern, path.read_text(encoding="utf-8"))
+    assert len(matches) == 1, (
+        f"{label} must quote the pinned revisions exactly once via {pattern!r}"
+    )
+    quoted = matches[0] if isinstance(matches[0], tuple) else (matches[0],)
+    expected = tuple(harness.STACK_COMMITS[stack] for stack in stacks)
+    assert quoted == expected, (
+        f"{label} quotes {quoted}, but the harness pins {expected}"
+    )
+
+
+def test_superseded_pin_is_recorded_as_history_only() -> None:
+    """The re-pinning section must describe a predecessor, not the current pin."""
+    harness = _load_harness_module()
+    body = README_PATH.read_text(encoding="utf-8")
+    heading = "## Re-pinning the candidate revision"
+    assert heading in body, "the README must keep a re-pinning section"
+    section = body.split(heading, 1)[1].split("\n## ", 1)[0]
+    superseded = re.findall(r"`([0-9a-f]{40})`", section)
+    assert superseded, "the re-pinning section must name the superseded revision"
+    assert harness.PYMC6_COMMIT not in superseded, (
+        "the re-pinning section names the current pin as its own predecessor"
+    )
