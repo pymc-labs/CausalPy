@@ -38,8 +38,6 @@ def test_did(did_data):
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
-        treated=1,
-        untreated=0,
         model=LinearRegression(),
     )
     assert isinstance(data, pd.DataFrame)
@@ -48,7 +46,7 @@ def test_did(did_data):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -132,7 +130,7 @@ def test_rd_drinking():
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -393,7 +391,6 @@ def test_rd_linear_with_gaussian_process(rd_data):
         data,
         formula="y ~ 1 + x + treated",
         model=GaussianProcessRegressor(kernel=kernel),
-        model_kwargs={"kernel": kernel},
         treatment_threshold=0.5,
         epsilon=0.001,
     )

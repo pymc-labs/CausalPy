@@ -12,7 +12,7 @@ cp.SyntheticControl(
     treated_units,
     model=None,
     min_donor_correlation=0.0,
-    **kwargs
+    auto_scale_sigma=True,
 )
 ```
 
@@ -27,6 +27,8 @@ cp.SyntheticControl(
 ## Model Guidance
 
 The default PyMC model is `WeightedSumFitter`, which uses Dirichlet donor weights. Use `SoftmaxWeightedSumFitter` when you want logit-scale regularization over simplex weights. Sklearn regressors are also supported after adaptation. For donor-weight and likelihood priors, see [scale-aware custom priors](custom_priors.md).
+
+Both weighted-sum fitters derive their observation-noise prior from each treated unit's pre-treatment spread, so the outcome does not need to be standardized for the default to behave. `auto_scale_sigma=False` restores the pre-1.0 fixed `HalfNormal(1)` prior, which is what you want when reproducing an analysis run against an earlier release; expect posteriors to differ otherwise.
 
 ## Example
 

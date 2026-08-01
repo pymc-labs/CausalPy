@@ -23,7 +23,7 @@ dependencies:
   - nbconvert
   - nbformat
   - numpy
-  - pandas
+  - pandas<4,>=2.3
   - papermill
   - patsy
   - prek

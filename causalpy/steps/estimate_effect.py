@@ -20,6 +20,7 @@ the pipeline can validate all steps before executing any fitting.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -40,10 +41,11 @@ class EstimateEffect:
     ----------
     method : type[BaseExperiment]
         The experiment class to instantiate (e.g. ``cp.InterruptedTimeSeries``).
+
+    Other Parameters
+    ----------------
     **kwargs
-        Keyword arguments forwarded to the experiment constructor.  The
-        ``data`` argument is supplied by the pipeline and must *not* be
-        included here.
+        Keyword arguments accepted by ``method``'s constructor, except ``data``, which the pipeline supplies. This is a deliberately narrow dynamic forwarder: ``method`` may be an integrator-provided ``BaseExperiment`` subclass, so its accepted constructor keys cannot be enumerated here. Built-in experiment constructors declare every supported key explicitly; unsupported, misspelled, or incomplete arguments raise ``TypeError`` during pipeline validation.
 
     Examples
     --------
@@ -66,13 +68,15 @@ class EstimateEffect:
         Parameters
         ----------
         context : PipelineContext
-            Pipeline context (unused at validation time but required by the
-            pipeline step interface).
+            Pipeline context. Its data is used to validate the selected experiment
+            constructor's keyword arguments before execution.
 
         Raises
         ------
         TypeError
-            If *method* is not a subclass of ``BaseExperiment``.
+            If *method* is not a subclass of ``BaseExperiment`` or supplied
+            constructor arguments are incompatible with an inspectable constructor,
+            including omitted required arguments.
         ValueError
             If ``data`` is passed in kwargs (it comes from the pipeline).
         """
@@ -86,6 +90,18 @@ class EstimateEffect:
             raise ValueError(
                 "Do not pass 'data' to EstimateEffect; it is supplied by the Pipeline."
             )
+
+        try:
+            constructor_signature = inspect.signature(self.method)
+        except (TypeError, ValueError):
+            return
+
+        try:
+            constructor_signature.bind(context.data, **self.kwargs)
+        except TypeError as error:
+            raise TypeError(
+                f"Invalid constructor arguments for {self.method.__name__}: {error}"
+            ) from error
 
     def run(self, context: PipelineContext) -> PipelineContext:
         """Instantiate and fit the experiment.

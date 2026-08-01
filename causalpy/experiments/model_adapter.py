@@ -431,7 +431,7 @@ class SklearnModelAdapter(ModelAdapter):
             )
 
         obs_ind = (
-            np.asarray(X.coords["obs_ind"])
+            X.get_index("obs_ind")
             if isinstance(X, xr.DataArray) and "obs_ind" in X.coords
             else np.arange(values.shape[0])
         )

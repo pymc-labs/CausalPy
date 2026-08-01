@@ -21,7 +21,7 @@ import contextlib
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -203,27 +203,6 @@ class BaseExperiment(ABC):
         )
         self._model_backend = adapter
         self.model = adapter.model
-
-    def fit(self, *args: Any, **kwargs: Any) -> None:
-        """Fit the underlying model.
-
-        Subclasses must override this hook to delegate to their concrete
-        fitting routine; the base class only provides the abstract entry
-        point.
-
-        Parameters
-        ----------
-        *args : Any
-            Positional arguments forwarded to the subclass implementation.
-        **kwargs : Any
-            Keyword arguments forwarded to the subclass implementation.
-
-        Raises
-        ------
-        NotImplementedError
-            Always, when called on the base class.
-        """
-        raise NotImplementedError("fit method not implemented")
 
     @property
     def idata(self) -> xr.DataTree | None:
@@ -415,86 +394,17 @@ class BaseExperiment(ABC):
         """
         raise NotImplementedError("_plot method not yet implemented")
 
-    def get_plot_data(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        """Recover the data of an experiment along with the prediction and causal impact information.
-
-        Parameters
-        ----------
-        *args
-            Positional arguments forwarded to the subclass implementation.
-        **kwargs
-            Keyword arguments forwarded to the subclass implementation.
-        """
-        raise NotImplementedError("get_plot_data method not yet implemented")
-
     @abstractmethod
-    def effect_summary(
-        self,
-        *,
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-        prefix: str = "Post-period",
-        **kwargs: Any,
-    ) -> EffectSummary:
-        """
-        Generate a decision-ready summary of causal effects.
+    def effect_summary(self) -> EffectSummary:
+        """Generate a decision-ready summary of causal effects.
 
-        Parameters
-        ----------
-        window : str, tuple, or slice, default="post"
-            Time window for analysis (ITS/SC only, ignored for DiD/RD):
-
-            - "post": All post-treatment time points (default)
-            - (start, end): Tuple of start and end times (handles both datetime and integer indices)
-            - slice: Python slice object for integer indices
-        direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for tail probability calculation (PyMC only, ignored for OLS):
-
-            - "increase": P(effect > 0)
-            - "decrease": P(effect < 0)
-            - "two-sided": Two-sided p-value, report 1-p as "probability of effect"
-        alpha : float, default=0.05
-            Significance level for HDI/CI intervals (1-alpha confidence level).
-            For Bayesian models the effective HDI probability is
-            ``hdi_prob = 1 - alpha``. Note that this is independent of the
-            project-wide :data:`~causalpy.constants.HDI_PROB` constant
-            (currently 0.94) used by :meth:`plot` and
-            :meth:`get_plot_data`, so the same experiment may report
-            a 95% HDI in :meth:`effect_summary` and a 94% HDI in :meth:`plot`
-            with default settings.
-        cumulative : bool, default=True
-            Whether to include cumulative effect statistics (ITS/SC only, ignored for DiD/RD)
-        relative : bool, default=True
-            Whether to include relative effect statistics (% change vs counterfactual)
-            (ITS/SC only, ignored for DiD/RD)
-        min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
-            If provided, reports ``P(|effect| > min_effect)`` for two-sided or
-            ``P(effect > min_effect)`` for one-sided.
-        treated_unit : str, optional
-            For multi-unit experiments (Synthetic Control), specify which treated unit
-            to analyze. If None and multiple units exist, uses first unit.
-        period : {"intervention", "post", "comparison"}, optional
-            For experiments with multiple periods (e.g., three-period ITS), specify
-            which period to summarize. Defaults to None for standard behavior.
-        prefix : str, optional
-            Prefix for prose generation (e.g., "During intervention", "Post-intervention").
-            Defaults to "Post-period".
-        **kwargs
-            Reserved for forward-compatibility; subclasses may consume
-            additional keyword arguments.
+        Concrete experiments declare only the keyword-only parameters that
+        their own effect-summary implementation supports.
 
         Returns
         -------
         EffectSummary
-            Object with .table (DataFrame) and .text (str) attributes.
-            The .text attribute contains a detailed multi-paragraph narrative report.
+            Object with ``.table`` (DataFrame) and ``.text`` (str) attributes.
         """
         raise NotImplementedError("effect_summary method not yet implemented")
 

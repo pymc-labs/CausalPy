@@ -12,7 +12,6 @@ cp.DifferenceInDifferences(
     group_variable_name,
     post_treatment_variable_name="post_treatment",
     model=None,
-    **kwargs
 )
 ```
 

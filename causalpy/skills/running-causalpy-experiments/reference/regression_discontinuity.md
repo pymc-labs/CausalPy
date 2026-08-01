@@ -14,7 +14,6 @@ cp.RegressionDiscontinuity(
     epsilon=0.001,
     bandwidth=np.inf,
     donut_hole=0.0,
-    **kwargs
 )
 ```
 

@@ -15,7 +15,6 @@ cp.InstrumentalVariable(
     vs_prior_type=None,
     vs_hyperparams=None,
     binary_treatment=False,
-    **kwargs
 )
 ```
 

@@ -12,12 +12,62 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Utility functions for intelligent date axis formatting.
+Utility functions for date axis formatting and datetime index validation.
 """
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
+
+from causalpy.custom_exceptions import BadIndexException
+
+
+def validate_treatment_time_against_index(
+    index: pd.Index,
+    treatment_time: int | float | pd.Timestamp,
+    *,
+    name: str = "treatment_time",
+) -> None:
+    """Check that a treatment boundary can be compared against ``data.index``.
+
+    Experiments slice their data with comparisons such as
+    ``data.index < treatment_time``. That is only well defined when the boundary
+    is missing-free, of the same broad kind as the index (datetime vs numeric),
+    and — for :class:`pandas.DatetimeIndex` — matches the index's
+    timezone-awareness. Timezone-aware values in *different* zones compare
+    correctly in pandas, so only a naive/aware mismatch is rejected.
+
+    Parameters
+    ----------
+    index : pd.Index
+        The index the boundary will be compared against.
+    treatment_time : int, float, or pd.Timestamp
+        The treatment boundary to validate.
+    name : str, default "treatment_time"
+        Name used in error messages, e.g. ``"treatment_end_time"``.
+
+    Raises
+    ------
+    BadIndexException
+        If ``treatment_time`` cannot be compared against ``index``.
+    """
+    if pd.isna(treatment_time):
+        raise BadIndexException(f"{name} must not be missing.")
+
+    if isinstance(index, pd.DatetimeIndex):
+        if not isinstance(treatment_time, pd.Timestamp):
+            raise BadIndexException(
+                f"If data.index is DatetimeIndex, {name} must be pd.Timestamp."
+            )
+        if (index.tz is None) != (treatment_time.tz is None):
+            raise BadIndexException(
+                f"{name} and data.index must either both be timezone-aware or "
+                "both be timezone-naive."
+            )
+    elif isinstance(treatment_time, pd.Timestamp):
+        raise BadIndexException(
+            f"If data.index is not DatetimeIndex, {name} must not be pd.Timestamp."
+        )
 
 
 def _combine_datetime_indices(

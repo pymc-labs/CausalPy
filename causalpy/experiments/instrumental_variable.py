@@ -29,8 +29,7 @@ from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
-from causalpy.reporting import EffectSummary
-from typing import Any, Literal
+from typing import Any, NoReturn
 
 
 class InstrumentalVariable(BaseExperiment):
@@ -68,8 +67,6 @@ class InstrumentalVariable(BaseExperiment):
         A indicator for whether the treatment to be modelled is binary or not.
         Determines which PyMC model we use to model the joint outcome and
         treatment.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Notes
     -----
@@ -137,7 +134,6 @@ class InstrumentalVariable(BaseExperiment):
         vs_prior_type=None,
         vs_hyperparams=None,
         binary_treatment=False,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
@@ -362,47 +358,14 @@ class InstrumentalVariable(BaseExperiment):
                     f"{round_num(hi, round_to)}]"
                 )
 
-    def effect_summary(
-        self,
-        *,
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-        prefix: str = "Post-period",
-        **kwargs: Any,
-    ) -> EffectSummary:
-        """
-        Generate a decision-ready summary of causal effects.
+    def effect_summary(self) -> NoReturn:
+        """Raise because unified effect summaries are unavailable.
 
-        Note: effect_summary is not yet implemented for InstrumentalVariable experiments.
-
-        Parameters
-        ----------
-        window : str, tuple, or slice, default "post"
-            Time window for analysis (unused for InstrumentalVariable).
-        direction : {"increase", "decrease", "two-sided"}, default "increase"
-            Direction for tail probability calculation.
-        alpha : float, default 0.05
-            Significance level for HDI/CI intervals.
-        cumulative : bool, default True
-            Whether to include cumulative effect statistics.
-        relative : bool, default True
-            Whether to include relative effect statistics.
-        min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold.
-        treated_unit : str, optional
-            For multi-unit experiments, the unit to analyse.
-        period : {"intervention", "post", "comparison"}, optional
-            Period selector for three-period designs.
-        prefix : str, default "Post-period"
-            Prefix for prose generation.
-        **kwargs
-            Reserved for forward-compatibility.
+        Raises
+        ------
+        NotImplementedError
+            Instrumental-variable experiments do not implement a unified
+            decision-ready effect summary.
         """
         raise NotImplementedError(
             "effect_summary is not yet implemented for InstrumentalVariable experiments."

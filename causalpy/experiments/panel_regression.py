@@ -14,7 +14,7 @@
 """Panel Regression with Fixed Effects."""
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +31,6 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
-from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
 from .base import BaseExperiment
@@ -69,8 +68,6 @@ class PanelRegression(BaseExperiment):
           but doesn't directly estimate individual unit effects.
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, a model must be provided.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Attributes
     ----------
@@ -148,7 +145,7 @@ class PanelRegression(BaseExperiment):
     ...     time_fe_variable="time",
     ...     fe_method="dummies",
     ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
     ... )
 
@@ -178,7 +175,7 @@ class PanelRegression(BaseExperiment):
     ...     time_fe_variable="time",
     ...     fe_method="demeaned",
     ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
     ... )
     """
@@ -195,11 +192,11 @@ class PanelRegression(BaseExperiment):
         time_fe_variable: str | None = None,
         fe_method: Literal["dummies", "demeaned"] = "dummies",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
 
-        # Rename the index to "obs_ind" (on original, before copying)
+        # Work on an owned frame before normalizing its index metadata.
+        data = data.copy()
         data.index.name = "obs_ind"
         self.data = data
         self.expt_type = "Panel Regression"
@@ -237,6 +234,12 @@ class PanelRegression(BaseExperiment):
             raise DataException(
                 f"time_fe_variable '{self.time_fe_variable}' not found in data columns"
             )
+
+        for variable in (self.unit_fe_variable, self.time_fe_variable):
+            if variable is not None and self.data[variable].isna().any():
+                raise DataException(
+                    f"Fixed-effect variable '{variable}' must not contain missing values"
+                )
 
         if self.fe_method not in ["dummies", "demeaned"]:
             raise ValueError(
@@ -362,9 +365,16 @@ class PanelRegression(BaseExperiment):
         data = data.copy()
 
         # Identify numeric and boolean columns to demean (exclude group variables).
-        # Boolean columns (e.g. treatment indicators) must be included; pandas
-        # select_dtypes(include=[np.number]) excludes bool.
-        numeric_cols = data.select_dtypes(include=[np.number, "bool"]).columns.tolist()
+        # Predicates include pandas extension dtypes such as ``BooleanDtype``.
+        numeric_cols = [
+            column
+            for column, dtype in data.dtypes.items()
+            if isinstance(column, str)
+            and (
+                pd.api.types.is_numeric_dtype(dtype)
+                or pd.api.types.is_bool_dtype(dtype)
+            )
+        ]
         group_vars_to_exclude = [self.unit_fe_variable]
         if self.time_fe_variable:
             group_vars_to_exclude.append(self.time_fe_variable)
@@ -375,19 +385,19 @@ class PanelRegression(BaseExperiment):
         # numeric results (bool - float would otherwise raise or produce
         # unexpected dtypes).
         for col in numeric_cols:
-            if data[col].dtype == "bool":
+            if pd.api.types.is_bool_dtype(data[col]):
                 data[col] = data[col].astype(float)
 
         # Store group means from the ORIGINAL data (before any demeaning in
         # prior calls) so that fixed effects can be recovered post-hoc.
         if group_var not in self._group_means:
-            self._group_means[group_var] = self._original_data.groupby(group_var)[
-                numeric_cols
-            ].mean()
+            self._group_means[group_var] = self._original_data.groupby(
+                group_var, observed=True
+            )[numeric_cols].mean()
 
         # Demean each numeric column
         for col in numeric_cols:
-            group_mean = data.groupby(group_var)[col].transform("mean")
+            group_mean = data.groupby(group_var, observed=True)[col].transform("mean")
             data[col] = data[col] - group_mean
 
         return data
@@ -455,59 +465,18 @@ class PanelRegression(BaseExperiment):
                 formatted_val = f"{round_num(coefs[idx], rd):>10}"
                 print(f"  {formatted_name}\t{formatted_val}")
 
-    def effect_summary(
-        self,
-        *,
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-        prefix: str = "Post-period",
-        **kwargs: Any,
-    ) -> EffectSummary:
-        """Generate a decision-ready summary of causal effects.
-
-        .. note::
-            ``effect_summary()`` is not yet implemented for
-            ``PanelRegression``.  Panel fixed-effects models estimate
-            regression coefficients rather than time-varying causal impacts,
-            so the standard ITS/SC-style effect summary does not directly
-            apply.  Use :meth:`summary` for coefficient-level inference.
-
-        Parameters
-        ----------
-        window : str, tuple, or slice, default "post"
-            Time window for analysis (placeholder; not consumed).
-        direction : {"increase", "decrease", "two-sided"}, default "increase"
-            Direction for tail probability calculation.
-        alpha : float, default 0.05
-            Significance level for HDI/CI intervals.
-        cumulative : bool, default True
-            Whether to include cumulative effect statistics.
-        relative : bool, default True
-            Whether to include relative effect statistics.
-        min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold.
-        treated_unit : str, optional
-            Treated unit selector for multi-unit experiments.
-        period : {"intervention", "post", "comparison"}, optional
-            Period selector for three-period designs.
-        prefix : str, default "Post-period"
-            Prefix for prose generation.
-        **kwargs
-            Reserved for forward-compatibility.
+    def effect_summary(self) -> NoReturn:
+        """Raise because panel regression has no unified effect summary.
 
         Raises
         ------
         NotImplementedError
-            Always raised; this method is a placeholder for future work.
+            Panel fixed-effects models estimate coefficients rather than
+            time-varying causal impacts. Use :meth:`summary` for
+            coefficient-level inference.
         """
         raise NotImplementedError(
-            "effect_summary() is not yet implemented for PanelRegression. "
+            "effect_summary() is not implemented for PanelRegression. "
             "Panel fixed-effects models estimate regression coefficients rather "
             "than time-varying causal impacts. Use summary() for coefficient-level "
             "inference."
@@ -649,17 +618,12 @@ class PanelRegression(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data(self, **kwargs: Any) -> pd.DataFrame:
+    def get_plot_data(self) -> pd.DataFrame:
         """Get plot data with fitted values.
 
         Bayesian models additionally return ``y_fitted_lower`` /
         ``y_fitted_upper`` 95% credible-interval columns.
 
-        Parameters
-        ----------
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------
@@ -899,7 +863,7 @@ class PanelRegression(BaseExperiment):
                 selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
             elif select == "extreme":
                 # Select units with the largest and smallest mean outcomes
-                unit_means = self.data.groupby(self.unit_fe_variable)[
+                unit_means = self.data.groupby(self.unit_fe_variable, observed=True)[
                     self.outcome_variable_name
                 ].mean()
                 n_each = max(1, n_sample // 2)
@@ -908,7 +872,7 @@ class PanelRegression(BaseExperiment):
                 selected_units = top + bottom
             elif select == "high_variance":
                 # Select units with the most within-unit variation
-                unit_var = self.data.groupby(self.unit_fe_variable)[
+                unit_var = self.data.groupby(self.unit_fe_variable, observed=True)[
                     self.outcome_variable_name
                 ].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()

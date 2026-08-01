@@ -1,6 +1,6 @@
 # Scale-Aware Custom Priors
 
-Use custom priors whenever CausalPy is fitting a PyMC model to predictors and outcomes that are not already on comparable, interpretable scales. Defaults are useful for examples, but a default such as `Normal(0, 50)` on coefficients or `HalfNormal(1)` on outcome noise can be too weak, too tight, or simply mismatched when outcomes are revenue, deaths, log-sales, percentages, or standardized scores.
+Use custom priors whenever CausalPy is fitting a PyMC model to predictors and outcomes that are not already on comparable, interpretable scales. Defaults are useful for examples, but a default such as `Normal(0, 50)` on coefficients or `HalfNormal(1)` on outcome noise can be too weak, too tight, or simply mismatched when outcomes are revenue, deaths, log-sales, percentages, or standardized scores. The synthetic-control weighted-sum fitters are the exception: their observation-noise default is derived from the data (see below).
 
 ## Basic Workflow
 
@@ -51,6 +51,15 @@ model = cp.pymc_models.WeightedSumFitter(
     }
 )
 ```
+
+### Observation noise is data-scaled by default
+
+`WeightedSumFitter` and `SoftmaxWeightedSumFitter` do not use a fixed noise prior. At fit time each treated unit *i* gets `sigma_i ~ Exponential(2 / s_i)`, where `s_i` is the standard deviation of that unit's pre-treatment outcome, giving `sigma_i` a prior mean of `s_i / 2`. This keeps the default weakly informative on outcomes of any magnitude, instead of fighting the data whenever the outcome's spread is much larger than 1. A unit whose pre-treatment series is constant (or has fewer than two observations) has no estimable spread, so it falls back to `s_i = 1` and warns.
+
+Two ways to take over:
+
+- Pass your own `y_hat` prior, as in the example above. An explicit prior always wins over the data-derived one.
+- Pass `cp.SyntheticControl(..., auto_scale_sigma=False)` to keep the pre-1.0 `HalfNormal(1)` default, for example when reproducing an older analysis. The experiment then fits a copy of your model with that prior pinned.
 
 `SoftmaxWeightedSumFitter` controls regularization through the scale of `beta_raw`. Smaller `sigma` pulls weights toward uniform; larger `sigma` lets weights concentrate on better-matching donors.
 

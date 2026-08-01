@@ -95,7 +95,7 @@ def test_its_with_state_space_model():
     rng = np.random.default_rng(seed=42)
     dates = pd.date_range(start="2020-01-01", periods=80, freq="D")
     trend = np.linspace(0, 1.0, len(dates))
-    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear / 7)
+    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear.to_numpy() / 7)
     noise = rng.normal(0, 0.2, len(dates))
     y = trend + season + noise
     df = pd.DataFrame({"y": y}, index=dates)
@@ -151,7 +151,7 @@ def test_state_space_predict_and_score():
     """Test StateSpaceTimeSeries predict and score methods directly."""
     # Skip if pymc-extras is not available
     try:
-        import pymc_extras.statespace.structural  # noqa: F401
+        from pymc_extras.statespace import structural  # noqa: F401
     except ImportError:
         pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
 
@@ -159,7 +159,7 @@ def test_state_space_predict_and_score():
     rng = np.random.default_rng(seed=42)
     dates = pd.date_range(start="2020-01-01", periods=60, freq="D")
     trend = np.linspace(0, 1.0, len(dates))
-    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear / 7)
+    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear.to_numpy() / 7)
     noise = rng.normal(0, 0.1, len(dates))
     y = trend + season + noise
 
@@ -194,7 +194,7 @@ def test_state_space_predict_and_score():
         level_order=2,
         seasonal_length=7,
         sample_kwargs=sample_kwargs,
-        mode="PyMC",
+        mode="FAST_COMPILE",
     )
 
     # Fit the model.
@@ -231,7 +231,7 @@ def test_state_space_custom_components():
     """Test StateSpaceTimeSeries custom component validation."""
     # Skip if pymc-extras is not available
     try:
-        import pymc_extras.statespace.structural  # noqa: F401
+        from pymc_extras.statespace import structural  # noqa: F401
     except ImportError:
         pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
 
@@ -268,73 +268,96 @@ def test_state_space_error_conditions():
     """Test StateSpaceTimeSeries error handling."""
     # Skip if pymc-extras is not available
     try:
-        import pymc_extras.statespace.structural  # noqa: F401
+        from pymc_extras.statespace import structural  # noqa: F401
     except ImportError:
         pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
 
     rng = np.random.default_rng(seed=42)
     dates = pd.date_range(start="2020-01-01", periods=30, freq="D")
-    y = rng.normal(0, 1, len(dates))
+    y_values = rng.normal(0, 1, (len(dates), 1))
+    y = xr.DataArray(
+        y_values,
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
 
-    sample_kwargs = {"chains": 1, "draws": 10, "progressbar": False}
+    sample_kwargs = {"chains": 1, "draws": 10, "tune": 10, "progressbar": False}
 
     model = cp.pymc_models.StateSpaceTimeSeries(
         level_order=2,
         seasonal_length=7,
         sample_kwargs=sample_kwargs,
-        mode="PyMC",
+        mode="FAST_COMPILE",
     )
 
-    # Test missing coords
-    with pytest.raises(ValueError, match="coords must be provided"):
-        model.fit(X=None, y=y, coords=None)
+    # y is required
+    with pytest.raises(ValueError, match="y must be provided"):
+        model.fit(X=None, y=None)
 
-    # Test missing datetime_index in coords
-    with pytest.raises(
-        ValueError,
-        match="coords must contain 'datetime_index' of type pandas.DatetimeIndex",
-    ):
-        model.fit(X=None, y=y, coords={"some_other_key": dates})
+    # A treated_units dimension is required
+    y_without_units = xr.DataArray(
+        y_values[:, 0], dims=["obs_ind"], coords={"obs_ind": dates}
+    )
+    with pytest.raises(ValueError, match="requires a treated_units dimension"):
+        model.fit(X=None, y=y_without_units)
 
-    # Test invalid datetime_index type
-    with pytest.raises(
-        ValueError,
-        match="coords must contain 'datetime_index' of type pandas.DatetimeIndex",
-    ):
-        model.fit(X=None, y=y, coords={"datetime_index": np.arange(len(dates))})
+    # Exactly one treated unit is supported
+    y_two_units = xr.DataArray(
+        rng.normal(0, 1, (len(dates), 2)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0", "unit_1"]},
+    )
+    with pytest.raises(ValueError, match="supports exactly one treated unit"):
+        model.fit(X=None, y=y_two_units)
 
-    # Fit a model for predict error tests
+    # Non-datetime obs_ind with no datetime_index fallback
+    y_integer_index = xr.DataArray(
+        y_values,
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(len(dates)), "treated_units": ["unit_0"]},
+    )
+    with pytest.raises(ValueError, match="must contain datetime values"):
+        model.fit(X=None, y=y_integer_index)
+
+    # The datetime_index fallback must be a pd.DatetimeIndex
+    with pytest.raises(ValueError, match="must be a pd.DatetimeIndex"):
+        model.fit(
+            X=None,
+            y=y_integer_index,
+            coords={"datetime_index": np.arange(len(dates))},
+        )
+
+    # Fit a model for the prediction error tests
     model2 = cp.pymc_models.StateSpaceTimeSeries(
         level_order=2,
         seasonal_length=7,
         sample_kwargs=sample_kwargs,
-        mode="PyMC",
+        mode="FAST_COMPILE",
     )
-    model2.fit(X=None, y=y, coords={"datetime_index": dates})
+    model2.fit(X=None, y=y)
 
-    # Test predict with out_of_sample=True but coords=None
-    with pytest.raises(
-        ValueError, match="coords must be provided for out-of-sample prediction"
-    ):
-        model2.predict(X=None, coords=None, out_of_sample=True)
+    # Out-of-sample prediction requires X carrying the forecast datetimes
+    with pytest.raises(ValueError, match="X must be provided for out-of-sample"):
+        model2.predict(X=None, out_of_sample=True)
 
-    # Test predict with out_of_sample=True but invalid datetime_index
-    with pytest.raises(
-        ValueError,
-        match="coords must contain 'datetime_index' for prediction period",
-    ):
-        model2.predict(
-            X=None,
-            coords={"datetime_index": np.arange(10)},
-            out_of_sample=True,
-        )
+    X_without_obs_ind = xr.DataArray(np.zeros((5, 0)), dims=["obs_ind", "coeffs"])
+    with pytest.raises(ValueError, match="X must have 'obs_ind' coordinate"):
+        model2.predict(X=X_without_obs_ind, out_of_sample=True)
 
-    # Test predict before fit
+    X_integer_index = xr.DataArray(
+        np.zeros((5, 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(5), "coeffs": []},
+    )
+    with pytest.raises(ValueError, match="must contain datetime values"):
+        model2.predict(X=X_integer_index, out_of_sample=True)
+
+    # Predict before fit
     unfitted_model = cp.pymc_models.StateSpaceTimeSeries(
         level_order=2,
         seasonal_length=7,
         sample_kwargs=sample_kwargs,
-        mode="PyMC",
+        mode="FAST_COMPILE",
     )
     with pytest.raises(RuntimeError, match="Model must be fit before"):
-        unfitted_model.predict(X=None, coords={"datetime_index": dates})
+        unfitted_model.predict(X=None)

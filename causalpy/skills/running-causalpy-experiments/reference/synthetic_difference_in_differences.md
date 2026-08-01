@@ -11,7 +11,6 @@ cp.SyntheticDifferenceInDifferences(
     control_units,
     treated_units,
     model=None,
-    **kwargs
 )
 ```
 

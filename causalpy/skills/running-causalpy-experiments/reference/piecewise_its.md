@@ -9,7 +9,6 @@ cp.PiecewiseITS(
     data,
     formula,
     model=None,
-    **kwargs
 )
 ```
 

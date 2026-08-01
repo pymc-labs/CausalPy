@@ -71,8 +71,6 @@ class PiecewiseITS(BaseExperiment):
     model : PyMCModel or RegressorMixin, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model.
-    **kwargs
-        Additional keyword arguments passed to the model.
 
     Attributes
     ----------
@@ -161,7 +159,6 @@ class PiecewiseITS(BaseExperiment):
         data: pd.DataFrame,
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
 
@@ -649,7 +646,7 @@ class PiecewiseITS(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data(self, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
+    def get_plot_data(self, *, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
         """
         Recover the data of the experiment along with prediction and effect information.
 
@@ -734,7 +731,6 @@ class PiecewiseITS(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        **kwargs: Any,
     ) -> EffectSummary:
         """Generate a decision-ready summary of PiecewiseITS causal effects.
 
@@ -758,8 +754,6 @@ class PiecewiseITS(BaseExperiment):
             Not supported by PiecewiseITS; pass ``None``.
         prefix : str, default "Post-period"
             Prefix for prose generation.
-        **kwargs
-            Reserved for forward-compatibility.
         """
         from causalpy.reporting import (
             _effect_summary_timeseries,

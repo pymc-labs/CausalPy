@@ -85,6 +85,27 @@ cp.SensitivityAnalysis(
 
 This check requires a PyMC-backed model because it works with posterior impact draws. In CausalPy it can also fit a hierarchical null model and, optionally, estimate Bayesian assurance for a user-supplied expected effect prior.
 
+#### Fold eligibility and the pre-period constraint
+
+Every placebo fold is a full re-fit, so a fold needs enough pre-treatment history to identify the model before its pseudo-intervention begins. `PlaceboInTime` requires each fold to have at least one full intervention window of observed history ahead of it, and skips folds that fall short rather than fitting them. A fold fitted on a handful of observations produces a posterior cumulative impact with a very large standard deviation, which inflates the between-fold scale `tau` of the hierarchical status-quo model and widens the learned null until it can swallow a genuine effect.
+
+Skipped folds are reported in the check text and recorded in `metadata["skipped_folds"]` with the observed and required pre-period row counts, and a warning names the reason. If every fold is skipped, the check returns `passed=None` (inconclusive) rather than building a null from nothing.
+
+The constraint bites when the pre-period is only a few times longer than the post-period, because by default each fold consumes one post-period worth of history. There are two ways out:
+
+- Pass an explicit `intervention_length` to shorten the placebo window. This shortens both the window and the history each fold requires, so more folds become eligible without changing the headline analysis. The actual effect is still summarised over the whole post-intervention period, so a much shorter window compares a long actual cumulative impact against a null built from short windows; `PlaceboInTime` warns when that happens and records both spans in `metadata["comparison_window"]`.
+- Pass an `experiment_factory` that adapts the model to the shorter fold data, for example by tightening priors or reducing the donor pool.
+
+```python
+cp.checks.PlaceboInTime(n_folds=4, intervention_length=10, random_seed=42)
+```
+
+#### Reproducibility
+
+`PlaceboInTime` has several stochastic stages: the per-fold experiment fits, the hierarchical status-quo `pm.sample`, the posterior predictive draw for `theta_new`, random fold selection, and the assurance simulation. The constructor's `random_seed` is the master seed for all of them, so setting it alone is enough to make the reported verdict, `metadata["p_effect_outside_null"]` and `metadata["null_samples"]` reproducible. Folds are seeded as `random_seed + fold_index`, so they are independent of one another but stable across runs.
+
+The one deliberate override is `sample_kwargs["random_seed"]`: when supplied explicitly it takes precedence, for the hierarchical `pm.sample` call only. Two cases sit outside the master seed and are surfaced rather than hidden. A custom `experiment_factory` owns any randomness it introduces, and an `expected_effect_prior` whose `.rvs` does not accept `random_state` is drawn unseeded, which raises a warning and is recorded in `metadata["unseeded_custom_priors"]`.
+
 ### {doc}`PriorSensitivity <../api/generated/causalpy.checks.prior_sensitivity.PriorSensitivity>`
 
 `PriorSensitivity` re-fits the same experiment with alternative prior specifications and compares the resulting effect summaries. Use it when prior choice could matter materially, especially in small samples or weakly identified models. Reporting how posterior conclusions change under reasonable alternatives is good Bayesian practice {cite:p}`liBayesianProp`.

@@ -216,9 +216,20 @@ class OutcomeFalsification:
             effect row) should fail loudly rather than silently
             returning the wrong row.
         """
-        summary = experiment.effect_summary(
-            alpha=alpha, direction="two-sided", cumulative=False, relative=False
-        )
+        if isinstance(experiment, DifferenceInDifferences):
+            summary = experiment.effect_summary(alpha=alpha, direction="two-sided")
+        elif isinstance(experiment, (InterruptedTimeSeries, PiecewiseITS)):
+            summary = experiment.effect_summary(
+                alpha=alpha,
+                direction="two-sided",
+                cumulative=False,
+                relative=False,
+            )
+        else:
+            raise TypeError(
+                "OutcomeFalsification supports InterruptedTimeSeries, "
+                "DifferenceInDifferences, and PiecewiseITS experiments."
+            )
         table = summary.table
 
         required_columns = {"mean", "hdi_lower", "hdi_upper"}

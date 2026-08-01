@@ -685,8 +685,8 @@ def test_iv_not_implemented_methods(iv_data, sample_kwargs, method):
         getattr(result, method)()
 
 
-def test_iv_get_plot_data_not_implemented(iv_data, sample_kwargs):
-    """Test that get_plot_data raises NotImplementedError."""
+def test_iv_has_no_unsupported_get_plot_data(iv_data, sample_kwargs):
+    """Instrumental variables expose no generic plot-data method."""
     result = cp.InstrumentalVariable(
         instruments_data=iv_data["instruments_data"],
         data=iv_data["data"],
@@ -697,7 +697,7 @@ def test_iv_get_plot_data_not_implemented(iv_data, sample_kwargs):
         ),
     )
 
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
