@@ -1,0 +1,61 @@
+.github/workflows/ci.yml
+  s_2cb94caf88c2c7::t_930ed31c4b82ba 69,79-89,104,106-110,119-140,155
+causalpy/date_utils.py
+  s_2cb94caf88c2c7::t_0dd2edce3b743a 15,22-71
+causalpy/experiments/diff_in_diff.py
+  s_2cb94caf88c2c7::t_e85a910c0c4311 23,32,125-126,178,195,215
+causalpy/experiments/interrupted_time_series.py
+  s_2cb94caf88c2c7::t_231920af693bec 27-31,33,167-168,269,271-273
+causalpy/experiments/model_adapter.py
+  s_2cb94caf88c2c7::t_2a7a27b108ede8 434
+causalpy/experiments/panel_regression.py
+  s_2cb94caf88c2c7::t_64be0bb0809aa1 202-203,242-247,372-381,392,398-400,404,916,925
+causalpy/experiments/prepostnegd.py
+  s_2cb94caf88c2c7::t_74d36b5c42e12c 29
+causalpy/experiments/regression_discontinuity.py
+  s_2cb94caf88c2c7::t_caedb00baf62e4 24,27,129-130,274-276
+causalpy/experiments/regression_kink.py
+  s_2cb94caf88c2c7::t_0c36bafe9c2a1b 25,27
+causalpy/experiments/staggered_did.py
+  s_2cb94caf88c2c7::t_7eb2724a4b0ab9 243-246,255-259,265-269,307,335-340,589-591,693-695,722,1082,1197-1199,1229-1231
+causalpy/experiments/synthetic_control.py
+  s_2cb94caf88c2c7::t_4350b1a9e0b51f 26-30,134-135,384
+causalpy/experiments/synthetic_difference_in_differences.py
+  s_2cb94caf88c2c7::t_127a5dc91272ec 29-33,138-139,180
+causalpy/formula_utils.py
+  s_2cb94caf88c2c7::t_60000684582859 20,22-31,46-131,189,194-195
+causalpy/tests/test_input_validation.py
+  s_2cb94caf88c2c7::t_f844dbe56bb20c 681,692,700,711
+causalpy/tests/test_migration_baseline_harness.py
+  s_2cb94caf88c2c7::t_4876f673db29ff 1-1193
+causalpy/tests/test_pandas_compat.py
+  s_2cb94caf88c2c7::t_e59072045c4421 1-545
+causalpy/tests/test_synthetic_data.py
+  s_2cb94caf88c2c7::t_93e96078ca806f 56
+environment.yml
+  s_2cb94caf88c2c7::t_b45b965c4d12e9 26
+pyproject.toml
+  s_2cb94caf88c2c7::t_f9c0ebb9ad8bb4 48
+scripts/migration_baseline/README.md
+  s_2cb94caf88c2c7::t_a6dba9e1fab2c9 1-121
+scripts/migration_baseline/REPORT_TEMPLATE.md
+  s_2cb94caf88c2c7::t_1ac52ae2f8fb20 1-74
+scripts/migration_baseline/harness.py
+  s_2cb94caf88c2c7::t_0e609447b6c082 1-2731
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c7c77c7125d4442bceee8199c4d51358dd64fb72",
+  "prompts": {},
+  "sessions": {
+    "s_2cb94caf88c2c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06ad2be0-e62d-4260-8b9b-ef3ede0ad528",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
