@@ -1,0 +1,19 @@
+causalpy/tests/test_parameter_recovery.py
+  s_ce7ba2138a4b43::t_1e146fefe672a2 213-214,216,218,221,223,226,382,392,596,670
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e540279616d04bbef2c0f0e2337d488de6c2f00e",
+  "prompts": {},
+  "sessions": {
+    "s_ce7ba2138a4b43": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d313a15-1d24-42f1-bdee-97e5c88489ca",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
