@@ -37,18 +37,39 @@ sdist).
 
 What it does
 ------------
-When ``--doctest-modules`` is active it replaces :func:`pymc.sample` with
-:func:`pymc.testing.mock_sample` (fast prior-predictive stand-in), and it
-booby-traps the real MCMC entry points so that if a doctest *ever* reaches the
-real sampler -- i.e. the mock stops applying for any reason -- the run fails
-loudly and immediately instead of sampling for real and wedging the job.
+When ``--doctest-modules`` is active it drives PyMC's own
+:func:`pymc.testing.mock_sample_setup_and_teardown` -- the *same* setup/teardown
+that backs the normal suite's ``mock_pymc_sample`` fixture, so the mock is
+defined in exactly one place. That swaps :func:`pymc.sample` for a fast
+prior-predictive stand-in and swaps ``Flat``/``HalfFlat`` for proper priors that
+prior-predictive can actually draw. On top of that it booby-traps the real MCMC
+entry points so that if a doctest *ever* reaches the real sampler -- i.e. the
+mock stops applying for any reason -- the run fails loudly and immediately
+instead of sampling for real and wedging the job.
 """
 
 import pytest
 
+#: Real MCMC entry points in ``pymc.sampling.mcmc`` that ``pymc.sample`` dispatches
+#: to. ``mock_sample`` routes through ``sample_prior_predictive`` (in
+#: ``pymc.sampling.forward``) and never calls any of these, so guarding them
+#: cannot false-fire on the mock.
+_FORBIDDEN_MCMC_ENTRY_POINTS = (
+    "_sample_many",
+    "_mp_sample",
+    "_sample_population",
+    "_sample_external_nuts",
+)
+
+# Session state stashed between configure and unconfigure. Restored on teardown
+# so the process-global patches do not leak, even though in practice the doctest
+# leg runs in a throwaway process of its own.
+_mock_gen = None
+_guard_originals: dict = {}
+
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Install the doctest sampling mock and the real-sampler guard.
+    """Install the doctest sampling mock and arm the real-sampler guard.
 
     Parameters
     ----------
@@ -59,29 +80,47 @@ def pytest_configure(config: pytest.Config) -> None:
     if not config.getoption("--doctest-modules", default=False):
         return
 
-    import pymc as pm
+    global _mock_gen
     from pymc.sampling import mcmc
-    from pymc.testing import mock_sample
+    from pymc.testing import mock_sample_setup_and_teardown
 
-    # The fix: doctests that call ``pm.sample`` get the fast prior-predictive
-    # stand-in instead of real MCMC.
-    pm.sample = mock_sample
+    # The fix. A bare import (no try/except) is deliberate: if PyMC's mock helper
+    # is unavailable we must fail loudly here, never silently fall through to
+    # real sampling.
+    _mock_gen = mock_sample_setup_and_teardown()
+    next(_mock_gen)  # run setup: swap pm.sample, pm.Flat, pm.HalfFlat
 
-    # The proof: ``mock_sample`` routes through ``pm.sample_prior_predictive``
-    # (in ``pymc.sampling.forward``) and never touches these MCMC entry points.
-    # Real sampling always does. Patching them to raise turns "a doctest reached
-    # the real sampler" into an immediate, unambiguous failure rather than a
-    # six-hour hang.
+    # The proof. ``getattr`` first so an upstream rename fails loudly *here*
+    # (AttributeError at configure time) rather than ``setattr`` silently
+    # attaching a dead attribute and leaving the real sampler unguarded.
     def _forbidden(*_args, **_kwargs):
         raise RuntimeError(
             "A doctest reached the real MCMC sampler: the doctest sampling mock "
             "is not in force. See causalpy/tests/doctest_sampling.py."
         )
 
-    for _name in (
-        "_sample_many",
-        "_mp_sample",
-        "_sample_population",
-        "_sample_external_nuts",
-    ):
-        setattr(mcmc, _name, _forbidden)
+    for name in _FORBIDDEN_MCMC_ENTRY_POINTS:
+        _guard_originals[name] = getattr(mcmc, name)
+        setattr(mcmc, name, _forbidden)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Restore ``pm.sample`` and the guarded MCMC entry points.
+
+    Parameters
+    ----------
+    config : pytest.Config
+        The active pytest configuration (unused; required by the hook
+        signature).
+    """
+    global _mock_gen
+    if _mock_gen is None:
+        return
+
+    from pymc.sampling import mcmc
+
+    next(_mock_gen, None)  # run teardown: restore pm.sample, pm.Flat, pm.HalfFlat
+    _mock_gen = None
+    while _guard_originals:
+        name, original = _guard_originals.popitem()
+        setattr(mcmc, name, original)
