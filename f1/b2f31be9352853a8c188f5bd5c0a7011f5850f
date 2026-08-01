@@ -1,0 +1,19 @@
+causalpy/tests/test_placebo_in_time.py
+  s_f6c953881a4858::t_7f942390cf8cfa 907-1038
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f1b2f31be9352853a8c188f5bd5c0a7011f5850f",
+  "prompts": {},
+  "sessions": {
+    "s_f6c953881a4858": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14aee63d-9434-405d-b6b6-75374bd486a0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
