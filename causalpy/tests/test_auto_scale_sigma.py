@@ -23,6 +23,8 @@ The tests use ``mock_pymc_sample`` where model construction is needed and never
 run real MCMC.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -30,7 +32,11 @@ import xarray as xr
 from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import SoftmaxWeightedSumFitter, WeightedSumFitter
+from causalpy.pymc_models import (
+    SoftmaxWeightedSumFitter,
+    WeightedSumFitter,
+    _uses_stock_y_hat_default,
+)
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
 
@@ -451,6 +457,179 @@ def test_finite_scale_rate_boundaries_are_checked(
         rate = np.asarray(sigma.parameters["lam"])
         assert np.all(np.isfinite(rate))
         assert np.all(rate > 0)
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_near_constant_series_falls_back_like_a_constant_one(fitter_cls):
+    """A spread below the outcome's float resolution is treated as degenerate.
+
+    A near-constant pre-period -- a broken data pull, say -- has a finite but
+    negligible sd, so ``2 / s`` is enormous yet finite and slips past the plain
+    zero/subnormal guard, minting a ~1e16 rate with no warning. Relative to the
+    outcome's own magnitude the spread is below one representable float64 step,
+    so it must fall back to the default scale rather than that absurd rate.
+    """
+    df, tt, treated = _make_data([1.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    level = 5.0
+    values = np.full(y.shape, level)
+    # A single row perturbed by one unit in the last place: a genuine, finite,
+    # sub-resolution spread that the old ``~isfinite | rate <= 0`` guard misses.
+    values[-1, 0] = np.nextafter(level, np.inf)
+    y = xr.DataArray(values, dims=y.dims, coords=y.coords)
+    with pytest.warns(UserWarning, match="Cannot estimate the pre-treatment"):
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    assert lam[0] == 2.0  # 2 / _DEGENERATE_OUTCOME_SCALE, not 2 / sd ~ 1e16
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_near_constant_unit_falls_back_only_for_that_unit(fitter_cls):
+    """The relative-resolution guard is per treated unit, not global.
+
+    One near-constant unit (a sub-resolution spread, caught only by the new
+    ``scales <= eps * |y|`` term) mixed with a healthy one: only the degenerate
+    unit falls back and is named in the warning; the healthy unit keeps its data
+    rate. A regression collapsing the per-unit magnitude to a single global
+    scalar (dropping ``axis=0``) would break this.
+    """
+    df, tt, treated = _make_data([1.0, 10.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    values = y.values.copy()
+    level = 5.0
+    values[:, 0] = level
+    values[-1, 0] = np.nextafter(level, np.inf)  # unit 0 near-constant
+    y = xr.DataArray(values, dims=y.dims, coords=y.coords)
+    with pytest.warns(UserWarning, match="Cannot estimate the pre-treatment") as record:
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    message = str(record[0].message)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    assert lam[0] == 2.0  # degenerate unit -> fallback
+    assert "treated_0" in message and "treated_1" not in message
+    np.testing.assert_allclose(lam[1], 2 / np.std(values[:, 1], ddof=1))
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_finite_but_sub_resolution_scale_falls_back(monkeypatch, fitter_cls):
+    """A finite sd negligible against the data magnitude falls back, not ~2e200.
+
+    ``np.std`` is forced to a tiny-but-finite ``1e-200`` while the outcome stays
+    at unit magnitude, so ``2 / s = 2e200`` is finite and positive and escapes
+    the zero/subnormal guard. The degeneracy decision reads the magnitude from
+    ``np.max`` on the *real* data (not from the patched ``np.std``), so the
+    relative test still fires and the rate falls back to 2.0 -- if the guard
+    ever derived the magnitude from ``np.std`` this test would be circular.
+    """
+    df, tt, treated = _make_data([1.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    monkeypatch.setattr(np, "std", lambda *_a, **_k: np.array([1e-200]))
+    with pytest.warns(UserWarning, match="Cannot estimate the pre-treatment"):
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    assert lam[0] == 2.0
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_genuinely_small_scale_outcome_keeps_its_data_rate(fitter_cls):
+    """The guard is relative, not absolute: a legitimately tiny-scale outcome
+    keeps its data-derived rate.
+
+    Rescaling the outcome to magnitude ~1e-100 while preserving its relative
+    spread must NOT be flagged: ``Exponential(2 / s)`` is scale-equivariant, so
+    a genuinely tiny scale deserves a genuinely large rate, not the fallback.
+    This is the guardrail against an over-aggressive absolute threshold.
+    (Magnitude ~1e-100 keeps ``std`` computable -- around ~1e-200 the squared
+    deviations underflow to zero, which is a genuine float64 limit, not signal.)
+    """
+    df, tt, treated = _make_data([1.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    tiny = 1e-100 * (y.values / np.max(np.abs(y.values)))
+    y = xr.DataArray(tiny, dims=y.dims, coords=y.coords)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)  # any degeneracy warning fails
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    np.testing.assert_allclose(lam, 2 / np.std(tiny, axis=0, ddof=1), rtol=1e-6)
+    assert lam[0] > 1e50  # tiny scale -> large finite data rate, not fallback 2.0
+
+
+@pytest.mark.parametrize("fitter_cls", FITTERS)
+def test_small_but_resolvable_relative_variation_is_not_degenerate(fitter_cls):
+    """Healthy low-variance data is left untouched -- the guard sits at eps.
+
+    A relative spread of ~1e-6 is far above the float64 resolution floor
+    (~1e-16), so it is real signal: no warning fires and the rate is the
+    data-derived ``2 / s``. This pins the threshold to the resolution scale and
+    protects the healthy-data behaviour the parameter-recovery tests depend on.
+    """
+    df, tt, treated = _make_data([1.0])
+    X, y = _pre_treatment_design(df, tt, treated)
+    rng = np.random.default_rng(0)
+    level = 100.0
+    values = level + rng.normal(0, level * 1e-6, size=y.shape)  # rel. sd ~1e-6
+    y = xr.DataArray(values, dims=y.dims, coords=y.coords)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        priors = _fitter(fitter_cls).priors_from_data(X, y)
+    lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
+    np.testing.assert_allclose(lam, 2 / np.std(values, axis=0, ddof=1))
+
+
+class _ExtraArgWeightedSumFitter(WeightedSumFitter):
+    """A weighted-sum subclass that, like the real time-series fitters, carries
+    an extra ``__init__`` parameter and a matching ``_clone`` override.
+
+    It inherits ``default_priors = {"y_hat": _LEGACY_Y_HAT_PRIOR}`` from
+    ``WeightedSumFitter``, so -- unlike ``BayesianBasisExpansionTimeSeries``,
+    whose ``default_priors`` is empty -- the ``auto_scale_sigma=False`` opt-out
+    actually fires for it, exercising the clone path with real extra config.
+    """
+
+    def __init__(self, marker="default", **kwargs):
+        super().__init__(**kwargs)
+        self.marker = marker
+
+    def _clone(self, priors=None):
+        return type(self)(
+            marker=self.marker,
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors if priors is None else priors,
+        )
+
+
+@pytest.mark.integration
+def test_opt_out_preserves_subclass_init_config_through_clone(mock_pymc_sample):
+    """auto_scale_sigma=False on a subclass with extra __init__ args keeps them.
+
+    The opt-out re-instantiates the model to pin the legacy prior. Routing that
+    through ``_clone`` (not ``type(model)(...)``) means the subclass's extra
+    ``marker`` config survives; the direct reconstruction on the base branch
+    reset it to the default. This reproduces the
+    ``BayesianBasisExpansionTimeSeries`` pattern -- extra init args plus a
+    ``_clone`` override -- on a fitter that actually reaches the opt-out.
+    """
+    df, tt, treated = _make_data([1.0])
+    model = _ExtraArgWeightedSumFitter(
+        marker="preserved", sample_kwargs={**sample_kwargs, "random_seed": 1}
+    )
+    # Precondition: this subclass really does reach the pin path. A silent no-op
+    # would let the assertions below pass for the wrong reason.
+    assert _uses_stock_y_hat_default(model)
+    result = cp.SyntheticControl(
+        df,
+        tt,
+        control_units=["a", "b", "c"],
+        treated_units=treated,
+        model=model,
+        auto_scale_sigma=False,
+    )
+    pinned = result.model
+    assert pinned is not model  # the opt-out fit a fresh copy
+    assert isinstance(pinned, _ExtraArgWeightedSumFitter)
+    assert pinned.marker == "preserved"  # dropped by type(model)(...) on base
+    sigma = pinned.priors["y_hat"].parameters["sigma"]
+    assert sigma.distribution == "HalfNormal"
+    assert sigma.parameters["sigma"] == 1
 
 
 @pytest.mark.integration

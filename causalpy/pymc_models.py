@@ -15,6 +15,7 @@
 
 import inspect
 import warnings
+from copy import deepcopy
 from typing import Any, Literal
 
 import arviz as az
@@ -258,16 +259,24 @@ class PyMCModel(pm.Model):
 
         self.priors = {**self.default_priors, **(priors or {})}
 
-    def _clone(self) -> "PyMCModel":
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration.
 
         ``copy.deepcopy`` of a ``pm.Model`` subclass loses its class
         identity, so this method constructs a new instance from the
         stored init parameters instead.
+
+        ``priors`` overrides the stored user priors on the copy. It is the sole
+        supported way to re-instantiate a model with a different prior set (used
+        by the ``auto_scale_sigma=False`` opt-out to pin the legacy noise prior),
+        so that no ``type(model)(...)`` reconstruction that could silently drop
+        subclass ``__init__`` configuration exists outside ``_clone``. Omitting
+        it (the ``clone_model`` sensitivity-check path) preserves the stored
+        priors unchanged.
         """
         return type(self)(
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def build_model(
@@ -685,9 +694,10 @@ def _uses_stock_y_hat_default(model: "PyMCModel") -> bool:
 
 
 #: Fallback outcome scale used when a treated unit's pre-treatment spread cannot
-#: be estimated (a constant series, or fewer than two observations). Keeping the
-#: scale at 1 reproduces the legacy ``HalfNormal(1)`` order of magnitude for
-#: those degenerate units instead of failing a fit that used to work.
+#: be estimated (a constant or sub-resolution series, or fewer than two
+#: observations). Keeping the scale at 1 reproduces the legacy ``HalfNormal(1)``
+#: order of magnitude for those degenerate units instead of failing a fit that
+#: used to work.
 _DEGENERATE_OUTCOME_SCALE = 1.0
 
 
@@ -696,8 +706,10 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
 
     Each treated unit's rate is ``2 / s_i``, giving ``sigma_i`` a prior mean of
     ``s_i / 2``, where ``s_i`` is that unit's sample standard deviation. Units
-    whose spread is not estimable fall back to ``s_i = 1`` with a warning;
-    non-finite outcomes are a data error and are rejected.
+    whose spread is not estimable -- constant, varying only below the outcome's
+    floating-point resolution, or with fewer than two observations -- fall back
+    to ``s_i = 1`` with a warning; non-finite outcomes are a data error and are
+    rejected.
     """
     y_values = np.asarray(
         y.transpose("obs_ind", "treated_units").values,
@@ -715,20 +727,34 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
         )
     if y_values.shape[0] < 2:
         scales = np.zeros(y_values.shape[1])
+        magnitudes = np.zeros(y_values.shape[1])
     else:
         scales = np.std(y_values, axis=0, ddof=1)
+        magnitudes = np.max(np.abs(y_values), axis=0)
     with np.errstate(divide="ignore", over="ignore"):
         rates = 2 / scales
-    # A zero (or subnormal) spread carries no scale information, so there is
-    # nothing to calibrate against and the fallback scale is used instead.
-    degenerate = ~np.isfinite(rates) | (rates <= 0)
+    # A spread carries no usable scale information in two cases. First, when it
+    # is zero or subnormal, ``2 / s`` overflows to non-finite or is non-positive.
+    # Second -- and this is the case the plain finite/positive test above misses
+    # -- when it is finite but negligible *relative to the outcome's own
+    # magnitude*. ``eps * |y|`` is the width of one representable float64 step at
+    # that magnitude, so a spread at or below it is indistinguishable from
+    # rounding noise; ``2 / s`` would mint that noise into an absurdly tight yet
+    # finite prior (a near-constant series -- e.g. a broken data pull -- is
+    # exactly this). The threshold is deliberately the resolution floor and no
+    # larger: above it the spread is genuine signal, however small in absolute
+    # terms, and the scale-equivariant ``Exponential(2 / s)`` prior is already
+    # calibrated to it. Both degenerate cases fall back to the default scale.
+    resolution = np.finfo(y_values.dtype).eps * magnitudes
+    degenerate = ~np.isfinite(rates) | (rates <= 0) | (scales <= resolution)
     if np.any(degenerate):
         warnings.warn(
             "Cannot estimate the pre-treatment outcome scale for treated unit(s) "
             f"{_format_treated_units(treated_units[degenerate])}; the series is "
-            "constant or has fewer than two observations. Falling back to an "
-            f"observation-noise scale of {_DEGENERATE_OUTCOME_SCALE} for those "
-            "units. Pass a custom y_hat prior to control this explicitly.",
+            "constant, varies only below its floating-point resolution, or has "
+            "fewer than two observations. Falling back to an observation-noise "
+            f"scale of {_DEGENERATE_OUTCOME_SCALE} for those units. Pass a custom "
+            "y_hat prior to control this explicitly.",
             UserWarning,
             stacklevel=2,
         )
@@ -1951,8 +1977,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._seasonality_component = None
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             n_order=self.n_order,
             n_changepoints_trend=self.n_changepoints_trend,
@@ -1960,7 +1990,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):
@@ -2401,9 +2431,20 @@ class StateSpaceTimeSeries(PyMCModel):
         Pytensor compile mode used when building the state-space model. Defaults
         to None.
     priors : dict, optional
-        Dictionary of priors for the model. Defaults to ``None``, in which
-        case default priors are used.
+        Dictionary mapping state-space parameter names to
+        :class:`pymc_extras.prior.Prior` objects, overriding the defaults in
+        `default_priors`. The `P0` covariance is parameterized through its
+        diagonal under the key `"P0_diag"`. Dims are resolved from the built
+        state-space model, so priors do not need to declare them.
     """
+
+    default_priors = {
+        "P0_diag": Prior("Gamma", alpha=2, beta=1),
+        "initial_level_trend": Prior("Normal", mu=0, sigma=50),
+        "params_freq": Prior("Normal", mu=0, sigma=80),
+        "sigma_level_trend": Prior("Gamma", alpha=2, beta=5),
+        "sigma_freq": Prior("Gamma", alpha=2, beta=1),
+    }
 
     def __init__(
         self,
@@ -2413,7 +2454,7 @@ class StateSpaceTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
-        priors: dict[str, Any] | None = None,
+        priors: dict[str, Prior] | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
@@ -2432,11 +2473,14 @@ class StateSpaceTimeSeries(PyMCModel):
         self.mode = mode
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
-        self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             level_order=self.level_order,
             seasonal_length=self.seasonal_length,
@@ -2444,7 +2488,7 @@ class StateSpaceTimeSeries(PyMCModel):
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):
@@ -2535,6 +2579,14 @@ class StateSpaceTimeSeries(PyMCModel):
                 "y must be provided for StateSpaceTimeSeries.build_model()"
             )
 
+        if self.free_RVs:
+            raise RuntimeError(
+                "This StateSpaceTimeSeries instance is already built and cannot be "
+                "rebuilt in place, because the variables live on the model itself. "
+                "Create a new instance, or call `_clone()` to copy this "
+                "configuration, and fit that."
+            )
+
         if "treated_units" not in y.dims:
             raise ValueError(
                 "StateSpaceTimeSeries requires a treated_units dimension with exactly "
@@ -2582,13 +2634,6 @@ class StateSpaceTimeSeries(PyMCModel):
         # `build_statespace_graph` is deprecated in pymc-extras.
         self.ss_mod = combined.build(mode=self.mode)
 
-        # Extract parameter dims (order: initial_trend, sigma_trend, seasonal, P0)
-        if self.ss_mod is None:
-            raise RuntimeError("State space model not initialized")
-        initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
-            self.ss_mod.param_dims.values()
-        )
-
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
         if coords:
@@ -2600,22 +2645,41 @@ class StateSpaceTimeSeries(PyMCModel):
             )  # obs_ind handled by state-space model's time dimension
             coordinates.update(coords_copy)
 
-        # Build model
-        with pm.Model(coords=coordinates) as self.second_model:
-            # Add coords for statespace (includes 'time' and 'state' dims)
-            P0_diag = pm.Gamma("P0_diag", alpha=2, beta=1, dims=P0_dims[0])
-            _P0 = pm.Deterministic("P0", pt.diag(P0_diag), dims=P0_dims)
-            _initial_trend = pm.Normal(
-                "initial_level_trend", sigma=50, dims=initial_trend_dims
+        # Every state-space parameter needs a prior. P0 is parameterized
+        # through its diagonal, so its prior is looked up as "P0_diag".
+        prior_keys = [
+            "P0_diag" if name == "P0" else name for name in self.ss_mod.param_names
+        ]
+        missing = [key for key in prior_keys if key not in self.priors]
+        if missing:
+            raise ValueError(
+                f"No prior found for state-space parameters: {missing}. "
+                "Pass them via the `priors` argument. Custom components "
+                "introduce their own parameter names; see `ss_mod.param_info`."
             )
-            # Keep Normal (not ZeroSumNormal): frequency-state coefficients are
-            # unconstrained here; see PR #679 for rationale and context.
-            _annual_seasonal = pm.Normal("params_freq", sigma=80, dims=annual_dims)
 
-            _sigma_trend = pm.Gamma(
-                "sigma_level_trend", alpha=2, beta=5, dims=sigma_trend_dims
-            )
-            _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
+        # Build model
+        self.add_coords(coordinates)
+        with self:
+            # Note for params_freq: keep Normal (not ZeroSumNormal) as default;
+            # frequency-state coefficients are unconstrained here; see PR #679
+            # for rationale and context.
+            for name in self.ss_mod.param_names:
+                dims = self.ss_mod.param_info[name]["dims"]
+                if name == "P0":
+                    # Dims are resolved from the built state-space model, so
+                    # copy the Prior and set them on the copy rather than
+                    # mutating the shared default_priors entries in place. The
+                    # copy keeps options the caller set, such as `centered`
+                    # and `transform`.
+                    prior = deepcopy(self.priors["P0_diag"])
+                    prior.dims = dims[0]
+                    P0_diag = prior.create_variable("P0_diag")
+                    pm.Deterministic("P0", pt.diag(P0_diag), dims=dims)
+                else:
+                    prior = deepcopy(self.priors[name])
+                    prior.dims = dims
+                    prior.create_variable(name)
 
             # Attach the state-space graph using the observed data
             # Extract values from xarray for pandas DataFrame
@@ -2625,8 +2689,7 @@ class StateSpaceTimeSeries(PyMCModel):
                 else y.values
             )
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
-            if self.ss_mod is not None:
-                self.ss_mod.build_statespace_graph(df[["y"]])
+            self.ss_mod.build_statespace_graph(df[["y"]])
 
     def fit(
         self,
@@ -2655,10 +2718,10 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         if y is None:
             raise ValueError("y must be provided for StateSpaceTimeSeries.fit()")
+        # Merge in data-driven priors, matching the base class fit()
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
         self.build_model(X, y, coords)
-        if self.second_model is None:
-            raise RuntimeError("Model not built. Call build_model() first.")
-        with self.second_model:
+        with self:
             self.idata = pm.sample(**self.sample_kwargs)
             if self.idata is not None:
                 pm.sample_posterior_predictive(

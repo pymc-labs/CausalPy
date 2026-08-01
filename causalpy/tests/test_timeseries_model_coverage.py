@@ -609,6 +609,129 @@ class TestStateSpaceTimeSeriesCoverage:
             "treated_units",
         )
 
+    def test_default_model_free_rvs(self, sample_data):
+        """Lock the default model contract: same five RVs as before the
+        priors refactor."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=sample_data)
+
+        assert sorted(rv.name for rv in model.free_RVs) == [
+            "P0_diag",
+            "initial_level_trend",
+            "params_freq",
+            "sigma_freq",
+            "sigma_level_trend",
+        ]
+
+    def test_user_priors_override(self, sample_data):
+        """Test that user-supplied priors replace the defaults."""
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={"sigma_freq": Prior("HalfNormal", sigma=1)},
+        )
+        model.build_model(y=sample_data)
+
+        assert model.priors["sigma_freq"].distribution == "HalfNormal"
+        assert model["sigma_freq"].owner.op.name == "halfnormal"
+        # Untouched defaults still apply
+        assert model["sigma_level_trend"].owner.op.name == "gamma"
+
+    def test_clone_preserves_config(self):
+        """Test that _clone carries over the full model configuration."""
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={"sigma_freq": Prior("HalfNormal", sigma=1)},
+        )
+        clone = model._clone()
+
+        assert clone.level_order == 1
+        assert clone.seasonal_length == 7
+        assert clone.sample_kwargs == model.sample_kwargs
+        assert clone.priors["sigma_freq"].distribution == "HalfNormal"
+
+    def test_missing_prior_raises(self, sample_data):
+        """Test error when a state-space parameter has no prior."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.priors.pop("sigma_freq")
+
+        with pytest.raises(
+            ValueError,
+            match="No prior found for state-space parameters: \\['sigma_freq'\\]",
+        ):
+            model.build_model(y=sample_data)
+
+    def test_p0_diag_prior_override(self, sample_data):
+        """A user prior for the P0 diagonal reaches the model."""
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={"P0_diag": Prior("HalfNormal", sigma=1)},
+        )
+        model.build_model(y=sample_data)
+
+        assert model["P0_diag"].owner.op.name == "halfnormal"
+        assert "P0" in [det.name for det in model.deterministics]
+
+    def test_prior_options_are_preserved(self, sample_data):
+        """Options beyond the distribution parameters survive dim resolution.
+
+        `centered` and `transform` live on the Prior itself, not in its
+        parameters, so rebuilding a prior from distribution plus parameters
+        would silently drop them.
+        """
+        from pymc_extras.prior import Prior
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={
+                "initial_level_trend": Prior("Normal", mu=0, sigma=50, centered=False),
+                "params_freq": Prior("Normal", mu=0, sigma=80, transform="log"),
+            },
+        )
+        model.build_model(y=sample_data)
+
+        free_rvs = {rv.name for rv in model.free_RVs}
+        deterministics = {det.name for det in model.deterministics}
+        # Non-centered priors sample an offset; transformed priors sample a raw.
+        assert "initial_level_trend_offset" in free_rvs
+        assert "params_freq_raw" in free_rvs
+        assert {"initial_level_trend", "params_freq"} <= deterministics
+        # The caller's Prior objects are left untouched.
+        assert model.priors["initial_level_trend"].dims is None
+
+    def test_rebuild_raises_with_guidance(self, sample_data):
+        """Building twice fails with a message that points at the way out."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=sample_data)
+
+        with pytest.raises(RuntimeError, match="already built"):
+            model.build_model(y=sample_data)
+
     def test_predict_out_of_sample_x_none(self, sample_data):
         """Test error when X is None for out-of-sample predictions."""
         y_da = sample_data
@@ -720,6 +843,73 @@ class TestTimeSeriesModelClonePreservesPriors:
         cloned = original._clone()
         assert cloned._user_priors == custom_priors
         assert cloned._user_priors is not None
+
+    def test_bayesian_basis_expansion_clone_accepts_priors_override(self):
+        """BSTS._clone(priors=...) overrides priors and keeps extra init args.
+
+        The ``auto_scale_sigma=False`` opt-out pins the legacy prior by cloning
+        with a ``priors`` override; the subclass override must accept it and
+        still carry ``n_order`` and friends, or the base and override signatures
+        drift apart.
+        """
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
+        original = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            n_order=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={"sentinel": "value"},
+        )
+        override = {"y_hat": "pinned"}
+        cloned = original._clone(priors=override)
+        assert cloned._user_priors == override  # override applied
+        assert cloned.n_order == 7  # extra init arg preserved through the clone
+
+    def test_state_space_clone_accepts_priors_override(self):
+        """StateSpaceTimeSeries._clone(priors=...) overrides priors, keeps args."""
+        pytest.importorskip(
+            "pymc_extras",
+            reason="pymc-extras optional for state-space model",
+        )
+        original = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+            priors={"sentinel": "value"},
+        )
+        override = {"y_hat": "pinned"}
+        cloned = original._clone(priors=override)
+        assert cloned._user_priors == override
+        assert cloned.level_order == 1
+
+    def test_all_shipped_pymc_model_clones_accept_priors_override(self):
+        """Every shipped ``PyMCModel._clone`` must accept the ``priors`` override.
+
+        The ``auto_scale_sigma=False`` opt-out pins the legacy prior via
+        ``_clone(priors=...)``; a subclass whose override dropped the parameter
+        would silently lose the pin. Since the design threads ``priors`` per
+        override rather than through a single template method, this guards the
+        exact drift that would reintroduce the bug one inheritance level up.
+        """
+        import inspect
+
+        from causalpy.pymc_models import PyMCModel
+
+        def _subclasses(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _subclasses(sub)
+
+        shipped = [
+            cls
+            for cls in _subclasses(PyMCModel)
+            if cls.__module__ == "causalpy.pymc_models"
+        ]
+        assert shipped  # sanity: the subclasses were discovered
+        for cls in shipped:
+            params = inspect.signature(cls._clone).parameters
+            assert "priors" in params, f"{cls.__name__}._clone drops priors override"
 
 
 class TestTimeSeriesModelCloneIsUnfitted:
