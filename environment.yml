@@ -20,13 +20,16 @@ dependencies:
   - jinja2
   - make
   - matplotlib>=3.5.3
+  - narwhals>=1.13.1
   - nbconvert
   - nbformat
   - numpy
   - pandas<4,>=2.3
   - papermill
   - patsy
+  - polars
   - prek
+  - pyarrow
   - pymc-bart
   - pymc-extras>=0.3.0
   - pymc<7,>=6.0.1
