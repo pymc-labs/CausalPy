@@ -201,16 +201,88 @@ class _FakeConfig:
         return self._doctest_modules
 
 
+def _sentinel(qualified_name):
+    """Build a unique, identifiable stand-in for one patched global.
+
+    Parameters
+    ----------
+    qualified_name : str
+        Name the sentinel stands in for, used in ``__name__`` and in the error
+        raised if anything actually calls it.
+
+    Returns
+    -------
+    callable
+        A fresh function object, distinct from every other object in the
+        process.
+    """
+
+    def _never_call(*_args, **_kwargs):
+        raise AssertionError(
+            f"the sentinel standing in for {qualified_name} was called"
+        )
+
+    _never_call.__name__ = f"sentinel_{qualified_name.replace('.', '_')}"
+    return _never_call
+
+
+def _pin_sampling_globals(monkeypatch):
+    """Pin every global the plugin patches to a unique sentinel, for one test.
+
+    The in-process hook tests assert that install *replaces* these globals and
+    that restore puts back *exactly* what was there. Read against whatever the
+    live values happen to be, both halves of that are order-dependent and can
+    pass vacuously: ``mock_pymc_sample`` in ``causalpy/tests/conftest.py`` is
+    session-scoped, so the first test file that uses it leaves ``pm.sample`` set
+    to ``mock_sample`` for the rest of the session. A test that then asserted
+    ``pm.sample.__name__ != "mock_sample"`` after restore would fail even though
+    the plugin behaved perfectly -- it restored the mock it was correctly handed
+    as the original.
+
+    Sentinels remove the coupling. Each is a fresh object that cannot collide
+    with ``mock_sample`` or with the real PyMC callables, so "install swapped
+    it" and "restore returned this exact object" are both decidable no matter
+    what ran earlier. ``monkeypatch`` reverts the pinning at teardown.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to install and later revert the sentinels.
+
+    Returns
+    -------
+    dict
+        Maps ``"pm.sample"``, ``"pm.Flat"``, ``"pm.HalfFlat"`` and each name in
+        ``_FORBIDDEN_MCMC_ENTRY_POINTS`` to the sentinel now bound there.
+    """
+    import pymc as pm
+
+    pinned = {}
+    for name in ("sample", "Flat", "HalfFlat"):
+        sentinel = _sentinel(f"pm.{name}")
+        monkeypatch.setattr(pm, name, sentinel)
+        pinned[f"pm.{name}"] = sentinel
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        sentinel = _sentinel(f"mcmc.{name}")
+        monkeypatch.setattr(mcmc, name, sentinel)
+        pinned[name] = sentinel
+    return pinned
+
+
 def test_configure_is_noop_without_doctest_modules(monkeypatch):
     """Outside the doctest leg the plugin must not touch global sampling state."""
     import pymc as pm
 
-    original_sample = pm.sample
-    monkeypatch.setattr(pm, "sample", original_sample)
+    pinned = _pin_sampling_globals(monkeypatch)
 
     doctest_sampling.pytest_configure(_FakeConfig(doctest_modules=False))
 
-    assert pm.sample is original_sample
+    assert pm.sample is pinned["pm.sample"]
+    assert pm.Flat is pinned["pm.Flat"]
+    assert pm.HalfFlat is pinned["pm.HalfFlat"]
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        assert getattr(mcmc, name) is pinned[name]
+    assert doctest_sampling._mock_gen is None
 
 
 def test_hooks_install_and_restore_inside_the_doctest_leg(monkeypatch):
@@ -219,23 +291,34 @@ def test_hooks_install_and_restore_inside_the_doctest_leg(monkeypatch):
     ``test_install_and_restore_round_trip`` covers the private helpers; this
     covers the wiring from ``pytest_configure``/``pytest_unconfigure`` to them,
     which otherwise only runs in the subprocess tests' child process.
+
+    The contract asserted here is a *round trip* -- restore hands back the exact
+    objects install was given -- not "``pm.sample`` is unmocked afterwards". The
+    latter is not the plugin's to promise: whatever ``pm.sample`` happened to be
+    at install time is what restore must reinstate, mock or not. See
+    ``_pin_sampling_globals`` for why that distinction decides whether this test
+    is order-dependent.
     """
     import pymc as pm
 
-    monkeypatch.setattr(pm, "sample", pm.sample)
-    monkeypatch.setattr(pm, "Flat", pm.Flat)
-    monkeypatch.setattr(pm, "HalfFlat", pm.HalfFlat)
-    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
-        monkeypatch.setattr(mcmc, name, getattr(mcmc, name))
+    pinned = _pin_sampling_globals(monkeypatch)
 
     doctest_sampling.pytest_configure(_FakeConfig(doctest_modules=True))
     try:
         assert pm.sample.__name__ == "mock_sample"
+        assert pm.Flat is pm.Normal
+        assert pm.HalfFlat is pm.HalfNormal
     finally:
         doctest_sampling.pytest_unconfigure(_FakeConfig(doctest_modules=True))
 
     assert doctest_sampling._mock_gen is None
-    assert pm.sample.__name__ != "mock_sample"
+    # Restore must hand back the exact objects install was given, not merely
+    # "something that isn't the mock".
+    assert pm.sample is pinned["pm.sample"]
+    assert pm.Flat is pinned["pm.Flat"]
+    assert pm.HalfFlat is pinned["pm.HalfFlat"]
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        assert getattr(mcmc, name) is pinned[name]
 
 
 def test_install_is_idempotent(monkeypatch):
@@ -246,14 +329,7 @@ def test_install_is_idempotent(monkeypatch):
     """
     import pymc as pm
 
-    monkeypatch.setattr(pm, "sample", pm.sample)
-    monkeypatch.setattr(pm, "Flat", pm.Flat)
-    monkeypatch.setattr(pm, "HalfFlat", pm.HalfFlat)
-    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
-        monkeypatch.setattr(mcmc, name, getattr(mcmc, name))
-    originals = {
-        n: getattr(mcmc, n) for n in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS
-    }
+    pinned = _pin_sampling_globals(monkeypatch)
 
     doctest_sampling._install_doctest_mock()
     try:
@@ -263,8 +339,10 @@ def test_install_is_idempotent(monkeypatch):
     finally:
         doctest_sampling._restore_doctest_mock()
 
-    for name, original in originals.items():
-        assert getattr(mcmc, name) is original
+    # The single restore matching the two installs must leave nothing mocked.
+    assert pm.sample is pinned["pm.sample"]
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        assert getattr(mcmc, name) is pinned[name]
 
 
 def test_restore_without_install_is_a_noop():
@@ -287,18 +365,13 @@ def test_install_and_restore_round_trip(monkeypatch):
     """
     import pymc as pm
 
-    monkeypatch.setattr(pm, "sample", pm.sample)
-    monkeypatch.setattr(pm, "Flat", pm.Flat)
-    monkeypatch.setattr(pm, "HalfFlat", pm.HalfFlat)
-    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
-        monkeypatch.setattr(mcmc, name, getattr(mcmc, name))
-    originals = {
-        n: getattr(mcmc, n) for n in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS
-    }
+    pinned = _pin_sampling_globals(monkeypatch)
 
     doctest_sampling._install_doctest_mock()
     try:
         assert pm.sample.__name__ == "mock_sample"
+        assert pm.Flat is pm.Normal
+        assert pm.HalfFlat is pm.HalfNormal
         for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
             with pytest.raises(RuntimeError, match="real MCMC sampler"):
                 getattr(mcmc, name)()
@@ -306,8 +379,11 @@ def test_install_and_restore_round_trip(monkeypatch):
         doctest_sampling._restore_doctest_mock()
 
     # Teardown restored every patched name to the exact original object.
-    for name, original in originals.items():
-        assert getattr(mcmc, name) is original
+    assert pm.sample is pinned["pm.sample"]
+    assert pm.Flat is pinned["pm.Flat"]
+    assert pm.HalfFlat is pinned["pm.HalfFlat"]
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        assert getattr(mcmc, name) is pinned[name]
     assert doctest_sampling._mock_gen is None
 
 
