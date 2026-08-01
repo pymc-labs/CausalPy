@@ -15,6 +15,7 @@
 
 import inspect
 import warnings
+from copy import deepcopy
 from typing import Any, Literal
 
 import arviz as az
@@ -2401,9 +2402,20 @@ class StateSpaceTimeSeries(PyMCModel):
         Pytensor compile mode used when building the state-space model. Defaults
         to None.
     priors : dict, optional
-        Dictionary of priors for the model. Defaults to ``None``, in which
-        case default priors are used.
+        Dictionary mapping state-space parameter names to
+        :class:`pymc_extras.prior.Prior` objects, overriding the defaults in
+        `default_priors`. The `P0` covariance is parameterized through its
+        diagonal under the key `"P0_diag"`. Dims are resolved from the built
+        state-space model, so priors do not need to declare them.
     """
+
+    default_priors = {
+        "P0_diag": Prior("Gamma", alpha=2, beta=1),
+        "initial_level_trend": Prior("Normal", mu=0, sigma=50),
+        "params_freq": Prior("Normal", mu=0, sigma=80),
+        "sigma_level_trend": Prior("Gamma", alpha=2, beta=5),
+        "sigma_freq": Prior("Gamma", alpha=2, beta=1),
+    }
 
     def __init__(
         self,
@@ -2413,7 +2425,7 @@ class StateSpaceTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
-        priors: dict[str, Any] | None = None,
+        priors: dict[str, Prior] | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
@@ -2432,7 +2444,6 @@ class StateSpaceTimeSeries(PyMCModel):
         self.mode = mode
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
-        self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
 
     def _clone(self) -> "PyMCModel":
@@ -2535,6 +2546,14 @@ class StateSpaceTimeSeries(PyMCModel):
                 "y must be provided for StateSpaceTimeSeries.build_model()"
             )
 
+        if self.free_RVs:
+            raise RuntimeError(
+                "This StateSpaceTimeSeries instance is already built and cannot be "
+                "rebuilt in place, because the variables live on the model itself. "
+                "Create a new instance, or call `_clone()` to copy this "
+                "configuration, and fit that."
+            )
+
         if "treated_units" not in y.dims:
             raise ValueError(
                 "StateSpaceTimeSeries requires a treated_units dimension with exactly "
@@ -2582,13 +2601,6 @@ class StateSpaceTimeSeries(PyMCModel):
         # `build_statespace_graph` is deprecated in pymc-extras.
         self.ss_mod = combined.build(mode=self.mode)
 
-        # Extract parameter dims (order: initial_trend, sigma_trend, seasonal, P0)
-        if self.ss_mod is None:
-            raise RuntimeError("State space model not initialized")
-        initial_trend_dims, sigma_trend_dims, annual_dims, P0_dims = (
-            self.ss_mod.param_dims.values()
-        )
-
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
         if coords:
@@ -2600,22 +2612,41 @@ class StateSpaceTimeSeries(PyMCModel):
             )  # obs_ind handled by state-space model's time dimension
             coordinates.update(coords_copy)
 
-        # Build model
-        with pm.Model(coords=coordinates) as self.second_model:
-            # Add coords for statespace (includes 'time' and 'state' dims)
-            P0_diag = pm.Gamma("P0_diag", alpha=2, beta=1, dims=P0_dims[0])
-            _P0 = pm.Deterministic("P0", pt.diag(P0_diag), dims=P0_dims)
-            _initial_trend = pm.Normal(
-                "initial_level_trend", sigma=50, dims=initial_trend_dims
+        # Every state-space parameter needs a prior. P0 is parameterized
+        # through its diagonal, so its prior is looked up as "P0_diag".
+        prior_keys = [
+            "P0_diag" if name == "P0" else name for name in self.ss_mod.param_names
+        ]
+        missing = [key for key in prior_keys if key not in self.priors]
+        if missing:
+            raise ValueError(
+                f"No prior found for state-space parameters: {missing}. "
+                "Pass them via the `priors` argument. Custom components "
+                "introduce their own parameter names; see `ss_mod.param_info`."
             )
-            # Keep Normal (not ZeroSumNormal): frequency-state coefficients are
-            # unconstrained here; see PR #679 for rationale and context.
-            _annual_seasonal = pm.Normal("params_freq", sigma=80, dims=annual_dims)
 
-            _sigma_trend = pm.Gamma(
-                "sigma_level_trend", alpha=2, beta=5, dims=sigma_trend_dims
-            )
-            _sigma_monthly_season = pm.Gamma("sigma_freq", alpha=2, beta=1)
+        # Build model
+        self.add_coords(coordinates)
+        with self:
+            # Note for params_freq: keep Normal (not ZeroSumNormal) as default;
+            # frequency-state coefficients are unconstrained here; see PR #679
+            # for rationale and context.
+            for name in self.ss_mod.param_names:
+                dims = self.ss_mod.param_info[name]["dims"]
+                if name == "P0":
+                    # Dims are resolved from the built state-space model, so
+                    # copy the Prior and set them on the copy rather than
+                    # mutating the shared default_priors entries in place. The
+                    # copy keeps options the caller set, such as `centered`
+                    # and `transform`.
+                    prior = deepcopy(self.priors["P0_diag"])
+                    prior.dims = dims[0]
+                    P0_diag = prior.create_variable("P0_diag")
+                    pm.Deterministic("P0", pt.diag(P0_diag), dims=dims)
+                else:
+                    prior = deepcopy(self.priors[name])
+                    prior.dims = dims
+                    prior.create_variable(name)
 
             # Attach the state-space graph using the observed data
             # Extract values from xarray for pandas DataFrame
@@ -2625,8 +2656,7 @@ class StateSpaceTimeSeries(PyMCModel):
                 else y.values
             )
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
-            if self.ss_mod is not None:
-                self.ss_mod.build_statespace_graph(df[["y"]])
+            self.ss_mod.build_statespace_graph(df[["y"]])
 
     def fit(
         self,
@@ -2655,10 +2685,10 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         if y is None:
             raise ValueError("y must be provided for StateSpaceTimeSeries.fit()")
+        # Merge in data-driven priors, matching the base class fit()
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
         self.build_model(X, y, coords)
-        if self.second_model is None:
-            raise RuntimeError("Model not built. Call build_model() first.")
-        with self.second_model:
+        with self:
             self.idata = pm.sample(**self.sample_kwargs)
             if self.idata is not None:
                 pm.sample_posterior_predictive(
