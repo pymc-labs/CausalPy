@@ -1218,13 +1218,13 @@ DOCUMENTED_PIN_QUOTES = (
         ("pymc6",),
     ),
     (
-        "REPORT_TEMPLATE.md",
+        "REPORT_TEMPLATE.md reference checkout",
         REPORT_TEMPLATE_PATH,
         r"- Reference checkout: `([0-9a-f]{40})`",
         ("pymc5",),
     ),
     (
-        "REPORT_TEMPLATE.md",
+        "REPORT_TEMPLATE.md candidate checkout",
         REPORT_TEMPLATE_PATH,
         r"- Candidate checkout: `([0-9a-f]{40})`",
         ("pymc6",),
