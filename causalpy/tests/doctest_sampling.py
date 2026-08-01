@@ -69,7 +69,7 @@ _guard_originals: dict = {}
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Install the doctest sampling mock and arm the real-sampler guard.
+    """Install the doctest sampling mock when running ``--doctest-modules``.
 
     Parameters
     ----------
@@ -77,10 +77,32 @@ def pytest_configure(config: pytest.Config) -> None:
         The active pytest configuration; used only to detect
         ``--doctest-modules``.
     """
-    if not config.getoption("--doctest-modules", default=False):
+    if config.getoption("--doctest-modules", default=False):
+        _install_doctest_mock()
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Undo whatever :func:`pytest_configure` installed.
+
+    Parameters
+    ----------
+    config : pytest.Config
+        The active pytest configuration (unused; required by the hook
+        signature).
+    """
+    _restore_doctest_mock()
+
+
+def _install_doctest_mock() -> None:
+    """Swap in the mock sampler and arm the real-sampler guard, process-wide."""
+    global _mock_gen
+    # Keep configure/unconfigure symmetric: a second install would capture the
+    # already-mocked state as its "original" and a single restore would then
+    # leak the mock. In practice a ``-p`` plugin configures once, but guard
+    # against double registration.
+    if _mock_gen is not None:
         return
 
-    global _mock_gen
     from pymc.sampling import mcmc
     from pymc.testing import mock_sample_setup_and_teardown
 
@@ -104,15 +126,8 @@ def pytest_configure(config: pytest.Config) -> None:
         setattr(mcmc, name, _forbidden)
 
 
-def pytest_unconfigure(config: pytest.Config) -> None:
-    """Restore ``pm.sample`` and the guarded MCMC entry points.
-
-    Parameters
-    ----------
-    config : pytest.Config
-        The active pytest configuration (unused; required by the hook
-        signature).
-    """
+def _restore_doctest_mock() -> None:
+    """Restore ``pm.sample``/``Flat``/``HalfFlat`` and the guarded entry points."""
     global _mock_gen
     if _mock_gen is None:
         return
