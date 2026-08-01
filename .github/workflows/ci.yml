@@ -68,6 +68,11 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }}, pandas ${{ matrix.pandas-version }})
     runs-on: ubuntu-latest
+    # Guard (issue #1117): a wedged run fails as `failure` in minutes instead of
+    # being `cancelled` at GitHub's 6h ceiling. Headroom over the observed ~21 min
+    # max for this job (incl. cold micromamba-cache solves); tune if legitimately
+    # slower runs appear.
+    timeout-minutes: 30
     permissions:
       contents: read
     defaults:
