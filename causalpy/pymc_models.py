@@ -696,8 +696,10 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
 
     Each treated unit's rate is ``2 / s_i``, giving ``sigma_i`` a prior mean of
     ``s_i / 2``, where ``s_i`` is that unit's sample standard deviation. Units
-    whose spread is not estimable fall back to ``s_i = 1`` with a warning;
-    non-finite outcomes are a data error and are rejected.
+    whose spread is not estimable -- constant, varying only below the outcome's
+    floating-point resolution, or with fewer than two observations -- fall back
+    to ``s_i = 1`` with a warning; non-finite outcomes are a data error and are
+    rejected.
     """
     y_values = np.asarray(
         y.transpose("obs_ind", "treated_units").values,
@@ -715,20 +717,34 @@ def _data_scaled_y_hat_prior(y: xr.DataArray) -> Prior:
         )
     if y_values.shape[0] < 2:
         scales = np.zeros(y_values.shape[1])
+        magnitudes = np.zeros(y_values.shape[1])
     else:
         scales = np.std(y_values, axis=0, ddof=1)
+        magnitudes = np.max(np.abs(y_values), axis=0)
     with np.errstate(divide="ignore", over="ignore"):
         rates = 2 / scales
-    # A zero (or subnormal) spread carries no scale information, so there is
-    # nothing to calibrate against and the fallback scale is used instead.
-    degenerate = ~np.isfinite(rates) | (rates <= 0)
+    # A spread carries no usable scale information in two cases. First, when it
+    # is zero or subnormal, ``2 / s`` overflows to non-finite or is non-positive.
+    # Second -- and this is the case the plain finite/positive test above misses
+    # -- when it is finite but negligible *relative to the outcome's own
+    # magnitude*. ``eps * |y|`` is the width of one representable float64 step at
+    # that magnitude, so a spread at or below it is indistinguishable from
+    # rounding noise; ``2 / s`` would mint that noise into an absurdly tight yet
+    # finite prior (a near-constant series -- e.g. a broken data pull -- is
+    # exactly this). The threshold is deliberately the resolution floor and no
+    # larger: above it the spread is genuine signal, however small in absolute
+    # terms, and the scale-equivariant ``Exponential(2 / s)`` prior is already
+    # calibrated to it. Both degenerate cases fall back to the default scale.
+    resolution = np.finfo(y_values.dtype).eps * magnitudes
+    degenerate = ~np.isfinite(rates) | (rates <= 0) | (scales <= resolution)
     if np.any(degenerate):
         warnings.warn(
             "Cannot estimate the pre-treatment outcome scale for treated unit(s) "
             f"{_format_treated_units(treated_units[degenerate])}; the series is "
-            "constant or has fewer than two observations. Falling back to an "
-            f"observation-noise scale of {_DEGENERATE_OUTCOME_SCALE} for those "
-            "units. Pass a custom y_hat prior to control this explicitly.",
+            "constant, varies only below its floating-point resolution, or has "
+            "fewer than two observations. Falling back to an observation-noise "
+            f"scale of {_DEGENERATE_OUTCOME_SCALE} for those units. Pass a custom "
+            "y_hat prior to control this explicitly.",
             UserWarning,
             stacklevel=2,
         )
