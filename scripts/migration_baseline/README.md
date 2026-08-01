@@ -1,6 +1,8 @@
 # PyMC Migration Baseline Harness
 
-This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
+This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `7b3e257b4b006800f445bec6303a399ef7ec2ffc`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
+
+The candidate was the head of the `pymc6_and_pymcmarketing1_migration` integration branch when it was pinned, so the evidence describes the tree proposed for `main`. It is deliberately not the harness checkout: run `scripts/migration_baseline/harness.py` from its own committed checkout, whose `HEAD` differs from both sampled revisions.
 
 The tracked implementation is `scripts/migration_baseline/harness.py`; generated JSON and Markdown evidence belongs outside every Git checkout. The harness rejects destinations inside its own checkout or either sampled checkout, and creates evidence files without replacing an existing path.
 
@@ -47,9 +49,20 @@ The two repeat captures for one stack must have identical runtime provenance, po
 
 Run the four capture commands as independent processes from a clean, committed harness checkout. One coordinator-generated canonical UUID is required for the whole batch; each capture receives its fixed role and a fresh capture UUID is generated inside the harness. The outputs below are create-only: use a newly created evidence directory, not an existing directory or old v1 evidence.
 
-The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` and install it into its own editable-install prefix. Do not use the committed `migration/1048-baseline-harness` checkout as `PYMC6_ROOT`: its source `HEAD` intentionally differs from the migration candidate.
+### Host requirements
 
-Set the six coordinator variables below to your own locations. `WORKTREES` is any
+The protocol is not runnable on a small shared CI container or agent sandbox; it must be scheduled on a host that provides all of the following.
+
+- **Environment manager:** `mamba`, `micromamba` or `conda` on `PATH`, able to create two prefixes. `pip` alone is not sufficient: the two stacks need incompatible PyMC/PyTensor/ArviZ trees and their compiled dependencies.
+- **Two distinct prefixes:** `PYMC5_PREFIX` with PyMC 5 / PyTensor 2 / ArviZ 0, and `PYMC6_PREFIX` with PyMC 6 / PyTensor 3 / ArviZ 1, each with an editable CausalPy install whose `direct_url.json` target is exactly that stack's checkout. The two prefixes must agree on platform, machine, Python version/implementation and NumPy/pandas/xarray versions: `capture` never sees the other prefix, so this is checked at `compare` time by the cross-stack runtime gate, and a mismatch there fails the comparison rather than being reported as migration drift. Budget roughly 5–8 GB of disk for the two prefixes, the two worktrees and the PyTensor compile caches.
+- **Memory:** at least 8 GB of RAM available to the run. The serialized fixtures are tiny — 24 and 20 rows — so the posteriors themselves are megabytes; the requirement is set by solving and building two full scientific stacks and by PyTensor's C/numba compilation, not by the draws.
+- **CPU:** at least 4 cores. Sampling does not use them: `cores=1` is a registered protocol constant (see the runtime protocol above), so the four chains of each model run serially and more cores do not shorten a capture. They are for provisioning the two prefixes and compiling, and for headroom. Do not run the captures concurrently — each is an independent process and the two stacks must not contend for memory.
+- **Wall time:** budget hours end to end and schedule it as one uninterrupted job. Sampling itself is the smaller part: 32 serial chain runs (4 captures × 2 models × 4 chains of 1,000 tune + 1,000 draws at `target_accept=0.95`) over small fixtures. The bulk of the wall time is creating the two prefixes and cold-compiling each stack.
+- **Isolation:** a clean host with no other memory-hungry work. The command block below points `PYTENSOR_FLAGS=compiledir=...` at a per-prefix directory so a PyTensor 2 and a PyTensor 3 stack never share a compile cache; the harness does not record or validate `compiledir`, so this one is on the coordinator.
+
+The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `7b3e257b4b006800f445bec6303a399ef7ec2ffc` and install it into its own editable-install prefix. Do not use the harness checkout (`MIGRATION_ROOT`) as `PYMC6_ROOT`: its `HEAD` intentionally differs from the migration candidate, so `capture` would reject it.
+
+Set the coordinator locations below to your own paths. `WORKTREES` is any
 directory outside every CausalPy checkout; `MAMBA` is whichever environment
 manager provides the two prefixes.
 
@@ -63,25 +76,27 @@ PYMC5_ROOT="$WORKTREES/CausalPy-1048-pymc5"
 PYMC5_PREFIX="$WORKTREES/.mamba/CausalPy-1048-pymc5"
 PYMC6_ROOT="$WORKTREES/CausalPy-1048-pymc6"
 PYMC6_PREFIX="$WORKTREES/.mamba/CausalPy-1048-pymc6"
+PYMC5_FLAGS="compiledir=$PYMC5_PREFIX/.pytensor"
+PYMC6_FLAGS="compiledir=$PYMC6_PREFIX/.pytensor"
 BATCH_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 EVIDENCE_ROOT="$WORKTREES/migration-baseline-v2-${BATCH_ID}"
 HARNESS="$MIGRATION_ROOT/scripts/migration_baseline/harness.py"
 
 mkdir "$EVIDENCE_ROOT"
 
-"$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="$PYMC5_FLAGS" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
   --stack pymc5 --capture-role reference_first --batch-id "$BATCH_ID" \
   --repo-root "$PYMC5_ROOT" --output "$EVIDENCE_ROOT/pymc5-run-1.json"
-"$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="$PYMC5_FLAGS" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
   --stack pymc5 --capture-role reference_second --batch-id "$BATCH_ID" \
   --repo-root "$PYMC5_ROOT" --output "$EVIDENCE_ROOT/pymc5-run-2.json"
-"$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="$PYMC6_FLAGS" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
   --stack pymc6 --capture-role candidate_first --batch-id "$BATCH_ID" \
   --repo-root "$PYMC6_ROOT" --output "$EVIDENCE_ROOT/pymc6-run-1.json"
-"$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="$PYMC6_FLAGS" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
   --stack pymc6 --capture-role candidate_second --batch-id "$BATCH_ID" \
   --repo-root "$PYMC6_ROOT" --output "$EVIDENCE_ROOT/pymc6-run-2.json"
-"$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" compare \
+PYTENSOR_FLAGS="$PYMC6_FLAGS" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" compare \
   --reference-first "$EVIDENCE_ROOT/pymc5-run-1.json" \
   --reference-second "$EVIDENCE_ROOT/pymc5-run-2.json" \
   --candidate-first "$EVIDENCE_ROOT/pymc6-run-1.json" \
@@ -93,6 +108,16 @@ mkdir "$EVIDENCE_ROOT"
 The comparator requires four distinct paths, exact role order, one shared batch UUID, and four distinct capture UUIDs. It reads each JSON input once, hashes that exact byte buffer, and carries the buffer-derived hash into the report. It verifies exact raw-draw digests, posterior summaries, and sampling-quality evidence only within each stack; a mismatch makes the entire comparison fail as non-deterministic evidence. It never compares a PyMC 5 digest or raw draw with a PyMC 6 digest or raw draw.
 
 A failed numerical comparison writes its fresh JSON decision and Markdown report, then exits with status `1`; malformed or invalid evidence exits with status `2`. The generated report records all four artifact paths and byte hashes, role/batch identity, clean checkout result, comparator identity, imported runtime provenance, and actual finite/convergence diagnostics. Attach it and its four input artifacts to #1048 with the command log. The static attachment outline is in [REPORT_TEMPLATE.md](REPORT_TEMPLATE.md).
+
+## Re-pinning the candidate revision
+
+`PYMC6_COMMIT` was first pinned at `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` (the merge of #1091). On 2026-08-01 it was moved to the current value, because 121 further commits had merged into the integration branch since, changing 60 files under `causalpy/`. Evidence captured at that superseded pin would have described a tree predating most of the migration. This section records why the pin moves; it is not a running changelog of every value it has held.
+
+Move the pin again when behavioral change to `causalpy/` merges into the integration branch before a capture is run. Commits that change only this harness, its documentation or its tests do not make the pin stale, because they cannot change a sampled posterior — the harness is executed from its own checkout, not from the sampled candidate tree.
+
+Re-pin only by editing `PYMC6_COMMIT`, this document, and [REPORT_TEMPLATE.md](REPORT_TEMPLATE.md) together in a reviewed commit; `test_pinned_revisions_are_documented_consistently` fails when they disagree. Re-pinning invalidates any capture taken at the previous pin: `capture` refuses a checkout whose `HEAD` is not the pinned revision, and `compare` refuses an artifact whose recorded `expected_commit` or `actual_commit` is not the currently pinned revision, so a stale artifact cannot be mixed into a new batch. Discard it and capture a fresh batch.
+
+Read this file from the harness checkout. `$PYMC5_ROOT` and `$PYMC6_ROOT` are full CausalPy checkouts and carry their own copies of this document, pinned to whatever the candidate was at that revision; a re-pin necessarily lags the merge it describes, so the sampled tree's copy always names an older pin.
 
 ## Continuous verification of the capture path
 
