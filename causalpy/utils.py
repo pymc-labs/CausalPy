@@ -297,27 +297,25 @@ def plot_correlations(
     Parameters
     ----------
     data : pd.DataFrame
-        Wide-format panel data with time as the index and locations/units
-        as columns.
+        Wide-format panel data with time as the index and locations/units as columns.
     columns : list[str], optional
-        Subset of columns to include. If ``None``, all numeric columns
-        are used.
+        Subset of columns to include. If ``None``, all numeric columns are used.
     method : {"pearson", "kendall", "spearman"}, default "pearson"
         Correlation method passed to :meth:`pandas.DataFrame.corr`.
     figsize : tuple[float, float], optional
-        Width and height in inches for the figure. Only used when ``ax``
-        is not provided. If ``None``, matplotlib's default is used.
+        Width and height in inches for the figure. Only used when ``ax`` is not provided. If ``None``, matplotlib's default is used.
     ax : matplotlib.axes.Axes, optional
-        Axes on which to draw the heatmap. If ``None``, a new figure and
-        axes are created (sized according to ``figsize``).
-    **kwargs
-        Additional keyword arguments forwarded to :func:`seaborn.heatmap`
-        (e.g., ``vmin``, ``vmax``, ``annot``, ``annot_kws``).
+        Axes on which to draw the heatmap. If ``None``, a new figure and axes are created (sized according to ``figsize``).
 
     Returns
     -------
     tuple[pd.DataFrame, matplotlib.axes.Axes]
         The correlation matrix and the axes containing the heatmap.
+
+    Other Parameters
+    ----------------
+    **kwargs
+        Keyword arguments forwarded to :func:`seaborn.heatmap`: ``vmin``, ``vmax``, ``cmap``, ``center``, ``robust``, ``annot``, ``fmt``, ``annot_kws``, ``linewidths``, ``linecolor``, ``cbar``, ``cbar_kws``, ``cbar_ax``, ``square``, ``xticklabels``, ``yticklabels``, ``mask``, and the :meth:`matplotlib.axes.Axes.pcolormesh` keywords supported by the installed seaborn version. ``data`` and ``ax`` are supplied by CausalPy. This narrow third-party forwarder lets callers override CausalPy's heatmap defaults without duplicating seaborn's evolving forwarding surface; unknown keys are rejected by seaborn or matplotlib rather than ignored.
 
     Examples
     --------

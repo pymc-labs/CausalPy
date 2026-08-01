@@ -11,7 +11,6 @@ cp.InterruptedTimeSeries(
     formula,
     model=None,
     treatment_end_time=None,
-    **kwargs
 )
 ```
 

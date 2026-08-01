@@ -678,7 +678,7 @@ def test_regression_discontinuity_int_treatment():
     """Test that RegressionDiscontinuity works with integer treatment variables."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
-    assert df["treated"].dtype == np.int64  # Ensure treatment is int
+    assert pd.api.types.is_integer_dtype(df["treated"])  # Ensure treatment is int
 
     # This should work now with our fix
     result = cp.RegressionDiscontinuity(
@@ -689,7 +689,7 @@ def test_regression_discontinuity_int_treatment():
     )
 
     # Check that the treatment variable was converted to bool
-    assert result.data["treated"].dtype == bool
+    assert pd.api.types.is_bool_dtype(result.data["treated"])
 
 
 def test_regression_discontinuity_bool_treatment():
@@ -697,7 +697,7 @@ def test_regression_discontinuity_bool_treatment():
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
     df["treated"] = df["treated"].astype(bool)  # Convert to bool
-    assert df["treated"].dtype == bool  # Ensure treatment is bool
+    assert pd.api.types.is_bool_dtype(df["treated"])  # Ensure treatment is bool
 
     # This should work as before
     result = cp.RegressionDiscontinuity(
@@ -708,7 +708,7 @@ def test_regression_discontinuity_bool_treatment():
     )
 
     # Check that the treatment variable is still bool
-    assert result.data["treated"].dtype == bool
+    assert pd.api.types.is_bool_dtype(result.data["treated"])
 
 
 def test_rd_donut_hole_zero_same_as_default():

@@ -46,11 +46,19 @@ dependencies = [
     "matplotlib>=3.5.3",
     "narwhals>=1.13.1",
     "numpy",
-    "pandas",
+    "pandas>=2.3,<4",
     "patsy",
     # Floors per the PyMC 6 migration (#1039). Deliberately NOT pymc>=6.1
     # (pymc-marketing v1.0.0 caps pymc<6.1.0, which would make the docs env
     # unsolvable) and NOT pytensor>=3.2 (pymc 6.1.0 caps pytensor<3.2).
+    #
+    # Knock-on effect of that cap (#1048 deprecation cleanup): `pymc-extras`
+    # versions below 0.13 emit a `DeprecationWarning` from
+    # `BSplineBasis.infer_shape`'s fgraph path. The fix requires
+    # `pymc-extras>=0.13`, which requires `pymc>=6.1`; `pymc-marketing` v1.0.0
+    # currently caps `pymc<6.1`. Leave the warning visible -- do not add a
+    # warning filter -- until those dependency constraints can be resolved
+    # together.
     "pymc>=6.0.1,<7",
     "pytensor>=3,<4",
     "scikit-learn>=1",
@@ -144,6 +152,8 @@ Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 [tool.pytest.ini_options]
 addopts = [
     "-vv",
+    "-m",
+    "not correctness",
     "--strict-markers",
     "--strict-config",
     "--cov=causalpy",
@@ -151,8 +161,10 @@ addopts = [
 ]
 testpaths = "causalpy/tests"
 markers = [
+    "correctness: mark as a statistical correctness test.",
     "integration: mark as an integration test.",
     "slow: mark test as slow.",
+    "correctness: mark statistical correctness and reproducibility tests.",
 ]
 
 [tool.ruff.format]
@@ -178,12 +190,7 @@ extend-select = [
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
 skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
 
-# Numpydoc validation. Originally introduced under #886 as a narrow check on
-# public ``.plot`` overrides, expanded under #898 to enforce a curated set of
-# numpydoc rules across the whole ``causalpy`` package. The ``exclude`` regex
-# matches any dotted node whose path contains a private (underscore-prefixed)
-# component — private helpers, dunders, and members of private modules are
-# considered implementation detail and not subject to docstring validation.
+# Numpydoc validation. Originally introduced under #886 as a narrow check on public ``.plot`` overrides, expanded under #898 to enforce a curated set of numpydoc rules across the whole ``causalpy`` package. The ``exclude`` regex matches any dotted node whose path contains a private (underscore-prefixed) component — private helpers, dunders, and members of private modules are considered implementation detail and not subject to docstring validation.
 [tool.numpydoc_validation]
 checks = [
     "PR01",  # Parameters not documented

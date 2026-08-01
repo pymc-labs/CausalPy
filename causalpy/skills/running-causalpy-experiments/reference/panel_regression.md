@@ -12,7 +12,6 @@ cp.PanelRegression(
     time_fe_variable=None,
     fe_method="dummies",
     model=None,
-    **kwargs
 )
 ```
 

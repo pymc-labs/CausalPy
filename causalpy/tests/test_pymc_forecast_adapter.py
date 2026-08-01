@@ -582,14 +582,15 @@ class TestPlaceboInTime:
                 model=clone_model(base_model),
             )
 
+        # ``n_folds=1`` is forced by this fixture's geometry, not by convenience: the intervention window is 29 daily observations (``dates[70]`` through ``dates[99]``), so a fold is only eligible when at least 29 pre-treatment rows precede its pseudo treatment time. Two sequential folds would sit at ``dates[12]`` and ``dates[41]``, and the first is skipped as ``insufficient_pre_period``, so the fixture can never admit two eligible sequential folds. This test is about PlaceboInTime accepting and refitting the forecast backend, so one fitted fold exercises it fully; do not raise ``n_folds`` here.
         check = cp.checks.PlaceboInTime(
-            n_folds=2,
+            n_folds=1,
             experiment_factory=factory,
             sample_kwargs=dict(fast_sample_kwargs),
             random_seed=42,
         )
         result = check.run(forecast_result)
-        assert len(result.metadata["fold_results"]) == 2
+        assert len(result.metadata["fold_results"]) == 1
         for fold in result.metadata["fold_results"]:
             fold_model = fold.experiment.model
             assert isinstance(fold_model, PyMCForecastModel)

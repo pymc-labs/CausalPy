@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint check-exports check-architecture test test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
+.PHONY: init setup lint check_lint check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
 DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
 DIFF_COVER_FAIL_UNDER ?= 96
@@ -40,8 +40,11 @@ check-architecture: ## Verify ARCHITECTURE.md experiment inventory matches code
 doctest: ## Run doctests for the causalpy module
 	python -m pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
 
-test: ## Run all tests with pytest
+test: ## Run default tests with pytest
 	python -m pytest
+
+test-correctness: ## Run statistical correctness tests
+	python -m pytest -o addopts='' -m correctness --no-cov
 
 test-patch-cov: ## Run tests and fail if patch coverage versus the base branch is too low
 	python -m pytest --cov-report=xml --no-cov-on-fail

@@ -11,7 +11,6 @@ cp.PrePostNEGD(
     group_variable_name,
     pretreatment_variable_name,
     model=None,
-    **kwargs
 )
 ```
 

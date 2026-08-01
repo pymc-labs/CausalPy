@@ -53,7 +53,7 @@ def test_generate_regression_discontinuity_data():
     assert "y" in df.columns
     assert "treated" in df.columns
     assert len(df) == 100  # default N value
-    assert df["treated"].dtype == bool or df["treated"].dtype == np.bool_
+    assert pd.api.types.is_bool_dtype(df["treated"])
 
     # Test with custom parameters
     df_custom = generate_regression_discontinuity_data(

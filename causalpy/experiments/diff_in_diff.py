@@ -20,7 +20,7 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices
+from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -29,7 +29,7 @@ from causalpy.custom_exceptions import (
     FormulaException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.formula_utils import build_formula_matrices
+from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     has_posterior_draws,
@@ -76,8 +76,6 @@ class DifferenceInDifferences(BaseExperiment):
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
         A PyMC model for difference in differences. Defaults to LinearRegression.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Notes
     -----
@@ -118,11 +116,11 @@ class DifferenceInDifferences(BaseExperiment):
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
-        # rename the index to "obs_ind"
+        # Work on an owned frame before normalizing its index metadata.
+        data = data.copy()
         data.index.name = "obs_ind"
         self.data = data
         self.expt_type = "Difference in Differences"
@@ -174,7 +172,7 @@ class DifferenceInDifferences(BaseExperiment):
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
@@ -191,7 +189,7 @@ class DifferenceInDifferences(BaseExperiment):
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
@@ -211,7 +209,7 @@ class DifferenceInDifferences(BaseExperiment):
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
@@ -650,7 +648,6 @@ class DifferenceInDifferences(BaseExperiment):
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
-        **kwargs: Any,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Difference-in-Differences.
@@ -665,9 +662,6 @@ class DifferenceInDifferences(BaseExperiment):
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (ignored for
             point-estimate predictions).
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------

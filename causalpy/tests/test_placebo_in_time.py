@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import warnings
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pymc as pm
 import pytest
 import xarray as xr
 from sklearn.linear_model import LinearRegression
@@ -95,6 +97,40 @@ def _make_pymc_factory():
     return factory
 
 
+def _make_fake_bayesian_experiment(
+    data: pd.DataFrame, treatment_time: int
+) -> SimpleNamespace:
+    """Create a lightweight Bayesian-like experiment for no-sampling checks."""
+    n_post = max(int((data.index >= treatment_time).sum()), 1)
+    post_impact = xr.DataArray(
+        np.ones((1, 2, n_post, 1)),
+        dims=("chain", "draw", "obs_ind", "treated_units"),
+    )
+    return SimpleNamespace(
+        data=data,
+        treatment_time=treatment_time,
+        _model_backend=SimpleNamespace(supports_idata=True),
+        model=SimpleNamespace(),
+        post_impact=post_impact,
+    )
+
+
+def _fake_status_quo_result(
+    fold_means: np.ndarray, fold_sds: np.ndarray
+) -> tuple[SimpleNamespace, np.ndarray]:
+    """Return deterministic hierarchical outputs without sampling."""
+    del fold_means, fold_sds
+    return (
+        SimpleNamespace(
+            posterior={
+                "mu_status_quo": xr.DataArray([0.0]),
+                "tau_status_quo": xr.DataArray([1.0]),
+            }
+        ),
+        np.array([-1.0, 1.0]),
+    )
+
+
 # ===========================================================================
 # Construction tests (unit — no sampling)
 # ===========================================================================
@@ -132,6 +168,60 @@ def test_custom_sample_kwargs():
     assert check.sample_kwargs["draws"] == 200
     assert check.sample_kwargs["chains"] == 2
     assert check.sample_kwargs["target_accept"] == 0.97
+
+
+@pytest.mark.parametrize(
+    ("hierarchical_seed", "master_seed"),
+    [(None, 17), (23, 17)],
+)
+def test_hierarchical_sampling_seed_precedence(
+    monkeypatch, hierarchical_seed, master_seed
+):
+    """The master seed controls PPC while an explicit fit seed takes precedence."""
+    sample_calls: list[dict] = []
+    posterior_predictive_calls: list[dict] = []
+
+    def fake_sample(**kwargs):
+        sample_calls.append(kwargs)
+        return object()
+
+    def fake_sample_posterior_predictive(idata, **kwargs):
+        del idata
+        posterior_predictive_calls.append(kwargs)
+        return {
+            "posterior_predictive": {
+                "theta_new": xr.DataArray(
+                    np.array([[[1.0], [2.0]]]),
+                    dims=("chain", "draw", "new_period"),
+                )
+            }
+        }
+
+    monkeypatch.setattr(pm, "sample", fake_sample)
+    monkeypatch.setattr(
+        pm, "sample_posterior_predictive", fake_sample_posterior_predictive
+    )
+    sample_kwargs = {"draws": 2, "chains": 1}
+    if hierarchical_seed is not None:
+        sample_kwargs["random_seed"] = hierarchical_seed
+    check = PlaceboInTime(
+        sample_kwargs=sample_kwargs,
+        random_seed=master_seed,
+    )
+
+    _, theta_new_samples = check._build_status_quo_model(
+        np.array([0.0, 1.0]),
+        np.array([1.0, 1.0]),
+    )
+
+    expected_hierarchical_seed = (
+        master_seed if hierarchical_seed is None else hierarchical_seed
+    )
+    assert sample_calls[0]["random_seed"] == expected_hierarchical_seed
+    assert posterior_predictive_calls == [
+        {"var_names": ["theta_new"], "random_seed": master_seed}
+    ]
+    np.testing.assert_array_equal(theta_new_samples, np.array([1.0, 2.0]))
 
 
 def test_default_threshold_and_prior_scale():
@@ -347,6 +437,59 @@ def test_assurance_formula_large_expected_effect_dominates_baseline():
     assert ar.true_positive_rate > 0.9
     assert ar.false_positive_rate < 0.1
     assert ar.true_positive_rate > ar.false_positive_rate
+
+
+def _assurance_rates(check: PlaceboInTime) -> tuple[float, ...]:
+    """Run the assurance simulation on fixed inputs and return its rates."""
+    result = check._compute_assurance(
+        theta_new_samples=np.linspace(-5.0, 5.0, 500),
+        fold_sds=np.array([0.5, 1.0, 2.0]),
+        n_posterior_samples=200,
+    )
+    return (
+        result.true_positive_rate,
+        result.false_positive_rate,
+        result.true_negative_rate,
+        result.false_negative_rate,
+    )
+
+
+def _make_assurance_check(random_seed: int | None) -> PlaceboInTime:
+    """Build a check whose assurance stage is driven only by ``random_seed``."""
+    return PlaceboInTime(
+        n_folds=2,
+        expected_effect_prior=np.linspace(0.0, 4.0, 500),
+        rope_half_width=1.0,
+        random_seed=random_seed,
+    )
+
+
+def test_assurance_simulation_is_reproducible_under_master_seed():
+    """The assurance stage must not drift between runs sharing a seed."""
+    first = _make_assurance_check(2024)
+    second = _make_assurance_check(2024)
+
+    assert _assurance_rates(first) == _assurance_rates(second)
+    # Repeating on the same instance must also be stable: the stage RNG is
+    # derived from the master seed, never carried across calls.
+    assert _assurance_rates(first) == _assurance_rates(first)
+
+
+def test_assurance_simulation_differs_across_master_seeds():
+    """Different seeds must actually exercise different simulation draws."""
+    assert _assurance_rates(_make_assurance_check(2024)) != _assurance_rates(
+        _make_assurance_check(99)
+    )
+
+
+def test_assurance_stage_rng_is_independent_of_prior_draw_stage():
+    """Prior draws and simulation noise must not share a stream."""
+    check = _make_assurance_check(2024)
+
+    assert not np.array_equal(
+        check._rng_for_stage(0).normal(size=50),
+        check._rng_for_stage(1).normal(size=50),
+    )
 
 
 # ===========================================================================
@@ -571,6 +714,7 @@ def test_no_mutable_state_on_check(mock_pymc_sample):
     )
     check.run(experiment)
     assert not hasattr(check, "fold_results")
+    assert not hasattr(check, "_unseeded_custom_priors")
 
 
 @pytest.mark.integration
@@ -690,6 +834,512 @@ def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
 
 
 # ===========================================================================
+# Fold eligibility (unit — no sampling)
+# ===========================================================================
+
+
+def test_run_skips_fold_with_insufficient_pre_period(monkeypatch):
+    """An early fold is excluded before it can widen the hierarchical null."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=70)
+    fitted_times: list[int] = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(n_folds=2, experiment_factory=factory)
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with pytest.warns(
+        UserWarning, match="shorter than one full intervention window"
+    ) as record:
+        result = check.run(experiment)
+
+    assert len(record) == 1
+    assert fitted_times == [41]
+    assert result.metadata["n_folds_requested"] == 2
+    assert result.metadata["n_folds_completed"] == 1
+    assert result.metadata["skipped_folds"] == [
+        {
+            "fold_index": 0,
+            "pseudo_treatment_time": 12,
+            "observed_pre_period_rows": 12,
+            "required_pre_period_rows": 29,
+            "reason": "insufficient_pre_period",
+        }
+    ]
+    assert "Fold 1: SKIPPED" in result.text
+    assert "Fold 1: pseudo treatment" not in result.text
+
+
+def test_run_is_inconclusive_when_no_fold_has_enough_pre_period():
+    """No eligible folds must not create a fabricated null distribution."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=50)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - must not fit
+        del fold_data, treatment_time
+        raise AssertionError("Ineligible folds must be skipped before fitting.")
+
+    check = PlaceboInTime(n_folds=1, experiment_factory=factory)
+
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+        result = check.run(experiment)
+
+    assert result.passed is None
+    assert "INCONCLUSIVE — no folds completed." in result.text
+    assert result.metadata["n_folds_requested"] == 1
+    assert result.metadata["n_folds_completed"] == 0
+    assert result.metadata["skipped_folds"] == [
+        {
+            "fold_index": 0,
+            "pseudo_treatment_time": 1,
+            "observed_pre_period_rows": 1,
+            "required_pre_period_rows": 49,
+            "reason": "insufficient_pre_period",
+        }
+    ]
+    assert "null_samples" not in result.metadata
+    assert "p_effect_outside_null" not in result.metadata
+
+
+def test_random_run_is_inconclusive_with_no_feasible_folds():
+    """A zero-candidate random selection cannot fabricate a null."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=50)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - must not fit
+        del fold_data, treatment_time
+        raise AssertionError("No feasible random fold may be fitted.")
+
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        experiment_factory=factory,
+    )
+
+    with pytest.warns(
+        UserWarning, match="random selection yielded only 0 of 1"
+    ) as record:
+        result = check.run(experiment)
+
+    assert len(record) == 1
+    assert result.passed is None
+    assert "INCONCLUSIVE — no folds completed." in result.text
+    assert result.metadata["n_folds_requested"] == 1
+    assert result.metadata["n_folds_completed"] == 0
+    assert result.metadata["skipped_folds"] == [
+        {
+            "fold_index": 0,
+            "pseudo_treatment_time": None,
+            "observed_pre_period_rows": None,
+            "required_pre_period_rows": 49,
+            "reason": "insufficient_feasible_random_folds",
+        }
+    ]
+    assert "null_samples" not in result.metadata
+
+
+def test_random_run_uses_maximum_feasible_partial_folds(monkeypatch):
+    """Random geometry shortfalls fit only the exact feasible subset."""
+    data = pd.DataFrame({"y": np.zeros(201)}, index=np.arange(201))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=150)
+    fitted_times: list[int] = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        min_training_pct=0.10,
+        experiment_factory=factory,
+        random_seed=42,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with pytest.warns(
+        UserWarning, match="random selection yielded only 2 of 3"
+    ) as record:
+        result = check.run(experiment)
+
+    assert len(record) == 1
+    assert fitted_times == [50, 100]
+    assert result.metadata["n_folds_requested"] == 3
+    assert result.metadata["n_folds_completed"] == 2
+    assert result.metadata["skipped_folds"] == [
+        {
+            "fold_index": 2,
+            "pseudo_treatment_time": None,
+            "observed_pre_period_rows": None,
+            "required_pre_period_rows": 50,
+            "reason": "insufficient_feasible_random_folds",
+        }
+    ]
+    assert "Fold 3: SKIPPED" in result.text
+
+
+def test_run_keeps_folds_with_one_full_intervention_window(monkeypatch):
+    """Folds with sufficient history still support the existing headline path."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=75)
+    fitted_times: list[int] = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(n_folds=2, experiment_factory=factory)
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = check.run(experiment)
+
+    assert fitted_times == [27, 51]
+    assert result.passed is True
+    assert result.metadata["n_folds_requested"] == 2
+    assert result.metadata["n_folds_completed"] == 2
+    assert result.metadata["skipped_folds"] == []
+
+
+# ===========================================================================
+# Explicit intervention_length tests (unit — no sampling)
+# ===========================================================================
+
+
+def test_intervention_length_defaults_to_none():
+    """Test intervention length defaults to none."""
+    check = PlaceboInTime()
+    assert check.intervention_length is None
+
+
+@pytest.mark.parametrize(
+    "intervention_length",
+    [0, -1, -2.5, pd.Timedelta(0), pd.Timedelta(days=-1)],
+)
+def test_invalid_intervention_length(intervention_length):
+    """Test invalid intervention length."""
+    with pytest.raises(ValueError, match="intervention_length must be positive"):
+        PlaceboInTime(intervention_length=intervention_length)
+
+
+def test_repr_shows_explicit_intervention_length():
+    """Test repr shows explicit intervention length."""
+    check = PlaceboInTime(n_folds=2, intervention_length=10)
+    assert repr(check) == "PlaceboInTime(n_folds=2, intervention_length=10)"
+
+
+def test_repr_omits_derived_intervention_length():
+    """Test repr omits derived intervention length."""
+    assert repr(PlaceboInTime(n_folds=2)) == "PlaceboInTime(n_folds=2)"
+
+
+def test_explicit_intervention_length_overrides_derived_default():
+    """An explicit window length wins over the experiment-derived one."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=70)
+
+    assert PlaceboInTime()._compute_intervention_length(experiment) == 29
+    assert (
+        PlaceboInTime(intervention_length=10)._compute_intervention_length(experiment)
+        == 10
+    )
+
+
+def test_explicit_intervention_length_makes_more_folds_eligible(monkeypatch):
+    """A shorter placebo window fits folds that the default would skip."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=70)
+    fitted_times: list[int] = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=4,
+        intervention_length=10,
+        experiment_factory=factory,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with pytest.warns(UserWarning, match="placebo windows span 10 observation"):
+        result = check.run(experiment)
+
+    assert fitted_times == [30, 40, 50, 60]
+    assert result.metadata["n_folds_completed"] == 4
+    assert result.metadata["skipped_folds"] == []
+    assert result.metadata["intervention_length"] == 10
+
+
+def test_comparison_window_metadata_is_recorded():
+    """Both spans behind the verdict are exposed for interpretation."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=70)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - not reached
+        del fold_data, treatment_time
+        raise AssertionError("No eligible fold exists in this configuration.")
+
+    check = PlaceboInTime(n_folds=1, intervention_length=90, experiment_factory=factory)
+
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+        result = check.run(experiment)
+
+    assert result.metadata["comparison_window"] == {
+        "placebo_window_observations": 30,
+        "actual_post_period_observations": 30,
+    }
+    assert result.metadata["intervention_length"] == 90
+
+
+def test_derived_intervention_length_does_not_warn_about_comparison_window(monkeypatch):
+    """The one-observation half-open artefact must stay silent."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=75)
+
+    def factory(fold_data, treatment_time):
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(n_folds=2, experiment_factory=factory)
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = check.run(experiment)
+
+    assert result.metadata["comparison_window"] == {
+        "placebo_window_observations": 24,
+        "actual_post_period_observations": 25,
+    }
+
+
+def test_intervention_length_spanning_no_observations_raises():
+    """An empty placebo window must fail loudly, not fabricate a null."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=69.5)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - not reached
+        del fold_data, treatment_time
+        raise AssertionError("An empty placebo window must fail before fitting.")
+
+    check = PlaceboInTime(
+        n_folds=1, intervention_length=0.4, experiment_factory=factory
+    )
+
+    with pytest.raises(ValueError, match="spans no observations"):
+        check.run(experiment)
+
+
+def test_explicit_intervention_length_with_datetime_index(monkeypatch):
+    """Timedelta windows drive fold geometry on datetime-indexed data."""
+    index = pd.date_range("2020-01-01", periods=100, freq="D")
+    data = pd.DataFrame({"y": np.zeros(100)}, index=index)
+    treatment_time = index[70]
+    experiment = _make_fake_bayesian_experiment(data, treatment_time)
+    fitted_times: list[pd.Timestamp] = []
+
+    def factory(fold_data, fold_treatment_time):
+        fitted_times.append(fold_treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, fold_treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=3,
+        intervention_length=pd.Timedelta(days=10),
+        experiment_factory=factory,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    with pytest.warns(UserWarning, match="placebo windows span 10 observation"):
+        result = check.run(experiment)
+
+    assert fitted_times == [index[40], index[50], index[60]]
+    assert result.metadata["n_folds_completed"] == 3
+
+
+def test_explicit_intervention_length_widens_random_candidate_pool():
+    """Random selection sees the configured window, not the derived one."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+
+    derived = PlaceboInTime(
+        n_folds=3, selection_method="random", random_seed=42
+    )._compute_random_fold_treatment_times(data, 70, 29)
+    configured = PlaceboInTime(
+        n_folds=3,
+        selection_method="random",
+        intervention_length=10,
+        random_seed=42,
+    )._compute_random_fold_treatment_times(data, 70, 10)
+
+    assert len(derived) < 3
+    assert len(configured) == 3
+
+
+def test_pipeline_run_derives_independent_fold_seeds(monkeypatch):
+    """Pipeline-created folds receive deterministic, distinct model seeds."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=75)
+    source_model = SimpleNamespace(sample_kwargs={"random_seed": 1})
+    fitted_models: list[SimpleNamespace] = []
+
+    def method(fold_data, treatment_time, model):
+        fitted_models.append(model)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    context = PipelineContext(data=data)
+    context.experiment_config = {
+        "method": method,
+        "treatment_time": 75,
+        "model": source_model,
+    }
+    check = PlaceboInTime(n_folds=2, random_seed=73)
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    result = check.run(experiment, context)
+
+    assert result.metadata["n_folds_completed"] == 2
+    assert [model.sample_kwargs["random_seed"] for model in fitted_models] == [73, 74]
+    assert source_model.sample_kwargs["random_seed"] == 1
+
+
+def test_pipeline_run_seeds_default_model_template(monkeypatch):
+    """Pipeline-created folds seed a method's implicit default model."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=75)
+    fitted_models: list[SimpleNamespace] = []
+
+    class _DefaultModel:
+        def __init__(self):
+            self.sample_kwargs: dict[str, int] = {}
+
+    class _Method:
+        _default_model_class = _DefaultModel
+
+        def __call__(self, fold_data, treatment_time, model):
+            fitted_models.append(model)
+            return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    context = PipelineContext(data=data)
+    context.experiment_config = {
+        "method": _Method(),
+        "treatment_time": 75,
+    }
+    check = PlaceboInTime(n_folds=2, random_seed=73)
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+
+    result = check.run(experiment, context)
+
+    assert result.metadata["n_folds_completed"] == 2
+    assert [model.sample_kwargs["random_seed"] for model in fitted_models] == [73, 74]
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.correctness
+def test_master_seed_makes_full_placebo_run_reproducible():
+    """Same-process runs retain exact report, metadata, and null samples."""
+
+    def run_once():
+        data = _make_its_data(n=100, seed=91)
+        return (
+            Pipeline(
+                data=data,
+                steps=[
+                    cp.EstimateEffect(
+                        method=InterruptedTimeSeries,
+                        treatment_time=75,
+                        formula="y ~ 1 + t",
+                        model=cp.pymc_models.LinearRegression(
+                            sample_kwargs={
+                                "chains": 1,
+                                "cores": 1,
+                                "draws": 20,
+                                "tune": 20,
+                                "progressbar": False,
+                                "random_seed": 41,
+                            }
+                        ),
+                    ),
+                    cp.SensitivityAnalysis(
+                        checks=[
+                            PlaceboInTime(
+                                n_folds=2,
+                                sample_kwargs={
+                                    "chains": 1,
+                                    "cores": 1,
+                                    "draws": 20,
+                                    "tune": 20,
+                                    "progressbar": False,
+                                },
+                                random_seed=73,
+                            )
+                        ]
+                    ),
+                ],
+            )
+            .run()
+            .sensitivity_results[0]
+        )
+
+    first = run_once()
+    second = run_once()
+
+    assert first.text == second.text
+    assert first.metadata.keys() == second.metadata.keys()
+    for key in (
+        "n_folds_requested",
+        "n_folds_completed",
+        "skipped_folds",
+        "actual_cumulative_mean",
+        "p_effect_outside_null",
+        "rope_half_width",
+        "threshold",
+        "expected_effect_prior",
+        "unseeded_custom_priors",
+    ):
+        assert first.metadata[key] == second.metadata[key]
+    np.testing.assert_array_equal(
+        first.metadata["fold_sds"], second.metadata["fold_sds"]
+    )
+    np.testing.assert_array_equal(
+        first.metadata["null_samples"], second.metadata["null_samples"]
+    )
+    xr.testing.assert_equal(
+        first.metadata["status_quo_idata"].posterior,
+        second.metadata["status_quo_idata"].posterior,
+    )
+
+    first_folds = first.metadata["fold_results"]
+    second_folds = second.metadata["fold_results"]
+    assert len(first_folds) == len(second_folds) == 2
+    for first_fold, second_fold in zip(first_folds, second_folds, strict=True):
+        assert first_fold.fold == second_fold.fold
+        assert first_fold.pseudo_treatment_time == second_fold.pseudo_treatment_time
+        assert first_fold.fold_mean == second_fold.fold_mean
+        assert first_fold.fold_sd == second_fold.fold_sd
+        np.testing.assert_array_equal(
+            first_fold.cumulative_impact_samples,
+            second_fold.cumulative_impact_samples,
+        )
+        pd.testing.assert_frame_equal(
+            first_fold.experiment.data, second_fold.experiment.data
+        )
+        xr.testing.assert_equal(
+            first_fold.experiment.post_impact,
+            second_fold.experiment.post_impact,
+        )
+    assert [
+        fold.experiment.model.sample_kwargs["random_seed"] for fold in first_folds
+    ] == [73, 74]
+    assert [
+        fold.experiment.model.sample_kwargs["random_seed"] for fold in second_folds
+    ] == [73, 74]
+
+
+# ===========================================================================
 # Assurance tests (integration — needs PyMC)
 # ===========================================================================
 
@@ -735,7 +1385,7 @@ def test_assurance_with_numpy_array(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_assurance_with_rvs_object(mock_pymc_sample):
-    """Test that expected_effect_prior with .rvs() method works."""
+    """Legacy .rvs(n) priors warn and are recorded as unseeded."""
 
     class _MockDistribution:
         def rvs(self, n):
@@ -756,9 +1406,27 @@ def test_assurance_with_rvs_object(mock_pymc_sample):
         rope_half_width=50.0,
         random_seed=42,
     )
-    result = check.run(experiment)
+    with pytest.warns(UserWarning, match="using unseeded legacy .rvs") as record:
+        result = check.run(experiment)
+
+    assert (
+        len(
+            [
+                warning
+                for warning in record
+                if "using unseeded legacy .rvs" in str(warning.message)
+            ]
+        )
+        == 1
+    )
     assert "assurance" in result.metadata
     assert isinstance(result.metadata["assurance"], float)
+    assert result.metadata["unseeded_custom_priors"][0]["reason"] == (
+        "rvs_does_not_accept_random_state"
+    )
+    assert result.metadata["unseeded_custom_priors"][0]["prior_type"].endswith(
+        "._MockDistribution"
+    )
 
 
 @pytest.mark.integration
@@ -920,6 +1588,33 @@ def test_random_fold_treatment_times_count():
     assert times == sorted(times)
 
 
+def test_random_fold_selection_requires_one_full_pre_period():
+    """Random selection excludes candidates without an intervention-sized history."""
+    data = pd.DataFrame({"y": np.zeros(200)}, index=np.arange(200))
+    intervention_length = 40
+    check = PlaceboInTime(
+        n_folds=2,
+        selection_method="random",
+        min_training_pct=0.10,
+        random_seed=42,
+    )
+
+    times = check._compute_random_fold_treatment_times(
+        data,
+        treatment_time=150,
+        intervention_length=intervention_length,
+    )
+
+    assert all(time >= intervention_length for time in times)
+    for time in times:
+        observed_rows, required_rows = check._get_fold_pre_period_observation_counts(
+            data,
+            time,
+            intervention_length,
+        )
+        assert observed_rows >= required_rows
+
+
 def test_random_fold_treatment_times_reproducible():
     """Same seed produces same selection."""
     n = 200
@@ -982,27 +1677,28 @@ def test_random_fold_respects_min_gap():
         assert times[i + 1] - times[i] >= 5
 
 
-def test_random_fold_respects_exclude_periods():
-    """Excluded periods are not selected."""
+def test_random_fold_returns_empty_without_eligible_periods():
+    """A valid configuration with no eligible period returns no folds."""
     n = 200
     data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
-    # Exclude all candidates by excluding every string representation
-    exclude = {str(i) for i in range(200)}
+    exclude = {str(i) for i in range(n)}
     check = PlaceboInTime(
         n_folds=1,
         selection_method="random",
         exclude_periods=exclude,
         random_seed=42,
     )
-    with pytest.raises(ValueError, match="eligible candidate"):
+
+    assert (
         check._compute_random_fold_treatment_times(
             data, treatment_time=150, intervention_length=10
         )
+        == []
+    )
 
 
-def test_random_fold_too_few_candidates_raises():
-    """Raises when there aren't enough eligible candidates."""
-    # Very short pre-period
+def test_random_fold_returns_feasible_partial_when_candidates_are_few():
+    """A valid but short candidate pool returns its feasible subset."""
     data = pd.DataFrame({"y": np.zeros(10)}, index=np.arange(10))
     check = PlaceboInTime(
         n_folds=5,
@@ -1010,10 +1706,10 @@ def test_random_fold_too_few_candidates_raises():
         min_training_pct=0.50,
         random_seed=42,
     )
-    with pytest.raises(ValueError, match="eligible candidate"):
-        check._compute_random_fold_treatment_times(
-            data, treatment_time=8, intervention_length=2
-        )
+
+    assert check._compute_random_fold_treatment_times(
+        data, treatment_time=8, intervention_length=2
+    ) == [4, 6]
 
 
 def test_random_fold_with_datetime_index():
@@ -1125,13 +1821,12 @@ def test_windows_overlap_helper_datetime():
 
 
 # ===========================================================================
-# Bounded-retry greedy selection (unit — no sampling)
+# Maximum feasible random selection (unit — no sampling)
 # ===========================================================================
 #
-# Replaces the "retry with a different random_seed" error-message
-# workaround.  With a seed set, the retry loop deterministically
-# explores up to ``MAX_RANDOM_SELECTION_RETRIES`` sub-seeds before
-# raising.
+# Seeded retries preserve random selection when the requested count is
+# feasible. Geometry shortfalls instead return the exact maximum subset so
+# the caller can report skipped folds rather than fail the whole analysis.
 
 
 def test_greedy_retry_preserves_reproducibility():
@@ -1154,46 +1849,34 @@ def test_greedy_retry_preserves_reproducibility():
     assert t1 == t2
 
 
-def test_greedy_retry_raises_when_infeasible():
-    """When no attempt can satisfy constraints the final error mentions retries."""
-    # 3 folds, intervention_length=50 so non-overlap needs 100 units span,
-    # but eligible window is only ~50 units (pos 20..99 with pseudo_end<=150).
-    # No arrangement can fit 3 non-overlapping windows of length 50 there.
-    n = 200
-    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+def test_random_selection_returns_maximum_when_geometry_is_infeasible():
+    """Non-overlap constraints return the available two-fold subset."""
+    data = pd.DataFrame({"y": np.zeros(200)}, index=np.arange(200))
     check = PlaceboInTime(
         n_folds=3,
         selection_method="random",
         min_training_pct=0.10,
         random_seed=42,
     )
-    with pytest.raises(ValueError, match="greedy attempts"):
-        check._compute_random_fold_treatment_times(
-            data, treatment_time=150, intervention_length=50
-        )
+
+    assert check._compute_random_fold_treatment_times(
+        data, treatment_time=150, intervention_length=50
+    ) == [50, 100]
 
 
-def test_greedy_retry_error_suggests_relaxing_constraints():
-    """The failure message names the settings the user can relax."""
-    n = 200
-    data = pd.DataFrame({"y": np.zeros(n)}, index=np.arange(n))
+def test_random_selection_avoids_the_central_greedy_trap():
+    """Partial selection finds both endpoint windows, not one random center."""
+    data = pd.DataFrame({"y": np.zeros(401)}, index=np.arange(401))
     check = PlaceboInTime(
-        n_folds=3,
+        n_folds=102,
         selection_method="random",
-        min_training_pct=0.10,
+        min_training_pct=0.30,
         random_seed=42,
     )
-    try:
-        check._compute_random_fold_treatment_times(
-            data, treatment_time=150, intervention_length=50
-        )
-    except ValueError as err:
-        msg = str(err)
-        assert "allow_overlap" in msg
-        assert "min_gap" in msg
-        assert "n_folds" in msg
-    else:  # pragma: no cover - we expect the error
-        raise AssertionError("Expected infeasible selection to raise.")
+
+    assert check._compute_random_fold_treatment_times(
+        data, treatment_time=300, intervention_length=100
+    ) == [100, 200]
 
 
 # ===========================================================================
@@ -1248,6 +1931,108 @@ def test_draw_expected_effect_samples_rvs_no_warning():
         out = check._draw_expected_effect_samples(n=13)
     assert dist.last_n == 13
     assert len(out) == 13
+
+
+def test_draw_expected_effect_samples_seeded_rvs_is_reproducible():
+    """Seed-aware priors receive a deterministic derived Generator."""
+
+    class _SeedAwareDistribution:
+        def __init__(self):
+            self.random_states: list[np.random.Generator] = []
+
+        def rvs(self, n, random_state):
+            self.random_states.append(random_state)
+            return random_state.normal(size=n)
+
+    first_distribution = _SeedAwareDistribution()
+    second_distribution = _SeedAwareDistribution()
+    first = PlaceboInTime(
+        expected_effect_prior=first_distribution,
+        rope_half_width=0.5,
+        random_seed=71,
+    )._draw_expected_effect_samples(n=13)
+    second = PlaceboInTime(
+        expected_effect_prior=second_distribution,
+        rope_half_width=0.5,
+        random_seed=71,
+    )._draw_expected_effect_samples(n=13)
+
+    np.testing.assert_array_equal(first, second)
+    assert isinstance(first_distribution.random_states[0], np.random.Generator)
+    assert isinstance(second_distribution.random_states[0], np.random.Generator)
+
+
+def test_draw_expected_effect_samples_scipy_prior_is_reproducible():
+    """SciPy priors receive the derived Generator through random_state."""
+    from scipy.stats import norm
+
+    first = PlaceboInTime(
+        expected_effect_prior=norm(loc=2.0, scale=0.5),
+        rope_half_width=0.5,
+        random_seed=71,
+    )._draw_expected_effect_samples(n=13)
+    second = PlaceboInTime(
+        expected_effect_prior=norm(loc=2.0, scale=0.5),
+        rope_half_width=0.5,
+        random_seed=71,
+    )._draw_expected_effect_samples(n=13)
+
+    np.testing.assert_array_equal(first, second)
+
+
+def test_draw_expected_effect_samples_propagates_seeded_prior_type_error():
+    """A TypeError inside a seed-aware prior is not misclassified as legacy."""
+
+    class _FailingSeedAwareDistribution:
+        def __init__(self):
+            self.calls = 0
+
+        def rvs(self, n, random_state):
+            del n, random_state
+            self.calls += 1
+            raise TypeError("prior calculation failed")
+
+    distribution = _FailingSeedAwareDistribution()
+    check = PlaceboInTime(
+        expected_effect_prior=distribution,
+        rope_half_width=0.5,
+        random_seed=71,
+    )
+
+    with pytest.raises(TypeError, match="prior calculation failed"):
+        check._draw_expected_effect_samples(n=13)
+    assert distribution.calls == 1
+
+
+def test_draw_expected_effect_samples_legacy_rvs_warns_and_is_recorded():
+    """Seeded legacy priors retain behavior without silently claiming reproducibility."""
+
+    class _LegacyDistribution:
+        def rvs(self, n):
+            return np.linspace(0.0, 1.0, n)
+
+    diagnostics: list[dict[str, str]] = []
+    check = PlaceboInTime(
+        expected_effect_prior=_LegacyDistribution(),
+        rope_half_width=0.5,
+        random_seed=71,
+    )
+    with pytest.warns(UserWarning, match="using unseeded legacy .rvs"):
+        samples = check._draw_expected_effect_samples(
+            n=13,
+            unseeded_custom_priors=diagnostics,
+        )
+
+    assert len(samples) == 13
+    assert diagnostics == [
+        {
+            "prior_type": (
+                f"{_LegacyDistribution.__module__}.{_LegacyDistribution.__qualname__}"
+            ),
+            "reason": "rvs_does_not_accept_random_state",
+        }
+    ]
+    assert not hasattr(check, "_unseeded_custom_priors")
 
 
 # ===========================================================================

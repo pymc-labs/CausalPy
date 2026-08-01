@@ -20,14 +20,13 @@ import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import build_design_matrices
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.formula_utils import build_formula_matrices
+from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     plot_posterior_over_x,
@@ -57,8 +56,6 @@ class PrePostNEGD(BaseExperiment):
         Name of the column in ``data`` for the pretreatment variable.
     model : PyMCModel, optional
         A PyMC model. Defaults to :class:`LinearRegression`.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Notes
     -----
@@ -109,7 +106,6 @@ class PrePostNEGD(BaseExperiment):
         group_variable_name: str,
         pretreatment_variable_name: str,
         model: PyMCModel | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray
@@ -413,7 +409,6 @@ class PrePostNEGD(BaseExperiment):
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
-        **kwargs: Any,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for PrePostNEGD.
@@ -426,9 +421,6 @@ class PrePostNEGD(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only).
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------

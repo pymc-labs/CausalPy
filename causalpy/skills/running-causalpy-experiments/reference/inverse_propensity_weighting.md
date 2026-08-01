@@ -11,7 +11,6 @@ cp.InversePropensityWeighting(
     outcome_variable,
     weighting_scheme,
     model=None,
-    **kwargs
 )
 ```
 

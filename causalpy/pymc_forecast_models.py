@@ -302,7 +302,6 @@ class PyMCForecastModel:
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
-        **kwargs: Any,
     ) -> xr.DataTree:
         """Predict in-sample (pre-period) or forecast the counterfactual.
 
@@ -318,8 +317,6 @@ class PyMCForecastModel:
             Not used, kept for API compatibility.
         out_of_sample : bool, default False
             ``True`` draws the post-period counterfactual ("as if untreated").
-        **kwargs
-            Reserved for forward-compatibility; not consumed.
 
         Returns
         -------

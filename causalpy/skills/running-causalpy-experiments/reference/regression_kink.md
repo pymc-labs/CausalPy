@@ -13,7 +13,6 @@ cp.RegressionKink(
     running_variable_name="x",
     epsilon=0.001,
     bandwidth=np.inf,
-    **kwargs
 )
 ```
 

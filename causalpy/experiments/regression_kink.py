@@ -22,9 +22,9 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from patsy import ModelDesc, build_design_matrices
+from patsy import ModelDesc
 import xarray as xr
-from causalpy.formula_utils import build_formula_matrices
+from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
@@ -66,8 +66,6 @@ class RegressionKink(BaseExperiment):
     bandwidth : float, default np.inf
         Data outside of the bandwidth (relative to the kink) is not used to
         fit the model.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
     Notes
     -----
@@ -90,7 +88,6 @@ class RegressionKink(BaseExperiment):
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
@@ -423,7 +420,6 @@ class RegressionKink(BaseExperiment):
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
-        **kwargs: Any,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Regression Kink.
@@ -436,9 +432,6 @@ class RegressionKink(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------

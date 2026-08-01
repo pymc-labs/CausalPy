@@ -35,6 +35,7 @@ backend (PyMC or pymc-forecast) for posterior extraction.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import warnings
 from dataclasses import dataclass, field
@@ -56,11 +57,34 @@ logger = logging.getLogger(__name__)
 MIN_FOLD_OBSERVATIONS = 3
 MAX_RANDOM_SELECTION_RETRIES = 16
 
+# Placebo windows are half-open (``[t, t + intervention_length)``) while the
+# actual effect is summarised over the whole post-intervention period.  With
+# the derived default ``intervention_length`` those two spans differ by at most
+# the single observation sitting on the closing edge of the window, which is a
+# geometry artefact rather than a misconfiguration, so the comparison-window
+# warning only fires beyond that.
+COMPARISON_WINDOW_OBSERVATION_TOLERANCE = 1
+
 _DEFAULT_SAMPLE_KWARGS: dict[str, Any] = {
     "draws": 1000,
     "chains": 4,
     "target_accept": 0.97,
 }
+
+
+def _is_non_positive_length(length: Any) -> bool:
+    """Return whether a window length is orderable against zero and not positive.
+
+    Numeric and ``pd.Timedelta`` lengths are compared against a zero of the
+    same kind.  Calendar offsets such as ``pd.DateOffset`` are not orderable,
+    so they pass this check and are validated at run time by the
+    intervention-window observation count in :meth:`PlaceboInTime.run`.
+    """
+    if isinstance(length, pd.Timedelta):
+        return length <= pd.Timedelta(0)
+    if isinstance(length, (int, float, np.integer, np.floating)):
+        return bool(length <= 0)
+    return False
 
 
 @dataclass
@@ -142,7 +166,10 @@ class PlaceboInTime:
     Parameters
     ----------
     n_folds : int, default 3
-        Number of placebo folds to create.  Must be >= 1.
+        Number of placebo folds to create.  Must be >= 1.  Each fold
+        consumes one ``intervention_length`` of pre-treatment history, so on
+        a short pre-period a large ``n_folds`` produces ineligible folds that
+        are skipped; shorten ``intervention_length`` to fit more folds.
     selection_method : {"sequential", "random"}, default "sequential"
         How to choose placebo windows.
 
@@ -151,17 +178,22 @@ class PlaceboInTime:
         * ``"random"`` — randomly sample eligible windows from the
           pre-intervention period, subject to ``min_training_pct``,
           ``min_gap``, and ``exclude_periods`` constraints.
+        Every placebo fold must have at least one full intervention window
+        of observed pre-treatment history. Sequential folds that do not meet
+        this rule are skipped with a warning and deterministic
+        ``skipped_folds`` metadata; random selection excludes them from its
+        candidate pool.
     min_training_pct : float, default 0.30
         *(random mode only)* Minimum fraction of total pre-period
         observations that must precede each candidate placebo window.
 
         Note: the eligible pre-period is further shortened because a
         candidate's pseudo-intervention window must also end before the
-        actual treatment.  When ``treatment_end_time`` is not set on
-        the experiment, ``intervention_length`` defaults to
-        ``data.index.max() - treatment_time`` (roughly the post-period
-        length), which can make the effective eligible window much
-        smaller than ``(1 - min_training_pct)`` suggests.
+        actual treatment.  With the derived default
+        ``intervention_length`` (see below) that window is roughly the
+        post-period length, which can make the effective eligible window
+        much smaller than ``(1 - min_training_pct)`` suggests; pass an
+        explicit ``intervention_length`` to widen it.
     min_gap : int, default 1
         *(random mode only)* Minimum number of pre-intervention
         observations between any two selected folds, measured as
@@ -188,7 +220,10 @@ class PlaceboInTime:
     experiment_factory : callable, optional
         Custom factory ``(data, treatment_time) -> BaseExperiment``.
         If ``None`` (default), the factory is derived from the pipeline's
-        ``experiment_config``.  Required for standalone (non-pipeline) use.
+        ``experiment_config``. Required for standalone (non-pipeline) use.
+        This is the escape hatch for adapting the model to the eligible
+        placebo-fold data; custom factories remain responsible for any
+        model-specific randomness they introduce.
     sample_kwargs : dict, optional
         MCMC settings for the hierarchical status-quo model.
         Defaults to ``{"draws": 1000, "chains": 4, "target_accept": 0.97}``.
@@ -203,10 +238,13 @@ class PlaceboInTime:
         ``tau ~ HalfNormal(2 * prior_scale * data_scale)``.
     expected_effect_prior : distribution or array, optional
         Prior belief about the true total effect under the alternative
-        hypothesis.  Accepts any object with an ``.rvs(n)`` method
-        (PreliZ, scipy) or a numpy array of pre-drawn samples.  When
-        provided together with ``rope_half_width``, assurance analysis
-        runs automatically.
+        hypothesis. Accepts any object with an ``.rvs(n)`` method
+        (PreliZ, scipy) or a numpy array of pre-drawn samples. When
+        ``random_seed`` is set, distributions exposing ``random_state``
+        receive a derived Generator; legacy ``.rvs(n)`` distributions remain
+        supported but emit a reproducibility warning and are recorded in
+        result metadata. Provided together with ``rope_half_width``, assurance
+        analysis runs automatically.
     rope_half_width : float, optional
         Half-width of the ROPE interval ``[-rope, +rope]``.  Required
         when ``expected_effect_prior`` is provided.
@@ -214,7 +252,36 @@ class PlaceboInTime:
         Number of simulation replications for assurance.  Defaults to
         ``min(theta_new.size, expected_effect_samples.size)``.
     random_seed : int, optional
-        RNG seed for the assurance simulation and random fold selection.
+        Master RNG seed for random fold selection, automatically constructed
+        placebo-fold fits (using ``random_seed + fold_index``), hierarchical
+        posterior predictive sampling, and assurance simulation. It also
+        seeds the hierarchical ``pm.sample`` call unless
+        ``sample_kwargs["random_seed"]`` is explicitly supplied, which takes
+        precedence for that call only.
+    intervention_length : int, float, ``pd.Timedelta`` or ``pd.DateOffset``, optional
+        Length of each placebo intervention window, in index units.  When
+        ``None`` (default) the length is derived from the experiment:
+        ``treatment_end_time - treatment_time`` when the experiment defines
+        an explicit intervention window, otherwise
+        ``data.index.max() - treatment_time`` (roughly the post-period
+        length).
+
+        Set this explicitly to fit more well-supported folds into a short
+        pre-period.  The derived default consumes one post-period worth of
+        history per fold, so when the pre-period is only a few times longer
+        than the post-period the earliest folds fail the eligibility rule
+        above and are skipped.  A shorter ``intervention_length`` shortens
+        both the placebo window and the history each fold requires, so more
+        folds become eligible.
+
+        The actual effect is still summarised over the full
+        post-intervention period, so a window materially shorter than that
+        period compares a long actual cumulative impact against a null built
+        from short windows, which inflates ``P(actual outside null)``.  Both
+        observation counts are recorded in
+        ``metadata["comparison_window"]`` and a warning is emitted when they
+        disagree by more than the one-observation half-open-window artefact
+        of the derived default.
 
     Examples
     --------
@@ -253,9 +320,16 @@ class PlaceboInTime:
         rope_half_width: float | None = None,
         n_design_replications: int | None = None,
         random_seed: int | None = None,
+        intervention_length: Any | None = None,
     ) -> None:
         if n_folds < 1:
             raise ValueError("n_folds must be >= 1")
+        if intervention_length is not None and _is_non_positive_length(
+            intervention_length
+        ):
+            raise ValueError(
+                f"intervention_length must be positive, got {intervention_length!r}"
+            )
         if selection_method not in ("sequential", "random"):
             raise ValueError(
                 f"selection_method must be 'sequential' or 'random', "
@@ -287,6 +361,7 @@ class PlaceboInTime:
         self.rope_half_width = rope_half_width
         self.n_design_replications = n_design_replications
         self.random_seed = random_seed
+        self.intervention_length = intervention_length
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Check the experiment is compatible with PlaceboInTime.
@@ -320,8 +395,33 @@ class PlaceboInTime:
                 f"backend (cp.pymc_forecast_models.PyMCForecastModel)."
             )
 
+    @staticmethod
+    def _clone_model_for_fold(model: Any, random_seed: int | None) -> Any:
+        """Clone a model and apply a fold-specific seed when supported."""
+        if random_seed is None:
+            return clone_model(model)
+
+        sample_kwargs = getattr(model, "sample_kwargs", None)
+        if isinstance(sample_kwargs, dict):
+            cloned_model = clone_model(model)
+            cloned_model.sample_kwargs = {
+                **cloned_model.sample_kwargs,
+                "random_seed": random_seed,
+            }
+            return cloned_model
+
+        if hasattr(model, "random_seed"):
+            original_seed = model.random_seed
+            model.random_seed = random_seed
+            try:
+                return clone_model(model)
+            finally:
+                model.random_seed = original_seed
+
+        return clone_model(model)
+
     def _get_factory(self, context: PipelineContext | None) -> Any:
-        """Return a factory ``(data, treatment_time) -> experiment``."""
+        """Return a factory that accepts data, treatment time, and a fold seed."""
         if self.experiment_factory is not None:
             return self.experiment_factory
 
@@ -335,19 +435,37 @@ class PlaceboInTime:
         config = context.experiment_config
         method = config["method"]
         kwargs = {k: v for k, v in config.items() if k != "method"}
+        model_template = kwargs.get("model")
+        if model_template is None:
+            context_experiment = getattr(context, "experiment", None)
+            if context_experiment is not None:
+                model_template = context_experiment.model
+        if model_template is None:
+            default_model_class = getattr(method, "_default_model_class", None)
+            if default_model_class is not None:
+                model_template = default_model_class()
 
-        def _factory(data: pd.DataFrame, treatment_time: Any) -> BaseExperiment:
+        def _factory(
+            data: pd.DataFrame,
+            treatment_time: Any,
+            fold_random_seed: int | None = None,
+        ) -> BaseExperiment:
             """Create a fresh experiment with the given treatment time."""
             kw = dict(kwargs)
             kw["treatment_time"] = treatment_time
-            if "model" in kw and kw["model"] is not None:
-                kw["model"] = clone_model(kw["model"])
+            if model_template is not None:
+                kw["model"] = self._clone_model_for_fold(
+                    model_template, fold_random_seed
+                )
             return method(data, **kw)
 
         return _factory
 
     def _compute_intervention_length(self, experiment: BaseExperiment) -> Any:
-        """Compute intervention length from the experiment."""
+        """Return the configured placebo window length, or derive it."""
+        if self.intervention_length is not None:
+            return self.intervention_length
+
         treatment_time = experiment.treatment_time  # type: ignore[attr-defined]
         data = experiment.data  # type: ignore[attr-defined]
 
@@ -391,23 +509,23 @@ class PlaceboInTime:
              ``[idx, idx + intervention_length)`` ends before the real
              ``treatment_time`` (so the placebo and real intervention
              cannot overlap in time).
+           * its pre-period contains at least as many observations as the
+             original intervention window, so every selected fold has one
+             full intervention window of fitting history.
 
-           If the resulting pool has fewer than :attr:`n_folds`
-           candidates the method raises :class:`ValueError` with the
-           knobs to relax (``n_folds`` / ``min_training_pct`` /
-           ``exclude_periods``).
+           If candidate eligibility or geometry constraints make the requested
+           number infeasible, the method returns the exact maximum feasible
+           subset rather than raising.
 
-        2. **Greedy selection with retry.**  Hands the pool to
-           :meth:`_try_greedy_selection`, which picks
-           :attr:`n_folds` indices one at a time subject to
-           :attr:`min_gap` (positional distance in the candidate pool)
-           and :attr:`allow_overlap` (non-overlap of the pseudo
-           windows in time/index units).  Greedy without backtracking
-           can paint itself into a corner on tight constraints, so the
-           method runs up to :data:`MAX_RANDOM_SELECTION_RETRIES`
-           passes.  When :attr:`random_seed` is set, each retry uses a
-           deterministic sub-seed (``seed + attempt``) so the whole
-           routine remains reproducible across runs.
+        2. **Random selection.**  When the maximum feasible subset
+           contains :attr:`n_folds` values, the method uses
+           :meth:`_try_greedy_selection` to select a random subset subject to
+           :attr:`min_gap` (positional distance in the candidate pool) and
+           :attr:`allow_overlap` (non-overlap of the pseudo windows in
+           time/index units). Greedy without backtracking can paint itself
+           into a corner, so up to :data:`MAX_RANDOM_SELECTION_RETRIES` passes
+           are attempted. If all seeded attempts miss a full selection, the
+           method falls back to the known feasible deterministic subset.
 
         Parameters
         ----------
@@ -421,23 +539,22 @@ class PlaceboInTime:
         Returns
         -------
         list[Any]
-            Sorted list of pseudo-treatment times.
+            Sorted pseudo-treatment times. The list can contain fewer than
+            :attr:`n_folds` values when eligibility or geometry constraints
+            make a full selection infeasible.
 
-        Raises
-        ------
-        ValueError
-            If not enough eligible candidates exist, or if no feasible
-            selection is found after ``MAX_RANDOM_SELECTION_RETRIES``
-            greedy attempts.
         """
         pre_data = data.loc[data.index < treatment_time]
         if pre_data.empty:
-            raise ValueError("No observations before treatment_time.")
+            return []
 
         all_indices = pre_data.index.sort_values()
         n_total = len(all_indices)
         min_training = int(np.ceil(self.min_training_pct * n_total))
         exclude = self.exclude_periods or set()
+        required_pre_period_rows = self._get_intervention_window_observation_count(
+            data, treatment_time, intervention_length
+        )
 
         # Each candidate carries its position in ``all_indices`` so
         # ``min_gap`` can be enforced as an observation-count distance
@@ -457,44 +574,64 @@ class PlaceboInTime:
             pseudo_end = idx_val + intervention_length
             if pseudo_end > treatment_time:
                 continue
+            pre_period_rows = int(all_indices.searchsorted(idx_val, side="left"))
+            if pre_period_rows < required_pre_period_rows:
+                continue
 
             candidates.append((pos, idx_val))
 
-        if len(candidates) < self.n_folds:
-            raise ValueError(
-                f"Only {len(candidates)} eligible candidate periods found, "
-                f"but {self.n_folds} folds requested.  Reduce n_folds, "
-                f"lower min_training_pct, or relax exclude_periods."
-            )
+        if not candidates:
+            return []
 
-        last_err: ValueError | None = None
+        maximum_selection = self._maximum_feasible_selection(
+            candidates, intervention_length
+        )
+        if len(maximum_selection) < self.n_folds:
+            return sorted(candidates[i][1] for i in maximum_selection)
+
         for attempt in range(MAX_RANDOM_SELECTION_RETRIES):
-            # Deterministic sub-seeds: successive attempts reshuffle
-            # choices in a reproducible way when ``random_seed`` is set
-            # and remain non-deterministic (as expected) when it isn't.
+            # Deterministic sub-seeds: successive attempts reshuffle choices
+            # in a reproducible way when ``random_seed`` is set and remain
+            # non-deterministic (as expected) when it isn't.
             sub_seed: int | None
             if self.random_seed is None:
                 sub_seed = None
             else:
                 sub_seed = int(self.random_seed) + attempt
             rng = np.random.default_rng(sub_seed)
-            try:
-                selected = self._try_greedy_selection(
-                    candidates, intervention_length, rng
-                )
+            selected = self._try_greedy_selection(candidates, intervention_length, rng)
+            if len(selected) == self.n_folds:
                 return sorted(candidates[i][1] for i in selected)
-            except ValueError as err:
-                last_err = err
+
+        return sorted(candidates[i][1] for i in maximum_selection[: self.n_folds])
+
+    def _maximum_feasible_selection(
+        self,
+        candidates: list[tuple[int, Any]],
+        intervention_length: Any,
+    ) -> list[int]:
+        """Return an exact maximum-cardinality subset of ordered candidates.
+
+        Taking the earliest compatible candidate is optimal: every candidate
+        that can follow a later start can also follow an earlier compatible
+        start because both positional gaps and intervention windows are
+        forward-ordered.
+        """
+        selected: list[int] = []
+        for i, (pos_i, idx_val_i) in enumerate(candidates):
+            if not selected:
+                selected.append(i)
                 continue
 
-        raise ValueError(
-            f"Cannot select {self.n_folds} folds with min_gap="
-            f"{self.min_gap} and allow_overlap={self.allow_overlap} "
-            f"after {MAX_RANDOM_SELECTION_RETRIES} greedy attempts with "
-            f"deterministic sub-seeds.  Relax constraints "
-            f"(smaller min_gap, set allow_overlap=True, or reduce "
-            f"n_folds).  Last underlying error: {last_err}"
-        )
+            pos_last, idx_val_last = candidates[selected[-1]]
+            if pos_i - pos_last < self.min_gap:
+                continue
+            if not self.allow_overlap and self._windows_overlap(
+                idx_val_i, idx_val_last, intervention_length
+            ):
+                continue
+            selected.append(i)
+        return selected
 
     def _try_greedy_selection(
         self,
@@ -502,17 +639,7 @@ class PlaceboInTime:
         intervention_length: Any,
         rng: np.random.Generator,
     ) -> list[int]:
-        """Single greedy pass over candidates; raises on infeasibility.
-
-        Enforces two constraints between any pair of selected folds:
-
-        * ``min_gap`` positional distance in the candidate index.
-        * When ``allow_overlap`` is ``False``, non-overlap of the
-          pseudo-intervention windows, expressed in the same units as
-          ``intervention_length``.  Two windows ``[t_a, t_a + L)`` and
-          ``[t_b, t_b + L)`` are non-overlapping iff
-          ``abs(t_a - t_b) >= L``.
-        """
+        """Select until the requested count is reached or no candidate remains."""
         pool = list(range(len(candidates)))
         selected: list[int] = []
 
@@ -534,10 +661,7 @@ class PlaceboInTime:
                 if ok:
                     valid.append(i)
             if not valid:
-                raise ValueError(
-                    "No candidate remaining satisfies min_gap and "
-                    "non-overlap constraints; greedy selection stuck."
-                )
+                break
             pick = int(rng.choice(valid))
             selected.append(pick)
             pool.remove(pick)
@@ -569,6 +693,78 @@ class PlaceboInTime:
         """Extract data up to the end of the placebo intervention window."""
         pseudo_end = pseudo_treatment_time + intervention_length
         return data.loc[data.index < pseudo_end].copy()
+
+    @staticmethod
+    def _get_intervention_window_observation_count(
+        data: pd.DataFrame,
+        treatment_time: Any,
+        intervention_length: Any,
+    ) -> int:
+        """Count observations in one full, in-range intervention window."""
+        intervention_end = treatment_time + intervention_length
+        index = data.index
+        return int(((index >= treatment_time) & (index < intervention_end)).sum())
+
+    @staticmethod
+    def _describe_comparison_window(
+        data: pd.DataFrame,
+        treatment_time: Any,
+        placebo_window_rows: int,
+    ) -> dict[str, int]:
+        """Compare the placebo window against the actual post-period span.
+
+        The hierarchical null is built from cumulative impacts summed over
+        placebo windows of ``placebo_window_rows`` observations, while the
+        actual cumulative impact is summed over every post-intervention
+        observation.  When the placebo windows are materially shorter the two
+        quantities are not on the same footing and ``P(actual outside null)``
+        is optimistic, so a warning is emitted.
+        """
+        actual_post_period_rows = int((data.index >= treatment_time).sum())
+        excess = actual_post_period_rows - placebo_window_rows
+        if excess > COMPARISON_WINDOW_OBSERVATION_TOLERANCE:
+            warnings.warn(
+                f"PlaceboInTime placebo windows span {placebo_window_rows} "
+                f"observation(s) but the actual effect is summarised over "
+                f"{actual_post_period_rows} post-intervention observation(s). "
+                "The actual cumulative impact therefore accumulates over a "
+                "longer span than the null distribution it is compared "
+                "against, which inflates P(actual outside null). Lengthen "
+                "intervention_length, or interpret the verdict as an upper "
+                "bound.",
+                stacklevel=3,
+            )
+        return {
+            "placebo_window_observations": placebo_window_rows,
+            "actual_post_period_observations": actual_post_period_rows,
+        }
+
+    @staticmethod
+    def _get_fold_pre_period_observation_counts(
+        data: pd.DataFrame,
+        pseudo_treatment_time: Any,
+        required_pre_period_rows: int,
+    ) -> tuple[int, int]:
+        """Return observed and required pre-period rows for a placebo fold."""
+        observed_pre_period_rows = int((data.index < pseudo_treatment_time).sum())
+        return observed_pre_period_rows, required_pre_period_rows
+
+    @staticmethod
+    def _make_skipped_fold_metadata(
+        fold_index: int,
+        pseudo_treatment_time: Any,
+        observed_pre_period_rows: int | None,
+        required_pre_period_rows: int | None,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Build deterministic metadata for a skipped placebo fold."""
+        return {
+            "fold_index": fold_index,
+            "pseudo_treatment_time": pseudo_treatment_time,
+            "observed_pre_period_rows": observed_pre_period_rows,
+            "required_pre_period_rows": required_pre_period_rows,
+            "reason": reason,
+        }
 
     @staticmethod
     def _extract_cumulative_impact(experiment: BaseExperiment) -> xr.DataArray:
@@ -649,7 +845,10 @@ class PlaceboInTime:
                 dims="fold",
             )
 
-            idata = pm.sample(**self.sample_kwargs)
+            sample_kwargs = dict(self.sample_kwargs)
+            if "random_seed" not in sample_kwargs and self.random_seed is not None:
+                sample_kwargs["random_seed"] = self.random_seed
+            idata = pm.sample(**sample_kwargs)
 
         with model:
             model.add_coords({"new_period": np.arange(1)})
@@ -659,7 +858,13 @@ class PlaceboInTime:
                 sigma=tau_status_quo,
                 dims="new_period",
             )
-            pp = pm.sample_posterior_predictive(idata, var_names=["theta_new"])
+            posterior_predictive_seed = self.random_seed
+            if posterior_predictive_seed is None:
+                posterior_predictive_seed = sample_kwargs.get("random_seed")
+            posterior_predictive_kwargs: dict[str, Any] = {"var_names": ["theta_new"]}
+            if posterior_predictive_seed is not None:
+                posterior_predictive_kwargs["random_seed"] = posterior_predictive_seed
+            pp = pm.sample_posterior_predictive(idata, **posterior_predictive_kwargs)
 
         theta_new_samples = (
             pp["posterior_predictive"]["theta_new"]
@@ -702,19 +907,51 @@ class PlaceboInTime:
         else:
             return "indeterminate"
 
-    def _draw_expected_effect_samples(self, n: int) -> np.ndarray:
+    def _rng_for_stage(self, stage: int) -> np.random.Generator:
+        """Return an independent reproducible generator for one check stage."""
+        if self.random_seed is None:
+            return np.random.default_rng()
+        seed_sequence = np.random.SeedSequence(int(self.random_seed))
+        return np.random.default_rng(seed_sequence.spawn(2)[stage])
+
+    @staticmethod
+    def _rvs_accepts_random_state(prior: Any) -> bool:
+        """Return whether ``prior.rvs`` explicitly supports ``random_state``."""
+        try:
+            parameters = inspect.signature(prior.rvs).parameters.values()
+        except (TypeError, ValueError):
+            return False
+        return any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            or (
+                parameter.name == "random_state"
+                and parameter.kind is not inspect.Parameter.POSITIONAL_ONLY
+            )
+            for parameter in parameters
+        )
+
+    def _draw_expected_effect_samples(
+        self,
+        n: int,
+        *,
+        unseeded_custom_priors: list[dict[str, str]] | None = None,
+    ) -> np.ndarray:
         """Draw samples from the expected-effect prior.
 
         Parameters
         ----------
         n : int
-            Desired number of samples.  Objects with an ``.rvs(n)``
-            method receive ``n`` directly.  Pre-drawn numpy arrays are
-            returned as-is, and :meth:`_compute_assurance` cycles
-            through them via ``i % len(prior)`` when the array is
-            shorter than the number of replications.  A warning is
-            emitted in this case because short arrays can introduce
-            spurious structure in the simulated decisions.
+            Desired number of samples.
+        unseeded_custom_priors : list[dict[str, str]], optional
+            Run-local diagnostic records for legacy distributions that do not
+            expose ``random_state``. With a master seed, seed-aware
+            distributions receive ``.rvs(n, random_state=...)``; legacy
+            distributions fall back to ``.rvs(n)`` with a warning. Pre-drawn
+            numpy arrays are returned as-is, and :meth:`_compute_assurance`
+            cycles through them via ``i % len(prior)`` when the array is
+            shorter than the number of replications. A warning is emitted in
+            this case because short arrays can introduce spurious structure
+            in the simulated decisions.
 
         Returns
         -------
@@ -737,6 +974,30 @@ class PlaceboInTime:
                 )
             return prior
         if hasattr(prior, "rvs"):
+            if self.random_seed is None:
+                return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
+            if self._rvs_accepts_random_state(prior):
+                return np.asarray(
+                    prior.rvs(  # type: ignore[union-attr]
+                        n, random_state=self._rng_for_stage(0)
+                    )
+                )
+
+            prior_type = f"{type(prior).__module__}.{type(prior).__qualname__}"
+            if unseeded_custom_priors is not None:
+                unseeded_custom_priors.append(
+                    {
+                        "prior_type": prior_type,
+                        "reason": "rvs_does_not_accept_random_state",
+                    }
+                )
+            warnings.warn(
+                "expected_effect_prior.rvs does not expose random_state; "
+                "using unseeded legacy .rvs(n). Assurance simulation is "
+                "not reproducible for this custom prior; result metadata "
+                "marks its type as unseeded.",
+                stacklevel=2,
+            )
             return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
         raise TypeError(
             f"expected_effect_prior must be a numpy array or have an "
@@ -748,6 +1009,8 @@ class PlaceboInTime:
         theta_new_samples: np.ndarray,
         fold_sds: np.ndarray,
         n_posterior_samples: int,
+        *,
+        unseeded_custom_priors: list[dict[str, str]] | None = None,
     ) -> AssuranceResult:
         """Simulate decisions under null and alternative to get assurance.
 
@@ -759,17 +1022,22 @@ class PlaceboInTime:
             Per-fold posterior SDs (used to simulate estimation noise).
         n_posterior_samples : int
             Number of posterior draws to simulate per replication.
+        unseeded_custom_priors : list[dict[str, str]], optional
+            Run-local diagnostic records for legacy expected-effect priors.
 
         Returns
         -------
         AssuranceResult
         """
-        expected_samples = self._draw_expected_effect_samples(len(theta_new_samples))
+        expected_samples = self._draw_expected_effect_samples(
+            len(theta_new_samples),
+            unseeded_custom_priors=unseeded_custom_priors,
+        )
         n_reps = self.n_design_replications
         if n_reps is None:
             n_reps = min(len(theta_new_samples), len(expected_samples))
 
-        rng = np.random.default_rng(self.random_seed)
+        rng = self._rng_for_stage(1)
         rope = self.rope_half_width
         if rope is None:
             raise ValueError(
@@ -854,10 +1122,24 @@ class PlaceboInTime:
             including the null samples and optional assurance results.
         """
         self.validate(experiment)
+        unseeded_custom_priors: list[dict[str, str]] = []
         factory = self._get_factory(context)
         treatment_time = experiment.treatment_time  # type: ignore[attr-defined]
         data = experiment.data  # type: ignore[attr-defined]
         intervention_length = self._compute_intervention_length(experiment)
+        required_pre_period_rows = self._get_intervention_window_observation_count(
+            data, treatment_time, intervention_length
+        )
+        if required_pre_period_rows < 1:
+            raise ValueError(
+                f"intervention_length={intervention_length!r} spans no "
+                f"observations at treatment_time={treatment_time!r}, so no "
+                "placebo window can be built. Pass a longer "
+                "intervention_length."
+            )
+        comparison_window = self._describe_comparison_window(
+            data, treatment_time, required_pre_period_rows
+        )
 
         actual_cumulative = self._extract_cumulative_impact(experiment)
         actual_cumulative_mean = float(actual_cumulative.mean().values)
@@ -873,7 +1155,30 @@ class PlaceboInTime:
 
         fold_results: list[PlaceboFoldResult] = []
         fold_summaries: list[str] = []
-        skipped_folds: list[int] = []
+        skipped_folds: list[dict[str, Any]] = []
+        insufficient_pre_period_folds: list[dict[str, Any]] = []
+        random_selection_shortfall_folds: list[dict[str, Any]] = []
+        random_selection_shortfall_summaries: list[str] = []
+        if (
+            self.selection_method == "random"
+            and len(fold_treatment_times) < self.n_folds
+        ):
+            for fold_idx in range(len(fold_treatment_times), self.n_folds):
+                random_selection_shortfall_folds.append(
+                    self._make_skipped_fold_metadata(
+                        fold_idx,
+                        None,
+                        None,
+                        required_pre_period_rows,
+                        "insufficient_feasible_random_folds",
+                    )
+                )
+                random_selection_shortfall_summaries.append(
+                    f"Fold {fold_idx + 1}: SKIPPED (no feasible pseudo "
+                    "treatment time after random eligibility and geometry "
+                    "constraints)"
+                )
+            skipped_folds.extend(random_selection_shortfall_folds)
 
         for fold_idx, pseudo_tt in enumerate(fold_treatment_times):
             fold_num = fold_idx + 1
@@ -884,6 +1189,29 @@ class PlaceboInTime:
                 pseudo_tt,
             )
 
+            observed_pre_period_rows, _ = self._get_fold_pre_period_observation_counts(
+                data,
+                pseudo_tt,
+                required_pre_period_rows,
+            )
+            if observed_pre_period_rows < required_pre_period_rows:
+                skipped_fold = self._make_skipped_fold_metadata(
+                    fold_idx,
+                    pseudo_tt,
+                    observed_pre_period_rows,
+                    required_pre_period_rows,
+                    "insufficient_pre_period",
+                )
+                skipped_folds.append(skipped_fold)
+                insufficient_pre_period_folds.append(skipped_fold)
+                fold_summaries.append(
+                    f"Fold {fold_num}: SKIPPED (only "
+                    f"{observed_pre_period_rows} pre-treatment observations, "
+                    f"need >= {required_pre_period_rows} for one full "
+                    f"intervention window)"
+                )
+                continue
+
             fold_data = self._get_fold_data(data, pseudo_tt, intervention_length)
 
             if len(fold_data) < MIN_FOLD_OBSERVATIONS:
@@ -893,7 +1221,15 @@ class PlaceboInTime:
                     len(fold_data),
                     MIN_FOLD_OBSERVATIONS,
                 )
-                skipped_folds.append(fold_num)
+                skipped_folds.append(
+                    self._make_skipped_fold_metadata(
+                        fold_idx,
+                        pseudo_tt,
+                        observed_pre_period_rows,
+                        required_pre_period_rows,
+                        "insufficient_fold_observations",
+                    )
+                )
                 fold_summaries.append(
                     f"Fold {fold_num}: SKIPPED (only {len(fold_data)} "
                     f"observations, need >= {MIN_FOLD_OBSERVATIONS})"
@@ -901,7 +1237,19 @@ class PlaceboInTime:
                 continue
 
             try:
-                fold_experiment = factory(fold_data, pseudo_tt)
+                fold_random_seed = (
+                    None
+                    if self.random_seed is None
+                    else int(self.random_seed) + fold_idx
+                )
+                if self.experiment_factory is None:
+                    fold_experiment = factory(
+                        fold_data,
+                        pseudo_tt,
+                        fold_random_seed=fold_random_seed,
+                    )
+                else:
+                    fold_experiment = factory(fold_data, pseudo_tt)
                 cum_samples = self._extract_cumulative_impact(fold_experiment)
                 f_mean = float(cum_samples.mean().values)
                 f_sd = float(cum_samples.std().values)
@@ -912,7 +1260,15 @@ class PlaceboInTime:
                     pseudo_tt,
                     exc_info=True,
                 )
-                skipped_folds.append(fold_num)
+                skipped_folds.append(
+                    self._make_skipped_fold_metadata(
+                        fold_idx,
+                        pseudo_tt,
+                        observed_pre_period_rows,
+                        required_pre_period_rows,
+                        "experiment_failed_to_fit",
+                    )
+                )
                 fold_summaries.append(
                     f"Fold {fold_num}: SKIPPED (experiment failed to fit "
                     f"at pseudo treatment time {pseudo_tt})"
@@ -933,6 +1289,30 @@ class PlaceboInTime:
                 f"— mean={f_mean:.2f}, sd={f_sd:.2f}"
             )
 
+        fold_summaries.extend(random_selection_shortfall_summaries)
+        if insufficient_pre_period_folds or random_selection_shortfall_folds:
+            warning_parts: list[str] = []
+            if insufficient_pre_period_folds:
+                warning_parts.append(
+                    f"{len(insufficient_pre_period_folds)} fold(s) had "
+                    "pre-treatment history shorter than one full intervention "
+                    "window"
+                )
+            if random_selection_shortfall_folds:
+                warning_parts.append(
+                    f"random selection yielded only "
+                    f"{len(fold_treatment_times)} of {self.n_folds} requested "
+                    "feasible fold(s) after eligibility and geometry constraints"
+                )
+            warnings.warn(
+                "PlaceboInTime skipped folds because "
+                + "; ".join(warning_parts)
+                + ". Use fewer folds or an experiment_factory tailored to "
+                "the eligible fold data; skipped_folds metadata records the "
+                "observed and required pre-period rows.",
+                stacklevel=2,
+            )
+
         n_completed = len(fold_results)
         n_skipped = len(skipped_folds)
 
@@ -948,9 +1328,15 @@ class PlaceboInTime:
                 text="\n".join(parts),
                 metadata={
                     "fold_results": fold_results,
+                    "n_folds_requested": self.n_folds,
+                    "n_folds_completed": n_completed,
+                    "skipped_folds": skipped_folds,
+                    "intervention_length": intervention_length,
+                    "comparison_window": comparison_window,
                     "rope_half_width": self.rope_half_width,
                     "threshold": self.threshold,
                     "expected_effect_prior": self.expected_effect_prior,
+                    "unseeded_custom_priors": unseeded_custom_priors,
                 },
             )
 
@@ -992,6 +1378,11 @@ class PlaceboInTime:
 
         metadata: dict[str, Any] = {
             "fold_results": fold_results,
+            "n_folds_requested": self.n_folds,
+            "n_folds_completed": n_completed,
+            "skipped_folds": skipped_folds,
+            "intervention_length": intervention_length,
+            "comparison_window": comparison_window,
             "fold_sds": fold_sds,
             "status_quo_idata": idata,
             "null_samples": theta_new_samples,
@@ -1000,13 +1391,17 @@ class PlaceboInTime:
             "rope_half_width": self.rope_half_width,
             "threshold": self.threshold,
             "expected_effect_prior": self.expected_effect_prior,
+            "unseeded_custom_priors": unseeded_custom_priors,
         }
 
         n_posterior_samples = len(actual_cumulative.values)
 
         if self.expected_effect_prior is not None:
             assurance_result = self._compute_assurance(
-                theta_new_samples, fold_sds, n_posterior_samples
+                theta_new_samples,
+                fold_sds,
+                n_posterior_samples,
+                unseeded_custom_priors=unseeded_custom_priors,
             )
             metadata["assurance_result"] = assurance_result
             metadata["assurance"] = assurance_result.true_positive_rate
@@ -1039,6 +1434,8 @@ class PlaceboInTime:
     def __repr__(self) -> str:
         """Return a string representation of the check."""
         parts = [f"n_folds={self.n_folds}"]
+        if self.intervention_length is not None:
+            parts.append(f"intervention_length={self.intervention_length!r}")
         if self.selection_method != "sequential":
             parts.append(f"selection_method={self.selection_method!r}")
         if self.allow_overlap:

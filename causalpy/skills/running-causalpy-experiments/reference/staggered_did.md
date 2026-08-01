@@ -16,7 +16,6 @@ cp.StaggeredDifferenceInDifferences(
     model=None,
     event_window=None,
     reference_event_time=-1,
-    **kwargs
 )
 ```
 

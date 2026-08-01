@@ -54,7 +54,7 @@ def test_did(mock_pymc_sample, did_data):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -160,7 +160,7 @@ def test_rd(mock_pymc_sample, rd_data):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -294,7 +294,7 @@ def test_rkink(mock_pymc_sample):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -877,7 +877,7 @@ def test_iv_reg(mock_pymc_sample):
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -907,7 +907,7 @@ def test_iv_binary_treatment(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "rho" in result.model.named_vars
 
@@ -938,7 +938,7 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "gamma_beta_t" in result.model.named_vars
     assert "pi_beta_t" in result.model.named_vars
@@ -978,7 +978,7 @@ def test_iv_reg_vs_prior_hs(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "tau_beta_t" in result.model.named_vars
     assert "tau_beta_z" in result.model.named_vars
@@ -1041,7 +1041,7 @@ def test_inverse_prop(mock_pymc_sample):
     assert isinstance(axs, list)
     assert all(isinstance(ax, plt.Axes) for ax in axs)
     plt.close()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
     ### testing outcome model
