@@ -23,9 +23,10 @@ upgrading; several public signatures and default behaviours changed.
   `pymc-marketing` v1.0.0 caps `pymc<6.1`, so environments that include it
   resolve to an older 6.x. Do not rely on a specific patch version.
 - **pytensor `>=3,<4`**.
-- **arviz `>=1.1,<2`** — the ArviZ 0.x → 1.x jump. `arviz.InferenceData` no
-  longer exists as a class; importing it emits a `MigrationWarning`, and ArviZ
-  now uses xarray's `DataTree` for the same role.
+- **arviz `>=1.1,<2`** — the ArviZ 0.x → 1.x jump. `arviz.InferenceData` is no
+  longer available as a usable class — accessing it emits a `MigrationWarning`
+  (`"arviz.InferenceData is no longer available on the arviz package"`) — and
+  ArviZ now uses xarray's `DataTree` for the same role.
 - **pandas `>=2.3,<4`** — pandas 2.3 through the 3.x line are supported and are
   exercised as separate CI legs.
 - **pymc-extras `>=0.3.0`**.
