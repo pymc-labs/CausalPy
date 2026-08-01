@@ -257,6 +257,16 @@ def _pin_sampling_globals(monkeypatch):
     """
     import pymc as pm
 
+    # The plugin's own bookkeeping is module-global too, so a sibling test that
+    # fails part-way (or a mutant that breaks restore) would otherwise hand the
+    # next test a half-installed plugin -- and the ``_mock_gen is not None``
+    # idempotence guard would silently turn its install into a no-op, letting
+    # the test pass without exercising anything. Pin it to the not-installed
+    # state so each test starts from a known plugin state as well as a known
+    # PyMC state.
+    monkeypatch.setattr(doctest_sampling, "_mock_gen", None)
+    monkeypatch.setattr(doctest_sampling, "_guard_originals", {})
+
     pinned = {}
     for name in ("sample", "Flat", "HalfFlat"):
         sentinel = _sentinel(f"pm.{name}")
@@ -345,13 +355,24 @@ def test_install_is_idempotent(monkeypatch):
         assert getattr(mcmc, name) is pinned[name]
 
 
-def test_restore_without_install_is_a_noop():
-    """``pytest_unconfigure`` also fires when configure never installed."""
-    assert doctest_sampling._mock_gen is None
+def test_restore_without_install_is_a_noop(monkeypatch):
+    """``pytest_unconfigure`` also fires when configure never installed.
+
+    The not-installed precondition is pinned rather than inherited from
+    whatever ran before, so this cannot fail as collateral from an unrelated
+    test leaving the plugin half-installed.
+    """
+    pinned = _pin_sampling_globals(monkeypatch)
 
     doctest_sampling._restore_doctest_mock()
 
     assert doctest_sampling._mock_gen is None
+    # A restore with nothing to undo must not touch the globals either.
+    import pymc as pm
+
+    assert pm.sample is pinned["pm.sample"]
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        assert getattr(mcmc, name) is pinned[name]
 
 
 def test_install_and_restore_round_trip(monkeypatch):
