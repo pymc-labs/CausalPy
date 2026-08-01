@@ -57,6 +57,15 @@ logger = logging.getLogger(__name__)
 MIN_FOLD_OBSERVATIONS = 3
 MAX_RANDOM_SELECTION_RETRIES = 16
 
+# The hierarchical status-quo (null) model estimates the between-fold spread
+# ``tau_status_quo`` from the completed folds.  That spread is unidentified from
+# a single fold: ``prior_mu_scale = np.nanstd([x]) == 0.0`` falls back to
+# ``1.0``, stripping all data scaling from both the ``mu`` and ``tau`` priors
+# and collapsing the null distribution to a prior-driven O(1) width.  On a
+# large-scale series that flips the verdict to a spurious SUPPORTED, so at least
+# this many usable folds are required before a verdict is issued.
+MIN_USABLE_FOLDS = 2
+
 # Placebo windows are half-open (``[t, t + intervention_length)``) while the
 # actual effect is summarised over the whole post-intervention period.  With
 # the derived default ``intervention_length`` those two spans differ by at most
@@ -1316,11 +1325,29 @@ class PlaceboInTime:
         n_completed = len(fold_results)
         n_skipped = len(skipped_folds)
 
-        if n_completed < 1:
-            parts = [
-                f"Placebo-in-time analysis: 0 folds completed ({n_skipped} skipped).",
-                "INCONCLUSIVE — no folds completed.",
-            ]
+        if n_completed < MIN_USABLE_FOLDS:
+            if n_completed == 0:
+                summary = (
+                    f"Placebo-in-time analysis: 0 folds completed "
+                    f"({n_skipped} skipped)."
+                )
+                verdict = "INCONCLUSIVE — no folds completed."
+            else:
+                # A single usable fold cannot identify the between-fold null
+                # spread, so the hierarchical null model is degenerate and any
+                # verdict would be driven by prior width rather than evidence.
+                # Abstain instead of building it (never surface as SUPPORTED).
+                summary = (
+                    f"Placebo-in-time analysis: {n_completed} of "
+                    f"{self.n_folds} folds completed ({n_skipped} skipped)."
+                )
+                verdict = (
+                    f"INCONCLUSIVE — only {n_completed} usable fold; at least "
+                    f"{MIN_USABLE_FOLDS} are required to identify the "
+                    "between-fold status-quo spread. A single fold leaves the "
+                    "null distribution unidentified, so no verdict is issued."
+                )
+            parts = [summary, verdict]
             parts.extend(fold_summaries)
             return CheckResult(
                 check_name="PlaceboInTime",

@@ -929,9 +929,7 @@ def _make_scaled_fake_experiment(
     totals = rng.normal(cumulative_mean, cumulative_sd, size=n_draws)
     per_obs = (totals / n_post).reshape(1, n_draws, 1, 1)
     post = np.broadcast_to(per_obs, (1, n_draws, n_post, 1)).copy()
-    post_impact = xr.DataArray(
-        post, dims=("chain", "draw", "obs_ind", "treated_units")
-    )
+    post_impact = xr.DataArray(post, dims=("chain", "draw", "obs_ind", "treated_units"))
     return SimpleNamespace(
         data=data,
         treatment_time=treatment_time,
@@ -1021,9 +1019,7 @@ def test_skips_down_to_single_fold_does_not_report_supported_on_large_scale():
         random_seed=42,
     )
 
-    with pytest.warns(
-        UserWarning, match="shorter than one full intervention window"
-    ):
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
         result = check.run(experiment)
 
     assert result.metadata["n_folds_requested"] == 2
