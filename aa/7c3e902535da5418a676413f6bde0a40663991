@@ -1,0 +1,123 @@
+.github/workflows/ci.yml
+  s_c3ce0eb209d541::t_83a46cd8f8afbe 69,79-89,104,106-110,119-140,145-146,148,157
+.gitignore
+  s_c3ce0eb209d541::t_6524e9e7541292 33-35
+.pre-commit-config.yaml
+  s_c3ce0eb209d541::t_cb77b1a64bfb4a 49-50
+AGENTS.md
+  s_c3ce0eb209d541::t_eb902834f45964 48
+ARCHITECTURE.md
+  s_c3ce0eb209d541::t_5d48d3c8656d4a 112-114
+Makefile
+  s_c3ce0eb209d541::t_93301f0b8b193d 11,43,46-48
+causalpy/checks/outcome_falsification.py
+  s_c3ce0eb209d541::t_3c1ad63efff4a9 219-232
+causalpy/checks/placebo_in_time.py
+  s_c3ce0eb209d541::t_b7155e24e6c5e7 38,60-67,75-89,169-172,181-185,192-196,223-226,241-247,255-284,323,327-332,364,398-422,424,438-452,456-459,465-468,512-528,542-544,549,555-557,577-579,583-590,593-595,602-603,605-623,626-634,642,664,697-768,848-851,861-867,910-938,944-954,977-1000,1012-1013,1025-1026,1032-1035,1040,1125,1130-1142,1158-1181,1192-1214,1224-1232,1240-1252,1263-1271,1292-1315,1331-1335,1339,1381-1385,1394,1401-1404,1437-1438
+causalpy/date_utils.py
+  s_c3ce0eb209d541::t_a8a4c53849fd63 15,22-71
+causalpy/experiments/base.py
+  s_c3ce0eb209d541::t_158a0237964389 24,398-399,401-402,407
+causalpy/experiments/diff_in_diff.py
+  s_c3ce0eb209d541::t_7b32456c5c61a3 23,32,122-123,175,192,212
+causalpy/experiments/instrumental_variable.py
+  s_c3ce0eb209d541::t_dfaae2cd530f3e 32,361-362,364-368
+causalpy/experiments/interrupted_time_series.py
+  s_c3ce0eb209d541::t_797ac848cfd41a 27-31,33,164-165,266,268-270,875
+causalpy/experiments/inverse_propensity_weighting.py
+  s_c3ce0eb209d541::t_b2bb844c2b278e 17,191-206,608,617-618,620,622,627,629,638-639,652,656,664,695-703,820-821,881-882,887-888,891-892
+causalpy/experiments/model_adapter.py
+  s_c3ce0eb209d541::t_16c7f77ebe87b6 434
+causalpy/experiments/panel_regression.py
+  s_c3ce0eb209d541::t_f2ac257349fc16 17,148,178,198-199,238-243,368-377,388,394-396,400,468-469,474-476,479,621,866,875
+causalpy/experiments/piecewise_its.py
+  s_c3ce0eb209d541::t_641fd4bd24e273 649
+causalpy/experiments/prepostnegd.py
+  s_c3ce0eb209d541::t_8b00c8192c00ba 29
+causalpy/experiments/regression_discontinuity.py
+  s_c3ce0eb209d541::t_093149e84496fd 24,27,126-127,271-273
+causalpy/experiments/regression_kink.py
+  s_c3ce0eb209d541::t_fbb65644d5603c 25,27
+causalpy/experiments/staggered_did.py
+  s_c3ce0eb209d541::t_433ae7cd1dd7a2 238-241,250-254,260-264,302,330-335,584-586,688-690,717,1077,1192-1194,1224-1226,1367
+causalpy/experiments/synthetic_control.py
+  s_c3ce0eb209d541::t_a44664b8233556 26-31,39-44,71-81,128,131-132,140-142,309-332,381,760-763
+causalpy/experiments/synthetic_difference_in_differences.py
+  s_c3ce0eb209d541::t_1a5b86b7dff041 29-33,135-136,177
+causalpy/formula_utils.py
+  s_c3ce0eb209d541::t_50c9fcc17a4298 20,22-31,46-131,189,194-195
+causalpy/pymc_models.py
+  s_c3ce0eb209d541::t_114c407e6716f2 407-417,479,658-748,753-754,757-759,761-774,803,806,808-814,825-826,828,830,833-835,927-934,986,989,991-997,999-1001,1013,1015,1023-1025,2382,2402-2403,2501,2600-2602,2659,2855
+causalpy/skills/running-causalpy-experiments/reference/custom_priors.md
+  s_c3ce0eb209d541::t_f6c16589db0695 3,55-63
+causalpy/skills/running-causalpy-experiments/reference/synthetic_control.md
+  s_c3ce0eb209d541::t_aa1f1cdf467a70 15,31-32
+causalpy/steps/estimate_effect.py
+  s_c3ce0eb209d541::t_4556c9be7563c9 23,44-46,48,71-72,77-79,94-105
+causalpy/tests/test_auto_scale_sigma.py
+  s_c3ce0eb209d541::t_1d02f59585b98b 1-495
+causalpy/tests/test_input_validation.py
+  s_c3ce0eb209d541::t_22195e0ef30339 681,692,700,711
+causalpy/tests/test_instrumental_variable.py
+  s_c3ce0eb209d541::t_606caaa99d8494 688-689,700
+causalpy/tests/test_integration_its_new_timeseries.py
+  s_c3ce0eb209d541::t_155f07c489dd6f 98,154,162,197,234,271,277-282,284,290,293-295,297-302,304-311,313-330,335,337,339-341,343-345,347-355,360,363
+causalpy/tests/test_integration_pymc_examples.py
+  s_c3ce0eb209d541::t_ec9d1544e21310 57,163,297,880,910,941,981,1044
+causalpy/tests/test_integration_skl_examples.py
+  s_c3ce0eb209d541::t_381e39d7a834a6 49,133
+causalpy/tests/test_ipw_extreme_ps.py
+  s_c3ce0eb209d541::t_d6489fcfd4ab7a 22-23,27,30,43,45-52,54-55,73-330,357-375
+causalpy/tests/test_migration_baseline_harness.py
+  s_c3ce0eb209d541::t_bb66f42c023413 1-1193
+causalpy/tests/test_pandas_compat.py
+  s_c3ce0eb209d541::t_440e13405014dd 1-545
+causalpy/tests/test_panel_regression.py
+  s_c3ce0eb209d541::t_443815e87026e2 637-639
+causalpy/tests/test_parameter_recovery.py
+  s_c3ce0eb209d541::t_bc081e4518661d 1-803
+causalpy/tests/test_placebo_in_time.py
+  s_c3ce0eb209d541::t_1845da8e0234ee 19,23,100-133,173-226,442-494,717,836-1341,1388,1409-1421,1424-1429,1591-1617,1680-1681,1684,1691-1692,1696-1697,1700-1701,1709-1712,1824,1827-1829,1852-1854,1862-1864,1866-1869,1871,1873,1876-1879,1936-2037
+causalpy/tests/test_public_signatures.py
+  s_c3ce0eb209d541::t_0f00da40dc4d4e 14,16-20,22-25,28,34,38-41,43,48-62,66-68,71,87,94-112,116-118,120-121,139-144,151,154-155,157-160,164-165,172,175,179,182,189,192-193,198,208,211,215-217,220-504
+causalpy/tests/test_pymc_forecast_adapter.py
+  s_c3ce0eb209d541::t_3fbb3c5a2373fa 585,587,593
+causalpy/tests/test_pymc_models_compat.py
+  s_c3ce0eb209d541::t_76e736ed8c2655 23,123-143
+causalpy/tests/test_synthetic_data.py
+  s_c3ce0eb209d541::t_26c69e4ebffc3f 56
+causalpy/utils.py
+  s_c3ce0eb209d541::t_3db4e0cff8708a 300,302,306,308,315-319
+docs/source/notebooks/interrupted-time-series-placebo-in-time-analysis.ipynb
+  s_c3ce0eb209d541::t_c6713dfea8ad7f 2-107,110-228,230-242,244-442,445-452,454-456,459-461,463-485,487-499,502-533,535-626,629-633,635-645,647-669,671-673,676-705,707-731,734-741,743-755,758-774,776-786,788-811,813-837,840-844,846-856,858-880,882-906,909-916,918-920,923-946,948-958,960-1194,1196-1604,1607-1609,1611-1634,1636-1648,1651-1670,1672-1674,1677-1700,1702-1703,1705-1729,1732-1739,1741-1753,1756-1770,1772-1782,1784-1809,1811-1833,1836-1843,1845-1869,1872-1876,1878-1879,1881-1883,1886-1888,1890-1911,1913-1915,1918-1989,1991-2042,2045-2049,2051-2061,2063-2086,2088-2090,2093-2095,2097-2122,2124-2148,2151-2155,2157-2167,2169-2194,2196-2198,2201-2228,2230-2242,2245-2261,2263-2273,2275-2297,2299-2301,2304-2306,2308-2333,2335-2337,2340-2362,2364-2508,2510-2522,2524-2526,2529-2620,2622-2624,2627-2716,2718-2719,2721-2730,2733-2737,2739-2749,2751-2771,2773-2775,2778-2802,2804-2816,2818-2870,2872-2878,2880-2932
+docs/source/notebooks/sensitivity_checks.md
+  s_c3ce0eb209d541::t_56f175652f46d9 88-108
+environment.yml
+  s_c3ce0eb209d541::t_ddf00ab9d46bdc 26
+pyproject.toml
+  s_c3ce0eb209d541::t_f3cdd4d2d072d3 48,53-60,152-153,161,164,190
+scripts/audit_public_signatures.py
+  s_c3ce0eb209d541::t_dbc450dbdc62de 1-314
+scripts/migration_baseline/README.md
+  s_c3ce0eb209d541::t_96b6346b69b15f 1-121
+scripts/migration_baseline/REPORT_TEMPLATE.md
+  s_c3ce0eb209d541::t_9fb910e9c7782b 1-74
+scripts/migration_baseline/harness.py
+  s_c3ce0eb209d541::t_a09464b4195aba 1-2731
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "aa7c3e902535da5418a676413f6bde0a40663991",
+  "prompts": {},
+  "sessions": {
+    "s_c3ce0eb209d541": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a766bd5-04ec-4d87-8525-15d0bf6486f7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
