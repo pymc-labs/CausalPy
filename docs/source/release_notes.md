@@ -132,12 +132,15 @@ older release — pass `SyntheticControl(..., auto_scale_sigma=False)`.
 #### `InstrumentalVariable` samples with `cores=1`
 
 The instrumental-variable model (an `MvNormal` with an `LKJCholeskyCov` prior)
-can crash under multiprocess sampling on the numba backend (a native worker
-death rather than a Python exception). To keep it usable, CausalPy forces
-`cores=1` for this model when `cores` is not otherwise specified
-(`causalpy/pymc_models.py`). This is a mitigation pending an upstream fix
-(tracked in issue #1067); IV sampling therefore does not parallelise across
-cores by default.
+can crash under multiprocess ("fork") sampling on an affected platform/version
+combination (observed on macOS arm64 with Python 3.14 and PyMC 6.0.1–6.2.0) —
+the worker dies natively rather than raising a Python exception. To keep the
+model usable, CausalPy forces `cores=1` for it when `cores` is not otherwise
+specified (`causalpy/pymc_models.py:1330-1332`). IV sampling therefore does not
+parallelise across cores by default. This is a temporary mitigation: the
+upstream bug is tracked at
+[pymc-devs/pymc#8377](https://github.com/pymc-devs/pymc/issues/8377), and
+removal of the workaround is tracked in CausalPy issue #1067.
 
 ### Behaviour that intentionally did *not* change
 
