@@ -139,7 +139,13 @@ jobs:
               )
           PY
       - name: Run doctests
-        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
+        # -p causalpy.tests.doctest_sampling loads the plugin that mocks
+        # pm.sample for doctests (an autouse fixture in causalpy/tests/conftest.py
+        # cannot reach doctests collected from causalpy/*.py) and that fails the
+        # leg fast if a doctest ever reaches the real MCMC sampler. The old
+        # --config-file=causalpy/tests/conftest.py pointed pytest's rootdir at
+        # causalpy/tests (a .py file carries no ini config), so it is dropped.
+        run: pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov
       - name: Run extra tests
         run: pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run statistical correctness tests
