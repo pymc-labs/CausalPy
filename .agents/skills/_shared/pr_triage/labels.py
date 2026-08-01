@@ -70,6 +70,7 @@ NEXT_ACTION_ORDER = [
     "waiting-on-author",  # changes requested, ball in author's court
     "ready-to-merge",  # approved + clean + not red
     "mechanical",  # conflicting or CI red (agent-fixable in Tier 2)
+    "mergeability-unknown",  # GitHub never resolved `mergeable`; don't claim clean
     "ready-for-review",  # clean, green/pending, awaiting a reviewer
 ]
 
@@ -125,6 +126,14 @@ def _last_activity(pr: dict) -> str:
     for c in pr.get("comments") or []:
         if c.get("createdAt"):
             stamps.append(c["createdAt"])
+    # Reviews count as real activity too: a PR reviewed yesterday is not idle,
+    # even if the last commit and comment are months old. Without this, a
+    # just-reviewed PR could pick up `status:stale` immediately after a human
+    # engaged with it.
+    for r in pr.get("reviews") or []:
+        ts = r.get("submittedAt") or r.get("createdAt")
+        if ts:
+            stamps.append(ts)
     return max(stamps, key=_parse_ts)
 
 
@@ -176,7 +185,7 @@ def fetch_prs(repo: str) -> list[dict]:
     # in the same call, resolve any UNKNOWN `mergeable` (`gh pr view` triggers
     # the lazy computation). One `gh pr view` per PR covers both.
     for pr in prs:
-        want = ["commits"]
+        want = ["commits", "reviews"]
         if pr.get("mergeable") == "UNKNOWN":
             want.append("mergeable")
         with contextlib.suppress(subprocess.CalledProcessError):
@@ -193,6 +202,7 @@ def fetch_prs(repo: str) -> list[dict]:
             )
             if v:
                 pr["commits"] = v.get("commits", [])
+                pr["reviews"] = v.get("reviews", [])
                 if "mergeable" in want:
                     pr["mergeable"] = v.get("mergeable", "UNKNOWN")
     return prs
@@ -201,9 +211,18 @@ def fetch_prs(repo: str) -> list[dict]:
 def _ci_state(pr: dict) -> str:
     rollup = pr.get("statusCheckRollup") or []
     states = [c.get("conclusion") or c.get("state") for c in rollup]
+    # CANCELLED is not a failure signal here. This repo uses
+    # `cancel-in-progress` concurrency, so every superseded run stays in the
+    # rollup as CANCELLED next to the run that replaced it. Counting those as
+    # red would mark green PRs `status:ci-failing` and route them to
+    # `mechanical`. SKIPPED/NEUTRAL are likewise non-signals.
+    ignored = {"CANCELLED", "SKIPPED", "NEUTRAL"}
+    states = [s for s in states if s not in ignored]
     if not states:
         return "none"
-    bad = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
+    # STARTUP_FAILURE is GitHub's conclusion when a workflow never starts (bad
+    # YAML, missing secret). It is a failure, not a green check.
+    bad = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
     if any(s in bad for s in states):
         return "red"
     pending = {"PENDING", "IN_PROGRESS", "QUEUED", "EXPECTED", None}
@@ -277,6 +296,11 @@ def _next_action(f: dict) -> str:
             f["review"] == "approved" and f["conflict"] == "clean" and f["ci"] != "red"
         ),
         "mechanical": lambda: f["conflict"] == "conflicting" or f["ci"] == "red",
+        # `conflict == "unknown"` means GitHub never finished computing
+        # mergeability even after the per-PR `gh pr view` retry. Such a PR may
+        # still be conflicting, so it must not be advertised as a clean review
+        # target; it gets its own bucket and no `status:ready-for-review`.
+        "mergeability-unknown": lambda: f["conflict"] == "unknown",
         "ready-for-review": lambda: True,
     }
     # Guard against drift between the precedence list and the predicate map.

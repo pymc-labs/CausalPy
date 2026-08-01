@@ -93,6 +93,7 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
     )
     waiting = by("waiting-on-author")
     mechanical = by("mechanical")
+    unknown_merge = by("mergeability-unknown")
     stale_drafts = by("stale-draft") + by("aging-draft")
     in_flight = by("in-flight-draft")
     to_merge = by("ready-to-merge")
@@ -157,6 +158,15 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
             + ("…" if len(mechanical) > 8 else "")
             + "."
         )
+    if unknown_merge:
+        m.append(
+            f"\n**❔ Mergeability unresolved ({len(unknown_merge)})** — GitHub "
+            "never finished computing `mergeable`, so these are not claimed as "
+            "clean review targets. They usually resolve on the next run: "
+            + ", ".join(_link(f) for f in unknown_merge[:8])
+            + ("…" if len(unknown_merge) > 8 else "")
+            + "."
+        )
     if stale_drafts:
         oldest = max(stale_drafts, key=lambda f: f["age_days"])
         m.append(
@@ -183,6 +193,7 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
             "reviews": len(reviews),
             "waiting": len(waiting),
             "mechanical": len(mechanical),
+            "mergeability_unknown": len(unknown_merge),
             "stale_drafts": len(stale_drafts),
             "in_flight": len(in_flight),
             "to_merge": len(to_merge),
