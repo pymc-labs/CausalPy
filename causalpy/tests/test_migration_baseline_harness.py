@@ -483,17 +483,15 @@ def test_capture_rejects_an_unpinned_revision_before_import(
     superseded_commit = "1" * 40
     assert superseded_commit not in harness.STACK_COMMITS.values()
 
-    def fake_run_git(_repo_root: Path, *arguments: str) -> str:
-        if arguments == ("rev-parse", "HEAD"):
-            return superseded_commit
-        assert arguments == ("status", "--porcelain")
-        return ""
+    git_queries: list[tuple[str, ...]] = []
+    imported_roots: list[Path] = []
 
-    def unexpected_import(_repo_root: Path) -> None:
-        pytest.fail("an unpinned revision must be rejected before importing CausalPy")
+    def fake_run_git(_repo_root: Path, *arguments: str) -> str:
+        git_queries.append(arguments)
+        return superseded_commit
 
     monkeypatch.setattr(harness, "_run_git", fake_run_git)
-    monkeypatch.setattr(harness, "_import_capture_dependencies", unexpected_import)
+    monkeypatch.setattr(harness, "_import_capture_dependencies", imported_roots.append)
 
     with pytest.raises(harness.HarnessError, match="capture requires"):
         harness._capture_artifact(
@@ -502,6 +500,9 @@ def test_capture_rejects_an_unpinned_revision_before_import(
             batch_id="00000000-0000-4000-8000-000000000000",
             capture_role="candidate_first",
         )
+
+    assert git_queries == [("rev-parse", "HEAD")]
+    assert imported_roots == []
 
 
 def test_did_capture_fixture_passes_constructor_validation_without_mcmc() -> None:
