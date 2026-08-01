@@ -81,6 +81,16 @@ _DEFAULT_SAMPLE_KWARGS: dict[str, Any] = {
 }
 
 
+class _NullModelUnidentifiedError(ValueError):
+    """Raised when the hierarchical null's between-fold spread is unidentified.
+
+    A subclass of :class:`ValueError` so existing ``except ValueError`` callers
+    keep working.  :meth:`PlaceboInTime.run` catches it and abstains
+    (INCONCLUSIVE) rather than building a scale-free null that could report a
+    spurious verdict.
+    """
+
+
 def _is_non_positive_length(length: Any) -> bool:
     """Return whether a window length is orderable against zero and not positive.
 
@@ -814,11 +824,11 @@ class PlaceboInTime:
 
         Raises
         ------
-        ValueError
+        _NullModelUnidentifiedError
             If the between-fold spread is unidentified, i.e.
             ``np.nanstd(fold_means)`` is not positive and finite. Building the
             null in that case would collapse it to a prior-driven width and
-            could report a spurious verdict.
+            could report a spurious verdict. A subclass of ``ValueError``.
         """
         n_folds = len(fold_means)
         fold_sds = np.where(fold_sds < 1e-6, 1e-6, fold_sds)
@@ -835,7 +845,7 @@ class PlaceboInTime:
         # complete; this guards the residual case of >= 2 folds whose
         # cumulative impacts coincide (e.g. an almost-constant series).
         if not np.isfinite(prior_mu_scale) or prior_mu_scale <= 0.0:
-            raise ValueError(
+            raise _NullModelUnidentifiedError(
                 "Cannot identify the hierarchical status-quo null: the "
                 f"{n_folds} completed placebo fold(s) have no between-fold "
                 "spread in their cumulative impacts (np.nanstd(fold_means) is "
@@ -1348,28 +1358,56 @@ class PlaceboInTime:
         n_completed = len(fold_results)
         n_skipped = len(skipped_folds)
 
-        if n_completed < MIN_USABLE_FOLDS:
-            if n_completed == 0:
-                summary = (
-                    f"Placebo-in-time analysis: 0 folds completed "
-                    f"({n_skipped} skipped)."
+        # A verdict requires a hierarchical null whose between-fold spread is
+        # identified.  It is not when fewer than ``MIN_USABLE_FOLDS`` folds
+        # complete (``np.nanstd`` of one fold is 0), nor when the completed
+        # folds have coincident cumulative impacts (``np.nanstd`` still 0).  In
+        # both cases the null loses all data scaling and collapses to a
+        # prior-driven width, which can flip the verdict to a spurious
+        # SUPPORTED.  Abstain (INCONCLUSIVE) instead — mirroring PlaceboInSpace,
+        # which returns ``passed=None`` when it lacks enough units to
+        # characterise its null.  The count is checked here; the coincident-fold
+        # case is detected inside ``_build_status_quo_model`` (which raises) so
+        # that monkeypatched builds and direct callers stay consistent.
+        fold_means = np.array([fr.fold_mean for fr in fold_results])
+        fold_sds = np.array([fr.fold_sd for fr in fold_results])
+
+        inconclusive: tuple[str, str] | None = None
+        idata = None
+        theta_new_samples = None
+        if n_completed == 0:
+            inconclusive = (
+                f"Placebo-in-time analysis: 0 folds completed ({n_skipped} skipped).",
+                "INCONCLUSIVE — no folds completed.",
+            )
+        elif n_completed < MIN_USABLE_FOLDS:
+            inconclusive = (
+                f"Placebo-in-time analysis: {n_completed} of {self.n_folds} "
+                f"folds completed ({n_skipped} skipped).",
+                f"INCONCLUSIVE — only {n_completed} usable fold; at least "
+                f"{MIN_USABLE_FOLDS} are required to identify the between-fold "
+                "status-quo spread. A single fold leaves the null distribution "
+                "unidentified, so no verdict is issued.",
+            )
+
+        if inconclusive is None:
+            try:
+                idata, theta_new_samples = self._build_status_quo_model(
+                    fold_means, fold_sds
                 )
-                verdict = "INCONCLUSIVE — no folds completed."
-            else:
-                # A single usable fold cannot identify the between-fold null
-                # spread, so the hierarchical null model is degenerate and any
-                # verdict would be driven by prior width rather than evidence.
-                # Abstain instead of building it (never surface as SUPPORTED).
-                summary = (
+            except _NullModelUnidentifiedError:
+                inconclusive = (
                     f"Placebo-in-time analysis: {n_completed} of "
-                    f"{self.n_folds} folds completed ({n_skipped} skipped)."
+                    f"{self.n_folds} folds completed ({n_skipped} skipped).",
+                    f"INCONCLUSIVE — the {n_completed} usable folds have "
+                    "coincident cumulative impacts, so the between-fold "
+                    "status-quo spread is unidentified. Building a null from it "
+                    "would collapse to a prior-driven width, so no verdict is "
+                    "issued.",
                 )
-                verdict = (
-                    f"INCONCLUSIVE — only {n_completed} usable fold; at least "
-                    f"{MIN_USABLE_FOLDS} are required to identify the "
-                    "between-fold status-quo spread. A single fold leaves the "
-                    "null distribution unidentified, so no verdict is issued."
-                )
+
+        if inconclusive is not None:
+            summary, verdict = inconclusive
             parts = [summary, verdict]
             parts.extend(fold_summaries)
             return CheckResult(
@@ -1390,10 +1428,8 @@ class PlaceboInTime:
                 },
             )
 
-        fold_means = np.array([fr.fold_mean for fr in fold_results])
-        fold_sds = np.array([fr.fold_sd for fr in fold_results])
-
-        idata, theta_new_samples = self._build_status_quo_model(fold_means, fold_sds)
+        # Reaching here means the null model was built successfully.
+        assert idata is not None and theta_new_samples is not None
 
         p_outside = float(
             (np.abs(actual_cumulative_mean) > np.abs(theta_new_samples)).mean()
