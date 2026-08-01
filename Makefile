@@ -38,7 +38,7 @@ check-architecture: ## Verify ARCHITECTURE.md experiment inventory matches code
 	python scripts/check_architecture_inventory.py --check
 
 doctest: ## Run doctests for the causalpy module
-	python -m pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py
+	python -m pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/
 
 test: ## Run default tests with pytest
 	python -m pytest

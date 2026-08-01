@@ -68,6 +68,11 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }}, pandas ${{ matrix.pandas-version }})
     runs-on: ubuntu-latest
+    # Guard (issue #1117): a wedged run fails as `failure` in minutes instead of
+    # being `cancelled` at GitHub's 6h ceiling. Headroom over the observed ~21 min
+    # max for this job (incl. cold micromamba-cache solves); tune if legitimately
+    # slower runs appear.
+    timeout-minutes: 30
     permissions:
       contents: read
     defaults:
@@ -139,7 +144,13 @@ jobs:
               )
           PY
       - name: Run doctests
-        run: pytest --doctest-modules --ignore=causalpy/tests/ causalpy/ --config-file=causalpy/tests/conftest.py --no-cov
+        # -p causalpy.tests.doctest_sampling loads the plugin that mocks
+        # pm.sample for doctests (an autouse fixture in causalpy/tests/conftest.py
+        # cannot reach doctests collected from causalpy/*.py) and that fails the
+        # leg fast if a doctest ever reaches the real MCMC sampler. The old
+        # --config-file=causalpy/tests/conftest.py pointed pytest's rootdir at
+        # causalpy/tests (a .py file carries no ini config), so it is dropped.
+        run: pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov
       - name: Run extra tests
         run: pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run statistical correctness tests
