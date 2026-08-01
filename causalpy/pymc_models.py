@@ -258,16 +258,24 @@ class PyMCModel(pm.Model):
 
         self.priors = {**self.default_priors, **(priors or {})}
 
-    def _clone(self) -> "PyMCModel":
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration.
 
         ``copy.deepcopy`` of a ``pm.Model`` subclass loses its class
         identity, so this method constructs a new instance from the
         stored init parameters instead.
+
+        ``priors`` overrides the stored user priors on the copy. It is the sole
+        supported way to re-instantiate a model with a different prior set (used
+        by the ``auto_scale_sigma=False`` opt-out to pin the legacy noise prior),
+        so that no ``type(model)(...)`` reconstruction that could silently drop
+        subclass ``__init__`` configuration exists outside ``_clone``. Omitting
+        it (the ``clone_model`` sensitivity-check path) preserves the stored
+        priors unchanged.
         """
         return type(self)(
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def build_model(
@@ -1967,8 +1975,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self._seasonality_component = None
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             n_order=self.n_order,
             n_changepoints_trend=self.n_changepoints_trend,
@@ -1976,7 +1988,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):
@@ -2451,8 +2463,12 @@ class StateSpaceTimeSeries(PyMCModel):
         self.second_model: pm.Model | None = None  # Created in build_model()
         self._validate_and_initialize_components()
 
-    def _clone(self) -> "PyMCModel":
-        """Create a fresh, unfitted copy with the same configuration."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
+        """Create a fresh, unfitted copy with the same configuration.
+
+        ``priors`` overrides the stored user priors on the copy; omitting it
+        preserves them. See :meth:`PyMCModel._clone`.
+        """
         return type(self)(
             level_order=self.level_order,
             seasonal_length=self.seasonal_length,
@@ -2460,7 +2476,7 @@ class StateSpaceTimeSeries(PyMCModel):
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
         )
 
     def _validate_and_initialize_components(self):

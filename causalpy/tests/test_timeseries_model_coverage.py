@@ -721,6 +721,45 @@ class TestTimeSeriesModelClonePreservesPriors:
         assert cloned._user_priors == custom_priors
         assert cloned._user_priors is not None
 
+    def test_bayesian_basis_expansion_clone_accepts_priors_override(self):
+        """BSTS._clone(priors=...) overrides priors and keeps extra init args.
+
+        The ``auto_scale_sigma=False`` opt-out pins the legacy prior by cloning
+        with a ``priors`` override; the subclass override must accept it and
+        still carry ``n_order`` and friends, or the base and override signatures
+        drift apart.
+        """
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
+        original = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            n_order=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            priors={"sentinel": "value"},
+        )
+        override = {"y_hat": "pinned"}
+        cloned = original._clone(priors=override)
+        assert cloned._user_priors == override  # override applied
+        assert cloned.n_order == 7  # extra init arg preserved through the clone
+
+    def test_state_space_clone_accepts_priors_override(self):
+        """StateSpaceTimeSeries._clone(priors=...) overrides priors, keeps args."""
+        pytest.importorskip(
+            "pymc_extras",
+            reason="pymc-extras optional for state-space model",
+        )
+        original = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
+            priors={"sentinel": "value"},
+        )
+        override = {"y_hat": "pinned"}
+        cloned = original._clone(priors=override)
+        assert cloned._user_priors == override
+        assert cloned.level_order == 1
+
 
 class TestTimeSeriesModelCloneIsUnfitted:
     """Regression tests: ``_clone()`` returns a fresh model with no fitted state.

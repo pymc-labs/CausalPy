@@ -323,10 +323,12 @@ class SyntheticControl(BaseExperiment):
         user_priors = model._user_priors or {}
         if "y_hat" in user_priors:
             return
-        pinned = type(model)(
-            sample_kwargs=dict(model.sample_kwargs),
-            priors={**user_priors, "y_hat": _LEGACY_Y_HAT_PRIOR},
-        )
+        # Route the opt-out through ``_clone`` rather than ``type(model)(...)``:
+        # subclasses with extra ``__init__`` parameters carry them through their
+        # ``_clone`` override, so a direct reconstruction here would silently
+        # drop that configuration. ``_clone`` takes the pinned prior set as an
+        # override, keeping the sole re-instantiation site inside ``_clone``.
+        pinned = model._clone(priors={**user_priors, "y_hat": _LEGACY_Y_HAT_PRIOR})
         self.model = pinned
         self._model_backend = PyMCModelAdapter(pinned)
 

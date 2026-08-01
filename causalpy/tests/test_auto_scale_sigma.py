@@ -32,7 +32,11 @@ import xarray as xr
 from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.pymc_models import SoftmaxWeightedSumFitter, WeightedSumFitter
+from causalpy.pymc_models import (
+    SoftmaxWeightedSumFitter,
+    WeightedSumFitter,
+    _uses_stock_y_hat_default,
+)
 
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
 
@@ -543,6 +547,64 @@ def test_small_but_resolvable_relative_variation_is_not_degenerate(fitter_cls):
         priors = _fitter(fitter_cls).priors_from_data(X, y)
     lam = np.asarray(priors["y_hat"].parameters["sigma"].parameters["lam"])
     np.testing.assert_allclose(lam, 2 / np.std(values, axis=0, ddof=1))
+
+
+class _ExtraArgWeightedSumFitter(WeightedSumFitter):
+    """A weighted-sum subclass that, like the real time-series fitters, carries
+    an extra ``__init__`` parameter and a matching ``_clone`` override.
+
+    It inherits ``default_priors = {"y_hat": _LEGACY_Y_HAT_PRIOR}`` from
+    ``WeightedSumFitter``, so -- unlike ``BayesianBasisExpansionTimeSeries``,
+    whose ``default_priors`` is empty -- the ``auto_scale_sigma=False`` opt-out
+    actually fires for it, exercising the clone path with real extra config.
+    """
+
+    def __init__(self, marker="default", **kwargs):
+        super().__init__(**kwargs)
+        self.marker = marker
+
+    def _clone(self, priors=None):
+        return type(self)(
+            marker=self.marker,
+            sample_kwargs=dict(self.sample_kwargs),
+            priors=self._user_priors if priors is None else priors,
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_opt_out_preserves_subclass_init_config_through_clone(mock_pymc_sample):
+    """auto_scale_sigma=False on a subclass with extra __init__ args keeps them.
+
+    The opt-out re-instantiates the model to pin the legacy prior. Routing that
+    through ``_clone`` (not ``type(model)(...)``) means the subclass's extra
+    ``marker`` config survives; the direct reconstruction on the base branch
+    reset it to the default. This reproduces the
+    ``BayesianBasisExpansionTimeSeries`` pattern -- extra init args plus a
+    ``_clone`` override -- on a fitter that actually reaches the opt-out.
+    """
+    df, tt, treated = _make_data([1.0])
+    model = _ExtraArgWeightedSumFitter(
+        marker="preserved", sample_kwargs={**sample_kwargs, "random_seed": 1}
+    )
+    # Precondition: this subclass really does reach the pin path. A silent no-op
+    # would let the assertions below pass for the wrong reason.
+    assert _uses_stock_y_hat_default(model)
+    result = cp.SyntheticControl(
+        df,
+        tt,
+        control_units=["a", "b", "c"],
+        treated_units=treated,
+        model=model,
+        auto_scale_sigma=False,
+    )
+    pinned = result.model
+    assert pinned is not model  # the opt-out fit a fresh copy
+    assert isinstance(pinned, _ExtraArgWeightedSumFitter)
+    assert pinned.marker == "preserved"  # dropped by type(model)(...) on base
+    sigma = pinned.priors["y_hat"].parameters["sigma"]
+    assert sigma.distribution == "HalfNormal"
+    assert sigma.parameters["sigma"] == 1
 
 
 @pytest.mark.integration
