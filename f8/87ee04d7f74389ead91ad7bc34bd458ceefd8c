@@ -1,0 +1,31 @@
+causalpy/pymc_models.py
+  s_a03837fb91b092::t_f99541cc9946e0 696-699
+causalpy/tests/test_timeseries_model_coverage.py
+  s_c3ce0eb209d541::t_1fc55b2324d6bc 763-790
+causalpy/tests/test_auto_scale_sigma.py
+  s_a03837fb91b092::t_a6ec1e916903de 486-511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f887ee04d7f74389ead91ad7bc34bd458ceefd8c",
+  "prompts": {},
+  "sessions": {
+    "s_a03837fb91b092": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2faa119e-0ab3-4546-9d73-60390e642a90",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    },
+    "s_c3ce0eb209d541": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a766bd5-04ec-4d87-8525-15d0bf6486f7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
