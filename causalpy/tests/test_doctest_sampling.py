@@ -190,6 +190,17 @@ def test_guarded_entry_points_still_exist():
         assert hasattr(mcmc, name), f"pymc.sampling.mcmc.{name} no longer exists"
 
 
+class _FakeConfig:
+    """Minimal stand-in for ``pytest.Config``; the hooks read one option."""
+
+    def __init__(self, *, doctest_modules):
+        self._doctest_modules = doctest_modules
+
+    def getoption(self, name, default=False):
+        assert name == "--doctest-modules"
+        return self._doctest_modules
+
+
 def test_configure_is_noop_without_doctest_modules(monkeypatch):
     """Outside the doctest leg the plugin must not touch global sampling state."""
     import pymc as pm
@@ -197,13 +208,72 @@ def test_configure_is_noop_without_doctest_modules(monkeypatch):
     original_sample = pm.sample
     monkeypatch.setattr(pm, "sample", original_sample)
 
-    class _FakeConfig:
-        def getoption(self, name, default=False):
-            return default  # --doctest-modules not set
-
-    doctest_sampling.pytest_configure(_FakeConfig())
+    doctest_sampling.pytest_configure(_FakeConfig(doctest_modules=False))
 
     assert pm.sample is original_sample
+
+
+def test_hooks_install_and_restore_inside_the_doctest_leg(monkeypatch):
+    """The pytest entry points themselves arm and disarm the mock.
+
+    ``test_install_and_restore_round_trip`` covers the private helpers; this
+    covers the wiring from ``pytest_configure``/``pytest_unconfigure`` to them,
+    which otherwise only runs in the subprocess tests' child process.
+    """
+    import pymc as pm
+
+    monkeypatch.setattr(pm, "sample", pm.sample)
+    monkeypatch.setattr(pm, "Flat", pm.Flat)
+    monkeypatch.setattr(pm, "HalfFlat", pm.HalfFlat)
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        monkeypatch.setattr(mcmc, name, getattr(mcmc, name))
+
+    doctest_sampling.pytest_configure(_FakeConfig(doctest_modules=True))
+    try:
+        assert pm.sample.__name__ == "mock_sample"
+    finally:
+        doctest_sampling.pytest_unconfigure(_FakeConfig(doctest_modules=True))
+
+    assert doctest_sampling._mock_gen is None
+    assert pm.sample.__name__ != "mock_sample"
+
+
+def test_install_is_idempotent(monkeypatch):
+    """A second install must not capture the mocked state as its "original".
+
+    If it did, the single matching restore would leave the mock in place for
+    every later test in the process.
+    """
+    import pymc as pm
+
+    monkeypatch.setattr(pm, "sample", pm.sample)
+    monkeypatch.setattr(pm, "Flat", pm.Flat)
+    monkeypatch.setattr(pm, "HalfFlat", pm.HalfFlat)
+    for name in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS:
+        monkeypatch.setattr(mcmc, name, getattr(mcmc, name))
+    originals = {
+        n: getattr(mcmc, n) for n in doctest_sampling._FORBIDDEN_MCMC_ENTRY_POINTS
+    }
+
+    doctest_sampling._install_doctest_mock()
+    try:
+        first_gen = doctest_sampling._mock_gen
+        doctest_sampling._install_doctest_mock()
+        assert doctest_sampling._mock_gen is first_gen
+    finally:
+        doctest_sampling._restore_doctest_mock()
+
+    for name, original in originals.items():
+        assert getattr(mcmc, name) is original
+
+
+def test_restore_without_install_is_a_noop():
+    """``pytest_unconfigure`` also fires when configure never installed."""
+    assert doctest_sampling._mock_gen is None
+
+    doctest_sampling._restore_doctest_mock()
+
+    assert doctest_sampling._mock_gen is None
 
 
 def test_install_and_restore_round_trip(monkeypatch):
