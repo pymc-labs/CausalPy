@@ -904,6 +904,239 @@ def test_run_is_inconclusive_when_no_fold_has_enough_pre_period():
     assert "p_effect_outside_null" not in result.metadata
 
 
+# ===========================================================================
+# Single usable fold degeneracy (regression for the tau-scale collapse)
+# ===========================================================================
+
+
+def _make_scaled_fake_experiment(
+    data: pd.DataFrame,
+    treatment_time: int,
+    cumulative_mean: float,
+    cumulative_sd: float,
+    n_draws: int = 400,
+    seed: int = 0,
+) -> SimpleNamespace:
+    """Create a fake Bayesian experiment with a controlled cumulative impact.
+
+    The returned ``post_impact`` sums (over ``obs_ind``) to a draw-level
+    cumulative impact with the requested mean and standard deviation, so the
+    downstream hierarchical null and verdict are exercised on a series whose
+    scale we choose deterministically.
+    """
+    rng = np.random.default_rng(seed)
+    n_post = max(int((data.index >= treatment_time).sum()), 1)
+    totals = rng.normal(cumulative_mean, cumulative_sd, size=n_draws)
+    per_obs = (totals / n_post).reshape(1, n_draws, 1, 1)
+    post = np.broadcast_to(per_obs, (1, n_draws, n_post, 1)).copy()
+    post_impact = xr.DataArray(post, dims=("chain", "draw", "obs_ind", "treated_units"))
+    return SimpleNamespace(
+        data=data,
+        treatment_time=treatment_time,
+        _model_backend=SimpleNamespace(supports_idata=True),
+        model=SimpleNamespace(),
+        post_impact=post_impact,
+    )
+
+
+def test_single_fold_directly_does_not_report_supported_on_large_scale():
+    """A large-scale series with ``n_folds=1`` must not fabricate SUPPORTED.
+
+    Route 1 to a single usable fold: ``n_folds=1`` requested directly.  With a
+    single fold the between-fold spread ``tau_status_quo`` is unidentified and
+    collapses to its prior width (~O(1)), so the null distribution loses all
+    data scaling.  An actual effect that is well within the fold's own noise at
+    the data scale must therefore never be declared "outside the null".
+    """
+    data = pd.DataFrame({"y": np.zeros(90)}, index=np.arange(90))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=60,
+        cumulative_mean=5150.0,
+        cumulative_sd=0.0,
+    )
+
+    def factory(fold_data, treatment_time):
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=5000.0,
+            cumulative_sd=300.0,
+            seed=1,
+        )
+
+    check = PlaceboInTime(
+        n_folds=1,
+        intervention_length=30,
+        experiment_factory=factory,
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        random_seed=42,
+    )
+
+    result = check.run(experiment)
+
+    assert result.metadata["n_folds_completed"] == 1
+    # A single usable fold cannot characterise the null distribution, so the
+    # verdict must abstain rather than (spuriously) claim the effect is real.
+    assert result.passed is None
+    assert "SUPPORTED" not in result.text
+    assert "INCONCLUSIVE" in result.text
+    # No degenerate null was built.
+    assert "null_samples" not in result.metadata
+    assert "p_effect_outside_null" not in result.metadata
+
+
+def test_skips_down_to_single_fold_does_not_report_supported_on_large_scale():
+    """Skips reducing ``n_folds>1`` to one usable fold must not report SUPPORTED.
+
+    Route 2 to a single usable fold: ``n_folds=2`` requested, but the earlier
+    fold is skipped for insufficient pre-period, leaving exactly one usable
+    fold.  This must reach the same abstention as the direct ``n_folds=1``
+    route rather than build a degenerate single-fold null.
+    """
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=70,
+        cumulative_mean=5150.0,
+        cumulative_sd=0.0,
+    )
+
+    def factory(fold_data, treatment_time):
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=5000.0,
+            cumulative_sd=300.0,
+            seed=1,
+        )
+
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=factory,
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        random_seed=42,
+    )
+
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+        result = check.run(experiment)
+
+    assert result.metadata["n_folds_requested"] == 2
+    assert result.metadata["n_folds_completed"] == 1
+    assert result.passed is None
+    assert "SUPPORTED" not in result.text
+    assert "INCONCLUSIVE" in result.text
+    assert "null_samples" not in result.metadata
+    assert "p_effect_outside_null" not in result.metadata
+
+
+def test_build_status_quo_model_raises_when_between_fold_spread_unidentified():
+    """>=2 folds with identical means must not fabricate a scale-free null.
+
+    The single-fold routes are abstained in :meth:`PlaceboInTime.run` before
+    the model is built.  This guards the residual root cause directly: when the
+    completed folds have no between-fold spread (``np.nanstd(fold_means) == 0``,
+    e.g. an almost-constant series with >= 2 folds), the old ``prior_mu_scale``
+    fallback to ``1.0`` stripped all data scaling and collapsed the null to an
+    O(1) width, flipping the verdict to a spurious SUPPORTED.  It must now fail
+    loudly rather than build that null.
+    """
+    check = PlaceboInTime(sample_kwargs=_FAST_HIERARCHICAL_KWARGS)
+    with pytest.raises(ValueError, match="Cannot identify the hierarchical"):
+        check._build_status_quo_model(
+            np.array([5000.0, 5000.0]),
+            np.array([300.0, 300.0]),
+        )
+
+
+def test_identical_folds_are_inconclusive_end_to_end():
+    """A near-constant large-scale series must never surface as SUPPORTED.
+
+    Two folds complete (so the single-fold count guard does not apply) but with
+    identical cumulative impacts, so the between-fold null spread is
+    unidentified.  ``run`` must abstain (INCONCLUSIVE) — mirroring the
+    single-fold routes and PlaceboInSpace — rather than build a degenerate null
+    or crash the caller.
+    """
+    data = pd.DataFrame({"y": np.zeros(120)}, index=np.arange(120))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=90,
+        cumulative_mean=5150.0,
+        cumulative_sd=0.0,
+    )
+
+    def factory(fold_data, treatment_time):
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=5000.0,
+            cumulative_sd=0.0,
+            seed=1,
+        )
+
+    check = PlaceboInTime(
+        n_folds=2,
+        intervention_length=30,
+        experiment_factory=factory,
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        random_seed=42,
+    )
+
+    result = check.run(experiment)
+
+    assert result.metadata["n_folds_completed"] == 2
+    assert result.passed is None
+    assert "SUPPORTED" not in result.text
+    assert "INCONCLUSIVE" in result.text
+    assert "null_samples" not in result.metadata
+    assert "p_effect_outside_null" not in result.metadata
+
+
+def test_two_folds_with_distinct_means_still_produce_a_verdict():
+    """The degeneracy guards must not over-fire on a healthy multi-fold run.
+
+    Two folds complete with *distinct* cumulative impacts, so the between-fold
+    spread is identified.  ``run`` must build the null and return a boolean
+    verdict rather than abstaining — this pins that the abstention path is
+    reached only for genuinely degenerate configurations.
+    """
+    data = pd.DataFrame({"y": np.zeros(120)}, index=np.arange(120))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=90,
+        cumulative_mean=5000.0,
+        cumulative_sd=0.0,
+    )
+
+    def factory(fold_data, treatment_time):
+        # Distinct per-fold means (folds sit at pseudo tt 30 and 60), so
+        # np.nanstd(fold_means) > 0 and the null is identified.
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=5000.0 + 2.0 * treatment_time,
+            cumulative_sd=300.0,
+            seed=1,
+        )
+
+    check = PlaceboInTime(
+        n_folds=2,
+        intervention_length=30,
+        experiment_factory=factory,
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        random_seed=42,
+    )
+
+    result = check.run(experiment)
+
+    assert result.metadata["n_folds_completed"] == 2
+    assert result.passed is not None
+    assert "INCONCLUSIVE" not in result.text
+    assert "null_samples" in result.metadata
+    assert "p_effect_outside_null" in result.metadata
+
+
 def test_random_run_is_inconclusive_with_no_feasible_folds():
     """A zero-candidate random selection cannot fabricate a null."""
     data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
