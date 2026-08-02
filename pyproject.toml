@@ -101,14 +101,12 @@ docs = [
     "pymc-bart",
     "linkify-it-py",
     "myst-nb<=1.0.0",
-    "pathlib",
     "pylint",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
     "labs-sphinx-theme",
     "sphinx-copybutton",
-    "sphinx-rtd-theme",
     "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex>=2.7.0",
@@ -164,7 +162,6 @@ addopts = [
 ]
 testpaths = "causalpy/tests"
 markers = [
-    "correctness: mark as a statistical correctness test.",
     "integration: mark as an integration test.",
     "slow: mark test as slow.",
     "correctness: mark statistical correctness and reproducibility tests.",
@@ -232,21 +229,6 @@ exclude_lines = [
 [tool.mypy]
 files = "causalpy/*.py"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
-
-[tool.mypy-matplotlib]
-ignore_missing_imports = true
-
-[tool.mypy-pymc]
-ignore_missing_imports = true
-
-[tool.mypy-seaborn]
-ignore_missing_imports = true
-
-[tool.mypy-sklearn]
-ignore_missing_imports = true
-
-[tool.mypy-scipy]
-ignore_missing_imports = true
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"
