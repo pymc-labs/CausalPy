@@ -29,7 +29,6 @@ Requires the `gh` CLI authenticated with read access to the repo.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime as _dt
 import json
 import subprocess
@@ -184,27 +183,48 @@ def fetch_prs(repo: str) -> list[dict]:
     # Per-PR pass: fetch `commits` (too expensive in bulk, see docstring) and,
     # in the same call, resolve any UNKNOWN `mergeable` (`gh pr view` triggers
     # the lazy computation). One `gh pr view` per PR covers both.
+    #
+    # A per-PR view that fails is NOT harmless: without `commits`/`reviews`,
+    # `_last_activity` silently falls back to creation time plus issue
+    # comments, so a PR pushed to this morning can read as months idle and
+    # `--apply` would write a wrong `status:aging`/`status:stale`. We retry
+    # once (these failures are usually transient rate-limit/network blips) and,
+    # if it still fails, flag the PR `detail_incomplete` and warn on stderr.
+    # Classification then withholds the idle-derived labels for that PR rather
+    # than guessing. Never swallow the failure and carry on.
     for pr in prs:
         want = ["commits", "reviews"]
         if pr.get("mergeable") == "UNKNOWN":
             want.append("mergeable")
-        with contextlib.suppress(subprocess.CalledProcessError):
-            v = _gh_json(
-                [
-                    "pr",
-                    "view",
-                    str(pr["number"]),
-                    "--repo",
-                    repo,
-                    "--json",
-                    ",".join(want),
-                ]
-            )
-            if v:
-                pr["commits"] = v.get("commits", [])
-                pr["reviews"] = v.get("reviews", [])
-                if "mergeable" in want:
-                    pr["mergeable"] = v.get("mergeable", "UNKNOWN")
+        args = [
+            "pr",
+            "view",
+            str(pr["number"]),
+            "--repo",
+            repo,
+            "--json",
+            ",".join(want),
+        ]
+        v = None
+        for attempt in range(2):
+            try:
+                v = _gh_json(args)
+                break
+            except subprocess.CalledProcessError as exc:
+                if attempt == 0:
+                    continue
+                print(
+                    f"warning: `gh pr view {pr['number']}` failed after a retry "
+                    f"({exc}); idle-based labels withheld for this PR",
+                    file=sys.stderr,
+                )
+        if v:
+            pr["commits"] = v.get("commits", [])
+            pr["reviews"] = v.get("reviews", [])
+            if "mergeable" in want:
+                pr["mergeable"] = v.get("mergeable", "UNKNOWN")
+        else:
+            pr["detail_incomplete"] = True
     return prs
 
 
@@ -267,6 +287,10 @@ class PRFacts:
     age_days: int
     idle_band: str  # fresh | aging | stale
     next_action: str
+    # True when the per-PR detail fetch failed even after a retry, so
+    # `commits`/`reviews` are missing and `idle_days` is a floor, not a fact.
+    # Consumers (labeller, digest) must not treat this PR's idleness as real.
+    detail_incomplete: bool = False
     status_labels: list[str] = field(default_factory=list)
 
 
@@ -319,10 +343,16 @@ def _status_labels_for(f: dict) -> list[str]:
     statuses; they only carry aging/stale flags."""
     labels: list[str] = []
     draft = f["lifecycle"] == "draft"
-    if f["idle_band"] == "stale":
-        labels.append("status:stale")
-    elif f["idle_band"] == "aging":
-        labels.append("status:aging")
+    # Idle-derived labels need the commit/review history. If the detail fetch
+    # failed, `idle_days` was computed from creation time and issue comments
+    # only, which overstates idleness for a PR whose recent activity was
+    # pushes or reviews. Withhold `status:aging`/`status:stale` rather than
+    # write a label the next healthy run would have to undo.
+    if not f.get("detail_incomplete"):
+        if f["idle_band"] == "stale":
+            labels.append("status:stale")
+        elif f["idle_band"] == "aging":
+            labels.append("status:aging")
     if not draft:
         if f["conflict"] == "conflicting":
             labels.append("status:conflicting")
@@ -366,6 +396,7 @@ def classify(prs: list[dict]) -> list[PRFacts]:
             "risk": risk,
             "idle_days": _days_since(_last_activity(pr)),
             "age_days": _days_since(pr["createdAt"]),
+            "detail_incomplete": bool(pr.get("detail_incomplete")),
         }
         f["idle_band"] = _idle_band(f["idle_days"])
         f["next_action"] = _next_action(f)
