@@ -19,8 +19,18 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from plotnine import (
+    aes,
+    geom_line,
+    geom_point,
+    geom_vline,
+    ggplot,
+    guides,
+    labs,
+    scale_color_manual,
+)
 from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
@@ -149,6 +159,7 @@ class RegressionDiscontinuity(BaseExperiment):
         if self.donut_hole > 0:
             mask &= np.abs(x_vals - c) >= self.donut_hole
 
+        self._fit_mask = mask.to_numpy(dtype=bool)
         self.fit_data = self.data.loc[mask]
 
         if len(self.fit_data) <= 10:
@@ -413,27 +424,89 @@ class RegressionDiscontinuity(BaseExperiment):
             (use matplotlib's default).
         """
         with_uncertainty = has_posterior_draws(self.pred)
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot data: use two layers only when there are excluded observations
         has_exclusion = len(self.fit_data) < len(self.data)
+        xcol = self.running_variable_name
+        ycol = self.outcome_variable_name
+
+        points = self.data.copy()
         if has_exclusion:
-            sns.scatterplot(
-                self.data,
-                x=self.running_variable_name,
-                y=self.outcome_variable_name,
-                color="lightgray",
-                ax=ax,
-                label="excluded data",
+            points["series"] = np.where(self._fit_mask, "fit data", "excluded data")
+            color_values = {"fit data": "k", "excluded data": "lightgray"}
+        else:
+            points["series"] = "data"
+            color_values = {"data": "k"}
+
+        # Plotnine provides the equivalent base geometry. Materialize it once so
+        # the posterior helper can retain its Matplotlib-only rendering modes.
+        p = ggplot(points, aes(x=xcol, y=ycol, color="series")) + geom_point()
+
+        # create strings to compose title
+        r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
+        if with_uncertainty:
+            percentiles = self.discontinuity_at_threshold.quantile(
+                [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+            ).values
+            ci = (
+                rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
+                + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
             )
-        sns.scatterplot(
-            self.fit_data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="k",
-            ax=ax,
-            label="fit data" if has_exclusion else "data",
+            discon = f"""
+            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
+            """
+            title = r2 + "\n" + discon + ci
+        else:
+            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
+            title = r2 + "\n" + discon
+            model_fit = pd.DataFrame(
+                {
+                    xcol: self.x_pred[xcol],
+                    "prediction": self.pred.isel(chain=0, draw=0, treated_units=0),
+                    "series": "model fit",
+                }
+            )
+            p += geom_line(model_fit, aes(x=xcol, y="prediction", color="series"))
+            color_values["model fit"] = "k"
+
+        threshold = pd.DataFrame(
+            {
+                "xintercept": [self.treatment_threshold],
+                "series": ["treatment threshold"],
+            }
         )
+        p += geom_vline(
+            threshold,
+            aes(xintercept="xintercept", color="series"),
+            size=3,
+        )
+        color_values["treatment threshold"] = "r"
+
+        if self.donut_hole > 0:
+            donut_boundaries = pd.DataFrame(
+                {
+                    "xintercept": [
+                        self.treatment_threshold - self.donut_hole,
+                        self.treatment_threshold + self.donut_hole,
+                    ],
+                    "series": ["donut boundary", "donut boundary"],
+                }
+            )
+            p += geom_vline(
+                donut_boundaries,
+                aes(xintercept="xintercept", color="series"),
+                linetype="dashed",
+                size=2,
+            )
+            color_values["donut boundary"] = "orange"
+
+        fig = (
+            p
+            + scale_color_manual(values=color_values)
+            + guides(color=False)
+            + labs(title=title, x=xcol, y=ycol)
+        ).draw()
+        if figsize is not None:
+            fig.set_size_inches(figsize)
+        ax = fig.axes[0]
 
         # Plot model fit to data
         if with_uncertainty:
@@ -451,59 +524,25 @@ class RegressionDiscontinuity(BaseExperiment):
                 plot_hdi_kwargs={"color": "C1"},
                 label="Posterior mean",
             )
-        else:
-            ax.plot(
-                self.x_pred[self.running_variable_name],
-                self.pred.isel(chain=0, draw=0, treated_units=0),
-                "k",
-                markersize=10,
-                label="model fit",
+        legend_handles = [
+            Line2D(
+                [],
+                [],
+                color=color,
+                label=label,
+                linestyle="None"
+                if label in {"data", "fit data", "excluded data"}
+                else "-",
+                marker="o" if label in {"data", "fit data", "excluded data"} else None,
             )
-
-        # create strings to compose title
-        r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
-        if with_uncertainty:
-            percentiles = self.discontinuity_at_threshold.quantile(
-                [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-            ).values
-            ci = (
-                rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-                + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-            )
-            discon = f"""
-            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
-            """
-            ax.set(title=r2 + "\n" + discon + ci)
-        else:
-            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
-            ax.set(title=r2 + "\n" + discon)
-
-        # Treatment threshold line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
+            for label, color in color_values.items()
+        ]
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(
+            handles=[*legend_handles, *handles],
+            labels=[*color_values, *labels],
+            fontsize=LEGEND_FONT_SIZE,
         )
-
-        # Add donut hole boundary lines if donut_hole > 0
-        if self.donut_hole > 0:
-            ax.axvline(
-                x=self.treatment_threshold - self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-                label="donut boundary",
-            )
-            ax.axvline(
-                x=self.treatment_threshold + self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-            )
-
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
         return (fig, ax)
 
     def effect_summary(

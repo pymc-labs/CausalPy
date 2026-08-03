@@ -27,6 +27,7 @@ dependencies:
   - pandas<4,>=2.3
   - papermill
   - patsy
+  - plotnine>=0.15.7
   - polars
   - prek
   - pyarrow
@@ -47,3 +48,4 @@ dependencies:
   - pip:
       - marimo[mcp]
       - pymc-forecast[extras]<0.3,>=0.2
+      - tidydraws==0.4.3

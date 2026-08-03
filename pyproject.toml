@@ -51,6 +51,8 @@ dependencies = [
     "numpy",
     "pandas>=2.3,<4",
     "patsy",
+    "plotnine>=0.15.7",
+    "polars",
     # Floors per the PyMC 6 migration (#1039). Deliberately NOT pymc>=6.1
     # (pymc-marketing v1.0.0 caps pymc<6.1.0, which would make the docs env
     # unsolvable) and NOT pytensor>=3.2 (pymc 6.1.0 caps pytensor<3.2).
@@ -68,6 +70,7 @@ dependencies = [
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
+    "tidydraws==0.4.3",
     "xarray>=v2022.11.0",
     "pymc-extras>=0.3.0",
 ]
@@ -142,6 +145,7 @@ channels = ["conda-forge"]
 # pymc-forecast is PyPI-only (not on conda-forge): route it to the pip
 # section of the generated environment.yml.
 [tool.pyproject2conda.dependencies]
+tidydraws = { pip = true }
 pymc-forecast = { pip = true }
 
 [project.urls]
