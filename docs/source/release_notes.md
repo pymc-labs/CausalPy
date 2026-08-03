@@ -188,6 +188,4 @@ See also the [runtime notes in the README](https://github.com/pymc-labs/CausalPy
 
 ### Version
 
-This release is intended to be **1.0.0** (the migration is
-backwards-incompatible, so the major version increments). The version is
-single-sourced from `causalpy/version.py`.
+This release is **1.0.0**: the migration is backwards-incompatible, so the major version increments. The version is single-sourced from `causalpy/version.py`, and `pyproject.toml` reads it dynamically, so `causalpy.__version__` and the installed distribution metadata cannot drift apart.

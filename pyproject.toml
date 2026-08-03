@@ -70,7 +70,6 @@ dependencies = [
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
-    "tidydraws==0.4.3",
     "xarray>=v2022.11.0",
     "pymc-extras>=0.3.0",
 ]
@@ -145,7 +144,6 @@ channels = ["conda-forge"]
 # pymc-forecast is PyPI-only (not on conda-forge): route it to the pip
 # section of the generated environment.yml.
 [tool.pyproject2conda.dependencies]
-tidydraws = { pip = true }
 pymc-forecast = { pip = true }
 
 [project.urls]
