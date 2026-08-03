@@ -163,8 +163,8 @@ class ModelAdapter(ABC):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
     ) -> xr.DataArray:
         """Return expected outcomes with canonical prediction dimensions.
 
@@ -178,10 +178,10 @@ class ModelAdapter(ABC):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata for Bayesian backends.
         out_of_sample : bool, default False
             Whether predictions are out-of-sample. Used by PyMC backends only.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
 
         Returns
         -------
@@ -191,7 +191,9 @@ class ModelAdapter(ABC):
         """
 
     @abstractmethod
-    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series:
         """Return per-unit :math:`R^2` scores in the canonical container.
 
         Every backend returns a :class:`pandas.Series` with one
@@ -204,8 +206,8 @@ class ModelAdapter(ABC):
             Predictor matrix.
         y : array-like or xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata for Bayesian backends.
 
         Returns
         -------
@@ -288,8 +290,8 @@ class PyMCModelAdapter(ModelAdapter):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
     ) -> xr.DataArray:
         """Predict expected outcomes using the PyMC model.
 
@@ -297,10 +299,10 @@ class PyMCModelAdapter(ModelAdapter):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
         out_of_sample : bool, default False
             Whether predictions are out-of-sample.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
 
         Returns
         -------
@@ -308,10 +310,12 @@ class PyMCModelAdapter(ModelAdapter):
             Posterior draws of ``mu`` with canonical prediction dimensions.
         """
         return _extract_mu(
-            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+            self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample)
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series:
         """Score predictions from the PyMC model.
 
         Parameters
@@ -320,10 +324,10 @@ class PyMCModelAdapter(ModelAdapter):
             Predictor matrix.
         y : array-like or xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
         """
-        return self._model.score(X=X, y=y, **kwargs)
+        return self._model.score(X=X, y=y, coords=coords)
 
     def coefficients(self) -> np.ndarray:
         """Return posterior mean coefficients."""
@@ -401,8 +405,8 @@ class SklearnModelAdapter(ModelAdapter):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
     ) -> xr.DataArray:
         """Return point predictions as singleton posterior draws.
 
@@ -410,10 +414,10 @@ class SklearnModelAdapter(ModelAdapter):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Ignored for sklearn backends.
         out_of_sample : bool, default False
             Ignored for sklearn backends.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
 
         Returns
         -------
@@ -421,7 +425,7 @@ class SklearnModelAdapter(ModelAdapter):
             Point predictions with canonical prediction dimensions and
             singleton ``chain``/``draw`` dimensions.
         """
-        values = np.asarray(self._model.predict(X=_sklearn_array(X), **kwargs))
+        values = np.asarray(self._model.predict(X=_sklearn_array(X)))
         if values.ndim == 1:
             values = values[:, None]
         if values.ndim != 2:
@@ -456,7 +460,16 @@ class SklearnModelAdapter(ModelAdapter):
             },
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+    def score(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+        sample_weight: Any | None = None,
+        multioutput: Literal["raw_values"] = "raw_values",
+        force_finite: bool = True,
+    ) -> pd.Series:
         """Return per-output :math:`R^2` scores from the sklearn model.
 
         Parameters
@@ -465,13 +478,16 @@ class SklearnModelAdapter(ModelAdapter):
             Predictor matrix.
         y : array-like
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to
-            :func:`sklearn.metrics.r2_score`, such as ``sample_weight``.
-            These are not forwarded to the underlying estimator's
-            ``score`` method. ``multioutput`` is fixed to
-            ``"raw_values"`` so each treated unit receives its own
-            ``unit_{i}_r2`` entry.
+        coords : dict, optional
+            Ignored for sklearn backends.
+        sample_weight : array-like, optional
+            Sample weights passed to :func:`sklearn.metrics.r2_score`.
+        multioutput : {"raw_values"}, default "raw_values"
+            The required aggregation mode. Per-unit scores require the raw
+            value for each output.
+        force_finite : bool, default True
+            Whether to replace non-finite scores for constant targets, passed to
+            :func:`sklearn.metrics.r2_score`.
 
         Returns
         -------
@@ -479,17 +495,18 @@ class SklearnModelAdapter(ModelAdapter):
             One ``unit_{i}_r2`` entry per output. Point estimates carry no
             dispersion entries.
         """
-        if "multioutput" in kwargs:
+        if multioutput != "raw_values":
             raise ValueError(
-                "Cannot pass multioutput to SklearnModelAdapter.score(); "
-                'the canonical contract requires multioutput="raw_values".'
+                "SklearnModelAdapter.score() requires "
+                'multioutput="raw_values" for the canonical per-unit score contract.'
             )
         scores = np.atleast_1d(
             r2_score(
                 _sklearn_y(y),
                 self._model.predict(X=_sklearn_array(X)),
-                multioutput="raw_values",
-                **kwargs,
+                sample_weight=sample_weight,
+                multioutput=multioutput,
+                force_finite=force_finite,
             )
         )
         return pd.Series(
@@ -572,8 +589,8 @@ class PyMCForecastAdapter(ModelAdapter):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
     ) -> xr.DataArray:
         """Predict in-sample or forecast the counterfactual.
 
@@ -581,11 +598,12 @@ class PyMCForecastAdapter(ModelAdapter):
         ----------
         X : xarray.DataArray
             Design matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata accepted by the forecasting backend but not
+            used by its forecasting implementation.
         out_of_sample : bool, default False
             ``True`` draws the post-period counterfactual via the model's
             forecasting path.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
 
         Returns
         -------
@@ -593,10 +611,12 @@ class PyMCForecastAdapter(ModelAdapter):
             Posterior draws of ``mu`` with canonical prediction dimensions.
         """
         return _extract_mu(
-            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+            self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample)
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series:
         """Score in-sample predictions with the Bayesian :math:`R^2`.
 
         Parameters
@@ -605,10 +625,11 @@ class PyMCForecastAdapter(ModelAdapter):
             Design matrix.
         y : xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata accepted by the forecasting backend but not
+            used by its scoring implementation.
         """
-        return self._model.score(X=X, y=y, **kwargs)
+        return self._model.score(X=X, y=y, coords=coords)
 
     def coefficients(self) -> np.ndarray:
         """Forecasting models have no design-matrix coefficients."""

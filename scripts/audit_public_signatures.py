@@ -3,7 +3,7 @@
 The audit uses source ASTs rather than importing CausalPy, so it is safe to run in
 an uninstalled checkout. Public membership follows the documented API manifest:
 ``docs/source/api/index.md`` roots, package ``__all__`` exports, top-level
-callable re-exports, and the Tier 4 ``BaseExperiment`` protocol hooks.
+callable re-exports, named Tier 4 hooks, and explicit Tier 3 exclusions.
 
 Usage
 -----
@@ -51,6 +51,15 @@ TIER_4_CALLABLES: dict[tuple[str, str], frozenset[str]] = {
 }
 
 
+TIER_3_MODULE_EXCLUSIONS: dict[str, str] = {
+    "causalpy.experiments.model_adapter": (
+        "Backend adapter plumbing is stored only on "
+        "BaseExperiment._model_backend; supported user access is "
+        "BaseExperiment.model."
+    ),
+}
+
+
 @dataclass(frozen=True)
 class ImportedSymbol:
     """A symbol imported by a package ``__init__.py``."""
@@ -80,65 +89,187 @@ def _module_path(module: str) -> Path:
     return candidate.with_suffix(".py")
 
 
+def _reject_tier_3_module(module: str) -> None:
+    """Reject a Tier 3 module when a manifest or export would promote it."""
+    if reason := TIER_3_MODULE_EXCLUSIONS.get(module):
+        raise ValueError(
+            f"{module} is explicitly Tier 3 and cannot be audited as public: {reason}"
+        )
+
+
 def _read_tree(module: str) -> ast.Module:
     """Parse one CausalPy source module."""
     path = _module_path(module)
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _all_names(tree: ast.Module) -> list[str]:
-    """Return literal names from a module-level ``__all__`` declaration."""
+def _all_names(tree: ast.Module) -> list[str] | None:
+    """Return a literal module-level ``__all__``, or ``None`` when absent."""
+    names: list[str] | None = None
     for node in tree.body:
-        if not isinstance(node, ast.Assign):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
             continue
         if not any(
             isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
+            for target in targets
         ):
             continue
-        if not isinstance(node.value, (ast.List, ast.Tuple)):
+        if not isinstance(value, (ast.List, ast.Tuple)):
             continue
-        return [
+        names = [
             element.value
-            for element in node.value.elts
+            for element in value.elts
             if isinstance(element, ast.Constant) and isinstance(element.value, str)
         ]
-    return []
+    return names
 
 
 def _resolve_from_module(package: str, node: ast.ImportFrom) -> str:
-    """Resolve an import-from node against its containing package."""
+    """Resolve an import-from node against its containing package or module."""
     if node.level == 0:
         return node.module or ""
 
     package_parts = package.split(".")
+    if _module_path(package).name != "__init__.py":
+        package_parts.pop()
     base_parts = package_parts[: len(package_parts) - node.level + 1]
     if node.module:
         base_parts.extend(node.module.split("."))
     return ".".join(base_parts)
 
 
-def _package_exports(package: str) -> dict[str, ImportedSymbol]:
-    """Return public ``__all__`` bindings and their static origins."""
-    tree = _read_tree(package)
+def _wildcard_export_names(
+    module: str, *, seen: frozenset[str] = frozenset()
+) -> set[str]:
+    """Return names made public by ``from module import *``, recursively."""
+    if module in seen:
+        return set()
+    tree = _read_tree(module)
+    if (names := _all_names(tree)) is not None:
+        return set(names)
+
+    next_seen = seen | {module}
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.name.startswith("_"):
+                names.add(node.name)
+        elif isinstance(node, ast.ImportFrom):
+            imported_module = _resolve_from_module(module, node)
+            for alias in node.names:
+                if alias.name == "*":
+                    names.update(
+                        _wildcard_export_names(imported_module, seen=next_seen)
+                    )
+                elif not (alias.asname or alias.name).startswith("_"):
+                    names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            names.update(
+                alias.asname or alias.name.partition(".")[0]
+                for alias in node.names
+                if not (alias.asname or alias.name.partition(".")[0]).startswith("_")
+            )
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names.update(
+                target.id
+                for target in targets
+                if isinstance(target, ast.Name) and not target.id.startswith("_")
+            )
+    return names
+
+
+def _assignment_source(
+    value: ast.expr, bindings: dict[str, ImportedSymbol]
+) -> ImportedSymbol | None:
+    """Resolve a simple static alias to its imported symbol."""
+    if isinstance(value, ast.Name):
+        return bindings.get(value.id)
+
+    attributes: list[str] = []
+    while isinstance(value, ast.Attribute):
+        attributes.append(value.attr)
+        value = value.value
+    if not isinstance(value, ast.Name) or not (source := bindings.get(value.id)):
+        return None
+
+    module = source.module
+    if source.name is not None:
+        submodule = f"{module}.{source.name}"
+        if not _module_path(submodule).exists():
+            return None
+        module = submodule
+    for attribute in reversed(attributes[1:]):
+        submodule = f"{module}.{attribute}"
+        if not _module_path(submodule).exists():
+            return None
+        module = submodule
+    return ImportedSymbol(module=module, name=attributes[0])
+
+
+def _import_bindings(
+    package: str, tree: ast.Module
+) -> tuple[dict[str, ImportedSymbol], list[str], dict[str, int]]:
+    """Return ordered static import bindings, star-import sources, and lines."""
     bindings: dict[str, ImportedSymbol] = {}
+    wildcard_modules: list[str] = []
+    binding_lines: dict[str, int] = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
             module = _resolve_from_module(package, node)
             for alias in node.names:
-                if alias.name != "*":
-                    bindings[alias.asname or alias.name] = ImportedSymbol(
-                        module=module,
-                        name=alias.name,
-                    )
+                if alias.name == "*":
+                    wildcard_modules.append(module)
+                    for name in _wildcard_export_names(module):
+                        bindings[name] = ImportedSymbol(module=module, name=name)
+                        binding_lines[name] = node.lineno
+                else:
+                    name = alias.asname or alias.name
+                    bindings[name] = ImportedSymbol(module=module, name=alias.name)
+                    binding_lines[name] = node.lineno
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                bindings[alias.asname or alias.name.partition(".")[0]] = ImportedSymbol(
-                    module=alias.name,
+                binding_name = alias.asname or alias.name.partition(".")[0]
+                bindings[binding_name] = ImportedSymbol(
+                    module=alias.name if alias.asname else binding_name,
                     name=None,
                 )
+                binding_lines[binding_name] = node.lineno
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if value is None:
+                continue
+            source = _assignment_source(value, bindings)
+            if source is not None:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        bindings[target.id] = source
+                        binding_lines[target.id] = node.lineno
+    return bindings, wildcard_modules, binding_lines
 
-    return {name: bindings[name] for name in _all_names(tree) if name in bindings}
+
+def _package_exports(package: str) -> dict[str, ImportedSymbol]:
+    """Return public ``__all__`` bindings and their static origins."""
+    tree = _read_tree(package)
+    bindings, wildcard_modules, _ = _import_bindings(package, tree)
+
+    exports: dict[str, ImportedSymbol] = {}
+    for name in _all_names(tree) or []:
+        if name in bindings:
+            exports[name] = bindings[name]
+            continue
+        for module in reversed(wildcard_modules):
+            if name in _wildcard_export_names(module):
+                exports[name] = ImportedSymbol(module=module, name=name)
+                break
+    return exports
 
 
 def _documented_module_roots() -> list[str]:
@@ -156,6 +287,7 @@ def _documented_module_roots() -> list[str]:
             break
         if not stripped or stripped.startswith(":"):
             continue
+        _reject_tier_3_module(f"{ROOT_MODULE}.{stripped}")
         roots.append(f"{ROOT_MODULE}.{stripped}")
     return roots
 
@@ -223,22 +355,51 @@ def _module_callables(module: str) -> list[CallableSignature]:
     return callables
 
 
-def _exported_symbol_callables(symbol: ImportedSymbol) -> list[CallableSignature]:
-    """Return public callables for one exported function or class binding."""
+def _exported_symbol_callables(
+    symbol: ImportedSymbol,
+    *,
+    seen: frozenset[tuple[str, str | None]] = frozenset(),
+) -> list[CallableSignature]:
+    """Return public callables for one exported binding, resolving re-exports."""
+    _reject_tier_3_module(symbol.module)
     if symbol.name is None:
         return []
 
+    identity = (symbol.module, symbol.name)
+    if identity in seen:
+        return []
+    next_seen = seen | {identity}
+
+    submodule = _module_path(f"{symbol.module}.{symbol.name}")
+    if submodule.exists():
+        _reject_tier_3_module(f"{symbol.module}.{symbol.name}")
+        return []
+
     tree = _read_tree(symbol.module)
-    for node in tree.body:
-        if (
-            not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-            or node.name != symbol.name
-        ):
-            continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return [_callable_signature(symbol.module, node)]
-        if isinstance(node, ast.ClassDef):
-            return _class_callables(symbol.module, node)
+    declaration = next(
+        (
+            node
+            for node in reversed(tree.body)
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == symbol.name
+        ),
+        None,
+    )
+    bindings, wildcard_modules, binding_lines = _import_bindings(symbol.module, tree)
+    if (source := bindings.get(symbol.name)) and (
+        declaration is None or binding_lines[symbol.name] > declaration.lineno
+    ):
+        return _exported_symbol_callables(source, seen=next_seen)
+    if declaration is not None:
+        if isinstance(declaration, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return [_callable_signature(symbol.module, declaration)]
+        return _class_callables(symbol.module, declaration)
+    for module in reversed(wildcard_modules):
+        if symbol.name in _wildcard_export_names(module):
+            return _exported_symbol_callables(
+                ImportedSymbol(module=module, name=symbol.name),
+                seen=next_seen,
+            )
     return []
 
 
@@ -283,7 +444,7 @@ def _markdown_report(callables: list[CallableSignature]) -> str:
         f"- Public callable declarations surveyed: **{len(callables)}**",
         f"- Declarations with `*args` or `**kwargs`: **{len(variadic)}**",
         "- Scope: documented API roots in `docs/source/api/index.md`, package `__all__` exports, top-level callable re-exports, and Tier 4 `BaseExperiment.__maketables_*__` / model `_clone()` hooks.",
-        "- Excluded: tests and private implementation details outside that Tier 4 protocol.",
+        "- Explicit Tier 3 exclusion: `causalpy.experiments.model_adapter` is backend plumbing stored on `BaseExperiment._model_backend`; supported user access is `BaseExperiment.model`.",
     ]
     if not variadic:
         lines.append("No variadic public signatures found.")
