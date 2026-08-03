@@ -130,6 +130,10 @@ default posterior relative to earlier releases. To restore the previous fixed
 `HalfNormal(1)` prior — for example when reproducing an analysis run against an
 older release — pass `SyntheticControl(..., auto_scale_sigma=False)`.
 
+#### `PlaceboInTime` abstains when its null cannot be identified
+
+`PlaceboInTime` now returns `INCONCLUSIVE` (`passed=None`) rather than a `SUPPORTED` or `NOT-SUPPORTED` verdict when fewer than `MIN_USABLE_FOLDS` (2) usable placebo folds complete or the completed folds have a non-positive/non-finite between-fold spread. Because it does not build a hierarchical null in those cases, the result metadata has no `null_samples` or `p_effect_outside_null`. The guard catches only exact degeneracy: a tiny-but-positive between-fold spread on a large-scale series remains eligible for a verdict. Choosing a relative threshold is an unresolved modelling decision.
+
 #### `InstrumentalVariable` samples with `cores=1`
 
 The instrumental-variable model (an `MvNormal` with an `LKJCholeskyCov` prior)
