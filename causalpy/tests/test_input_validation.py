@@ -17,6 +17,7 @@ import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from matplotlib.collections import PolyCollection
 
 import causalpy as cp
 from causalpy.custom_exceptions import BadIndexException
@@ -888,7 +889,7 @@ def test_rd_unrecognized_model_type():
 
 
 def test_rd_ols_plot_with_donut_hole():
-    """Test that OLS plot shows donut hole boundary lines."""
+    """Test that the OLS hybrid plot preserves its rendering contract."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
@@ -900,22 +901,88 @@ def test_rd_ols_plot_with_donut_hole():
         donut_hole=0.1,
     )
 
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    fig, ax = result.plot(show=False)
+    try:
+        assert ax in fig.axes
+        threshold_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "-" and line.get_color() == "r"
+        ]
+        assert len(threshold_lines) == 1
+        np.testing.assert_allclose(
+            threshold_lines[0].get_xdata(), [threshold, threshold]
+        )
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
-    plt.close(fig)
+        donut_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "--" and line.get_color() == "orange"
+        ]
+        assert len(donut_lines) == 2
+        np.testing.assert_allclose(
+            sorted(line.get_xdata()[0] for line in donut_lines),
+            [threshold - 0.1, threshold + 0.1],
+        )
+        assert {
+            "fit data",
+            "excluded data",
+            "model fit",
+            "treatment threshold",
+            "donut boundary",
+        } <= {text.get_text() for text in ax.get_legend().get_texts()}
+    finally:
+        plt.close(fig)
+
+
+def test_rd_plot_isolated_from_user_column_names() -> None:
+    """Test Plotnine renderer columns cannot collide with user column names."""
+    prediction = np.linspace(-2, 2, 12)
+    data = pd.DataFrame(
+        {
+            "prediction": prediction,
+            "series": prediction + 2 * (prediction >= 0),
+            "treated": (prediction >= 0).astype(int),
+        }
+    )
+    result = cp.RegressionDiscontinuity(
+        data,
+        formula="series ~ 1 + prediction + treated + prediction:treated",
+        model=LinearRegression(),
+        running_variable_name="prediction",
+        treatment_threshold=0,
+    )
+
+    fig, ax = result.plot(show=False)
+    try:
+        point_offsets = np.concatenate(
+            [collection.get_offsets() for collection in ax.collections]
+        )
+        np.testing.assert_allclose(
+            np.sort(point_offsets[:, 0]), np.sort(data["prediction"].to_numpy())
+        )
+        np.testing.assert_allclose(
+            np.sort(point_offsets[:, 1]), np.sort(data["series"].to_numpy())
+        )
+
+        model_fit = next(
+            line
+            for line in ax.get_lines()
+            if len(line.get_xdata()) == len(result.x_pred)
+        )
+        np.testing.assert_allclose(
+            model_fit.get_xdata(), result.x_pred["prediction"].to_numpy()
+        )
+        np.testing.assert_allclose(
+            model_fit.get_ydata(),
+            result.pred.isel(chain=0, draw=0, treated_units=0).to_numpy(),
+        )
+    finally:
+        plt.close(fig)
 
 
 def test_rd_bayesian_plot_with_donut_hole():
-    """Test that Bayesian plot shows donut hole boundary lines."""
+    """Test that the Bayesian hybrid plot preserves its rendering contract."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
@@ -927,18 +994,41 @@ def test_rd_bayesian_plot_with_donut_hole():
         donut_hole=0.1,
     )
 
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    fig, ax = result.plot(show=False)
+    try:
+        assert ax in fig.axes
+        assert any(
+            isinstance(collection, PolyCollection) for collection in ax.collections
+        )
+        threshold_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "-" and line.get_color() == "r"
+        ]
+        assert len(threshold_lines) == 1
+        np.testing.assert_allclose(
+            threshold_lines[0].get_xdata(), [threshold, threshold]
+        )
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
-    plt.close(fig)
+        donut_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "--" and line.get_color() == "orange"
+        ]
+        assert len(donut_lines) == 2
+        np.testing.assert_allclose(
+            sorted(line.get_xdata()[0] for line in donut_lines),
+            [threshold - 0.1, threshold + 0.1],
+        )
+        assert {
+            "fit data",
+            "excluded data",
+            "treatment threshold",
+            "donut boundary",
+            "Posterior mean",
+        } <= {text.get_text() for text in ax.get_legend().get_texts()}
+    finally:
+        plt.close(fig)
 
 
 # Synthetic Control - Convex Hull Assumption
