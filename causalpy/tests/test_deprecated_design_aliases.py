@@ -11,21 +11,17 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Backward-compatibility tests for deprecated design-matrix aliases.
-
-Each test verifies that:
-1. Accessing the deprecated attribute triggers ``DeprecationWarning``.
-2. The data returned by the deprecated path is identical to the new API.
-"""
+"""Tests for the 1.0 removal of deprecated design-matrix aliases."""
 
 import warnings
 
+import numpy as np
 import pandas as pd
 import pytest
-import xarray.testing as xrt
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.experiments.base import BaseExperiment
 
 # ---------------------------------------------------------------------------
 # Helpers – lightweight experiment instances (OLS for speed)
@@ -53,6 +49,78 @@ def _make_rd() -> cp.RegressionDiscontinuity:
     )
 
 
+def _make_panel(_mock_pymc_sample) -> cp.PanelRegression:
+    data = pd.DataFrame(
+        {
+            "unit": [0, 0, 1, 1],
+            "time": [0, 1, 0, 1],
+            "x": [0.0, 1.0, 0.0, 1.0],
+            "y": [0.0, 1.0, 1.0, 2.0],
+        }
+    )
+    return cp.PanelRegression(
+        data,
+        formula="y ~ x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        model=LinearRegression(),
+    )
+
+
+def _make_piecewise(_mock_pymc_sample) -> cp.PiecewiseITS:
+    return cp.PiecewiseITS(
+        pd.DataFrame({"t": [0, 1, 2, 3], "y": [0.0, 1.0, 3.0, 4.0]}),
+        formula="y ~ 1 + t + step(t, 2)",
+        model=LinearRegression(),
+    )
+
+
+def _make_prepost(mock_pymc_sample) -> cp.PrePostNEGD:
+    return cp.PrePostNEGD(
+        cp.load_data("anova1"),
+        formula="post ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={
+                "chains": 1,
+                "cores": 1,
+                "draws": 5,
+                "progressbar": False,
+                "random_seed": 42,
+                "tune": 5,
+            }
+        ),
+    )
+
+
+def _make_regression_kink(mock_pymc_sample) -> cp.RegressionKink:
+    kink = 0.5
+    x = np.linspace(-1, 1, 10)
+    data = pd.DataFrame(
+        {
+            "x": x,
+            "y": x + np.where(x >= kink, x - kink, 0),
+            "treated": x >= kink,
+        }
+    )
+    return cp.RegressionKink(
+        data,
+        formula=f"y ~ 1 + x + I((x - {kink}) * treated)",
+        kink_point=kink,
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={
+                "chains": 1,
+                "cores": 1,
+                "draws": 5,
+                "progressbar": False,
+                "random_seed": 42,
+                "tune": 5,
+            }
+        ),
+    )
+
+
 def _make_its(mock_pymc_sample) -> cp.InterruptedTimeSeries:
     df = (
         cp.load_data("its")
@@ -64,7 +132,14 @@ def _make_its(mock_pymc_sample) -> cp.InterruptedTimeSeries:
         treatment_time=pd.to_datetime("2017-01-01"),
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(
-            sample_kwargs={"random_seed": 42, "progressbar": False}
+            sample_kwargs={
+                "chains": 1,
+                "cores": 1,
+                "draws": 5,
+                "progressbar": False,
+                "random_seed": 42,
+                "tune": 5,
+            }
         ),
     )
 
@@ -79,9 +154,13 @@ def _make_sc(mock_pymc_sample) -> cp.SyntheticControl:
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(
             sample_kwargs={
-                "target_accept": 0.95,
-                "random_seed": 42,
+                "chains": 1,
+                "cores": 1,
+                "draws": 5,
                 "progressbar": False,
+                "random_seed": 42,
+                "target_accept": 0.95,
+                "tune": 5,
             }
         ),
     )
@@ -97,22 +176,59 @@ _FORMULA_CASES = [
 ]
 
 
-@pytest.mark.parametrize("old_attr,dataset_attr,key", _FORMULA_CASES)
-def test_deprecated_alias_did(old_attr, dataset_attr, key):
-    result = _make_did()
-    with pytest.warns(DeprecationWarning, match=old_attr):
-        old_val = getattr(result, old_attr)
-    new_val = getattr(result, dataset_attr)[key]
-    xrt.assert_identical(old_val, new_val)
+def _assert_removed_alias(result, old_attr, dataset_attr, key):
+    """Assert the supported Dataset replacement works and the alias is absent."""
+    assert key in getattr(result, dataset_attr)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        with pytest.raises(AttributeError, match=old_attr):
+            getattr(result, old_attr)
+
+
+_MIGRATED_EXPERIMENT_CLASSES = [
+    cp.DifferenceInDifferences,
+    cp.InterruptedTimeSeries,
+    cp.PanelRegression,
+    cp.PiecewiseITS,
+    cp.PrePostNEGD,
+    cp.RegressionDiscontinuity,
+    cp.RegressionKink,
+    cp.SyntheticControl,
+    cp.SyntheticDifferenceInDifferences,
+]
+
+
+def test_deprecated_design_alias_forwarding_is_absent():
+    """The base class no longer exposes the metadata or forwarding hook."""
+    assert "_deprecated_design_aliases" not in BaseExperiment.__dict__
+    assert "__getattr__" not in BaseExperiment.__dict__
+
+
+@pytest.mark.parametrize("experiment_class", _MIGRATED_EXPERIMENT_CLASSES)
+def test_deprecated_design_alias_metadata_is_absent(experiment_class):
+    """Migrated experiments no longer retain inert alias metadata."""
+    assert "_deprecated_design_aliases" not in experiment_class.__dict__
 
 
 @pytest.mark.parametrize("old_attr,dataset_attr,key", _FORMULA_CASES)
-def test_deprecated_alias_rd(old_attr, dataset_attr, key):
-    result = _make_rd()
-    with pytest.warns(DeprecationWarning, match=old_attr):
-        old_val = getattr(result, old_attr)
-    new_val = getattr(result, dataset_attr)[key]
-    xrt.assert_identical(old_val, new_val)
+def test_removed_alias_did(old_attr, dataset_attr, key):
+    _assert_removed_alias(_make_did(), old_attr, dataset_attr, key)
+
+
+@pytest.mark.parametrize("old_attr,dataset_attr,key", _FORMULA_CASES)
+def test_removed_alias_rd(old_attr, dataset_attr, key):
+    _assert_removed_alias(_make_rd(), old_attr, dataset_attr, key)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_panel, _make_piecewise, _make_prepost, _make_regression_kink],
+)
+@pytest.mark.parametrize("old_attr,dataset_attr,key", _FORMULA_CASES)
+def test_removed_alias_remaining_formula_experiments(
+    mock_pymc_sample, factory, old_attr, dataset_attr, key
+):
+    _assert_removed_alias(factory(mock_pymc_sample), old_attr, dataset_attr, key)
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +244,8 @@ _ITS_CASES = [
 
 
 @pytest.mark.parametrize("old_attr,dataset_attr,key", _ITS_CASES)
-def test_deprecated_alias_its(mock_pymc_sample, old_attr, dataset_attr, key):
-    result = _make_its(mock_pymc_sample)
-    with pytest.warns(DeprecationWarning, match=old_attr):
-        old_val = getattr(result, old_attr)
-    new_val = getattr(result, dataset_attr)[key]
-    xrt.assert_identical(old_val, new_val)
+def test_removed_alias_its(mock_pymc_sample, old_attr, dataset_attr, key):
+    _assert_removed_alias(_make_its(mock_pymc_sample), old_attr, dataset_attr, key)
 
 
 # ---------------------------------------------------------------------------
@@ -149,12 +261,8 @@ _SC_CASES = [
 
 
 @pytest.mark.parametrize("old_attr,dataset_attr,key", _SC_CASES)
-def test_deprecated_alias_sc(mock_pymc_sample, old_attr, dataset_attr, key):
-    result = _make_sc(mock_pymc_sample)
-    with pytest.warns(DeprecationWarning, match=old_attr):
-        old_val = getattr(result, old_attr)
-    new_val = getattr(result, dataset_attr)[key]
-    xrt.assert_identical(old_val, new_val)
+def test_removed_alias_sc(mock_pymc_sample, old_attr, dataset_attr, key):
+    _assert_removed_alias(_make_sc(mock_pymc_sample), old_attr, dataset_attr, key)
 
 
 # ---------------------------------------------------------------------------
@@ -171,37 +279,21 @@ def _make_sdid(mock_pymc_sample) -> cp.SyntheticDifferenceInDifferences:
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
-            sample_kwargs={"random_seed": 42, "progressbar": False}
+            sample_kwargs={
+                "chains": 1,
+                "cores": 1,
+                "draws": 5,
+                "progressbar": False,
+                "random_seed": 42,
+                "tune": 5,
+            }
         ),
     )
 
 
 @pytest.mark.parametrize("old_attr,dataset_attr,key", _SC_CASES)
-def test_deprecated_alias_sdid(mock_pymc_sample, old_attr, dataset_attr, key):
-    result = _make_sdid(mock_pymc_sample)
-    with pytest.warns(DeprecationWarning, match=old_attr):
-        old_val = getattr(result, old_attr)
-    new_val = getattr(result, dataset_attr)[key]
-    xrt.assert_identical(old_val, new_val)
-
-
-# ---------------------------------------------------------------------------
-# ConvexHullCheck should NOT trigger any DeprecationWarning
-# ---------------------------------------------------------------------------
-
-
-def test_convex_hull_check_no_deprecation_warning(mock_pymc_sample):
-    """ConvexHullCheck.run() must not trigger DeprecationWarning internally."""
-    from causalpy.checks.convex_hull import ConvexHullCheck
-    from causalpy.pipeline import PipelineContext
-
-    sc = _make_sc(mock_pymc_sample)
-    check = ConvexHullCheck()
-    ctx = PipelineContext(data=sc.data)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        check.run(sc, ctx)
+def test_removed_alias_sdid(mock_pymc_sample, old_attr, dataset_attr, key):
+    _assert_removed_alias(_make_sdid(mock_pymc_sample), old_attr, dataset_attr, key)
 
 
 # ---------------------------------------------------------------------------
