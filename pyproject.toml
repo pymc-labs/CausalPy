@@ -149,7 +149,7 @@ Homepage = "https://github.com/pymc-labs/CausalPy"
 "Bug Reports" = "https://github.com/pymc-labs/CausalPy/issues"
 Source = "https://github.com/pymc-labs/CausalPy"
 Documentation = "https://causalpy.readthedocs.io"
-Changelog = "https://github.com/pymc-labs/CausalPy/releases"
+Changelog = "https://causalpy.readthedocs.io/en/latest/release_notes.html"
 Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 
 [tool.pytest.ini_options]
