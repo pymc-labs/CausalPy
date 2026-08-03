@@ -32,6 +32,7 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import has_posterior_draws
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
@@ -52,8 +53,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe with panel data (unit x time observations).
+    data : dataframe-like
+        Panel data (unit x time observations) as any eager dataframe Narwhals
+        supports, such as pandas, Polars, or PyArrow. Converted to pandas
+        internally.
     formula : str
         A statistical model formula. Recommended: "y ~ 1 + C(unit) + C(time)"
         for unit and time fixed effects.
@@ -161,7 +164,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         unit_variable_name: str,
         time_variable_name: str,
@@ -185,8 +188,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self.event_window = event_window
         self.reference_event_time = reference_event_time
 
-        # Make a copy of data to avoid modifying the original
-        data = data.copy()
+        # to_pandas returns a copy, so the caller's dataframe is left alone
+        data = to_pandas(data)
         data.index.name = "obs_ind"
 
         # Input validation

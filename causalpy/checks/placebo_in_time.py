@@ -472,6 +472,12 @@ class PlaceboInTime:
             """Create a fresh experiment with the given treatment time."""
             kw = dict(kwargs)
             kw["treatment_time"] = treatment_time
+            # This factory receives a slice of experiment.data, which is already
+            # normalized: time_column has been moved onto the index, so the
+            # column no longer exists and replaying the argument would fail.
+            # The other checks re-fit from the caller's original data and do
+            # need it, so this is dropped here rather than at the source.
+            kw.pop("time_column", None)
             if model_template is not None:
                 kw["model"] = self._clone_model_for_fold(
                     model_template, fold_random_seed

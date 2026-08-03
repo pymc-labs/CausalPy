@@ -16,7 +16,6 @@
 from typing import Any, Literal
 
 import numpy as np
-import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -30,6 +29,7 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     has_posterior_draws,
@@ -63,8 +63,9 @@ class DifferenceInDifferences(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula.
     time_variable_name : str
@@ -110,7 +111,7 @@ class DifferenceInDifferences(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         time_variable_name: str,
         group_variable_name: str,
@@ -119,8 +120,9 @@ class DifferenceInDifferences(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
-        # Work on an owned frame before normalizing its index metadata.
-        data = data.copy()
+        # to_pandas returns a copy, so index metadata is normalized on an
+        # owned frame rather than the caller's.
+        data = to_pandas(data)
         data.index.name = "obs_ind"
         self.data = data
         self.expt_type = "Difference in Differences"
