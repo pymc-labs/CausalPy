@@ -88,6 +88,11 @@ STATUS_LABELS = {
     "status:stale",
 }
 
+# The subset of STATUS_LABELS derived purely from the idle clock. These are the
+# only labels whose input (`commits`/`reviews`) can go missing on a failed
+# detail fetch, so they get the carry-over treatment in `_status_labels_for`.
+IDLE_LABELS = {"status:aging", "status:stale"}
+
 # -----------------------------------------------------------------------------
 
 
@@ -261,7 +266,16 @@ def _author_class(login: str) -> str:
     return "external"
 
 
-def _idle_band(idle: int) -> str:
+def _idle_band(idle: int, detail_incomplete: bool = False) -> str:
+    """Bucket the idle clock. Returns `unknown` when the per-PR detail fetch
+    failed: without `commits`/`reviews`, `idle_days` was computed from creation
+    time and issue comments only, so it is a ceiling on real idleness, not a
+    measurement. `unknown` is a first-class band, not a synonym for `fresh` --
+    it means "do not act on this number", and both `_next_action` (which stops
+    routing drafts to stale-draft/aging-draft) and `_status_labels_for` (which
+    stops deriving idle labels and carries the existing ones over) read it."""
+    if detail_incomplete:
+        return "unknown"
     if idle >= STALE_DAYS:
         return "stale"
     if idle >= AGING_DAYS:
@@ -285,7 +299,7 @@ class PRFacts:
     risk: str | None  # high | medium | low | None
     idle_days: int
     age_days: int
-    idle_band: str  # fresh | aging | stale
+    idle_band: str  # fresh | aging | stale | unknown
     next_action: str
     # True when the per-PR detail fetch failed even after a retry, so
     # `commits`/`reviews` are missing and `idle_days` is a floor, not a fact.
@@ -310,6 +324,10 @@ def _next_action(f: dict) -> str:
     classification (true first-match-wins). `ready-for-review` is the
     always-true fallback and must stay last in the list."""
     draft = f["lifecycle"] == "draft"
+    # The two draft idle buckets test the band by equality, so an `unknown`
+    # band (failed detail fetch) matches neither and the draft falls through to
+    # `in-flight-draft`. That is deliberate: the digest must not call a draft
+    # stale on an idle figure the labeller already refuses to trust.
     predicates = {
         "decision": lambda: f["decision_needed"],
         "stale-draft": lambda: draft and f["idle_band"] == "stale",
@@ -338,21 +356,26 @@ def _next_action(f: dict) -> str:
     return "ready-for-review"
 
 
-def _status_labels_for(f: dict) -> list[str]:
+def _status_labels_for(f: dict, existing: set[str] | None = None) -> list[str]:
     """Derive the `status:*` label set. Drafts stay out of the reviewer-facing
-    statuses; they only carry aging/stale flags."""
+    statuses; they only carry aging/stale flags.
+
+    `existing` is the PR's current `status:*` labels. It matters only for the
+    `unknown` idle band: the labeller reconciles by set difference, so a label
+    left OUT of this list is a label it will REMOVE. Simply withholding the
+    idle labels when the detail fetch failed would therefore strip correct,
+    durable aging/stale state on every unlucky run. Instead we carry the
+    existing idle labels through unchanged, which makes the reconcile a no-op
+    for them: a failed fetch neither writes a new idle verdict nor erases the
+    last good one."""
     labels: list[str] = []
     draft = f["lifecycle"] == "draft"
-    # Idle-derived labels need the commit/review history. If the detail fetch
-    # failed, `idle_days` was computed from creation time and issue comments
-    # only, which overstates idleness for a PR whose recent activity was
-    # pushes or reviews. Withhold `status:aging`/`status:stale` rather than
-    # write a label the next healthy run would have to undo.
-    if not f.get("detail_incomplete"):
-        if f["idle_band"] == "stale":
-            labels.append("status:stale")
-        elif f["idle_band"] == "aging":
-            labels.append("status:aging")
+    if f["idle_band"] == "unknown":
+        labels.extend(sorted((existing or set()) & IDLE_LABELS))
+    elif f["idle_band"] == "stale":
+        labels.append("status:stale")
+    elif f["idle_band"] == "aging":
+        labels.append("status:aging")
     if not draft:
         if f["conflict"] == "conflicting":
             labels.append("status:conflicting")
@@ -398,9 +421,11 @@ def classify(prs: list[dict]) -> list[PRFacts]:
             "age_days": _days_since(pr["createdAt"]),
             "detail_incomplete": bool(pr.get("detail_incomplete")),
         }
-        f["idle_band"] = _idle_band(f["idle_days"])
+        f["idle_band"] = _idle_band(f["idle_days"], f["detail_incomplete"])
         f["next_action"] = _next_action(f)
-        f["status_labels"] = _status_labels_for(f)
+        f["status_labels"] = _status_labels_for(
+            f, {n for n in names if n in STATUS_LABELS}
+        )
         results.append(PRFacts(**f))
     return results
 
