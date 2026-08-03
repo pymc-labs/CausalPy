@@ -28,6 +28,7 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     format_r2_score,
@@ -61,8 +62,11 @@ class PiecewiseITS(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas DataFrame containing the time series data.
+    data : dataframe-like
+        Time series data as any eager dataframe Narwhals supports, such as
+        pandas, Polars, or PyArrow. The time axis comes from the ``step()`` or
+        ``ramp()`` column in the formula, not from the index, so a dataframe
+        without an index works here. Converted to pandas internally.
     formula : str
         A patsy formula specifying the model. Must include at least one
         ``step()`` or ``ramp()`` term, and all such terms must use the same
@@ -152,11 +156,10 @@ class PiecewiseITS(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         model: PyMCModel | RegressorMixin | None = None,
     ) -> None:
@@ -165,7 +168,7 @@ class PiecewiseITS(BaseExperiment):
         # Store configuration
         self.expt_type = "Piecewise Interrupted Time Series"
         self.formula = formula
-        self.data = data.copy()
+        self.data = to_pandas(data)
 
         # Rename the index to "obs_ind" for consistency
         self.data.index.name = "obs_ind"

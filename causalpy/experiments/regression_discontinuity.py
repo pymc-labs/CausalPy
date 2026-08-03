@@ -25,6 +25,7 @@ from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -55,8 +56,9 @@ class RegressionDiscontinuity(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula.
     treatment_threshold : float
@@ -108,11 +110,10 @@ class RegressionDiscontinuity(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         treatment_threshold: float,
         model: PyMCModel | RegressorMixin | None = None,
@@ -123,9 +124,10 @@ class RegressionDiscontinuity(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Discontinuity"
-        # Work on an owned frame before normalizing the treated indicator.
-        data = data.copy()
-        self.data = data
+        # to_pandas returns a copy, so the treated indicator is normalized on
+        # an owned frame rather than the caller's.
+        self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold
@@ -232,6 +234,9 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+        # Preserve the design rows used for the threshold prediction contrast:
+        # row 0 is below the threshold and row 1 is above it.
+        self.x_discon_design = np.asarray(new_x)
         self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
         self.discontinuity_at_threshold = self.pred_discon.isel(
             obs_ind=1, treated_units=0

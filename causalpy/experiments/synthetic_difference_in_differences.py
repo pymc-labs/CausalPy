@@ -31,6 +31,7 @@ from causalpy.date_utils import (
     format_date_axes,
     validate_treatment_time_against_index,
 )
+from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
 from causalpy.reporting import EffectSummary
@@ -49,8 +50,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     Parameters
     ----------
-    data : pandas.DataFrame
-        A dataframe in wide format (columns = units, rows = time periods).
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, in wide format (columns = units,
+        rows = time periods). For a pandas dataframe the index carries the time
+        axis. Dataframes from other libraries have no index, so those callers
+        must pass ``time_column``.
     treatment_time : int, float or pandas.Timestamp
         The time when treatment occurred, should be in reference to the data
         index.
@@ -61,6 +65,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     model : PyMCModel or sklearn.base.RegressorMixin, optional
         A ``SyntheticDifferenceInDifferencesWeightFitter`` instance. Defaults
         to ``SyntheticDifferenceInDifferencesWeightFitter``.
+    time_column : str, optional
+        Column holding the time axis. It becomes the index of the data. Required
+        for non-pandas inputs, which carry no index. If None (default), the
+        pandas index of ``data`` is used. Passing it for data that already has a
+        meaningful index raises, since only one of the two can be the time axis.
 
     Notes
     -----
@@ -116,24 +125,20 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     supports_ols = True
     supports_bayes = True
     _default_model_class = SyntheticDifferenceInDifferencesWeightFitter
-    _deprecated_design_aliases = {
-        "datapre_control": ("pre_design", "control"),
-        "datapre_treated": ("pre_design", "treated"),
-        "datapost_control": ("post_design", "control"),
-        "datapost_treated": ("post_design", "treated"),
-    }
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         treatment_time: int | float | pd.Timestamp,
         control_units: list[str],
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
+        time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
-        # Work on an owned frame before normalizing its index metadata.
-        data = data.copy()
+        # to_pandas_with_time_index returns a copy, so index metadata is
+        # normalized on an owned frame rather than the caller's.
+        data = to_pandas_with_time_index(data, time_column)
         data.index.name = "obs_ind"
         self.data = data
         self.input_validation(data, treatment_time)

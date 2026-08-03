@@ -31,6 +31,7 @@ from causalpy.date_utils import (
 )
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     format_r2_score,
@@ -57,10 +58,12 @@ class InterruptedTimeSeries(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe with time series data. The index should be either
-        a DatetimeIndex or numeric (integer/float), with unique values in
-        monotonically increasing order.
+    data : dataframe-like
+        Time series data as any eager dataframe Narwhals supports. For a pandas
+        dataframe the index carries the time axis, and it should be either a
+        DatetimeIndex or numeric (integer/float), with unique values in
+        monotonically increasing order. Dataframes from other libraries have no
+        index, so those callers must pass ``time_column``.
     treatment_time : Union[int, float, pd.Timestamp]
         The time when treatment occurred, should be in reference to the data index.
         Must match the index type (DatetimeIndex requires pd.Timestamp).
@@ -81,6 +84,11 @@ class InterruptedTimeSeries(BaseExperiment):
         the analysis assumes a permanent intervention (two-period design).
         **INCLUSIVE**: Observations at exactly ``treatment_end_time`` are included in the
         post-intervention period (uses ``>=`` comparison).
+    time_column : str, optional
+        Column holding the time axis. It becomes the index of the data. Required
+        for non-pandas inputs, which carry no index. If None (default), the
+        pandas index of ``data`` is used. Passing it for data that already has a
+        meaningful index raises, since only one of the two can be the time axis.
 
     Notes
     -----
@@ -143,26 +151,22 @@ class InterruptedTimeSeries(BaseExperiment):
     supports_bayes = True
     supports_pymc_forecast = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {
-        "pre_X": ("pre_design", "X"),
-        "pre_y": ("pre_design", "y"),
-        "post_X": ("post_design", "X"),
-        "post_y": ("post_design", "y"),
-    }
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         treatment_time: int | float | pd.Timestamp,
         formula: str,
         model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
+        time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
         self.pre_design: xr.Dataset
         self.post_design: xr.Dataset
-        # Work on an owned frame before normalizing its index metadata.
-        data = data.copy()
+        # to_pandas_with_time_index returns a copy, so index metadata is
+        # normalized on an owned frame rather than the caller's.
+        data = to_pandas_with_time_index(data, time_column)
         data.index.name = "obs_ind"
         self.data = data
         self.input_validation(data, treatment_time, treatment_end_time)
