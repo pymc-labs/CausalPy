@@ -246,8 +246,20 @@ def _ci_state(pr: dict) -> str:
     if not states:
         return "none"
     # STARTUP_FAILURE is GitHub's conclusion when a workflow never starts (bad
-    # YAML, missing secret). It is a failure, not a green check.
-    bad = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
+    # YAML, missing secret). It is a failure, not a green check. STALE is the
+    # conclusion for a check GitHub has given up on (the run outlived its
+    # commit); GitHub does not count a stale required check as successful, so
+    # neither do we -- otherwise the PR could reach `ready-to-merge`. Unlike
+    # CANCELLED, a STALE check is not superseded by a sibling run in the
+    # rollup, so it needs a re-run: `red` routes it to `mechanical`.
+    bad = {
+        "FAILURE",
+        "ERROR",
+        "TIMED_OUT",
+        "STARTUP_FAILURE",
+        "ACTION_REQUIRED",
+        "STALE",
+    }
     if any(s in bad for s in states):
         return "red"
     pending = {"PENDING", "IN_PROGRESS", "QUEUED", "EXPECTED", None}

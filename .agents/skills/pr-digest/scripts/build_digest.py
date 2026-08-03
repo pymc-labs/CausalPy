@@ -44,8 +44,27 @@ sys.modules["pr_triage_labels"] = core  # needed so dataclass annotations resolv
 _spec.loader.exec_module(core)
 
 
+def _md(text: str) -> str:
+    """Escape characters that would terminate a markdown link label early.
+
+    PR titles routinely carry prefixes like `[WIP]` or `[RFC]`, and a raw `]`
+    interpolated between `[` and `]` closes the link on the wrong character,
+    corrupting the rest of the line."""
+    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
 def _fmt(f: dict) -> str:
-    return f"[#{f['number']} {f['title'][:60]}]({f['url']})"
+    return f"[#{f['number']} {_md(f['title'][:60])}]({f['url']})"
+
+
+def _idle(f: dict) -> str:
+    """Render the idle clock, or admit we don't know it.
+
+    `idle_days` is only a measurement when the per-PR detail fetch succeeded.
+    With `detail_incomplete` the core computed it without commits/reviews and
+    already refuses to derive idle labels from it (`idle_band == "unknown"`), so
+    the digest must not print it as a fact either."""
+    return "idle unknown" if f["detail_incomplete"] else f"idle {f['idle_days']}d"
 
 
 def _link(f: dict) -> str:
@@ -87,9 +106,16 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
     hard_numbers = {f["number"] for f in other_hard}
     if hard is not None:
         hard_numbers.add(hard["number"])
+    # Externals first, then by idle. PRs with an untrusted idle figure sort
+    # after the trusted ones in their group rather than being interleaved on a
+    # number the core told us not to act on.
     reviews = sorted(
         (f for f in by("ready-for-review") if f["number"] not in hard_numbers),
-        key=lambda f: (f["author_class"] != "external", f["idle_days"]),
+        key=lambda f: (
+            f["author_class"] != "external",
+            f["detail_incomplete"],
+            f["idle_days"],
+        ),
     )
     waiting = by("waiting-on-author")
     mechanical = by("mechanical")
@@ -114,7 +140,7 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
         m.append("\n{{HARD_ITEM_FRAMING}}")  # agent fills: context, default, cost
         m.append(
             f"\nLead PR: {_fmt(hard)} ({hard['author']}, "
-            f"open {hard['age_days']}d, idle {hard['idle_days']}d)."
+            f"open {hard['age_days']}d, {_idle(hard)})."
         )
         if other_hard:
             queued = ", ".join(_link(f) for f in other_hard[:4])
@@ -172,8 +198,8 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
         m.append(
             f"\n**🗂️ Stale/aging drafts — a nudge, not a task "
             f"({len(stale_drafts)})** — oldest is {_link(oldest)} "
-            f"(opened {oldest['age_days']}d ago, idle "
-            f"{oldest['idle_days']}d). Worth a bulk abandon-or-resume "
+            f"(opened {oldest['age_days']}d ago, {_idle(oldest)}). "
+            "Worth a bulk abandon-or-resume "
             "pass some quiet afternoon."
         )
     if in_flight:
