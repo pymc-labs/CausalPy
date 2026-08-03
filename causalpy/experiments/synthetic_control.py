@@ -29,6 +29,7 @@ from causalpy.date_utils import (
     validate_treatment_time_against_index,
 )
 from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
+from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     format_r2_score,
@@ -53,8 +54,10 @@ class SyntheticControl(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports. For a pandas dataframe the index
+        carries the time axis. Dataframes from other libraries have no index,
+        so those callers must pass ``time_column``.
     treatment_time : int, float, or pd.Timestamp
         The time when treatment occurred, in reference to the data index.
     control_units : list of str
@@ -79,6 +82,11 @@ class SyntheticControl(BaseExperiment):
         pinned explicitly, leaving the instance you passed in untouched. A model
         constructed with an explicit ``y_hat`` prior is never rescaled either
         way.
+    time_column : str, optional
+        Column holding the time axis. It becomes the index of the data. Required
+        for non-pandas inputs, which carry no index. If None (default), the
+        pandas index of ``data`` is used. Passing it for data that already has a
+        meaningful index raises, since only one of the two can be the time axis.
 
     Notes
     -----
@@ -113,17 +121,19 @@ class SyntheticControl(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         treatment_time: int | float | pd.Timestamp,
         control_units: list[str],
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
         auto_scale_sigma: bool = True,
+        time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
-        # Work on an owned frame before normalizing its index metadata.
-        data = data.copy()
+        # to_pandas_with_time_index returns a copy, so index metadata is
+        # normalized on an owned frame rather than the caller's.
+        data = to_pandas_with_time_index(data, time_column)
         data.index.name = "obs_ind"
         self.data = data
         self.input_validation(data, treatment_time)

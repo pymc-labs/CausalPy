@@ -27,6 +27,7 @@ from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import PropensityScore
 
 from .base import BaseExperiment
@@ -37,8 +38,9 @@ class InversePropensityWeighting(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula for the propensity model.
     outcome_variable : str
@@ -84,7 +86,7 @@ class InversePropensityWeighting(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         outcome_variable: str,
         weighting_scheme: str,
@@ -92,7 +94,8 @@ class InversePropensityWeighting(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Inverse Propensity Score Weighting"
-        self.data = data
+        self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme

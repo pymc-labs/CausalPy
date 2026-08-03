@@ -16,7 +16,6 @@
 import warnings  # noqa: I001
 
 import numpy as np
-import pandas as pd
 from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
@@ -25,6 +24,7 @@ import arviz as az
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
@@ -37,13 +37,14 @@ class InstrumentalVariable(BaseExperiment):
 
     Parameters
     ----------
-    instruments_data : pd.DataFrame
-        A pandas dataframe of instruments for our treatment variable.
-        Should contain instruments Z, and treatment t.
-    data : pd.DataFrame
-        A pandas dataframe of covariates for fitting the focal regression
-        of interest. Should contain covariates X including treatment t and
-        outcome y.
+    instruments_data : dataframe-like
+        Instruments for our treatment variable, as any eager dataframe
+        Narwhals supports, such as pandas, Polars, or PyArrow. Should contain
+        instruments Z, and treatment t. Converted to pandas internally.
+    data : dataframe-like
+        Covariates for fitting the focal regression of interest, as any eager
+        dataframe Narwhals supports. Should contain covariates X including
+        treatment t and outcome y. Converted to pandas internally.
     instruments_formula : str
         A statistical model formula for the instrumental stage regression,
         e.g. ``t ~ 1 + z1 + z2 + z3``.
@@ -125,8 +126,8 @@ class InstrumentalVariable(BaseExperiment):
 
     def __init__(
         self,
-        instruments_data: pd.DataFrame,
-        data: pd.DataFrame,
+        instruments_data: DataFrameLike,
+        data: DataFrameLike,
         instruments_formula: str,
         formula: str,
         model: InstrumentalVariableRegression | None = None,
@@ -137,8 +138,12 @@ class InstrumentalVariable(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
-        self.data = data
-        self.instruments_data = instruments_data
+        self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
+        self.instruments_data = to_pandas(
+            instruments_data, argument_name="instruments_data"
+        )
+        self.instruments_data.index.name = "obs_ind"
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.vs_prior_type = vs_prior_type

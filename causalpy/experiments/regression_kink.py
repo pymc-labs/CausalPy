@@ -25,6 +25,7 @@ import seaborn as sns
 from patsy import ModelDesc
 import xarray as xr
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
@@ -51,8 +52,9 @@ class RegressionKink(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula.
     kink_point : float
@@ -80,7 +82,7 @@ class RegressionKink(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         kink_point: float,
         model: PyMCModel | None = None,
@@ -90,7 +92,8 @@ class RegressionKink(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
-        self.data = data
+        self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.kink_point = kink_point

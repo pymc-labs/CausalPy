@@ -29,6 +29,7 @@ from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
 from causalpy.utils import round_num
@@ -44,9 +45,10 @@ class PanelRegression(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe with panel data. Each row is an observation for a
-        unit at a time period.
+    data : dataframe-like
+        Panel data as any eager dataframe Narwhals supports, such as pandas,
+        Polars, or PyArrow. Each row is an observation for a unit at a time
+        period. Converted to pandas internally.
     formula : str
         A statistical model formula using patsy syntax. For the unpooled
         dummy-variable fixed-effects approach, include ``C(unit_var)`` (and
@@ -185,7 +187,7 @@ class PanelRegression(BaseExperiment):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         unit_fe_variable: str,
         time_fe_variable: str | None = None,
@@ -194,8 +196,9 @@ class PanelRegression(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
 
-        # Work on an owned frame before normalizing its index metadata.
-        data = data.copy()
+        # to_pandas returns a copy, so this rename lands on ours, not the
+        # caller's dataframe.
+        data = to_pandas(data)
         data.index.name = "obs_ind"
         self.data = data
         self.expt_type = "Panel Regression"
