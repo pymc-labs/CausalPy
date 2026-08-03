@@ -24,7 +24,7 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -54,12 +54,60 @@ class EffectSummary:
     text: str
 
 
+@dataclass(frozen=True)
+class _BayesianDecision:
+    """Internal Bayesian HDI/ROPE decision consumed by reporting prose."""
+
+    conclusion: Literal[
+        "practically_significant",
+        "practically_equivalent_to_zero",
+        "inconclusive",
+        "descriptive",
+    ]
+    framework: Literal["hdi_rope", "descriptive"]
+    interval: tuple[float, float]
+    rope: tuple[float, float] | None
+    tail_label: Literal["increase", "decrease", "two-sided"]
+    tail_probability: float
+    posterior_mass_below_rope: float | None
+    posterior_mass_inside_rope: float | None
+    posterior_mass_above_rope: float | None
+
+
+class _ScalarBayesianStats(TypedDict, total=False):
+    """Numerical scalar summary fields plus the prose decision."""
+
+    mean: float
+    median: float
+    hdi_lower: float
+    hdi_upper: float
+    p_gt_0: float
+    p_lt_0: float
+    p_two_sided: float
+    prob_of_effect: float
+    p_rope: float
+    decision: _BayesianDecision
+
+
 __all__ = ["EffectSummary"]
 
 
 # ==============================================================================
 # Helper functions for common operations
 # ==============================================================================
+
+
+def _posterior_probability(indicator: xr.DataArray, effect: xr.DataArray) -> float:
+    """Return an indicator's posterior mean while excluding non-finite draws."""
+    return _as_scalar(indicator.where(np.isfinite(effect)).mean(skipna=True))
+
+
+def _finite_posterior_draws(effect: xr.DataArray) -> xr.DataArray:
+    """Mask non-finite posterior draws and reject an empty finite posterior."""
+    finite_effect = effect.where(np.isfinite(effect))
+    if not bool(np.isfinite(effect).any()):
+        raise ValueError("Effect posterior contains no finite draws.")
+    return finite_effect
 
 
 def _compute_tail_probabilities(
@@ -80,12 +128,12 @@ def _compute_tail_probabilities(
         Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
     """
     if direction == "increase":
-        return {"p_gt_0": _as_scalar((effect > 0).mean())}
+        return {"p_gt_0": _posterior_probability(effect > 0, effect)}
     elif direction == "decrease":
-        return {"p_lt_0": _as_scalar((effect < 0).mean())}
+        return {"p_lt_0": _posterior_probability(effect < 0, effect)}
     else:  # two-sided
-        p_gt = _as_scalar((effect > 0).mean())
-        p_lt = _as_scalar((effect < 0).mean())
+        p_gt = _posterior_probability(effect > 0, effect)
+        p_lt = _posterior_probability(effect < 0, effect)
         p_two_sided = 2 * min(p_gt, p_lt)
         return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
 
@@ -112,11 +160,84 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return _as_scalar((np.abs(effect) > min_effect).mean())
+        return _posterior_probability(np.abs(effect) > min_effect, effect)
     elif direction == "increase":
-        return _as_scalar((effect > min_effect).mean())
+        return _posterior_probability(effect > min_effect, effect)
     elif direction == "decrease":
-        return _as_scalar((effect < -min_effect).mean())
+        return _posterior_probability(effect < -min_effect, effect)
+
+
+def _validate_min_effect(min_effect: float | None) -> float | None:
+    """Validate and normalize a supplied ROPE threshold."""
+    if min_effect is None:
+        return None
+    if not np.isfinite(min_effect) or min_effect < 0:
+        raise ValueError("min_effect must be finite and non-negative.")
+    return float(min_effect)
+
+
+def _make_bayesian_decision(
+    effect: xr.DataArray,
+    *,
+    hdi_lower: float,
+    hdi_upper: float,
+    tail_probabilities: dict[str, float],
+    direction: Literal["increase", "decrease", "two-sided"],
+    min_effect: float | None,
+) -> _BayesianDecision:
+    """Construct the immutable decision used by Bayesian prose renderers."""
+    tail_key = {
+        "increase": "p_gt_0",
+        "decrease": "p_lt_0",
+        "two-sided": "p_two_sided",
+    }[direction]
+    interval = (hdi_lower, hdi_upper)
+    tail_probability = tail_probabilities[tail_key]
+    min_effect = _validate_min_effect(min_effect)
+
+    if min_effect is None:
+        return _BayesianDecision(
+            conclusion="descriptive",
+            framework="descriptive",
+            interval=interval,
+            rope=None,
+            tail_label=direction,
+            tail_probability=tail_probability,
+            posterior_mass_below_rope=None,
+            posterior_mass_inside_rope=None,
+            posterior_mass_above_rope=None,
+        )
+
+    rope = (-min_effect, min_effect)
+    posterior_mass_below_rope = _posterior_probability(effect < rope[0], effect)
+    posterior_mass_inside_rope = _posterior_probability(
+        (effect >= rope[0]) & (effect <= rope[1]), effect
+    )
+    posterior_mass_above_rope = _posterior_probability(effect > rope[1], effect)
+
+    conclusion: Literal[
+        "practically_significant",
+        "practically_equivalent_to_zero",
+        "inconclusive",
+    ]
+    if hdi_upper < rope[0] or hdi_lower > rope[1]:
+        conclusion = "practically_significant"
+    elif rope[0] <= hdi_lower and hdi_upper <= rope[1]:
+        conclusion = "practically_equivalent_to_zero"
+    else:
+        conclusion = "inconclusive"
+
+    return _BayesianDecision(
+        conclusion=conclusion,
+        framework="hdi_rope",
+        interval=interval,
+        rope=rope,
+        tail_label=direction,
+        tail_probability=tail_probability,
+        posterior_mass_below_rope=posterior_mass_below_rope,
+        posterior_mass_inside_rope=posterior_mass_inside_rope,
+        posterior_mass_above_rope=posterior_mass_above_rope,
+    )
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
@@ -137,6 +258,73 @@ def _format_number(x: float, decimals: int = 2) -> str:
     return f"{x:.{decimals}f}"
 
 
+def _format_probability_as_percent(probability: float) -> str:
+    """Format a probability as a percentage without truncating its precision."""
+    return f"{np.format_float_positional(probability * 100, unique=True, trim='-')}%"
+
+
+def _format_rope_bound(value: float) -> str:
+    """Format a ROPE bound using the shortest round-trip-safe representation."""
+    if value == 0:
+        return "0"
+    return repr(float(value)).removesuffix(".0")
+
+
+def _render_bayesian_decision(decision: _BayesianDecision, coverage: str) -> str:
+    """Render the decision-owned Bayesian tail and optional ROPE interpretation."""
+    if decision.tail_label == "increase":
+        parts = [
+            "The posterior probability of an increase is "
+            f"{_format_number(decision.tail_probability, 3)}."
+        ]
+    elif decision.tail_label == "decrease":
+        parts = [
+            "The posterior probability of a decrease is "
+            f"{_format_number(decision.tail_probability, 3)}."
+        ]
+    else:
+        parts = [
+            "The two-sided tail probability is "
+            f"{_format_number(decision.tail_probability, 3)}."
+        ]
+
+    if decision.framework == "descriptive":
+        return " ".join(parts)
+
+    rope = decision.rope
+    if rope is None:
+        raise ValueError("An HDI/ROPE decision requires ROPE bounds.")
+    rope_lower, rope_upper = map(_format_rope_bound, rope)
+
+    if decision.conclusion == "practically_significant":
+        parts.append(
+            f"Using the closed ROPE [{rope_lower}, {rope_upper}], the {coverage} HDI "
+            "is entirely outside the ROPE; the effect is practically significant."
+        )
+    elif decision.conclusion == "practically_equivalent_to_zero":
+        parts.append(
+            f"Using the closed ROPE [{rope_lower}, {rope_upper}], the {coverage} HDI "
+            "is entirely inside the ROPE; the effect is practically equivalent to zero."
+        )
+    else:
+        parts.append(
+            f"Using the closed ROPE [{rope_lower}, {rope_upper}], the {coverage} HDI "
+            "overlaps the ROPE; the result is inconclusive."
+        )
+
+    below = decision.posterior_mass_below_rope
+    inside = decision.posterior_mass_inside_rope
+    above = decision.posterior_mass_above_rope
+    if below is None or inside is None or above is None:
+        raise ValueError("An HDI/ROPE decision requires posterior ROPE masses.")
+    parts.append(
+        f"Posterior mass is {_format_number(below, 3)} below, "
+        f"{_format_number(inside, 3)} inside, and {_format_number(above, 3)} "
+        "above the ROPE."
+    )
+    return " ".join(parts)
+
+
 # ==============================================================================
 # Unified scalar effect statistics (DiD, RD, RKink)
 # ==============================================================================
@@ -147,7 +335,7 @@ def _compute_statistics_scalar(
     hdi_prob: float = 0.95,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     min_effect: float | None = None,
-) -> dict[str, float]:
+) -> _ScalarBayesianStats:
     """Compute statistics for scalar causal effects (DiD, RD, RKink).
 
     Works for any scalar effect with posterior draws (chain, draw dimensions).
@@ -161,48 +349,50 @@ def _compute_statistics_scalar(
     direction : {"increase", "decrease", "two-sided"}
         Direction for tail probability calculation
     min_effect : float, optional
-        Minimum effect size for ROPE analysis
+        Finite, non-negative ROPE half-width. The generated decision uses the
+        closed interval ``[-min_effect, min_effect]`` when supplied.
 
     Returns
     -------
-    dict[str, float]
-        Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
+    _ScalarBayesianStats
+        Numerical summary fields plus the internal decision used for prose.
     """
-    stats = {
+    min_effect = _validate_min_effect(min_effect)
+    effect = _finite_posterior_draws(effect)
+
+    stats: _ScalarBayesianStats = {
         "mean": _as_scalar(effect.mean(dim=["chain", "draw"])),
         "median": _as_scalar(effect.median(dim=["chain", "draw"])),
     }
 
-    # HDI using helper
     stats["hdi_lower"], stats["hdi_upper"] = hdi_bounds(effect, prob=hdi_prob)
+    tail_probabilities = _compute_tail_probabilities(effect, direction)
+    if direction == "increase":
+        stats["p_gt_0"] = tail_probabilities["p_gt_0"]
+    elif direction == "decrease":
+        stats["p_lt_0"] = tail_probabilities["p_lt_0"]
+    else:
+        stats["p_two_sided"] = tail_probabilities["p_two_sided"]
+        stats["prob_of_effect"] = tail_probabilities["prob_of_effect"]
 
-    # Tail probabilities using helper
-    stats.update(_compute_tail_probabilities(effect, direction))
-
-    # ROPE using helper
     if min_effect is not None:
         stats["p_rope"] = _compute_rope_probability(effect, min_effect, direction)
 
+    stats["decision"] = _make_bayesian_decision(
+        effect,
+        hdi_lower=stats["hdi_lower"],
+        hdi_upper=stats["hdi_upper"],
+        tail_probabilities=tail_probabilities,
+        direction=direction,
+        min_effect=min_effect,
+    )
     return stats
 
 
 def _generate_table_scalar(
-    stats: dict[str, float], index_name: str = "effect"
+    stats: _ScalarBayesianStats, index_name: str = "effect"
 ) -> pd.DataFrame:
-    """Generate summary table for scalar effects (DiD, RD, RKink).
-
-    Parameters
-    ----------
-    stats : dict[str, float]
-        Statistics dictionary from _compute_statistics_scalar()
-    index_name : str
-        Name for the table index (e.g., "treatment_effect", "discontinuity")
-
-    Returns
-    -------
-    pd.DataFrame
-        Summary table with one row
-    """
+    """Generate summary table for scalar effects (DiD, RD, RKink)."""
     row = {
         "mean": stats["mean"],
         "median": stats["median"],
@@ -210,62 +400,37 @@ def _generate_table_scalar(
         "hdi_upper": stats["hdi_upper"],
     }
 
-    # Add tail probabilities (whichever are present)
-    for key in ["p_gt_0", "p_lt_0", "p_two_sided", "prob_of_effect", "p_rope"]:
-        if key in stats:
-            row[key] = stats[key]
+    if "p_gt_0" in stats:
+        row["p_gt_0"] = stats["p_gt_0"]
+    if "p_lt_0" in stats:
+        row["p_lt_0"] = stats["p_lt_0"]
+    if "p_two_sided" in stats:
+        row["p_two_sided"] = stats["p_two_sided"]
+    if "prob_of_effect" in stats:
+        row["prob_of_effect"] = stats["prob_of_effect"]
+    if "p_rope" in stats:
+        row["p_rope"] = stats["p_rope"]
 
     return pd.DataFrame([row], index=[index_name])
 
 
 def _generate_prose_scalar(
-    stats: dict[str, float],
+    stats: _ScalarBayesianStats,
     effect_name: str,
     alpha: float = 0.05,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
 ) -> str:
-    """Generate prose summary for scalar effects.
-
-    Parameters
-    ----------
-    stats : dict[str, float]
-        Statistics dictionary from _compute_statistics_scalar()
-    effect_name : str
-        Name of the effect for prose (e.g., "average treatment effect",
-        "discontinuity at threshold", "change in gradient at the kink point")
-    alpha : float
-        Significance level for HDI interval
-    direction : {"increase", "decrease", "two-sided"}
-        Direction for tail probability
-
-    Returns
-    -------
-    str
-        Prose summary of the effect
-    """
-    hdi_pct = int((1 - alpha) * 100)
+    """Generate prose summary for scalar effects."""
+    hdi_coverage = _format_probability_as_percent(1 - alpha)
+    decision = stats["decision"]
     mean = stats["mean"]
-    lower = stats["hdi_lower"]
-    upper = stats["hdi_upper"]
+    lower, upper = decision.interval
 
-    # Direction-specific text
-    if direction == "increase":
-        p_val = stats.get("p_gt_0", 0.0)
-        direction_text = "increase"
-    elif direction == "decrease":
-        p_val = stats.get("p_lt_0", 0.0)
-        direction_text = "decrease"
-    else:
-        p_val = stats.get("prob_of_effect", 0.0)
-        direction_text = "effect"
-
-    prose = (
+    return (
         f"The {effect_name} was {_format_number(mean)} "
-        f"({hdi_pct}% HDI [{_format_number(lower)}, {_format_number(upper)}]), "
-        f"with a posterior probability of an {direction_text} of {_format_number(p_val, 3)}."
+        f"({hdi_coverage} HDI [{_format_number(lower)}, {_format_number(upper)}]). "
+        f"{_render_bayesian_decision(decision, hdi_coverage)}"
     )
-
-    return prose
 
 
 def _detect_experiment_type(result):
@@ -639,15 +804,21 @@ def _effect_summary_timeseries(
     window_coords : pd.Index
         Window coordinates from :func:`_extract_window`.
     direction : {"increase", "decrease", "two-sided"}, default "increase"
-        Direction for tail probability calculation (Bayesian only).
+        Selects the Bayesian tail probability reported in prose and the
+        direction-sensitive ``p_rope`` table column. It does not change the
+        symmetric HDI+ROPE conclusion.
     alpha : float, default 0.05
-        Significance level for HDI/CI intervals.
+        Interval tail mass. Bayesian ``effect_summary`` reports an HDI with
+        probability ``1 - alpha`` (95% by default), independently of the
+        project-wide :data:`~causalpy.constants.HDI_PROB` setting.
     cumulative : bool, default True
         Whether to include cumulative effect statistics.
     relative : bool, default True
         Whether to include relative effect statistics.
     min_effect : float, optional
-        Region of Practical Equivalence threshold (Bayesian only).
+        Finite, non-negative ROPE half-width. Supplying it uses the closed
+        symmetric ROPE ``[-min_effect, min_effect]`` for the three-way
+        HDI+ROPE conclusion; omitting it leaves prose descriptive.
     prefix : str, default "Post-period"
         Prefix for prose generation.
     experiment_type : str, optional
@@ -742,10 +913,13 @@ def _compute_statistics(
     default is effectively unused; it is set to :data:`HDI_PROB` to keep the
     project-wide convention consistent.
     """
+    min_effect = _validate_min_effect(min_effect)
+
     stats = {}
 
     # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
+    avg_effect = _finite_posterior_draws(avg_effect)
     stats["avg"] = {
         "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
         "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
@@ -757,25 +931,23 @@ def _compute_statistics(
     )
 
     # Tail probabilities for average
-    if direction == "increase":
-        stats["avg"]["p_gt_0"] = _as_scalar((avg_effect > 0).mean())
-    elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = _as_scalar((avg_effect < 0).mean())
-    else:  # two-sided
-        p_gt = _as_scalar((avg_effect > 0).mean())
-        p_lt = _as_scalar((avg_effect < 0).mean())
-        p_two_sided = 2 * min(p_gt, p_lt)
-        stats["avg"]["p_two_sided"] = p_two_sided
-        stats["avg"]["prob_of_effect"] = 1 - p_two_sided
+    avg_tail_probabilities = _compute_tail_probabilities(avg_effect, direction)
+    stats["avg"].update(avg_tail_probabilities)
 
     # ROPE for average
     if min_effect is not None:
-        rope_direction_avg = direction
-        if direction != "two-sided":
-            rope_direction_avg = "increase" if stats["avg"]["mean"] >= 0 else "decrease"
         stats["avg"]["p_rope"] = _compute_rope_probability(
-            avg_effect, min_effect, rope_direction_avg
+            avg_effect, min_effect, direction
         )
+
+    stats["avg"]["decision"] = _make_bayesian_decision(
+        avg_effect,
+        hdi_lower=stats["avg"]["hdi_lower"],
+        hdi_upper=stats["avg"]["hdi_upper"],
+        tail_probabilities=avg_tail_probabilities,
+        direction=direction,
+        min_effect=min_effect,
+    )
 
     # Cumulative effect
     if cumulative:
@@ -783,6 +955,7 @@ def _compute_statistics(
         cum_effect = impact.cumsum(dim=time_dim)
         # Take final value (cumulative over entire window)
         cum_final = cum_effect.isel({time_dim: -1})
+        cum_final = _finite_posterior_draws(cum_final)
 
         stats["cum"] = {
             "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
@@ -795,27 +968,23 @@ def _compute_statistics(
         )
 
         # Tail probabilities for cumulative
-        if direction == "increase":
-            stats["cum"]["p_gt_0"] = _as_scalar((cum_final > 0).mean())
-        elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = _as_scalar((cum_final < 0).mean())
-        else:  # two-sided
-            p_gt = _as_scalar((cum_final > 0).mean())
-            p_lt = _as_scalar((cum_final < 0).mean())
-            p_two_sided = 2 * min(p_gt, p_lt)
-            stats["cum"]["p_two_sided"] = p_two_sided
-            stats["cum"]["prob_of_effect"] = 1 - p_two_sided
+        cum_tail_probabilities = _compute_tail_probabilities(cum_final, direction)
+        stats["cum"].update(cum_tail_probabilities)
 
         # ROPE for cumulative
         if min_effect is not None:
-            rope_direction_cum = direction
-            if direction != "two-sided":
-                rope_direction_cum = (
-                    "increase" if stats["cum"]["mean"] >= 0 else "decrease"
-                )
             stats["cum"]["p_rope"] = _compute_rope_probability(
-                cum_final, min_effect, rope_direction_cum
+                cum_final, min_effect, direction
             )
+
+        stats["cum"]["decision"] = _make_bayesian_decision(
+            cum_final,
+            hdi_lower=stats["cum"]["hdi_lower"],
+            hdi_upper=stats["cum"]["hdi_upper"],
+            tail_probabilities=cum_tail_probabilities,
+            direction=direction,
+            min_effect=min_effect,
+        )
 
     # Relative effects
     if relative:
@@ -948,9 +1117,7 @@ def _generate_prose_detailed(
     alpha : float, default=0.05
         Significance level for HDI interval
     direction : {"increase", "decrease", "two-sided"}, default="increase"
-        Direction for tail probability interpretation. When "increase" or
-        "decrease", the function auto-detects the actual effect sign and
-        adjusts the probability accordingly.
+        Direction for tail probability interpretation.
     cumulative : bool, default=True
         Whether cumulative effects were computed
     relative : bool, default=True
@@ -974,7 +1141,7 @@ def _generate_prose_detailed(
     str
         Detailed multi-paragraph narrative report
     """
-    hdi_pct = int((1 - alpha) * 100)
+    hdi_coverage = _format_probability_as_percent(1 - alpha)
 
     # Format window string
     if len(window_coords) > 0:
@@ -988,37 +1155,11 @@ def _generate_prose_detailed(
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
 
-    # Extract statistics
+    # The attached decision is the sole source for the reported average HDI.
+    # This keeps the interval, tail, and optional ROPE verdict coherent.
+    decision = stats["avg"]["decision"]
     avg_mean = stats["avg"]["mean"]
-    avg_lower = stats["avg"]["hdi_lower"]
-    avg_upper = stats["avg"]["hdi_upper"]
-
-    # Direction-specific probability with auto-detection of effect sign.
-    # When the user requests direction="increase" but the effect is negative
-    # (or vice versa), we flip to the correct tail so the prose is coherent.
-    if direction == "two-sided":
-        p_val = stats["avg"].get("prob_of_effect", 0.0)
-        direction_text = "effect"
-    else:
-        p_gt_0 = stats["avg"].get("p_gt_0", None)
-        p_lt_0 = stats["avg"].get("p_lt_0", None)
-
-        if avg_mean >= 0:
-            if p_gt_0 is not None:
-                p_val = p_gt_0
-            elif p_lt_0 is not None:
-                p_val = 1.0 - p_lt_0
-            else:
-                p_val = 0.0
-            direction_text = "increase"
-        else:
-            if p_lt_0 is not None:
-                p_val = p_lt_0
-            elif p_gt_0 is not None:
-                p_val = 1.0 - p_gt_0
-            else:
-                p_val = 0.0
-            direction_text = "decrease"
+    avg_lower, avg_upper = decision.interval
 
     # Paragraph 1: Observed vs counterfactual (average)
     paragraphs = []
@@ -1034,18 +1175,18 @@ def _generate_prose_detailed(
             f"During the {prefix} ({window_str}), the response variable had "
             f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
             f"absence of an intervention, we would have expected an average response of "
-            f"{fmt_num(counterfactual_avg)}. The {hdi_pct}% interval of this counterfactual "
+            f"{fmt_num(counterfactual_avg)}. The {hdi_coverage} interval of this counterfactual "
             f"prediction is [{fmt_num(cf_interval_lower)}, "
             f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
             f"from the observed response yields an estimate of the causal effect the "
             f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
-            f"with a {hdi_pct}% interval of [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]."
+            f"with a {hdi_coverage} interval of [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]."
         )
     else:
         para1 = (
             f"During the {prefix} ({window_str}), the estimated average causal "
             f"effect of the intervention is {fmt_num(avg_mean)} "
-            f"({hdi_pct}% HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"({hdi_coverage} HDI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
             f"This represents the difference between the observed response and the "
             f"counterfactual prediction of what would have occurred without the intervention."
         )
@@ -1053,9 +1194,9 @@ def _generate_prose_detailed(
 
     # Paragraph 2: Cumulative effect (if applicable)
     if cumulative and "cum" in stats:
+        cumulative_decision = stats["cum"]["decision"]
         cum_mean = stats["cum"]["mean"]
-        cum_lower = stats["cum"]["hdi_lower"]
-        cum_upper = stats["cum"]["hdi_upper"]
+        cum_lower, cum_upper = cumulative_decision.interval
 
         if observed_cum is not None and counterfactual_cum is not None:
             cum_cf_lower = observed_cum - cum_upper
@@ -1065,42 +1206,25 @@ def _generate_prose_detailed(
                 f"Summing up the individual data points during the {prefix}, "
                 f"the response variable had an overall value of {fmt_num(observed_cum)}. "
                 f"By contrast, had the intervention not taken place, we would have expected "
-                f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_pct}% interval of this "
-                f"prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
+                f"a sum of {fmt_num(counterfactual_cum)}. The {hdi_coverage} interval of this "
+                f"prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]. "
+                f"The cumulative effect is {fmt_num(cum_mean)} with a {hdi_coverage} HDI "
+                f"[{fmt_num(cum_lower)}, {fmt_num(cum_upper)}]."
             )
         else:
             para2 = (
                 f"The cumulative effect over the {prefix} "
-                f"was {fmt_num(cum_mean)} ({hdi_pct}% HDI [{fmt_num(cum_lower)}, "
+                f"was {fmt_num(cum_mean)} ({hdi_coverage} HDI [{fmt_num(cum_lower)}, "
                 f"{fmt_num(cum_upper)}])."
             )
         paragraphs.append(para2)
 
-    # Paragraph 3: Posterior summary
-    hdi_excludes_zero = (avg_lower > 0) or (avg_upper < 0)
-
-    credibility_parts = []
-    if hdi_excludes_zero:
+    # Paragraph 3: posterior summaries rendered from attached decisions.
+    credibility_parts = [_render_bayesian_decision(decision, hdi_coverage)]
+    if cumulative and "cum" in stats:
         credibility_parts.append(
-            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
-            f"{fmt_num(avg_upper)}] does not include zero."
-        )
-    else:
-        credibility_parts.append(
-            f"The {hdi_pct}% HDI of the effect [{fmt_num(avg_lower)}, "
-            f"{fmt_num(avg_upper)}] includes zero."
-        )
-
-    article = "an" if direction_text[0].lower() in "aeiou" else "a"
-    credibility_parts.append(
-        f"The posterior probability of {article} {direction_text} is {fmt_num(p_val, 3)}."
-    )
-
-    if "p_rope" in stats["avg"]:
-        p_rope = stats["avg"]["p_rope"]
-        credibility_parts.append(
-            f"The probability that the {direction_text} exceeds the minimum effect "
-            f"size threshold is {fmt_num(p_rope, 3)}."
+            "For the cumulative effect, "
+            f"{_render_bayesian_decision(cumulative_decision, hdi_coverage)}"
         )
 
     if relative and "relative_mean" in stats["avg"]:
@@ -1109,7 +1233,7 @@ def _generate_prose_detailed(
         rel_upper = stats["avg"]["relative_hdi_upper"]
         credibility_parts.append(
             f"Relative to the counterfactual, the effect represents a "
-            f"{fmt_num(rel_mean)}% change ({hdi_pct}% HDI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_mean)}% change ({hdi_coverage} HDI [{fmt_num(rel_lower)}%, "
             f"{fmt_num(rel_upper)}%])."
         )
 
