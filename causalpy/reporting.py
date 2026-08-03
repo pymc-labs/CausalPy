@@ -1733,26 +1733,46 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
     # with the degrees of freedom used below for the t-distribution.
     mse = np.sum(residuals**2) / df
 
-    # Find the treated coefficient index
-    coeff_idx = None
-    for i, label in enumerate(result.labels):
-        if "treated" in label.lower() and ":" in label:
-            coeff_idx = i
-            break
+    try:
+        threshold_design = np.asarray(result.x_discon_design, dtype=float)
+    except AttributeError as err:
+        raise ValueError(
+            "Cannot compute the RD threshold-contrast standard error because "
+            "the threshold design rows are unavailable."
+        ) from err
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "RD threshold design must be a finite numeric two-row array."
+        ) from err
 
-    if coeff_idx is None:
-        se = np.std(residuals) / np.sqrt(n)
-    else:
-        X = X_da
-        try:
-            if hasattr(X, "values"):
-                X = X.values
-            elif hasattr(X, "data"):
-                X = X.data
-            XtX_inv = np.linalg.inv(X.T @ X)
-            se = np.sqrt(mse * XtX_inv[coeff_idx, coeff_idx])
-        except (np.linalg.LinAlgError, AttributeError):
-            se = np.std(residuals) / np.sqrt(n)
+    if threshold_design.ndim != 2 or threshold_design.shape[0] != 2:
+        raise ValueError(
+            "RD threshold design must contain exactly two rows: below threshold "
+            "followed by above threshold."
+        )
+
+    if not np.isfinite(threshold_design).all():
+        raise ValueError("RD threshold design must be a finite numeric two-row array.")
+
+    X = np.asarray(X_da)
+    if threshold_design.shape[1] != X.shape[1]:
+        raise ValueError(
+            "RD threshold design must have the same number of columns as the "
+            "fitted design matrix."
+        )
+
+    try:
+        XtX_inv = np.linalg.inv(X.T @ X)
+    except np.linalg.LinAlgError as err:
+        raise ValueError(
+            "Cannot compute the RD threshold-contrast standard error because "
+            "X.T @ X is singular."
+        ) from err
+
+    # discontinuity_at_threshold is the prediction above the threshold minus
+    # the prediction below it, so its uncertainty must use that same contrast.
+    contrast = threshold_design[1] - threshold_design[0]
+    se = np.sqrt(mse * contrast @ XtX_inv @ contrast)
 
     # t-critical value
     t_critical = t.ppf(1 - alpha / 2, df=df)

@@ -487,63 +487,79 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
 
 @pytest.mark.integration
 def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
-    """Regression-pin for RD OLS ``effect_summary()`` intervals.
-
-    The pre-#1049 ``_compute_statistics_rd_ols`` subtracted a bare ``(n,)``
-    ``y_pred`` array from the ``(n, 1)`` y DataArray, broadcasting to an
-    ``(n, n)`` residual matrix (every observation's y minus every *other*
-    observation's prediction) and inflating the MSE ~9x on this dataset, so
-    the reported standard errors were ~3x too wide. ``_point_residuals``
-    fixed that. Separately, the residual variance was estimated as SSR/n
-    (biased) rather than SSR/(n-p) (unbiased), inconsistent with the
-    ``df = n - p`` already used for the t-distribution critical value. With
-    both bugs fixed, this test pins the corrected residual shape and SE
-    against an independent statsmodels fit almost exactly, not just up to
-    some remaining conversion factor.
-    """
+    """RD OLS residuals must have one value per fitted observation."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _point_residuals
 
-    formula = "y ~ 1 + x + treated + x:treated"
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    n, _ = result.design["X"].shape
+    residuals = _point_residuals(result)
+
+    assert residuals.shape == (n,)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + x + treated + x:treated",
+        "y ~ 1 + x + treated",
+    ],
+    ids=["interaction", "parallel_slopes"],
+)
+def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(rd_data, formula):
+    """RD OLS summaries must match the exact threshold prediction contrast."""
+    import statsmodels.formula.api as smf
+    from patsy import build_design_matrices
+    from scipy.stats import t as t_dist
+    from sklearn.linear_model import LinearRegression
+
     result = cp.RegressionDiscontinuity(
         rd_data,
         formula=formula,
         treatment_threshold=0.5,
         model=LinearRegression(),
     )
+    row = result.effect_summary().table.loc["discontinuity"]
 
-    n, p = result.design["X"].shape
-    residuals = _point_residuals(result)
-    assert residuals.shape == (n,)
-
-    stats = result.effect_summary()
-    row = stats.table.loc["discontinuity"]
-
-    import statsmodels.formula.api as smf
-    from scipy.stats import t as t_dist
+    threshold_data = pd.DataFrame(
+        {
+            result.running_variable_name: [
+                result.treatment_threshold - result.epsilon,
+                result.treatment_threshold + result.epsilon,
+            ],
+            "treated": [False, True],
+        }
+    )
+    (expected_threshold_design,) = build_design_matrices(
+        [result._x_design_info], threshold_data
+    )
+    expected_threshold_design = np.asarray(expected_threshold_design)
+    np.testing.assert_allclose(result.x_discon_design, expected_threshold_design)
 
     sm_fit = smf.ols(formula, data=result.fit_data).fit()
-    interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
-    unbiased_se = sm_fit.bse[interaction_col]
+    assert list(sm_fit.params.index) == result.labels
+    contrast = expected_threshold_design[1] - expected_threshold_design[0]
+    expected = sm_fit.t_test(contrast)
+    expected_ci = np.asarray(expected.conf_int(alpha=0.05)).squeeze()
+    n, p = result.design["X"].shape
+    t_critical = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_critical)
+    expected_se = float(np.asarray(expected.sd).squeeze())
 
-    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
-    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+    assert reported_se == pytest.approx(expected_se)
 
-    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
-    # Guard against regressing to either the (n, n) broadcast bug (~3x
-    # inflation) or the biased SSR/n denominator understatement.
-    biased_mse = np.mean(residuals**2)
-    XtX_inv = np.linalg.inv(
-        np.asarray(result.design["X"]).T @ np.asarray(result.design["X"])
-    )
-    coeff_idx = next(
-        i
-        for i, label in enumerate(result.labels)
-        if "treated" in label.lower() and ":" in label
-    )
-    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
-    assert reported_se != pytest.approx(biased_se, rel=1e-3)
+    assert row["mean"] == pytest.approx(float(np.asarray(expected.effect).squeeze()))
+    assert row["ci_lower"] == pytest.approx(expected_ci[0])
+    assert row["ci_upper"] == pytest.approx(expected_ci[1])
+    assert row["p_value"] == pytest.approx(float(np.asarray(expected.pvalue).squeeze()))
 
 
 @pytest.mark.integration
@@ -2064,34 +2080,82 @@ def test_compute_statistics_did_ols_missing_interaction_term(
 
 
 @pytest.mark.integration
-def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
-    """Test _compute_statistics_rd_ols uses fallback when coefficient not found."""
+def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(rd_data):
+    """RD contrast inference requires the stored threshold design rows."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _compute_statistics_rd_ols
 
-    df = rd_data
     result = cp.RegressionDiscontinuity(
-        df,
+        rd_data,
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
     )
+    del result.x_discon_design
 
-    # Manually corrupt the labels to trigger fallback
-    original_labels = result.labels
-    result.labels = ["Intercept", "x", "some_other_term"]
+    with pytest.raises(ValueError, match="threshold design rows are unavailable"):
+        _compute_statistics_rd_ols(result)
 
-    # Should not raise error, but use fallback SE calculation
-    stats = _compute_statistics_rd_ols(result, alpha=0.05)
 
-    # Restore labels
-    result.labels = original_labels
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "invalid_design",
+    [
+        lambda design: design[:1],
+        lambda design: design[0],
+        lambda design: design[:, :-1],
+        lambda design: np.full(design.shape, "not-a-number", dtype=object),
+        lambda design: np.full_like(design, np.nan),
+        lambda design: np.full_like(design, np.inf),
+        lambda design: np.full_like(design, -np.inf),
+    ],
+    ids=[
+        "one_row",
+        "one_dimensional",
+        "wrong_width",
+        "nonnumeric",
+        "nan",
+        "positive_infinity",
+        "negative_infinity",
+    ],
+)
+def test_compute_statistics_rd_ols_raises_when_threshold_design_is_malformed(
+    rd_data, invalid_design
+):
+    """RD contrast inference rejects stored design rows that cannot form c."""
+    from sklearn.linear_model import LinearRegression
 
-    assert "mean" in stats
-    assert "ci_lower" in stats
-    assert "ci_upper" in stats
-    assert "p_value" in stats
+    from causalpy.reporting import _compute_statistics_rd_ols
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+    result.x_discon_design = invalid_design(result.x_discon_design)
+
+    with pytest.raises(ValueError, match="threshold design"):
+        _compute_statistics_rd_ols(result)
+
+
+@pytest.mark.integration
+def test_compute_statistics_rd_ols_raises_when_fitted_design_is_singular(rd_data):
+    """RD contrast inference rejects singular normal equations."""
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _compute_statistics_rd_ols
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + I(2 * x) + treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    with pytest.raises(ValueError, match="X.T @ X is singular"):
+        _compute_statistics_rd_ols(result)
 
 
 # ==============================================================================
