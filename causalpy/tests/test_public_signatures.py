@@ -61,6 +61,10 @@ class _SignatureAudit(Protocol):
 
     def _collect_public_callables(self) -> list[_AuditedCallable]: ...
 
+    def _markdown_report(self, callables: list[_AuditedCallable]) -> str: ...
+
+    def _package_exports(self, package: str) -> dict[str, Any]: ...
+
 
 def _all_base_experiment_subclasses() -> list[type]:
     """Import every experiment module and collect concrete subclasses."""
@@ -232,6 +236,273 @@ def _load_signature_audit() -> _SignatureAudit:
 
 _SIGNATURE_AUDIT = _load_signature_audit()
 _PUBLIC_SIGNATURES = _SIGNATURE_AUDIT._collect_public_callables()
+
+
+def _configure_temporary_audit_package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    root_init: str,
+    experiments_init: str = "",
+    module_adapter: str = "class ModelAdapter:\n    pass\n",
+) -> None:
+    """Point the AST audit at a tiny package with a controlled export graph."""
+    package = tmp_path / "causalpy"
+    experiments = package / "experiments"
+    experiments.mkdir(parents=True)
+    (package / "__init__.py").write_text(root_init, encoding="utf-8")
+    (experiments / "__init__.py").write_text(experiments_init, encoding="utf-8")
+    (experiments / "model_adapter.py").write_text(module_adapter, encoding="utf-8")
+    api_index = tmp_path / "index.md"
+    api_index.write_text(".. autosummary::\n```\n", encoding="utf-8")
+    monkeypatch.setattr(_SIGNATURE_AUDIT, "PACKAGE_ROOT", package)
+    monkeypatch.setattr(_SIGNATURE_AUDIT, "API_INDEX_PATH", api_index)
+
+
+def test_adapter_tier_three_exclusion_is_reported_and_absent():
+    """The private adapter seam is an explicit audit boundary, not an accident."""
+    report = _SIGNATURE_AUDIT._markdown_report(_PUBLIC_SIGNATURES)
+    assert "Explicit Tier 3 exclusion" in report
+    assert "`causalpy.experiments.model_adapter`" in report
+    assert "BaseExperiment._model_backend" in report
+    assert not {
+        candidate.qualified_name
+        for candidate in _PUBLIC_SIGNATURES
+        if candidate.qualified_name.startswith("causalpy.experiments.model_adapter.")
+    }
+
+
+def test_audit_rejects_adapter_as_documented_api_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Tier 3 adapter plumbing cannot enter the docs-derived public inventory."""
+    api_index = tmp_path / "index.md"
+    api_index.write_text(
+        ".. autosummary::\n  experiments.model_adapter\n```\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(_SIGNATURE_AUDIT, "API_INDEX_PATH", api_index)
+
+    with pytest.raises(ValueError, match="model_adapter.*Tier 3"):
+        _SIGNATURE_AUDIT._collect_public_callables()
+
+
+@pytest.mark.parametrize(
+    ("root_init", "experiments_init"),
+    [
+        (
+            "from .experiments.model_adapter import ModelAdapter\n"
+            '__all__ = ["ModelAdapter"]\n',
+            "",
+        ),
+        (
+            'from .experiments import PublicAdapter\n__all__ = ["PublicAdapter"]\n',
+            "from .model_adapter import ModelAdapter as PublicAdapter\n",
+        ),
+        (
+            "from .experiments.model_adapter import ModelAdapter as PublicAdapter\n"
+            '__all__ = ["PublicAdapter"]\n',
+            "",
+        ),
+        (
+            "import causalpy.experiments.model_adapter as adapter\n"
+            '__all__ = ["adapter"]\n',
+            "",
+        ),
+        (
+            "from .experiments import model_adapter as adapter\n"
+            '__all__ = ["adapter"]\n',
+            "",
+        ),
+        (
+            "from .experiments.model_adapter import ModelAdapter\n"
+            "PublicAdapter = ModelAdapter\n"
+            '__all__ = ["PublicAdapter"]\n',
+            "",
+        ),
+        (
+            'from .experiments.model_adapter import *\n__all__ = ["ModelAdapter"]\n',
+            "",
+        ),
+        (
+            "from .experiments.model_adapter import ModelAdapter\n"
+            '__all__: list[str] = ["ModelAdapter"]\n',
+            "",
+        ),
+        (
+            "from .experiments import model_adapter as adapter\n"
+            "PublicAdapter = adapter.ModelAdapter\n"
+            '__all__ = ["PublicAdapter"]\n',
+            "",
+        ),
+        (
+            'from .experiments import PublicAdapter\n__all__ = ["PublicAdapter"]\n',
+            "from .model_adapter import ModelAdapter\n"
+            "PublicAdapter: object = ModelAdapter\n",
+        ),
+        (
+            'from .experiments import ModelAdapter\n__all__ = ["ModelAdapter"]\n',
+            "from .model_adapter import *\n",
+        ),
+        (
+            'from .experiments import *\n__all__ = ["ModelAdapter"]\n',
+            "from .model_adapter import *\n",
+        ),
+        (
+            "__all__ = []\n"
+            "from .experiments.model_adapter import ModelAdapter\n"
+            '__all__ = ["ModelAdapter"]\n',
+            "",
+        ),
+        (
+            "import causalpy.experiments.model_adapter\n"
+            "PublicAdapter = causalpy.experiments.model_adapter.ModelAdapter\n"
+            '__all__ = ["PublicAdapter"]\n',
+            "",
+        ),
+        (
+            "import causalpy.experiments as adapter\n"
+            "PublicAdapter = adapter.model_adapter.ModelAdapter\n"
+            '__all__ = ["PublicAdapter"]\n',
+            "",
+        ),
+    ],
+)
+def test_audit_rejects_adapter_export_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    root_init: str,
+    experiments_init: str,
+):
+    """Every supported static re-export form preserves the Tier 3 exclusion."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init=root_init,
+        experiments_init=experiments_init,
+    )
+
+    with pytest.raises(ValueError, match="model_adapter.*Tier 3"):
+        _SIGNATURE_AUDIT._collect_public_callables()
+
+
+def test_audit_resolves_star_imports_by_actual_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A later unrelated star import cannot hide an earlier adapter binding."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init=(
+            "from .experiments.model_adapter import *\n"
+            "from .safe import *\n"
+            '__all__ = ["ModelAdapter"]\n'
+        ),
+        module_adapter="class ModelAdapter:\n    pass\n",
+    )
+    (tmp_path / "causalpy" / "safe.py").write_text(
+        "class Safe:\n    pass\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="model_adapter.*Tier 3"):
+        _SIGNATURE_AUDIT._collect_public_callables()
+
+
+def test_audit_honors_later_star_import_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A later adapter star import overrides an earlier safe binding."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init=(
+            "from .safe import ModelAdapter\n"
+            "from .experiments.model_adapter import *\n"
+            '__all__ = ["ModelAdapter"]\n'
+        ),
+    )
+    (tmp_path / "causalpy" / "safe.py").write_text(
+        "class ModelAdapter:\n    pass\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="model_adapter.*Tier 3"):
+        _SIGNATURE_AUDIT._collect_public_callables()
+
+
+def test_audit_honors_later_explicit_import_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A later explicit safe binding overrides an adapter star import."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init=(
+            "from .experiments.model_adapter import *\n"
+            "from .safe import ModelAdapter\n"
+            '__all__ = ["ModelAdapter"]\n'
+        ),
+    )
+    (tmp_path / "causalpy" / "safe.py").write_text(
+        "class ModelAdapter:\n    pass\n", encoding="utf-8"
+    )
+
+    exported = _SIGNATURE_AUDIT._package_exports("causalpy")["ModelAdapter"]
+    assert exported.module == "causalpy.safe"
+
+
+def test_audit_honors_later_reexport_over_local_declaration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A later import overrides an earlier local declaration of the same name."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init='from .safe import ModelAdapter\n__all__ = ["ModelAdapter"]\n',
+    )
+    (tmp_path / "causalpy" / "safe.py").write_text(
+        "class ModelAdapter:\n    pass\n"
+        "from .experiments.model_adapter import ModelAdapter\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="model_adapter.*Tier 3"):
+        _SIGNATURE_AUDIT._collect_public_callables()
+
+
+def test_audit_honors_empty_all_during_star_resolution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """An explicit empty ``__all__`` exports no names through a star import."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init='from .safe import *\n__all__ = ["Safe"]\n',
+    )
+    (tmp_path / "causalpy" / "safe.py").write_text(
+        "class Safe:\n    pass\n__all__ = []\n", encoding="utf-8"
+    )
+
+    assert _SIGNATURE_AUDIT._package_exports("causalpy") == {}
+
+
+def test_audit_stops_at_nonpublic_reexport_cycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Cycle protection avoids recursive static export resolution."""
+    _configure_temporary_audit_package(
+        monkeypatch,
+        tmp_path,
+        root_init="",
+    )
+    package = tmp_path / "causalpy"
+    (package / "alpha.py").write_text("from .beta import Thing\n", encoding="utf-8")
+    (package / "beta.py").write_text("from .alpha import Thing\n", encoding="utf-8")
+    audit = cast(Any, _SIGNATURE_AUDIT)
+    symbol_type = audit.ImportedSymbol
+    resolver = audit._exported_symbol_callables
+
+    assert resolver(symbol_type(module="causalpy.alpha", name="Thing")) == []
+
+
 _FORWARDER_EXEMPTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     "causalpy.steps.estimate_effect.EstimateEffect.__init__": (
         "kwargs",

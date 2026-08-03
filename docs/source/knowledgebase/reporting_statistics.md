@@ -26,7 +26,7 @@ The `effect_summary()` method is available for the following experiment types:
 | Regression Kink | ✅ Full support | ❌ Not implemented |
 | Interrupted Time Series | ✅ Full support | ✅ Full support |
 | Synthetic Control | ✅ Full support | ✅ Full support |
-| PrePostNEGD | ❌ Use `.summary()` instead | ❌ Use `.summary()` instead |
+| PrePostNEGD | ✅ Full support | ❌ Not implemented |
 | Instrumental Variable | ❌ Not available | ❌ Not available |
 | Inverse Propensity Weighting | ❌ Not available | ❌ Not available |
 
@@ -71,7 +71,7 @@ For symmetric posteriors, mean and median are nearly identical. For skewed poste
 - **Key difference from CI:** This is a probability statement about the parameter itself, not about the procedure
 
 :::{note}
-The `hdi_prob` parameter controls the interval width (e.g., 0.95 for 95% HDI, 0.90 for 90% HDI). Wider intervals (higher probability) provide more certainty but less precision.
+Public `effect_summary()` methods take `alpha`, not `hdi_prob`: their HDI coverage is `1 - alpha`. The default `alpha=0.05` therefore reports a 95% HDI, while `alpha=0.025` reports a 97.5% HDI. This is independent of the project-wide `HDI_PROB = 0.94` setting used by other reporting and plotting APIs, so one experiment can legitimately show a 95% summary HDI and 94% plot bands.
 :::
 
 **Example interpretation:**
@@ -82,64 +82,51 @@ mean: 2.5, 95% HDI: [1.2, 3.8]
 
 "The estimated effect is 2.5 on average, and we can be 95% certain the true effect lies between 1.2 and 3.8."
 
-### Hypothesis Testing
+### Posterior Tail Summaries
 
-Bayesian hypothesis testing uses posterior probabilities directly, making the interpretation more intuitive than traditional p-values.
+`direction` selects the tail summary that `effect_summary()` reports; it does not infer a direction from the posterior mean and does not change the HDI+ROPE conclusion.
 
-**Directional Tests**
+- `direction="increase"` reports `p_gt_0 = P(effect > 0)`.
+- `direction="decrease"` reports `p_lt_0 = P(effect < 0)`.
+- `direction="two-sided"` reports `p_two_sided = 2 × min(P(effect > 0), P(effect < 0))` as a two-sided tail probability.
 
-- `p_gt_0`: {term}`Posterior probability` that the effect is greater than zero (positive effect)
-- `p_lt_0`: Posterior probability that the effect is less than zero (negative effect)
-- **Interpretation:** Direct probability statements about the hypothesis
-- **Example:** If `p_gt_0 = 0.95`, there's a 95% probability the effect is positive
+The table also retains `prob_of_effect = 1 - p_two_sided` for compatibility. This is a tail-derived score, not a posterior probability that the effect is non-zero: with a continuous posterior, `P(effect != 0)` is generally one regardless of that score. Tail summaries are descriptive evidence, not a binary credible/not-credible verdict.
 
-**Two-Sided Tests**
+### ROPE and Practical Significance
 
-- `p_two_sided`: Probability of observing an effect at least this extreme in either direction
-  - **Calculation:** `2 × min(P(effect > 0), P(effect < 0))`
-  - This mirrors the frequentist two-sided p-value approach
-  - Example: If 97% of posterior is > 0 and 3% is < 0, then p_two_sided = 2 × 0.03 = 0.06
-- `prob_of_effect`: Probability of a non-zero effect in either direction (1 - p_two_sided)
-  - Continuing the example: prob_of_effect = 1 - 0.06 = 0.94 (94% probability of some effect)
-- **When to use:** When you don't have a directional hypothesis
-- **Interpretation:** `prob_of_effect = 0.95` means 95% probability of a non-zero effect
+`min_effect` is the smallest absolute effect that is practically meaningful. It must be finite and non-negative; `0` is valid and creates the point ROPE `[0, 0]`.
 
-:::{note}
-Unlike frequentist p-values, Bayesian posterior probabilities answer the question you actually care about: "What's the probability of this hypothesis given the data?"
-:::
+#### The `p_rope` table column
 
-**Decision guidance:**
+For compatibility, the optional `p_rope` column is a direction-sensitive strict exceedance probability:
 
-- `p_gt_0 > 0.95` or `p_lt_0 > 0.95`: Strong evidence for directional effect
-- `prob_of_effect > 0.95`: Strong evidence for any effect (two-sided)
-- Values close to 0.5: Weak or no evidence for the effect
+1. `direction="increase"`: `P(effect > min_effect)`.
+2. `direction="decrease"`: `P(effect < -min_effect)`.
+3. `direction="two-sided"`: `P(|effect| > min_effect)`.
 
-### Effect Size Assessment
+It is not the probability mass inside the ROPE and is not the input to CausalPy's prose conclusion.
 
-**ROPE (Region of Practical Equivalence)**
+#### The HDI+ROPE conclusion
 
-- Tests whether the effect exceeds a minimum meaningful threshold (`min_effect`)
-- Reported as `p_rope` in summary tables
-- **Purpose:** Distinguish statistical significance from practical significance
-- **Interpretation:** Probability that the effect exceeds the threshold you care about
+When you supply `min_effect`, CausalPy instead uses the closed, symmetric ROPE `[-min_effect, min_effect]` and compares the reported HDI `[L, U]` with it.
 
-**How it works:**
+- If `U < -min_effect` or `L > min_effect`, the HDI is entirely outside the ROPE: the effect is **practically significant**.
+- If `-min_effect <= L` and `U <= min_effect`, the HDI is entirely inside the ROPE: the effect is **practically equivalent to zero**.
+- Otherwise the HDI overlaps the ROPE: the result is **inconclusive**.
 
-1. You specify `min_effect` (the smallest effect size you consider meaningful)
-2. For "increase" direction: `p_rope` = P(effect > min_effect)
-3. For "decrease" direction: `p_rope` = P(effect < -min_effect)
-4. For "two-sided" direction: `p_rope` = P(|effect| > min_effect)
+Because the ROPE is closed, an HDI that only touches `-min_effect` or `min_effect` is inconclusive unless it is wholly inside. The report gives the posterior mass below, inside, and above the ROPE; samples exactly on a boundary count as inside, so those three masses partition the finite posterior draws. For time-series summaries with `cumulative=True`, CausalPy reports the same decision and mass breakdown separately for the average and cumulative effects.
+Non-finite posterior draws are excluded consistently from the reported mean, median, HDI, tail summary, ROPE masses, and conclusion; CausalPy raises `ValueError` if no finite posterior draws remain.
 
-**Example:**
+Without `min_effect`, `effect_summary()` remains strictly descriptive: it reports the interval, the requested tail summary, and any requested relative effect, but gives no binary or practical-significance verdict.
 
 ```python
-result.effect_summary(direction="increase", min_effect=1.0)
+summary = result.effect_summary(direction="increase", min_effect=1.0)
+print(summary.table["p_rope"])  # P(effect > 1.0)
+print(summary.text)  # HDI+ROPE conclusion and below/inside/above masses
 ```
 
-If `p_rope = 0.85`, there's an 85% probability the effect exceeds your meaningful threshold of 1.0.
-
 :::{important}
-ROPE analysis requires domain knowledge to set `min_effect`. Consider: What's the smallest effect that would justify the intervention cost? What effect size is scientifically or practically meaningful?
+Choose `min_effect` from domain knowledge: it should reflect the smallest effect that would justify the intervention cost or be scientifically meaningful.
 :::
 
 ---
@@ -308,8 +295,7 @@ Returns a human-readable interpretation ready for reports:
 
 ```python
 print(summary.text)
-# Output: "The average treatment effect was 2.50 (95% HDI [1.20, 3.80]),
-#          with a posterior probability of an increase of 0.975."
+# Output: "The average treatment effect was 2.50 (95% HDI [1.20, 3.80]). The posterior probability of an increase is 0.975."
 ```
 
 ### Basic usage (default Bayesian):
@@ -335,21 +321,20 @@ summary = result.effect_summary(direction="increase")  # Reports p_gt_0
 # Test for a decrease
 summary = result.effect_summary(direction="decrease")  # Reports p_lt_0
 
-# Two-sided test
-summary = result.effect_summary(direction="two-sided")  # Reports prob_of_effect
+# Two-sided tail summary
+summary = result.effect_summary(direction="two-sided")  # Reports p_two_sided
 ```
 
-### With practical significance threshold:
+### With a practical significance threshold:
 
 ```python
-# Only care about effects > 2.0
+# Define effects smaller than 2.0 in magnitude as practically equivalent.
 summary = result.effect_summary(
     direction="increase",
-    min_effect=2.0  # ROPE analysis
+    min_effect=2.0,
 )
-# Access results
-print(summary.table)  # p_rope column included
-print(summary.text)   # Prose interpretation
+print(summary.table)  # Includes the legacy direction-sensitive p_rope column.
+print(summary.text)  # Reports an HDI+ROPE verdict and posterior ROPE masses.
 ```
 
 ### For time-series experiments with custom window:

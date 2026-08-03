@@ -10,7 +10,7 @@ The sensitivity framework has three main pieces:
 
 1. **`Check`** --- a protocol that individual checks implement. Each check declares which experiment types it applies to (`applicable_methods`), validates preconditions, and returns a structured `CheckResult`.
 2. **`SensitivityAnalysis`** --- a pipeline step that holds a list of `Check` objects and runs them against the fitted experiment.
-3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` for informational checks), a prose summary, an optional diagnostics table, optional figures, and arbitrary metadata.
+3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` when a check is informational or inconclusive), a prose summary, an optional diagnostics table, optional figures, and arbitrary metadata.
 
 When a `GenerateReport` step follows `SensitivityAnalysis`, those results are included in the generated HTML report automatically.
 
@@ -89,7 +89,7 @@ This check requires a PyMC-backed model because it works with posterior impact d
 
 Every placebo fold is a full re-fit, so a fold needs enough pre-treatment history to identify the model before its pseudo-intervention begins. `PlaceboInTime` requires each fold to have at least one full intervention window of observed history ahead of it, and skips folds that fall short rather than fitting them. A fold fitted on a handful of observations produces a posterior cumulative impact with a very large standard deviation, which inflates the between-fold scale `tau` of the hierarchical status-quo model and widens the learned null until it can swallow a genuine effect.
 
-Skipped folds are reported in the check text and recorded in `metadata["skipped_folds"]` with the observed and required pre-period row counts, and a warning names the reason. If every fold is skipped, the check returns `passed=None` (inconclusive) rather than building a null from nothing.
+Skipped folds are reported in the check text and recorded in `metadata["skipped_folds"]` with the observed and required pre-period row counts, and a warning names the reason. If fewer than two usable folds remain, or the completed folds do not identify a finite positive between-fold spread, the check returns `passed=None` (inconclusive) rather than building an unidentified null. These results do not have `metadata["null_samples"]` or `metadata["p_effect_outside_null"]`; test those keys are present before accessing them, because a `passed is None` result has neither.
 
 The constraint bites when the pre-period is only a few times longer than the post-period, because by default each fold consumes one post-period worth of history. There are two ways out:
 
@@ -102,7 +102,7 @@ cp.checks.PlaceboInTime(n_folds=4, intervention_length=10, random_seed=42)
 
 #### Reproducibility
 
-`PlaceboInTime` has several stochastic stages: the per-fold experiment fits, the hierarchical status-quo `pm.sample`, the posterior predictive draw for `theta_new`, random fold selection, and the assurance simulation. The constructor's `random_seed` is the master seed for all of them, so setting it alone is enough to make the reported verdict, `metadata["p_effect_outside_null"]` and `metadata["null_samples"]` reproducible. Folds are seeded as `random_seed + fold_index`, so they are independent of one another but stable across runs.
+`PlaceboInTime` has several stochastic stages: the per-fold experiment fits, the hierarchical status-quo `pm.sample`, the posterior predictive draw for `theta_new`, random fold selection, and the assurance simulation. When the check identifies a hierarchical null, the constructor's `random_seed` is the master seed for all of them, so setting it alone is enough to make the reported verdict, `metadata["p_effect_outside_null"]` and `metadata["null_samples"]` reproducible. Folds are seeded as `random_seed + fold_index`, so they are independent of one another but stable across runs.
 
 The one deliberate override is `sample_kwargs["random_seed"]`: when supplied explicitly it takes precedence, for the hierarchical `pm.sample` call only. Two cases sit outside the master seed and are surfaced rather than hidden. A custom `experiment_factory` owns any randomness it introduces, and an `expected_effect_prior` whose `.rvs` does not accept `random_state` is drawn unseeded, which raises a warning and is recorded in `metadata["unseeded_custom_priors"]`.
 
@@ -144,7 +144,7 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 Each check returns a `CheckResult` with the following fields:
 
-- **`passed`** --- `True` if the check passed, `False` if it failed, or `None` for informational checks with no pass/fail criterion.
+- **`passed`** --- `True` if the check passed, `False` if it failed, or `None` when it is informational or cannot reach a verdict.
 - **`text`** --- a prose summary describing the outcome.
 - **`table`** --- an optional `pandas.DataFrame` with diagnostic statistics.
 - **`figures`** --- an optional list of matplotlib figures.
@@ -157,13 +157,17 @@ for cr in result.sensitivity_results:
     status = (
         "PASS"
         if cr.passed is True
-        else ("FAIL" if cr.passed is False else "INFO")
+        else ("FAIL" if cr.passed is False else "NO VERDICT")
     )
     print(f"[{status}] {cr.check_name}: {cr.text}")
 
     if cr.table is not None:
         display(cr.table)
 ```
+
+When `passed is None`, inspect the result text: it may describe an informational diagnostic or an inconclusive check that could not reach a verdict.
+
+Check-specific metadata can be absent when a check has no verdict. In particular, an inconclusive `PlaceboInTime` result has neither `null_samples` nor `p_effect_outside_null`; access learned-null values only after testing the relevant key, for example `if "null_samples" in cr.metadata:`.
 
 When a `GenerateReport` step follows `SensitivityAnalysis` in the pipeline, check results are automatically included in the HTML report.
 

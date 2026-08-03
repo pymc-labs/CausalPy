@@ -151,12 +151,6 @@ class InterruptedTimeSeries(BaseExperiment):
     supports_bayes = True
     supports_pymc_forecast = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {
-        "pre_X": ("pre_design", "X"),
-        "pre_y": ("pre_design", "y"),
-        "post_X": ("post_design", "X"),
-        "post_y": ("post_design", "y"),
-    }
 
     def __init__(
         self,
