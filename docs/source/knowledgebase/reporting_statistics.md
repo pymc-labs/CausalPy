@@ -119,6 +119,16 @@ Non-finite posterior draws are excluded consistently from the reported mean, med
 
 Without `min_effect`, `effect_summary()` remains strictly descriptive: it reports the interval, the requested tail summary, and any requested relative effect, but gives no binary or practical-significance verdict.
 
+#### Scope of the HDI+ROPE verdict
+
+The HDI+ROPE verdict accounts for only part of the relevant uncertainty. It is a within-model statement: it propagates posterior uncertainty about the effect parameter conditional on the model, its priors, and the observed data—and nothing else. Thus, a practically significant, practically equivalent, or inconclusive verdict describes practical significance only within those modelling assumptions.
+
+It does not represent design or identification uncertainty: whether the counterfactual is credible, whether parallel trends hold, whether a synthetic-control donor reconstruction holds, or how much a comparable period or unit moves when no intervention happened at all.
+
+Where a valid, identified placebo null can be constructed, it is the better reference for total uncertainty. `PlaceboInTime` re-fits against pre-treatment placebo periods and learns a posterior-predictive status-quo null; `PlaceboInSpace` re-fits each control unit as if treated and returns the resulting placebo-unit effect summaries for comparison. In each case, empirical variation in periods or units presumed untreated adds design-relevant uncertainty that a posterior HDI alone does not contain. When those estimates provide an identified placebo null, that null captures strictly more of the total uncertainty than a posterior HDI. Read HDI+ROPE as the model-internal significance statement, but prefer judging practical significance against an identified placebo null. Agreement between the two is reassuring; disagreement is a signal that the model understates uncertainty.
+
+`PlaceboInTime` does not always provide a null to compare against. It abstains with an **INCONCLUSIVE** result when fewer than two folds are usable or when the usable folds do not identify a between-fold spread, so there is no placebo null in either case. This learned null's spread is the same quantity the {doc}`sensitivity checks <../notebooks/sensitivity_checks>` already report and forthcoming power-analysis work will consume, so these uses must remain coherent rather than becoming different notions of “significant.”
+
 ```python
 summary = result.effect_summary(direction="increase", min_effect=1.0)
 print(summary.table["p_rope"])  # P(effect > 1.0)
