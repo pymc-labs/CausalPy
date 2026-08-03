@@ -25,7 +25,7 @@ from plotnine import (
     aes,
     geom_line,
     geom_point,
-    geom_vline,
+
     ggplot,
     guides,
     labs,
@@ -470,35 +470,10 @@ class RegressionDiscontinuity(BaseExperiment):
             p += geom_line(model_fit, aes(x=xcol, y="prediction", color="series"))
             color_values["model fit"] = "k"
 
-        threshold = pd.DataFrame(
-            {
-                "xintercept": [self.treatment_threshold],
-                "series": ["treatment threshold"],
-            }
-        )
-        p += geom_vline(
-            threshold,
-            aes(xintercept="xintercept", color="series"),
-            size=3,
-        )
+        # Plotnine cannot provide the Axes-resident rule artists that the
+        # existing public plot contract exposes, so retain these components.
         color_values["treatment threshold"] = "r"
-
         if self.donut_hole > 0:
-            donut_boundaries = pd.DataFrame(
-                {
-                    "xintercept": [
-                        self.treatment_threshold - self.donut_hole,
-                        self.treatment_threshold + self.donut_hole,
-                    ],
-                    "series": ["donut boundary", "donut boundary"],
-                }
-            )
-            p += geom_vline(
-                donut_boundaries,
-                aes(xintercept="xintercept", color="series"),
-                linetype="dashed",
-                size=2,
-            )
             color_values["donut boundary"] = "orange"
 
         fig = (
@@ -510,6 +485,25 @@ class RegressionDiscontinuity(BaseExperiment):
         if figsize is not None:
             fig.set_size_inches(figsize)
         ax = fig.axes[0]
+        ax.axvline(
+            x=self.treatment_threshold,
+            ls="-",
+            lw=3,
+            color="r",
+            label="treatment threshold",
+        )
+        if self.donut_hole > 0:
+            for boundary in (
+                self.treatment_threshold - self.donut_hole,
+                self.treatment_threshold + self.donut_hole,
+            ):
+                ax.axvline(
+                    x=boundary,
+                    ls="--",
+                    lw=2,
+                    color="orange",
+                    label="donut boundary",
+                )
 
         # Plot model fit to data
         if with_uncertainty:
@@ -527,6 +521,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 plot_hdi_kwargs={"color": "C1"},
                 label="Posterior mean",
             )
+        rule_labels = {"treatment threshold", "donut boundary"}
         legend_handles = [
             Line2D(
                 [],
@@ -539,11 +534,15 @@ class RegressionDiscontinuity(BaseExperiment):
                 marker="o" if label in {"data", "fit data", "excluded data"} else None,
             )
             for label, color in color_values.items()
+            if label not in rule_labels
         ]
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(
             handles=[*legend_handles, *handles],
-            labels=[*color_values, *labels],
+            labels=[
+                *(label for label in color_values if label not in rule_labels),
+                *labels,
+            ],
             fontsize=LEGEND_FONT_SIZE,
         )
         return (fig, ax)
