@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.reporting import EffectSummary
+from causalpy.reporting import EffectSummary, _BayesianDecision
 
 sample_kwargs = {
     "chains": 2,
@@ -205,14 +205,14 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
 def test_effect_summary_window_integer(mock_pymc_sample):
     """Test effect_summary with integer index window."""
     # Create data with integer index
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_pre = 50
     n_post = 30
     t_pre = np.arange(n_pre)
     t_post = np.arange(n_pre, n_pre + n_post)
 
-    y_pre = 10 + 0.5 * t_pre + np.random.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + np.random.normal(0, 1, n_post)
+    y_pre = 10 + 0.5 * t_pre + rng.normal(0, 1, n_pre)
+    y_post = 15 + 0.5 * t_post + rng.normal(0, 1, n_post)
 
     df = pd.DataFrame(
         {
@@ -273,6 +273,16 @@ def test_effect_summary_rope(mock_pymc_sample, its_data):
 
     assert "p_rope" in stats.table.columns
     assert 0 <= stats.table.loc["average", "p_rope"] <= 1
+    assert "Using the closed ROPE [-1, 1]" in stats.text
+    assert "Posterior mass is" in stats.text
+    assert any(
+        verdict in stats.text
+        for verdict in (
+            "the effect is practically significant.",
+            "the effect is practically equivalent to zero.",
+            "the result is inconclusive.",
+        )
+    )
 
 
 @pytest.mark.integration
@@ -770,7 +780,7 @@ def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
 def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
     """Test effect_summary with Synthetic Control experiment (multiple treated units)."""
     # Create multi-unit synthetic control data
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_obs = 60
     n_control = 4
     n_treated = 2
@@ -782,21 +792,21 @@ def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
     # Control unit data
     control_data = {}
     for i in range(n_control):
-        control_data[f"control_{i}"] = np.random.normal(10, 2, n_obs) + np.sin(
+        control_data[f"control_{i}"] = rng.normal(10, 2, n_obs) + np.sin(
             np.arange(n_obs) * 0.1
         )
 
     # Treated unit data
     treated_data = {}
     for j in range(n_treated):
-        weights = np.random.dirichlet(np.ones(n_control))
+        weights = rng.dirichlet(np.ones(n_control))
         base_signal = sum(
             weights[i] * control_data[f"control_{i}"] for i in range(n_control)
         )
         treatment_effect = np.zeros(n_obs)
-        treatment_effect[40:] = np.random.normal(5, 1, n_obs - 40)
+        treatment_effect[40:] = rng.normal(5, 1, n_obs - 40)
         treated_data[f"treated_{j}"] = (
-            base_signal + treatment_effect + np.random.normal(0, 0.5, n_obs)
+            base_signal + treatment_effect + rng.normal(0, 0.5, n_obs)
         )
 
     df = pd.DataFrame({**control_data, **treated_data}, index=time_index)
@@ -950,6 +960,8 @@ def test_effect_summary_did_rope(mock_pymc_sample, did_data):
 
     assert "p_rope" in stats.table.columns
     assert 0 <= stats.table.loc["treatment_effect", "p_rope"] <= 1
+    assert "Using the closed ROPE [-1, 1]" in stats.text
+    assert "Posterior mass is" in stats.text
 
 
 @pytest.mark.integration
@@ -1003,6 +1015,407 @@ def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
 # ==============================================================================
 
 
+def _fixed_bayesian_decision(
+    interval,
+    tail_label,
+    tail_probability,
+    *,
+    conclusion="descriptive",
+    rope=None,
+    masses=(None, None, None),
+):
+    """Create a fixed decision for direct prose fixtures."""
+    below, inside, above = masses
+    return _BayesianDecision(
+        conclusion=conclusion,
+        framework="descriptive" if rope is None else "hdi_rope",
+        interval=interval,
+        rope=rope,
+        tail_label=tail_label,
+        tail_probability=tail_probability,
+        posterior_mass_below_rope=below,
+        posterior_mass_inside_rope=inside,
+        posterior_mass_above_rope=above,
+    )
+
+
+@pytest.mark.parametrize(
+    ("direction", "tail_probability"),
+    [
+        ("increase", 0.5),
+        ("decrease", 0.25),
+        ("two-sided", 0.5),
+    ],
+)
+def test_make_bayesian_decision_without_rope_uses_requested_tail(
+    direction, tail_probability
+):
+    """No-ROPE decisions are descriptive and retain their requested tail."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities, _make_bayesian_decision
+
+    effect = xr.DataArray([2.0, -1.0, 0.0, 2.0])
+    decision = _make_bayesian_decision(
+        effect,
+        hdi_lower=-1.0,
+        hdi_upper=2.0,
+        tail_probabilities=_compute_tail_probabilities(effect, direction),
+        direction=direction,
+        min_effect=None,
+    )
+
+    assert decision.conclusion == "descriptive"
+    assert decision.framework == "descriptive"
+    assert decision.rope is None
+    assert decision.posterior_mass_below_rope is None
+    assert decision.posterior_mass_inside_rope is None
+    assert decision.posterior_mass_above_rope is None
+    assert decision.tail_label == direction
+    assert decision.tail_probability == tail_probability
+
+
+@pytest.mark.parametrize(
+    ("interval", "conclusion"),
+    [
+        ((1.01, 2.0), "practically_significant"),
+        ((-2.0, -1.01), "practically_significant"),
+        ((-1.0, 1.0), "practically_equivalent_to_zero"),
+        ((1.0, 2.0), "inconclusive"),
+        ((-2.0, -1.0), "inconclusive"),
+        ((-0.5, 1.01), "inconclusive"),
+    ],
+)
+def test_make_bayesian_decision_uses_closed_rope_geometry(interval, conclusion):
+    """HDI verdicts use strict non-overlap and inclusive closed-ROPE endpoints."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-2.0, 0.0, 2.0]),
+        hdi_lower=interval[0],
+        hdi_upper=interval[1],
+        tail_probabilities={"p_gt_0": 0.5},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.conclusion == conclusion
+    assert decision.rope == (-1.0, 1.0)
+
+
+@pytest.mark.parametrize(
+    ("interval", "conclusion"),
+    [
+        ((np.nextafter(1.0, -np.inf), 2.0), "inconclusive"),
+        ((1.0, 2.0), "inconclusive"),
+        ((np.nextafter(1.0, np.inf), 2.0), "practically_significant"),
+        ((-2.0, np.nextafter(-1.0, -np.inf)), "practically_significant"),
+        ((-2.0, -1.0), "inconclusive"),
+        ((-2.0, np.nextafter(-1.0, np.inf)), "inconclusive"),
+    ],
+)
+def test_make_bayesian_decision_compares_raw_rope_boundaries(interval, conclusion):
+    """ROPE geometry must not round endpoints before comparing them."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-2.0, 0.0, 2.0]),
+        hdi_lower=interval[0],
+        hdi_upper=interval[1],
+        tail_probabilities={"p_gt_0": 0.5},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.conclusion == conclusion
+
+
+def test_make_bayesian_decision_partitions_mass_with_rope_boundary_ties():
+    """Boundary draws belong inside the closed ROPE and masses partition exactly."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]),
+        hdi_lower=-1.5,
+        hdi_upper=1.5,
+        tail_probabilities={"p_gt_0": 3 / 7},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 7)
+    assert decision.posterior_mass_inside_rope == pytest.approx(5 / 7)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 7)
+    assert (
+        decision.posterior_mass_below_rope
+        + decision.posterior_mass_inside_rope
+        + decision.posterior_mass_above_rope
+    ) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("min_effect", [-1.0, np.nan, np.inf, -np.inf])
+def test_make_bayesian_decision_rejects_invalid_rope_thresholds(min_effect):
+    """Negative and non-finite ROPE thresholds are rejected."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        _make_bayesian_decision(
+            xr.DataArray([0.0]),
+            hdi_lower=0.0,
+            hdi_upper=0.0,
+            tail_probabilities={"p_gt_0": 0.0},
+            direction="increase",
+            min_effect=min_effect,
+        )
+
+
+def test_make_bayesian_decision_accepts_zero_width_rope():
+    """A zero threshold remains a closed point ROPE with a mass partition."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-1.0, 0.0, 1.0]),
+        hdi_lower=0.0,
+        hdi_upper=0.0,
+        tail_probabilities={"p_gt_0": 1 / 3},
+        direction="increase",
+        min_effect=0.0,
+    )
+
+    assert decision.rope == (0.0, 0.0)
+    assert decision.conclusion == "practically_equivalent_to_zero"
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_inside_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 3)
+
+
+def test_bayesian_decision_ignores_nonfinite_draws_in_tail_and_rope_masses():
+    """Finite posterior draws alone determine Bayesian tail and ROPE masses."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities, _make_bayesian_decision
+
+    effect = xr.DataArray([-2.0, 0.0, 2.0, np.nan])
+    tail_probabilities = _compute_tail_probabilities(effect, "increase")
+    decision = _make_bayesian_decision(
+        effect,
+        hdi_lower=-2.0,
+        hdi_upper=2.0,
+        tail_probabilities=tail_probabilities,
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.tail_probability == pytest.approx(1 / 3)
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_inside_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 3)
+
+
+def test_scalar_statistics_filter_nonfinite_posterior_draws():
+    """All scalar Bayesian summaries use the same finite posterior draws."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics_scalar
+
+    effect = xr.DataArray([[-2.0, np.inf, 2.0]], dims=["chain", "draw"])
+    stats = _compute_statistics_scalar(effect, min_effect=1.0)
+
+    assert stats["mean"] == pytest.approx(0.0)
+    assert stats["median"] == pytest.approx(0.0)
+    assert np.isfinite(stats["hdi_lower"])
+    assert np.isfinite(stats["hdi_upper"])
+    assert stats["p_gt_0"] == pytest.approx(0.5)
+    assert stats["decision"].posterior_mass_below_rope == pytest.approx(0.5)
+    assert stats["decision"].posterior_mass_above_rope == pytest.approx(0.5)
+
+    with pytest.raises(ValueError, match="contains no finite draws"):
+        _compute_statistics_scalar(
+            xr.DataArray([[np.nan, np.inf]], dims=["chain", "draw"])
+        )
+
+
+def test_time_series_statistics_filter_nonfinite_posterior_draws():
+    """Average and cumulative Bayesian summaries share finite posterior draws."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    impact = xr.DataArray(
+        [[[-0.5, -0.5], [np.inf, np.inf], [1.5, 1.5]]],
+        dims=["chain", "draw", "obs_ind"],
+    )
+    stats = _compute_statistics(
+        impact,
+        xr.zeros_like(impact),
+        min_effect=1.0,
+        relative=False,
+    )
+
+    assert stats["avg"]["mean"] == pytest.approx(0.5)
+    assert stats["cum"]["mean"] == pytest.approx(1.0)
+    assert stats["avg"]["median"] == pytest.approx(0.5)
+    assert stats["cum"]["median"] == pytest.approx(1.0)
+    for summary in stats.values():
+        assert np.isfinite(summary["hdi_lower"])
+        assert np.isfinite(summary["hdi_upper"])
+        assert summary["p_gt_0"] == pytest.approx(0.5)
+        assert summary["decision"].posterior_mass_inside_rope == pytest.approx(0.5)
+        assert summary["decision"].posterior_mass_above_rope == pytest.approx(0.5)
+
+    with pytest.raises(ValueError, match="contains no finite draws"):
+        _compute_statistics(
+            xr.full_like(impact, np.inf),
+            xr.zeros_like(impact),
+            relative=False,
+        )
+
+
+def test_effect_summary_helpers_use_alpha_for_scalar_and_time_series_hdis():
+    """Both Bayesian summary assembly paths use HDI coverage ``1 - alpha``."""
+    import xarray as xr
+
+    from causalpy._arviz_compat import hdi_bounds
+    from causalpy.reporting import _effect_summary_did, _effect_summary_timeseries
+
+    alpha = 0.025
+    effect = xr.DataArray(np.arange(101, dtype=float)[None, :], dims=["chain", "draw"])
+    expected_bounds = hdi_bounds(effect, prob=1 - alpha)
+
+    scalar = _effect_summary_did(SimpleNamespace(causal_impact=effect), alpha=alpha)
+    assert tuple(
+        scalar.table.loc["treatment_effect", ["hdi_lower", "hdi_upper"]]
+    ) == pytest.approx(expected_bounds)
+    assert "97.5% HDI" in scalar.text
+
+    impact = xr.DataArray(
+        np.repeat(effect.values[:, :, None], 2, axis=2),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1]},
+    )
+    time_series = _effect_summary_timeseries(
+        impact,
+        xr.zeros_like(impact),
+        pd.Index([0, 1], name="obs_ind"),
+        alpha=alpha,
+        cumulative=False,
+        relative=False,
+    )
+    assert tuple(
+        time_series.table.loc["average", ["hdi_lower", "hdi_upper"]]
+    ) == pytest.approx(expected_bounds)
+    assert "97.5% interval" in time_series.text
+
+
+def test_effect_summary_timeseries_renders_distinct_cumulative_rope_decision():
+    """Public time-series prose renders the cumulative decision, not the average one."""
+    import xarray as xr
+
+    from causalpy.reporting import _effect_summary_timeseries
+
+    impact = xr.DataArray(
+        np.full((1, 20, 3), 0.5),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    summary = _effect_summary_timeseries(
+        impact,
+        xr.zeros_like(impact),
+        pd.Index([0, 1, 2], name="obs_ind"),
+        min_effect=1.0,
+        relative=False,
+    )
+
+    assert "The cumulative effect is 1.50 with a 95% HDI [1.50, 1.50]." in summary.text
+    assert (
+        "For the cumulative effect, The posterior probability of an increase is 1.000. "
+        "Using the closed ROPE [-1, 1], the 95% HDI is entirely outside the ROPE; "
+        "the effect is practically significant. Posterior mass is 0.000 below, "
+        "0.000 inside, and 1.000 above the ROPE."
+    ) in summary.text
+
+
+def test_effect_summary_did_distinguishes_zero_rope_from_no_rope():
+    """A public summary retains a point ROPE and strict ``p_rope`` at zero."""
+    import xarray as xr
+
+    from causalpy.reporting import _effect_summary_did
+
+    summary = _effect_summary_did(
+        SimpleNamespace(
+            causal_impact=xr.DataArray([[-1.0, 0.0, 1.0]], dims=["chain", "draw"])
+        ),
+        min_effect=0.0,
+    )
+
+    assert summary.table.loc["treatment_effect", "p_rope"] == pytest.approx(1 / 3)
+    assert "Using the closed ROPE [0, 0]" in summary.text
+
+
+def test_compute_statistics_time_series_rope_uses_requested_direction():
+    """Average and cumulative ``p_rope`` use strict requested-direction tails."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    draw_values = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
+    impact = xr.DataArray(
+        np.tile(draw_values[None, :, None], (1, 1, 2)),
+        dims=["chain", "draw", "obs_ind"],
+    )
+    counterfactual = xr.zeros_like(impact)
+
+    expected = {
+        "increase": (1 / 5, 2 / 5),
+        "decrease": (1 / 5, 2 / 5),
+        "two-sided": (2 / 5, 4 / 5),
+    }
+    for direction, (avg_expected, cum_expected) in expected.items():
+        stats = _compute_statistics(
+            impact,
+            counterfactual,
+            hdi_prob=0.95,
+            direction=direction,
+            cumulative=True,
+            relative=False,
+            min_effect=1.0,
+        )
+
+        assert stats["avg"]["p_rope"] == pytest.approx(avg_expected)
+        assert stats["cum"]["p_rope"] == pytest.approx(cum_expected)
+
+
+def test_compute_statistics_builds_distinct_average_and_cumulative_decisions():
+    """Cumulative ROPE geometry is computed independently of average geometry."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    impact = xr.DataArray(np.full((1, 5, 2), 0.6), dims=["chain", "draw", "obs_ind"])
+    stats = _compute_statistics(
+        impact,
+        xr.zeros_like(impact),
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    assert stats["avg"]["decision"].conclusion == "practically_equivalent_to_zero"
+    assert stats["cum"]["decision"].conclusion == "practically_significant"
+
+
 def test_compute_statistics_scalar_hdi_golden_unmonkeypatched():
     """Approved fixed-seed HDI golden via reporting scalar helpers (no monkeypatch).
 
@@ -1029,6 +1442,7 @@ def test_compute_statistics_scalar_hdi_golden_unmonkeypatched():
     assert table.loc["effect", "hdi_upper"] == pytest.approx(
         1.732311605409944, rel=1e-12, abs=1e-12
     )
+    assert "decision" not in table.columns
 
 
 def test_compute_statistics_scalar_singleton_treated_units():
@@ -1261,6 +1675,7 @@ def test_compute_statistics_time_series_hdi_golden():
         rel=1e-12,
         abs=1e-12,
     )
+    assert "decision" not in table.columns
 
 
 def test_compute_statistics_with_singleton_treated_unit_dim():
@@ -1468,27 +1883,18 @@ def test_compute_statistics_rope_near_threshold():
     assert 0.3 < stats["avg"]["p_rope"] < 0.7
 
 
-def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
-    """ROPE should follow the auto-detected sign direction for one-sided requests."""
+def test_compute_statistics_rope_honors_requested_direction():
+    """Time-series ``p_rope`` must not flip a requested increase to decrease."""
     import xarray as xr
 
     from causalpy.reporting import _compute_statistics
 
-    rng = np.random.default_rng(42)
-    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
-    impact = xr.DataArray(
-        draws,
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2]},
-    )
+    draws = np.full((1, 20, 3), -5.0)
+    impact = xr.DataArray(draws, dims=["chain", "draw", "obs_ind"])
     counterfactual = xr.DataArray(
-        np.ones((1, 200, 3)) * 10.0,
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2]},
+        np.full((1, 20, 3), 10.0), dims=["chain", "draw", "obs_ind"]
     )
 
-    # Request increase, but true effect is strongly negative.
-    # p_rope should align with the detected "decrease" direction.
     stats = _compute_statistics(
         impact,
         counterfactual,
@@ -1501,8 +1907,8 @@ def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
 
     assert stats["avg"]["mean"] < 0
     assert stats["cum"]["mean"] < 0
-    assert stats["avg"]["p_rope"] > 0.95
-    assert stats["cum"]["p_rope"] > 0.95
+    assert stats["avg"]["p_rope"] == 0.0
+    assert stats["cum"]["p_rope"] == 0.0
 
 
 def test_format_number():
@@ -1513,6 +1919,18 @@ def test_format_number():
     assert _format_number(3.14159, decimals=3) == "3.142"
     assert _format_number(10.0, decimals=1) == "10.0"
     assert _format_number(0.001, decimals=4) == "0.0010"
+
+
+def test_format_rope_bound_is_compact_and_round_trip_safe():
+    """ROPE prose remains usable for finite thresholds across float magnitudes."""
+    from causalpy.reporting import _format_rope_bound
+
+    smallest = np.nextafter(0.0, 1.0)
+    largest = np.finfo(float).max
+
+    assert _format_rope_bound(1.0) == "1"
+    assert float(_format_rope_bound(smallest)) == smallest
+    assert float(_format_rope_bound(largest)) == largest
 
 
 def test_select_treated_unit():
@@ -1777,14 +2195,14 @@ def test_select_treated_unit_with_multiple_units():
 def test_extract_window_slice_with_step(mock_pymc_sample):
     """Test _extract_window with slice having step parameter."""
     # Create data with integer index
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_pre = 50
     n_post = 30
     t_pre = np.arange(n_pre)
     t_post = np.arange(n_pre, n_pre + n_post)
 
-    y_pre = 10 + 0.5 * t_pre + np.random.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + np.random.normal(0, 1, n_post)
+    y_pre = 10 + 0.5 * t_pre + rng.normal(0, 1, n_pre)
+    y_post = 15 + 0.5 * t_post + rng.normal(0, 1, n_post)
 
     df = pd.DataFrame(
         {
@@ -1817,15 +2235,16 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
     from causalpy.reporting import _compute_statistics
 
     # Create mock data with near-zero counterfactual
+    rng = np.random.default_rng(42)
     impact = xr.DataArray(
-        np.random.normal(1.0, 0.1, (2, 10, 5)),
+        rng.normal(1.0, 0.1, (2, 10, 5)),
         dims=["chain", "draw", "obs_ind"],
         coords={"chain": [0, 1], "draw": range(10), "obs_ind": range(5)},
     )
 
     # Counterfactual with values very close to zero
     counterfactual = xr.DataArray(
-        np.random.normal(0.0001, 0.00001, (2, 10, 5)),
+        rng.normal(0.0001, 0.00001, (2, 10, 5)),
         dims=["chain", "draw", "obs_ind"],
         coords={"chain": [0, 1], "draw": range(10), "obs_ind": range(5)},
     )
@@ -2069,6 +2488,7 @@ def test_generate_prose_scalar_increase():
         "hdi_lower": 1.0,
         "hdi_upper": 4.0,
         "p_gt_0": 0.95,
+        "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.95),
     }
 
     prose = _generate_prose_scalar(
@@ -2093,6 +2513,7 @@ def test_generate_prose_scalar_decrease():
         "hdi_lower": -4.0,
         "hdi_upper": -1.0,
         "p_lt_0": 0.98,
+        "decision": _fixed_bayesian_decision((-4.0, -1.0), "decrease", 0.98),
     }
 
     prose = _generate_prose_scalar(
@@ -2113,7 +2534,9 @@ def test_generate_prose_scalar_two_sided():
         "mean": 2.5,
         "hdi_lower": 1.0,
         "hdi_upper": 4.0,
+        "p_two_sided": 0.30,
         "prob_of_effect": 0.85,
+        "decision": _fixed_bayesian_decision((1.0, 4.0), "two-sided", 0.30),
     }
 
     prose = _generate_prose_scalar(
@@ -2121,9 +2544,130 @@ def test_generate_prose_scalar_two_sided():
     )
 
     assert "discontinuity" in prose
-    assert "2.50" in prose
-    assert "0.850" in prose
-    assert "effect" in prose  # "effect" (not "increase" or "decrease")
+    assert "two-sided tail probability" in prose
+    assert "0.850" not in prose
+    assert "0.300" in prose
+
+
+@pytest.mark.parametrize(
+    ("alpha", "coverage"),
+    [
+        (0.05, "95%"),
+        (0.10, "90%"),
+        (0.025, "97.5%"),
+    ],
+)
+def test_generate_prose_scalar_renders_coverage_from_alpha(alpha, coverage):
+    """Bayesian prose coverage is derived from ``1 - alpha`` without truncation."""
+    from causalpy.reporting import _generate_prose_scalar
+
+    prose = _generate_prose_scalar(
+        {
+            "mean": 1.0,
+            "hdi_lower": 0.5,
+            "hdi_upper": 1.5,
+            "decision": _fixed_bayesian_decision((0.5, 1.5), "increase", 0.9),
+        },
+        "effect",
+        alpha=alpha,
+        direction="increase",
+    )
+
+    assert f"{coverage} HDI" in prose
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "interval", "expected_verdict"),
+    [
+        (
+            "practically_significant",
+            (1.01, 2.0),
+            "is entirely outside the ROPE; the effect is practically significant.",
+        ),
+        (
+            "practically_equivalent_to_zero",
+            (-1.0, 1.0),
+            "is entirely inside the ROPE; the effect is practically equivalent to zero.",
+        ),
+        (
+            "inconclusive",
+            (1.0, 2.0),
+            "overlaps the ROPE; the result is inconclusive.",
+        ),
+    ],
+)
+def test_generate_prose_scalar_renders_each_rope_decision(
+    conclusion, interval, expected_verdict
+):
+    """Scalar prose renders the attached ROPE verdict and complete mass partition."""
+    from causalpy.reporting import _generate_prose_scalar
+
+    prose = _generate_prose_scalar(
+        {
+            "mean": 1.5,
+            "hdi_lower": interval[0],
+            "hdi_upper": interval[1],
+            "decision": _fixed_bayesian_decision(
+                interval,
+                "increase",
+                0.75,
+                conclusion=conclusion,
+                rope=(-1.0, 1.0),
+                masses=(0.1, 0.8, 0.1),
+            ),
+        },
+        "effect",
+        alpha=0.05,
+        direction="increase",
+    )
+
+    assert "posterior probability of an increase is 0.750" in prose
+    assert "Using the closed ROPE [-1, 1], the 95% HDI" in prose
+    assert expected_verdict in prose
+    assert (
+        "Posterior mass is 0.100 below, 0.800 inside, and 0.100 above the ROPE."
+        in prose
+    )
+
+
+def test_bayesian_prose_uses_attached_decision_without_rederiving_statistics():
+    """Scalar and detailed prose read intervals and tails only from decisions."""
+    from causalpy.reporting import _generate_prose_detailed, _generate_prose_scalar
+
+    decision = _fixed_bayesian_decision((1.0, 2.0), "increase", 0.123)
+    scalar_prose = _generate_prose_scalar(
+        {
+            "mean": -5.0,
+            "hdi_lower": -6.0,
+            "hdi_upper": -4.0,
+            "p_gt_0": 0.999,
+            "decision": decision,
+        },
+        "effect",
+        direction="decrease",
+    )
+    detailed_prose = _generate_prose_detailed(
+        {
+            "avg": {
+                "mean": -5.0,
+                "hdi_lower": -6.0,
+                "hdi_upper": -4.0,
+                "p_lt_0": 0.999,
+                "decision": decision,
+            }
+        },
+        pd.Index([1]),
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+    )
+
+    for prose in (scalar_prose, detailed_prose):
+        assert "posterior probability of an increase is 0.123" in prose
+        assert "posterior probability of a decrease" not in prose
+        assert "0.999" not in prose
+        assert "HDI [1.00, 2.00]" in prose
+        assert "HDI [-6.00, -4.00]" not in prose
 
 
 # ==============================================================================
@@ -2244,6 +2788,7 @@ def test_generate_prose_detailed_basic():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2279,6 +2824,7 @@ def test_generate_prose_detailed_counterfactual_interval():
             "hdi_lower": -3.0,
             "hdi_upper": -1.0,
             "p_gt_0": 0.001,
+            "decision": _fixed_bayesian_decision((-3.0, -1.0), "increase", 0.001),
         }
     }
 
@@ -2304,8 +2850,8 @@ def test_generate_prose_detailed_counterfactual_interval():
     assert "20.00" in prose
 
 
-def test_generate_prose_detailed_direction_autodetect_negative():
-    """Test that a negative effect with direction='increase' auto-detects decrease."""
+def test_generate_prose_detailed_honors_requested_increase_direction():
+    """A negative mean must not change a requested increase to decrease."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2314,6 +2860,7 @@ def test_generate_prose_detailed_direction_autodetect_negative():
             "hdi_lower": -2.15,
             "hdi_upper": -1.33,
             "p_gt_0": 0.0,
+            "decision": _fixed_bayesian_decision((-2.15, -1.33), "increase", 0.0),
         }
     }
 
@@ -2330,16 +2877,13 @@ def test_generate_prose_detailed_direction_autodetect_negative():
         counterfactual_avg=18.82,
     )
 
-    # Should auto-detect decrease: P(decrease) = 1 - P(increase) = 1.0
-    assert "decrease" in prose
-    # HDI excludes zero, so it should say "does not include zero"
-    assert "does not include zero" in prose
-    # Posterior probability should be 1.000 (auto-detected)
-    assert "1.000" in prose
+    assert "posterior probability of an increase is 0.000" in prose
+    assert "posterior probability of a decrease" not in prose
+    assert "does not include zero" not in prose
 
 
-def test_generate_prose_detailed_direction_autodetect_positive():
-    """Test that a positive effect with direction='decrease' auto-detects increase."""
+def test_generate_prose_detailed_honors_requested_decrease_direction():
+    """A positive mean must not change a requested decrease to increase."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2348,6 +2892,7 @@ def test_generate_prose_detailed_direction_autodetect_positive():
             "hdi_lower": 1.5,
             "hdi_upper": 4.5,
             "p_lt_0": 0.001,
+            "decision": _fixed_bayesian_decision((1.5, 4.5), "decrease", 0.001),
         }
     }
 
@@ -2364,12 +2909,12 @@ def test_generate_prose_detailed_direction_autodetect_positive():
         counterfactual_avg=50.0,
     )
 
-    assert "increase" in prose
-    assert "does not include zero" in prose
+    assert "posterior probability of a decrease is 0.001" in prose
+    assert "posterior probability of an increase" not in prose
 
 
-def test_generate_prose_detailed_two_sided_uses_correct_article():
-    """Test that two-sided prose uses 'an effect' (not 'a effect')."""
+def test_generate_prose_detailed_two_sided_uses_tail_probability():
+    """Two-sided prose names ``p_two_sided`` as a tail probability."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2377,7 +2922,9 @@ def test_generate_prose_detailed_two_sided_uses_correct_article():
             "mean": 0.5,
             "hdi_lower": -0.2,
             "hdi_upper": 1.2,
+            "p_two_sided": 0.2,
             "prob_of_effect": 0.9,
+            "decision": _fixed_bayesian_decision((-0.2, 1.2), "two-sided", 0.2),
         }
     }
     window_coords = pd.Index([10, 11, 12])
@@ -2391,8 +2938,9 @@ def test_generate_prose_detailed_two_sided_uses_correct_article():
         relative=False,
     )
 
-    assert "posterior probability of an effect" in prose
-    assert "posterior probability of a effect" not in prose
+    assert "two-sided tail probability is 0.200" in prose
+    assert "posterior probability of an effect" not in prose
+    assert "0.900" not in prose
 
 
 def test_generate_prose_detailed_preserves_custom_prefix_casing():
@@ -2405,6 +2953,7 @@ def test_generate_prose_detailed_preserves_custom_prefix_casing():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
     window_coords = pd.Index([10, 11, 12])
@@ -2432,11 +2981,20 @@ def test_generate_prose_detailed_cumulative():
             "hdi_lower": 1.0,
             "hdi_upper": 3.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 3.0), "increase", 0.99),
         },
         "cum": {
             "mean": 20.0,
             "hdi_lower": 10.0,
             "hdi_upper": 30.0,
+            "decision": _fixed_bayesian_decision(
+                (10.0, 30.0),
+                "increase",
+                0.99,
+                conclusion="practically_significant",
+                rope=(-1.0, 1.0),
+                masses=(0.0, 0.0, 1.0),
+            ),
         },
     }
 
@@ -2461,6 +3019,17 @@ def test_generate_prose_detailed_cumulative():
     # cum_cf_lower = 520 - 30 = 490, cum_cf_upper = 520 - 10 = 510
     assert "490.00" in prose
     assert "510.00" in prose
+    assert "The cumulative effect is 20.00 with a 95% HDI [10.00, 30.00]." in prose
+    assert (
+        "For the cumulative effect, The posterior probability of an increase is 0.990."
+        in prose
+    )
+    assert "the effect is practically significant." in prose
+    assert "Using the closed ROPE [-1, 1]" in prose
+    assert (
+        "Posterior mass is 0.000 below, 0.000 inside, and 1.000 above the ROPE."
+        in prose
+    )
 
 
 def test_generate_prose_detailed_with_relative():
@@ -2476,6 +3045,7 @@ def test_generate_prose_detailed_with_relative():
             "relative_mean": 5.0,
             "relative_hdi_lower": 2.0,
             "relative_hdi_upper": 8.0,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2498,8 +3068,8 @@ def test_generate_prose_detailed_with_relative():
     assert "8.00%" in prose
 
 
-def test_generate_prose_detailed_rope_in_prose():
-    """Test that ROPE probability appears in prose when provided."""
+def test_generate_prose_detailed_rope_decision_in_prose():
+    """Test that an attached ROPE decision, not ``p_rope``, controls prose."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2509,6 +3079,14 @@ def test_generate_prose_detailed_rope_in_prose():
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
             "p_rope": 0.85,
+            "decision": _fixed_bayesian_decision(
+                (1.0, 4.0),
+                "increase",
+                0.99,
+                conclusion="practically_significant",
+                rope=(-0.004, 0.004),
+                masses=(0.0, 0.0, 1.0),
+            ),
         }
     }
 
@@ -2525,8 +3103,15 @@ def test_generate_prose_detailed_rope_in_prose():
         counterfactual_avg=50.0,
     )
 
-    assert "minimum effect size threshold" in prose
-    assert "0.850" in prose
+    assert (
+        "Using the closed ROPE [-0.004, 0.004], the 95% HDI is entirely outside"
+        in prose
+    )
+    assert (
+        "Posterior mass is 0.000 below, 0.000 inside, and 1.000 above the ROPE."
+        in prose
+    )
+    assert "minimum effect size threshold" not in prose
 
 
 def test_generate_prose_detailed_is_descriptive():
@@ -2539,6 +3124,7 @@ def test_generate_prose_detailed_is_descriptive():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2561,8 +3147,8 @@ def test_generate_prose_detailed_is_descriptive():
     assert "weak or inconclusive" not in prose
     assert "strong statistical evidence" not in prose
     # Should contain descriptive factual statements
-    assert "does not include zero" in prose
-    assert "posterior probability" in prose
+    assert "does not include zero" not in prose
+    assert "posterior probability of an increase" in prose
     assert "We recommend" in prose
 
 
@@ -2813,7 +3399,7 @@ def test_assumptions_text_default():
 
 
 # ==============================================================================
-# Tests for direction auto-detection without observed/cf values
+# Tests for prose without observed/counterfactual values
 # ==============================================================================
 
 
@@ -2827,6 +3413,7 @@ def test_prose_detailed_no_observed_values():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
